@@ -1439,6 +1439,371 @@ fn managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation() {
 }
 
 #[test]
+fn managed_hooks_run_staged_list_uses_index_backed_selector() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["hooks", "run", "pre-commit", "--staged", "--list"]
+        ),
+        ""
+    );
+
+    write_file(repo.path(), "tracked.txt", "base\n");
+    write_file(repo.path(), "rename-old.txt", "rename\n");
+    write_file(repo.path(), "delete.txt", "delete\n");
+    git(
+        repo.path(),
+        ["add", "tracked.txt", "rename-old.txt", "delete.txt"],
+    );
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "added.rs", "fn main() {}\n");
+    git(repo.path(), ["add", "added.rs"]);
+
+    write_file(repo.path(), "tracked.txt", "staged\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    write_file(repo.path(), "tracked.txt", "staged plus unstaged noise\n");
+
+    git(repo.path(), ["mv", "rename-old.txt", "rename-new.txt"]);
+    git(repo.path(), ["rm", "delete.txt"]);
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["hooks", "run", "pre-commit", "--staged", "--list"]
+        ),
+        "A added.rs\nD delete.txt\nR rename-old.txt -> rename-new.txt\nM tracked.txt"
+    );
+}
+
+#[test]
+fn managed_hooks_run_staged_ext_list_and_execution_use_selected_paths() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "tracked.ts", "base\n");
+    write_file(repo.path(), "skip.txt", "base\n");
+    git(repo.path(), ["add", "tracked.ts", "skip.txt"]);
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "added.rs", "fn main() {}\n");
+    write_file(repo.path(), "tracked.ts", "staged\n");
+    write_file(repo.path(), "skip.txt", "skip staged\n");
+    git(repo.path(), ["add", "added.rs", "tracked.ts", "skip.txt"]);
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--ext",
+                "rs,ts",
+                "--list"
+            ],
+        ),
+        "A added.rs\nM tracked.ts"
+    );
+
+    let script = repo.path().join("capture.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > selected-paths.txt\n",
+    )
+    .expect("write capture script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("chmod capture script");
+    }
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--ext",
+                "rs,ts",
+                "--",
+                "sh",
+                "capture.sh",
+            ],
+        ),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("selected-paths.txt")).expect("read selected paths"),
+        "added.rs\ntracked.ts\n"
+    );
+}
+
+#[test]
+fn managed_hooks_run_staged_dry_run_and_exit_code_match_command_mode_contract() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "tracked.rs", "base\n");
+    git(repo.path(), ["add", "tracked.rs"]);
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "tracked.rs", "staged\n");
+    git(repo.path(), ["add", "tracked.rs"]);
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--dry-run",
+                "--",
+                "cargo",
+                "fmt",
+                "--check",
+            ],
+        ),
+        "'cargo' 'fmt' '--check' 'tracked.rs'"
+    );
+
+    let failure = run_zmin_failure_output(
+        repo.path(),
+        &[
+            "hooks",
+            "run",
+            "pre-commit",
+            "--staged",
+            "--",
+            "sh",
+            "-c",
+            "exit 7",
+        ],
+    );
+    assert_eq!(failure.0, 7);
+    assert_eq!(failure.1, "");
+    assert_eq!(failure.2, "");
+
+    let empty = git_init();
+    configure_identity(empty.path());
+    assert_eq!(
+        run_zmin(
+            empty.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--dry-run",
+                "--",
+                "cargo",
+                "fmt",
+                "--check",
+            ],
+        ),
+        "would not run: no staged executable paths selected"
+    );
+    assert_eq!(
+        run_zmin(
+            empty.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--",
+                "sh",
+                "-c",
+                "printf fail > should-not-exist.txt; exit 9",
+            ],
+        ),
+        ""
+    );
+    assert!(!empty.path().join("should-not-exist.txt").exists());
+}
+
+#[test]
+fn managed_hooks_run_staged_pathspec_filters_list_dry_run_and_execution() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    fs::create_dir_all(repo.path().join("src")).expect("create src");
+    fs::create_dir_all(repo.path().join("docs")).expect("create docs");
+    write_file(repo.path(), "src/keep.rs", "base\n");
+    write_file(repo.path(), "docs/skip.rs", "base\n");
+    git(repo.path(), ["add", "src/keep.rs", "docs/skip.rs"]);
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "src/keep.rs", "staged src\n");
+    write_file(repo.path(), "docs/skip.rs", "staged docs\n");
+    git(repo.path(), ["add", "src/keep.rs", "docs/skip.rs"]);
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--list",
+                "--",
+                "src",
+            ],
+        ),
+        "M src/keep.rs"
+    );
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--dry-run",
+                "--",
+                "missing",
+                "--",
+                "cargo",
+                "fmt",
+                "--check",
+            ],
+        ),
+        "would not run: no staged executable paths selected"
+    );
+
+    let script = repo.path().join("capture-pathspec.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > selected-pathspec-paths.txt\n",
+    )
+    .expect("write pathspec capture script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("chmod pathspec capture script");
+    }
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--",
+                "src",
+                "--",
+                "sh",
+                "capture-pathspec.sh",
+            ],
+        ),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("selected-pathspec-paths.txt"))
+            .expect("read pathspec selected paths"),
+        "src/keep.rs\n"
+    );
+}
+
+#[test]
+fn managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    let script = repo.path().join("capture-hook.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > selected-hook-paths.txt\n",
+    )
+    .expect("write hook capture script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("chmod hook capture script");
+    }
+
+    run_zmin(
+        repo.path(),
+        [
+            "hooks",
+            "add",
+            "--staged-runner",
+            "--ext",
+            "rs,ts",
+            "pre-commit",
+            "--",
+            "sh",
+            "capture-hook.sh",
+        ],
+    );
+    assert_eq!(
+        git(
+            repo.path(),
+            ["config", "--get-all", "zmin.hooks-runner.pre-commit"]
+        ),
+        "'--ext' 'rs,ts' 'sh' 'capture-hook.sh'"
+    );
+    let listed = run_zmin(repo.path(), ["hooks", "list"]);
+    assert!(listed.contains("pre-commit\t[staged-runner]"));
+    let hook_contents =
+        fs::read_to_string(repo.path().join(".git/hooks/pre-commit")).expect("read runner hook");
+    assert!(hook_contents.contains("# zmin-managed-hook-runner"));
+    assert!(hook_contents.contains("hooks run 'pre-commit' --staged \"$@\""));
+
+    write_file(repo.path(), "keep.rs", "base\n");
+    write_file(repo.path(), "skip.txt", "base\n");
+    git(repo.path(), ["add", "keep.rs", "skip.txt"]);
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "keep.rs", "staged rs\n");
+    write_file(repo.path(), "skip.txt", "staged txt\n");
+    git(repo.path(), ["add", "keep.rs", "skip.txt"]);
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["hooks", "run", "pre-commit", "--staged", "--list"]
+        ),
+        "M keep.rs"
+    );
+
+    run_zmin(repo.path(), ["commit", "-m", "update"]);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("selected-hook-paths.txt"))
+            .expect("read hook selected paths"),
+        "keep.rs\n"
+    );
+
+    run_zmin(repo.path(), ["hooks", "remove", "pre-commit"]);
+    assert_eq!(run_zmin(repo.path(), ["hooks", "list"]), "");
+    assert!(!repo.path().join(".git/hooks/pre-commit").exists());
+    assert_eq!(
+        run_zmin_failure_output(
+            repo.path(),
+            &["config", "--get-all", "zmin.hooks-runner.pre-commit"]
+        )
+        .0,
+        1
+    );
+}
+
+#[test]
 fn version_command_reports_git_compatible_version_shape() {
     let repo = git_init();
 

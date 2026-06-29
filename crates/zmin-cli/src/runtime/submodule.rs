@@ -1200,6 +1200,7 @@ fn fetch_network_submodule_target(
         false,
         false,
         true,
+        true,
         false,
         false,
         false,

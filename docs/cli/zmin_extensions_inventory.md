@@ -13,17 +13,17 @@ coverage numbers in the Git compatibility matrix.
 | Zmin-only commands | `12` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `15` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
-| Zmin-only schema command aliases | `9` | flattened schema entries that belong to Zmin-only command groups |
+| Zmin-only schema command aliases | `10` | flattened schema entries that belong to Zmin-only command groups |
 | Deferred/non-Git-2.47 schema commands | `1` | schema commands compared to newer/current stock Git but outside the Git `2.47.1` denominator |
-| Stable extensions | `5` | implemented and covered by focused tests |
+| Stable extensions | `6` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
-| Planned extensions | `1` | designed backlog, not implemented |
+| Planned extensions | `0` | designed backlog, not implemented |
 
 ## Zmin-Only Commands
 
 | Command | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| `zmin hooks` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation` | supports `init`, `add [--force]`, `list`, and `remove` managed-hook subcommands for supported hook names; rejects unsupported managed-hook names as Zmin-only validation |
+| `zmin hooks` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `git_admin_tools_compat::managed_hooks_run_staged_list_uses_index_backed_selector`; `git_admin_tools_compat::managed_hooks_run_staged_ext_list_and_execution_use_selected_paths`; `git_admin_tools_compat::managed_hooks_run_staged_dry_run_and_exit_code_match_command_mode_contract`; `git_admin_tools_compat::managed_hooks_run_staged_pathspec_filters_list_dry_run_and_execution`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | supports `init`, `add [--force]`, `list`, `remove`, and index-backed `run <hook> --staged` preview/execution with extension filters, pathspec filters, dry-run output, child exit-code propagation, and managed `pre-commit` staged-runner wrappers for supported hook names; rejects unsupported managed-hook names as Zmin-only validation |
 | `zmin repo` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | exposes Zmin-only repository metadata and structure summaries; stock Git has no `git repo` command |
 | `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin last-modified` | stable | `git_history_query_compat::last_modified_reports_latest_commit_per_path` | reports the latest commit that affected each selected path, with recursive and NUL-delimited modes; stock Git has no `git last-modified` command, so this is tracked outside the Git `2.47.1` denominator |
@@ -45,9 +45,10 @@ Git `2.47.1` compatibility coverage.
 | Command | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | `zmin hooks init` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-init`; initializes managed-hook metadata without replacing manual hooks |
-| `zmin hooks add` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation` | flattened schema alias `hooks-add`; adds managed hook commands and validates supported Zmin hook names |
+| `zmin hooks add` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-add`; adds managed hook commands, supports managed staged-runner wrappers for supported hook names, and validates supported Zmin hook names |
 | `zmin hooks list` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-list`; lists configured managed-hook commands |
-| `zmin hooks remove` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-remove`; removes managed hook commands without deleting manual hooks |
+| `zmin hooks remove` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-remove`; removes managed hook commands or staged-runner config without deleting manual hooks |
+| `zmin hooks run` | stable | `git_admin_tools_compat::managed_hooks_run_staged_list_uses_index_backed_selector`; `git_admin_tools_compat::managed_hooks_run_staged_ext_list_and_execution_use_selected_paths`; `git_admin_tools_compat::managed_hooks_run_staged_dry_run_and_exit_code_match_command_mode_contract`; `git_admin_tools_compat::managed_hooks_run_staged_pathspec_filters_list_dry_run_and_execution`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-run`; current implemented surface includes preview, extension filters, pathspec filters, dry-run output, direct command execution over selected staged paths, and wrapper-driven pre-commit execution |
 | `zmin repo info` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-info`; reports Zmin-only repository metadata |
 | `zmin repo structure` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-structure`; reports Zmin-only repository layout summaries |
 | `zmin history reword` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch` | flattened schema alias `history-reword`; dry-run prints planned ref updates without moving the branch |
@@ -88,46 +89,43 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | --- | --- | --- | --- |
 | `ZMIN_GIT_HTTP_VERSION` | stable | `transport_impl::tests::remote_http_helper_version_arg_rejects_unsupported_values` | selects the Zmin HTTP remote-helper protocol preference; accepted values are `auto`, `http1`, `http2` and `http3`; invalid values are Zmin-only validation and do not count toward Git `2.47.1` compatibility |
 
-## Planned: Staged Hook Runner
+## Staged Hook Runner
 
-The next hooks extension should stay Zmin-only and must not change standard Git
-hook semantics.
+The staged hook runner is a Zmin-only extension and must not change standard
+Git hook semantics.
 
 Detailed command contract and acceptance rows live in
 `docs/cli/zmin_hooks_staged_runner.md` and
 `docs/cli/zmin_hooks_staged_runner_acceptance.tsv`.
 
-Candidate user-facing API:
+Current implemented user-facing API:
 
 ```bash
-zmin hooks run pre-commit --staged
-zmin hooks run pre-commit --staged --ext rs,ts,js
 zmin hooks run pre-commit --staged --list
+zmin hooks run pre-commit --staged --ext rs,ts,js --list
+zmin hooks run pre-commit --staged --list -- src
 zmin hooks run pre-commit --staged --dry-run -- command ...
 zmin hooks run pre-commit --staged -- command ...
+zmin hooks run pre-commit --staged -- src -- command ...
 ```
 
-Requirements:
+Current selector contract:
 
 - read staged paths from the index, not from the working tree
-- support pathspec and extension filters
-- skip deleted paths by default, while still listing them in dry-run output
+- list deleted paths distinctly while keeping the preview index-backed
 - preserve renamed paths using the staged destination path
-- pass only selected staged files to the command, not the whole project
-- provide `--list` / `--dry-run` output before executing tools
+- return an empty successful preview when the index has no staged entries
+- support extension filters before list, dry-run, or execution output is rendered
+- support pathspec filters before list, dry-run, or execution output is rendered
+- pass only selected staged executable files to command mode
+- return the child exit code from command mode
+
+Verified wrapper requirements:
+
+- skip deleted paths by default during command execution, while still listing
+  them in preview output
 - work from a standard Git hook wrapper without breaking `.git/hooks/<hook>`
 - keep managed hooks optional; manual hooks must still work
-
-Suggested implementation order:
-
-1. Add an index-backed staged-file selector with tests for modified, added,
-   renamed, deleted and unstaged-only paths.
-2. Add `hooks run <hook> --staged --list` as a non-executing preview and mark
-   the matching acceptance rows with evidence.
-3. Add extension and pathspec filters after the selector contract is stable.
-4. Add command execution after selector parity is covered.
-5. Add managed-hook wrapper integration so `pre-commit` can call the staged
-   runner automatically.
 
 This staged runner remains separate from Git compatibility reporting because
 stock Git has no equivalent `git hooks run --staged` command.

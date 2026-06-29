@@ -1053,12 +1053,37 @@ The following surfaces are not approved as complete Git parity:
   non-loopback network scenarios are outside the current supported parity claim
   until each has a dedicated local and Windows scenario gate. Existing
   unauthenticated public-provider and loopback transport smokes do not imply
-  parity for these environments.
-- Git LFS, partial clone filter negotiation beyond the explicit
-  demand-hydration surface, sparse-checkout expansion, signed commit/tag
-  verification workflows, and platform-specific file watcher / daemon behavior
-  remain outside the current parity claim unless a later test slice explicitly
-  adds them.
+  parity for these environments. The currently verified helper-backed auth
+  surface covers repo-configured `git credential fill|approve|reject` flows for
+  `credential.helper=store` and `credential.helper=cache`, plus loopback smart
+  HTTP discovery using `credential.helper=store`, including quoted `--file`
+  paths with spaces (`git_credential_compat::credential_fill_uses_configured_store_helpers_like_stock_git`,
+  `git_credential_compat::credential_approve_and_reject_use_configured_store_helper_like_stock_git`,
+  `git_credential_compat::credential_fill_approve_and_reject_use_configured_cache_helper_like_stock_git`,
+  `git_transport_http_compat::ls_remote_sends_basic_auth_from_credential_store_helper_with_quoted_file_path`
+  and
+  `git_replacement_dogfood_compat::replacement_dogfood_smoke_script_passes_with_current_zmin_binary`)
+  integrate the current git-in-PATH replacement smoke into `cargo test`, so
+  IDE-shaped shim flows are now covered by a durable automated gate instead of
+  only a manual shell step. That replacement smoke now also covers shim-level
+  `git lfs version`, `git lfs env`, and empty-repo `git lfs ls-files` probes as
+  client/plugin readiness evidence for the built-in local LFS foundation.
+  `transport_impl::tests::parsed_http_url_reads_credential_store_helper_basic_auth_with_quoted_file_path`).
+- Full Git LFS product parity, partial clone filter negotiation beyond the
+  explicit demand-hydration surface, sparse-checkout expansion, signed
+  commit/tag verification workflows, and platform-specific file watcher /
+  daemon behavior remain outside the current parity claim unless a later test
+  slice explicitly adds them. The currently verified LFS-compatible surface
+  covers pointer workflows through configured `filter.lfs.process` on `add`,
+  `checkout`, and `cat-file --filters`
+  (`git_object_plumbing_compat::lfs_process_filter_pointer_workflow_matches_stock_git`)
+  plus built-in local `git lfs` foundation commands:
+  `version`, `env`, `install --local --skip-repo`,
+  `install --local --skip-smudge`, `track`, `untrack`, `ls-files`, and local
+  `pre-push` stdin-shape validation
+  (`git_lfs_local_compat::{lfs_track_and_untrack_match_stock_git_for_basic_patterns,lfs_install_local_skip_repo_matches_stock_git_filter_config,lfs_install_local_skip_smudge_writes_builtin_pre_push_hook,lfs_ls_files_default_name_only_and_long_match_stock_git_for_pointer_entries,lfs_version_and_env_report_builtin_local_foundation_state,lfs_pre_push_validates_update_stream_shape}`).
+  Network LFS upload/download, batch API/auth, and full client/plugin
+  compatibility are still open.
 - Larger real-repository scale scenarios are not complete. Existing real-repo
   smokes are useful preservation evidence, but they are not a substitute for a
   documented scale matrix with repository size, object count, ref count,

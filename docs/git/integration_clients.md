@@ -61,6 +61,7 @@ command.
 Run the replacement smoke before local IDE dogfood:
 
 ```bash
+cargo test -q -p zmin-cli --test git_replacement_dogfood_compat -- --nocapture
 tools/git-replacement-dogfood-smoke.sh
 ```
 
@@ -68,5 +69,9 @@ The smoke creates a temporary `git` shim that dispatches to `zmin`, then checks
 the IDE-shaped surfaces that usually run first: version probes, build-option
 version output, invalid version-option shape, `status -z`, porcelain v2 branch
 status, `rev-parse`, `config`, `ls-files -z`, `diff -z`, `log -z` and
-`fetch --prune --no-tags`. This is a dogfood gate, not a complete Git
-compatibility claim.
+`fetch --prune --no-tags`. It also checks that a `git` shim can answer the
+common LFS discovery probes many clients/plugins issue separately:
+`git lfs version`, `git lfs env`, and empty-repo `git lfs ls-files`. The Rust
+integration test is the durable gate for CI/local verification; the shell entry
+point remains useful for direct manual dogfood. This is a dogfood gate, not a
+complete Git or Git LFS compatibility claim.

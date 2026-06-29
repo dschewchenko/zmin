@@ -8712,6 +8712,39 @@ fn ls_remote_sends_basic_auth_from_credential_store_helper() {
 }
 
 #[test]
+fn ls_remote_sends_basic_auth_from_credential_store_helper_with_quoted_file_path() {
+    let dir = TempDir::new().expect("temp dir");
+    git(dir.path(), ["init", "client"]);
+    let client = dir.path().join("client");
+    let credentials_dir = dir.path().join("folder with spaces");
+    std::fs::create_dir_all(&credentials_dir).expect("credentials dir");
+    let credentials = credentials_dir.join("quoted credentials");
+    let server = AuthorizationCaptureHttpServer::new();
+    let url = format!("http://127.0.0.1:{}/repo.git", server.port);
+    std::fs::write(
+        &credentials,
+        format!("http://user:p%40ss@127.0.0.1:{}\n", server.port),
+    )
+    .expect("credentials");
+    git(
+        &client,
+        [
+            "config",
+            "credential.helper",
+            &format!("store --file '{}'", credentials.display()),
+        ],
+    );
+
+    let (_code, _stdout, _stderr) = run_zmin_failure_output(&client, &["ls-remote", url.as_str()]);
+
+    let request = server.request_text();
+    assert!(
+        request.contains("Authorization: Basic dXNlcjpwQHNz\r\n"),
+        "request did not include credential-store auth header from quoted path:\n{request}"
+    );
+}
+
+#[test]
 fn ls_remote_follows_http_redirect_to_location() {
     let dir = TempDir::new().expect("temp dir");
     let target = AuthorizationCaptureHttpServer::new();

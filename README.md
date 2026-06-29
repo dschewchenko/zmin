@@ -387,15 +387,25 @@ commands, `zmin repo` metadata summaries and CMS-style porcelain such as
 tuning through `ZMIN_GIT_HTTP_VERSION` is tracked as a Zmin-only environment
 control.
 
-The staged-file hook runner is planned as a Zmin-only extension, with an API
-shape like `zmin hooks run pre-commit --staged -- command ...`. It will be
+The staged-file hook runner is available as a Zmin-only extension, including
+preview, extension-filtered execution, and dry-run command surfaces. It is
 tracked below the extension inventory, not in the Git compatibility matrix.
 
 ## Preview Limits
 
 Zmin works with regular Git repositories and existing Git remotes. This preview
-does not include Git LFS, reftable repositories or official package-manager
-installs.
+does not claim full Git LFS product parity, reftable repositories, or official
+package-manager installs. Basic Git-LFS-style pointer workflows through
+configured `filter.lfs.process` are verified for `add`, `checkout`, and
+`cat-file --filters`. Built-in local `git lfs` foundation coverage is also
+verified for `version`, `env`, `install --local --skip-repo`,
+`install --local --skip-smudge`, `track`, `untrack`, `ls-files`, and local
+`pre-push` stdin-shape validation. Network LFS transfer flows, batch API/auth,
+and broader `git lfs ...` product parity remain out of scope. Repo-configured
+`credential.helper=store` and
+`credential.helper=cache` flows are verified for `git credential
+fill|approve|reject`, but broader authenticated enterprise transport scenarios
+still need dedicated gates.
 
 Some edge-case options and environments still need more coverage. Keep a
 current backup before using preview builds on important repositories.

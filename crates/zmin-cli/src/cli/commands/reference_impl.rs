@@ -2135,6 +2135,7 @@ pub(crate) struct ForEachRefOptions<'a> {
     pub(crate) perl: bool,
     pub(crate) tcl: bool,
     pub(crate) color: Option<String>,
+    pub(crate) no_color: bool,
     pub(crate) ignore_case: bool,
     pub(crate) contains: Option<String>,
     pub(crate) no_contains: Option<String>,
@@ -2158,6 +2159,7 @@ enum ForEachRefQuoteMode {
 pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let _color = &options.color;
+    let _no_color = options.no_color;
     if options.stdin && !options.patterns.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -4575,6 +4577,7 @@ fn remote_update(repo: &GitRepo, prune: bool, remotes: Vec<String>) -> Result<()
             false,
             false,
             false,
+            true,
             false,
             false,
             false,
@@ -9932,6 +9935,10 @@ mod tests {
             &refs,
             &objects,
             &[],
+            &[],
+            false,
+            false,
+            None,
             &ForEachRefRequirements::default(),
             None,
         )

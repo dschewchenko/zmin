@@ -2314,13 +2314,14 @@ fn http_credential_from_store_helper(
 }
 
 fn http_credential_store_helper_path(helper: &str) -> Result<Option<PathBuf>> {
-    let mut parts = helper.split_whitespace();
-    let Some(name) = parts.next() else {
+    let parts = split_shell_words(helper)?;
+    let Some(name) = parts.first() else {
         return Ok(None);
     };
     if name != "store" {
         return Ok(None);
     }
+    let mut parts = parts.into_iter().skip(1);
     let mut file = None;
     while let Some(part) = parts.next() {
         if part == "--file" {
@@ -9733,6 +9734,7 @@ pub(crate) fn run_fetch(
                 _atomic,
                 update_head_ok,
                 write_fetch_head,
+                true,
                 &refmap,
                 prefetch,
                 porcelain,
@@ -9773,6 +9775,7 @@ pub(crate) fn run_fetch(
                 _atomic,
                 update_head_ok,
                 write_fetch_head,
+                true,
                 &refmap,
                 prefetch,
                 porcelain,
@@ -9839,6 +9842,7 @@ pub(crate) fn run_fetch(
         _atomic,
         update_head_ok,
         write_fetch_head,
+        true,
         &refmap,
         prefetch,
         porcelain,
@@ -11786,6 +11790,7 @@ pub(crate) fn run_pull(
         });
     }
     let deepen = deepen.as_deref().map(validate_positive_depth).transpose()?;
+    let show_fetch_head_ref = remote.is_some() || branch.is_some();
     let shallow_since = shallow_since
         .as_deref()
         .map(parse_git_date)
@@ -11875,6 +11880,7 @@ fatal: the remote end hung up unexpectedly\n"
                 false,
                 false,
                 true,
+                show_fetch_head_ref,
                 pull_fetch_refmap,
                 false,
                 false,
@@ -11912,6 +11918,7 @@ fatal: the remote end hung up unexpectedly\n"
                 false,
                 false,
                 true,
+                show_fetch_head_ref,
                 pull_fetch_refmap,
                 false,
                 false,
@@ -12747,6 +12754,7 @@ fn fetch_with_depth(
     atomic: bool,
     update_head_ok: bool,
     write_fetch_head: bool,
+    show_fetch_head_ref: bool,
     refmap: &[String],
     prefetch: bool,
     porcelain: bool,
@@ -12988,6 +12996,7 @@ fn fetch_with_depth(
         prefetch,
         update_shallow,
         write_fetch_head,
+        show_fetch_head_ref,
         dry_run,
         dry_run && fetch_should_recurse_submodules(recurse_submodules_mode),
         porcelain,
@@ -13028,6 +13037,7 @@ fn fetch_with_missing_ref_code(
         &[],
         false,
         false,
+        true,
         true,
         false,
         false,
@@ -13075,6 +13085,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     prefetch: bool,
     update_shallow: bool,
     write_fetch_head: bool,
+    show_fetch_head_ref: bool,
     dry_run: bool,
     dry_run_recurse_submodules: bool,
     porcelain: bool,
@@ -13542,11 +13553,11 @@ pub(crate) fn fetch_with_repo_and_remote(
                         &source_refs,
                         old_id.as_ref(),
                         &id,
+                        show_fetch_head_ref,
                     )?;
                 }
             } else if !quiet {
-                eprintln!("From {}", fetch_head_url_display(&url));
-                eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+                print_fetch_from_header(&url, branch, show_fetch_head_ref);
                 if let Some(old_id) = old_id.as_ref() {
                     if old_id != &id {
                         eprintln!(
@@ -13621,13 +13632,13 @@ pub(crate) fn fetch_with_repo_and_remote(
                     &source_refs,
                     old_id.as_ref(),
                     &id,
+                    show_fetch_head_ref,
                 )?;
             }
         } else {
             write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
             if !quiet {
-                eprintln!("From {}", fetch_head_url_display(&url));
-                eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+                print_fetch_from_header(&url, branch, show_fetch_head_ref);
                 if let Some(old_id) = old_id {
                     if old_id != id {
                         eprintln!(
@@ -14898,7 +14909,7 @@ fn fetch_branch_without_destination_ref(
         copy_configured_fetch_tags(source_refs, &refs_adapter_from_git_dir(&repo.git_dir))?;
         write_branch_fetch_head_with_tags_file(repo, &id, &ref_name, source_refs, url)?;
         if !quiet {
-            print_branch_fetch_with_tags(url, branch, source_refs)?;
+            print_branch_fetch_with_tags(url, branch, source_refs, true)?;
         }
         return Ok(());
     }
@@ -16856,9 +16867,20 @@ fn write_branch_fetch_head_with_tags_file(
     write_fetch_head_content(repo, rows.concat().as_bytes(), false)
 }
 
-fn print_branch_fetch_with_tags(url: &str, branch: &str, source_refs: &RefStore) -> Result<()> {
+fn print_fetch_from_header(url: &str, branch: &str, show_fetch_head_ref: bool) {
     eprintln!("From {}", fetch_head_url_display(url));
-    eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    if show_fetch_head_ref {
+        eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    }
+}
+
+fn print_branch_fetch_with_tags(
+    url: &str,
+    branch: &str,
+    source_refs: &RefStore,
+    show_fetch_head_ref: bool,
+) -> Result<()> {
+    print_fetch_from_header(url, branch, show_fetch_head_ref);
     source_refs.for_each_ref_name("refs/tags/", |ref_name| {
         let tag = ref_name.strip_prefix("refs/tags/").unwrap_or(ref_name);
         eprintln!(" * [new tag]         {tag:<11}-> {tag}");
@@ -16873,8 +16895,9 @@ fn print_named_branch_fetch_with_tags(
     source_refs: &RefStore,
     old_id: Option<&ObjectId>,
     new_id: &ObjectId,
+    show_fetch_head_ref: bool,
 ) -> Result<()> {
-    print_branch_fetch_with_tags(url, branch, source_refs)?;
+    print_branch_fetch_with_tags(url, branch, source_refs, show_fetch_head_ref)?;
     let source_ref = format!("refs/heads/{branch}");
     let destination_ref = format!("refs/remotes/{remote}/{branch}");
     if let Some(old_id) = old_id {
@@ -21375,6 +21398,7 @@ fn fetch_with_repo_and_remote_deepen(
             false,
             false,
             write_fetch_head,
+            true,
             false,
             false,
             false,
@@ -21589,6 +21613,7 @@ fn fetch_with_repo_and_remote_unshallow(
         false,
         false,
         write_fetch_head,
+        true,
         false,
         false,
         false,
@@ -26530,6 +26555,29 @@ mod transport_request_tests {
             repo.git_dir.join("config"),
             format!(
                 "[credential]\n\thelper = store --file {}\n",
+                credentials.display()
+            ),
+        )
+        .expect("config");
+
+        let url = parsed_http_url_with_extra_headers(Some(&repo), "https://example.test/repo.git")
+            .expect("parsed URL with credential helper");
+
+        assert_eq!(url.authorization.as_deref(), Some("Basic dXNlcjpwQHNz"));
+    }
+
+    #[test]
+    fn parsed_http_url_reads_credential_store_helper_basic_auth_with_quoted_file_path() {
+        let dir = tempfile::TempDir::new().expect("repo");
+        let repo = test_repo_at(dir.path());
+        let credentials_dir = dir.path().join("folder with spaces");
+        std::fs::create_dir_all(&credentials_dir).expect("credentials dir");
+        let credentials = credentials_dir.join("quoted credentials");
+        std::fs::write(&credentials, "https://user:p%40ss@example.test\n").expect("credentials");
+        std::fs::write(
+            repo.git_dir.join("config"),
+            format!(
+                "[credential]\n\thelper = store --file '{}'\n",
                 credentials.display()
             ),
         )

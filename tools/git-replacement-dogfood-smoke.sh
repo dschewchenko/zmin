@@ -75,6 +75,8 @@ printf 'nested\n' >"$source_repo/dir/nested.txt"
 "$stock_git" clone --bare "$source_repo" "$remote_repo" --quiet
 "$stock_git" clone "$remote_repo" "$stock_client" --quiet
 "$stock_git" clone "$remote_repo" "$zmin_client" --quiet
+"$stock_git" -C "$stock_client" lfs install --local --skip-repo >/dev/null
+PATH="$shim_dir:$PATH" git -C "$zmin_client" lfs install --local --skip-repo >/dev/null
 
 printf 'changed\n' >"$stock_client/tracked.txt"
 printf 'changed\n' >"$zmin_client/tracked.txt"
@@ -98,6 +100,105 @@ run_capture() {
   printf '%s\n' "$code" >"$prefix.status"
 }
 
+compare_capture_prefixes() {
+  local label="$1"
+  local stock_prefix="$2"
+  local zmin_prefix="$3"
+  for suffix in status stdout stderr; do
+    if ! cmp -s "$stock_prefix.$suffix" "$zmin_prefix.$suffix"; then
+      echo "mismatch for $label: $suffix" >&2
+      echo "--- stock $suffix" >&2
+      od -An -tx1c "$stock_prefix.$suffix" >&2
+      echo "--- zmin $suffix" >&2
+      od -An -tx1c "$zmin_prefix.$suffix" >&2
+      exit 1
+    fi
+  done
+}
+
+compare_nul_sorted_stdout_prefixes() {
+  local label="$1"
+  local stock_prefix="$2"
+  local zmin_prefix="$3"
+  for suffix in status stderr; do
+    if ! cmp -s "$stock_prefix.$suffix" "$zmin_prefix.$suffix"; then
+      echo "mismatch for $label: $suffix" >&2
+      echo "--- stock $suffix" >&2
+      od -An -tx1c "$stock_prefix.$suffix" >&2
+      echo "--- zmin $suffix" >&2
+      od -An -tx1c "$zmin_prefix.$suffix" >&2
+      exit 1
+    fi
+  done
+  python3 - "$stock_prefix.stdout" "$zmin_prefix.stdout" "$label" <<'PY'
+import pathlib
+import sys
+
+stock = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+zmin = pathlib.Path(sys.argv[2]).read_bytes().split(b"\0")
+label = sys.argv[3]
+
+if stock and stock[-1] == b"":
+    stock.pop()
+if zmin and zmin[-1] == b"":
+    zmin.pop()
+
+if sorted(stock) != sorted(zmin):
+    print(f"mismatch for {label}: stdout", file=sys.stderr)
+    print("--- stock stdout", file=sys.stderr)
+    for item in sorted(stock):
+        print(repr(item), file=sys.stderr)
+    print("--- zmin stdout", file=sys.stderr)
+    for item in sorted(zmin):
+        print(repr(item), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+compare_capture_prefixes_with_normalized_stderr() {
+  local label="$1"
+  local stock_prefix="$2"
+  local zmin_prefix="$3"
+  local stock_stderr="$stock_prefix.stderr.normalized"
+  local zmin_stderr="$zmin_prefix.stderr.normalized"
+  sed \
+    -e 's/workflow-stock/workflow-remote/g' \
+    -e 's/workflow-zmin/workflow-remote/g' \
+    -e 's/workflow-stock\.git/workflow-remote.git/g' \
+    -e 's/workflow-zmin\.git/workflow-remote.git/g' \
+    "$stock_prefix.stderr" >"$stock_stderr"
+  sed \
+    -e 's/workflow-stock/workflow-remote/g' \
+    -e 's/workflow-zmin/workflow-remote/g' \
+    -e 's/workflow-stock\.git/workflow-remote.git/g' \
+    -e 's/workflow-zmin\.git/workflow-remote.git/g' \
+    "$zmin_prefix.stderr" >"$zmin_stderr"
+  if ! cmp -s "$stock_prefix.status" "$zmin_prefix.status"; then
+    echo "mismatch for $label: status" >&2
+    echo "--- stock status" >&2
+    od -An -tx1c "$stock_prefix.status" >&2
+    echo "--- zmin status" >&2
+    od -An -tx1c "$zmin_prefix.status" >&2
+    exit 1
+  fi
+  if ! cmp -s "$stock_prefix.stdout" "$zmin_prefix.stdout"; then
+    echo "mismatch for $label: stdout" >&2
+    echo "--- stock stdout" >&2
+    od -An -tx1c "$stock_prefix.stdout" >&2
+    echo "--- zmin stdout" >&2
+    od -An -tx1c "$zmin_prefix.stdout" >&2
+    exit 1
+  fi
+  if ! cmp -s "$stock_stderr" "$zmin_stderr"; then
+    echo "mismatch for $label: stderr" >&2
+    echo "--- stock stderr" >&2
+    od -An -tx1c "$stock_prefix.stderr" >&2
+    echo "--- zmin stderr" >&2
+    od -An -tx1c "$zmin_prefix.stderr" >&2
+    exit 1
+  fi
+}
+
 compare_command() {
   local label="$1"
   shift
@@ -113,16 +214,7 @@ compare_command_at() {
   local zmin_prefix="$capture_dir/$label.zmin"
   run_capture stock "$stock_cwd" "$stock_prefix" "$@"
   run_capture zmin "$zmin_cwd" "$zmin_prefix" "$@"
-  for suffix in status stdout stderr; do
-    if ! cmp -s "$stock_prefix.$suffix" "$zmin_prefix.$suffix"; then
-      echo "mismatch for $label ($*): $suffix" >&2
-      echo "--- stock $suffix" >&2
-      od -An -tx1c "$stock_prefix.$suffix" >&2
-      echo "--- zmin $suffix" >&2
-      od -An -tx1c "$zmin_prefix.$suffix" >&2
-      exit 1
-    fi
-  done
+  compare_capture_prefixes "$label ($*)" "$stock_prefix" "$zmin_prefix"
 }
 
 compare_readonly_same_repo() {
@@ -185,6 +277,46 @@ if [[ "$short_version_output" != "$version_output" ]]; then
   printf 'git -v: %s\n' "$short_version_output" >&2
   exit 1
 fi
+
+lfs_version_output="$(PATH="$shim_dir:$PATH" git -C "$zmin_client" lfs version)"
+case "$lfs_version_output" in
+  'git-lfs/zmin (zmin '*'; built-in local foundation)')
+    ;;
+  *)
+    echo "unexpected git lfs version through shim: $lfs_version_output" >&2
+    exit 1
+    ;;
+esac
+
+lfs_env_prefix="$capture_dir/lfs_env.zmin"
+run_capture zmin "$zmin_client" "$lfs_env_prefix" lfs env
+if [[ "$(cat "$lfs_env_prefix.status")" != "0" ]]; then
+  echo "git lfs env failed through shim" >&2
+  cat "$lfs_env_prefix.stderr" >&2
+  exit 1
+fi
+zmin_client_real="$(cd "$zmin_client" && pwd -P)"
+for expected in \
+  "git-lfs/zmin (zmin " \
+  "git version 2.47.1.zmin" \
+  "LocalWorkingDir=$zmin_client_real" \
+  "LocalGitDir=$zmin_client_real/.git" \
+  "LocalMediaDir=$zmin_client_real/.git/lfs/objects" \
+  "git config"; do
+  if ! grep -Fq "$expected" "$lfs_env_prefix.stdout"; then
+    echo "git lfs env missing '$expected' through shim" >&2
+    cat "$lfs_env_prefix.stdout" >&2
+    exit 1
+  fi
+done
+if [[ -s "$lfs_env_prefix.stderr" ]]; then
+  echo "git lfs env wrote stderr through shim" >&2
+  cat "$lfs_env_prefix.stderr" >&2
+  exit 1
+fi
+
+compare_readonly_same_repo lfs_ls_files_empty "$zmin_client" lfs ls-files
+compare_readonly_same_repo lfs_ls_files_name_only_empty "$zmin_client" lfs ls-files --name-only
 
 build_options_prefix="$capture_dir/version_build_options.zmin"
 run_capture zmin "$zmin_client" "$build_options_prefix" version --build-options
@@ -259,7 +391,12 @@ compare_readonly_same_repo \
   rev_parse_nested_toplevel \
   "$zmin_client/dir" \
   rev-parse --show-toplevel
-compare_command config_null_list config --null --list
+run_capture stock "$stock_client" "$capture_dir/config_null_list.stock" config --null --list
+run_capture zmin "$zmin_client" "$capture_dir/config_null_list.zmin" config --null --list
+compare_nul_sorted_stdout_prefixes \
+  "config_null_list" \
+  "$capture_dir/config_null_list.stock" \
+  "$capture_dir/config_null_list.zmin"
 compare_command config_core_filemode config --get core.filemode
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
@@ -300,22 +437,113 @@ printf 'two\n' >"$source_repo/tracked.txt"
 
 run_capture stock "$stock_client" "$capture_dir/fetch_prune_no_tags.stock" fetch --prune --no-tags
 run_capture zmin "$zmin_client" "$capture_dir/fetch_prune_no_tags.zmin" fetch --prune --no-tags
-for suffix in status stdout stderr; do
-  if ! cmp -s "$capture_dir/fetch_prune_no_tags.stock.$suffix" "$capture_dir/fetch_prune_no_tags.zmin.$suffix"; then
-    echo "fetch mismatch: $suffix" >&2
-    echo "--- stock $suffix" >&2
-    od -An -tx1c "$capture_dir/fetch_prune_no_tags.stock.$suffix" >&2
-    echo "--- zmin $suffix" >&2
-    od -An -tx1c "$capture_dir/fetch_prune_no_tags.zmin.$suffix" >&2
-    exit 1
-  fi
-done
+compare_capture_prefixes \
+  "fetch_prune_no_tags" \
+  "$capture_dir/fetch_prune_no_tags.stock" \
+  "$capture_dir/fetch_prune_no_tags.zmin"
 
 compare_command fetched_origin_main rev-parse refs/remotes/origin/main
 compare_command fetched_pruned_branch_missing rev-parse --verify refs/remotes/origin/gone
 compare_command fetched_no_tags_missing rev-parse --verify refs/tags/later-tag
 if ! cmp -s "$stock_client/.git/FETCH_HEAD" "$zmin_client/.git/FETCH_HEAD"; then
   echo "FETCH_HEAD mismatch after fetch --prune --no-tags" >&2
+  exit 1
+fi
+
+workflow_stock_remote="$tmp_dir/workflow-stock.git"
+workflow_zmin_remote="$tmp_dir/workflow-zmin.git"
+workflow_stock_publish="$tmp_dir/workflow-stock-publish"
+workflow_zmin_publish="$tmp_dir/workflow-zmin-publish"
+workflow_stock_pull="$tmp_dir/workflow-stock-pull"
+workflow_zmin_pull="$tmp_dir/workflow-zmin-pull"
+
+"$stock_git" clone --bare "$source_repo" "$workflow_stock_remote" --quiet
+"$stock_git" clone --bare "$source_repo" "$workflow_zmin_remote" --quiet
+"$stock_git" clone "$workflow_stock_remote" "$workflow_stock_publish" --quiet
+"$stock_git" clone "$workflow_stock_remote" "$workflow_stock_pull" --quiet
+PATH="$shim_dir:$PATH" git clone "$workflow_zmin_remote" "$workflow_zmin_publish" --quiet
+PATH="$shim_dir:$PATH" git clone "$workflow_zmin_remote" "$workflow_zmin_pull" --quiet
+
+for repo in \
+  "$workflow_stock_publish" \
+  "$workflow_stock_pull" \
+  "$workflow_zmin_publish" \
+  "$workflow_zmin_pull"; do
+  "$stock_git" -C "$repo" config user.name "Zmin Dogfood"
+  "$stock_git" -C "$repo" config user.email "zmin-dogfood@example.invalid"
+  "$stock_git" -C "$repo" config commit.gpgsign false
+done
+
+printf 'workflow stock\n' >"$workflow_stock_publish/tracked.txt"
+printf 'workflow stock\n' >"$workflow_zmin_publish/tracked.txt"
+printf 'workflow-new\n' >"$workflow_stock_publish/workflow.txt"
+printf 'workflow-new\n' >"$workflow_zmin_publish/workflow.txt"
+"$stock_git" -C "$workflow_stock_publish" add tracked.txt workflow.txt
+PATH="$shim_dir:$PATH" git -C "$workflow_zmin_publish" add tracked.txt workflow.txt
+
+workflow_env=(
+  GIT_AUTHOR_NAME="Zmin Dogfood"
+  GIT_AUTHOR_EMAIL="zmin-dogfood@example.invalid"
+  GIT_COMMITTER_NAME="Zmin Dogfood"
+  GIT_COMMITTER_EMAIL="zmin-dogfood@example.invalid"
+  GIT_AUTHOR_DATE="2000-01-02T03:04:05Z"
+  GIT_COMMITTER_DATE="2000-01-02T03:04:05Z"
+)
+
+env "${workflow_env[@]}" \
+  "$stock_git" -C "$workflow_stock_publish" commit -m "workflow update" \
+  >"$capture_dir/workflow_commit.stock.stdout" \
+  2>"$capture_dir/workflow_commit.stock.stderr"
+printf '0\n' >"$capture_dir/workflow_commit.stock.status"
+env "${workflow_env[@]}" PATH="$shim_dir:$PATH" \
+  git -C "$workflow_zmin_publish" commit -m "workflow update" \
+  >"$capture_dir/workflow_commit.zmin.stdout" \
+  2>"$capture_dir/workflow_commit.zmin.stderr"
+printf '0\n' >"$capture_dir/workflow_commit.zmin.status"
+compare_capture_prefixes \
+  "workflow_commit" \
+  "$capture_dir/workflow_commit.stock" \
+  "$capture_dir/workflow_commit.zmin"
+
+if [[ "$("$stock_git" -C "$workflow_stock_publish" rev-parse HEAD)" != \
+      "$(PATH="$shim_dir:$PATH" git -C "$workflow_zmin_publish" rev-parse HEAD)" ]]; then
+  echo "workflow commit HEAD mismatch between stock and shim publishers" >&2
+  exit 1
+fi
+
+run_capture stock "$workflow_stock_publish" "$capture_dir/workflow_push.stock" push origin main
+run_capture zmin "$workflow_zmin_publish" "$capture_dir/workflow_push.zmin" push origin main
+compare_capture_prefixes_with_normalized_stderr \
+  "workflow_push" \
+  "$capture_dir/workflow_push.stock" \
+  "$capture_dir/workflow_push.zmin"
+
+run_capture stock "$workflow_stock_pull" "$capture_dir/workflow_pull.stock" pull --ff-only
+run_capture zmin "$workflow_zmin_pull" "$capture_dir/workflow_pull.zmin" pull --ff-only
+compare_capture_prefixes_with_normalized_stderr \
+  "workflow_pull" \
+  "$capture_dir/workflow_pull.stock" \
+  "$capture_dir/workflow_pull.zmin"
+
+if [[ "$(cat "$workflow_stock_pull/tracked.txt")" != "workflow stock" ]]; then
+  echo "unexpected stock workflow pull content" >&2
+  exit 1
+fi
+if [[ "$(cat "$workflow_zmin_pull/tracked.txt")" != "workflow stock" ]]; then
+  echo "unexpected zmin workflow pull content" >&2
+  exit 1
+fi
+if [[ "$(cat "$workflow_stock_pull/workflow.txt")" != "workflow-new" ]]; then
+  echo "missing stock workflow-added file after pull" >&2
+  exit 1
+fi
+if [[ "$(cat "$workflow_zmin_pull/workflow.txt")" != "workflow-new" ]]; then
+  echo "missing zmin workflow-added file after pull" >&2
+  exit 1
+fi
+if [[ "$("$stock_git" -C "$workflow_stock_pull" rev-parse HEAD)" != \
+      "$(PATH="$shim_dir:$PATH" git -C "$workflow_zmin_pull" rev-parse HEAD)" ]]; then
+  echo "workflow pull HEAD mismatch between stock and shim subscribers" >&2
   exit 1
 fi
 

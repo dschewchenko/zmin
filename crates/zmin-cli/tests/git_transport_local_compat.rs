@@ -9194,8 +9194,17 @@ fn pull_local_remote_fast_forwards_like_stock_git() {
 
     let git_client = dir.path().join("git-client");
     let zmin_client = dir.path().join("zmin-client");
-    git(&git_client, ["pull", "--ff-only"]);
-    run_zmin(&zmin_client, ["pull", "--ff-only"]);
+    let git_output = command_any_output("git", &git_client, &["pull", "--ff-only"], "git pull");
+    let zmin_output =
+        command_any_output(zmin_bin(), &zmin_client, &["pull", "--ff-only"], "zmin pull");
+    assert_eq!(zmin_output.0, git_output.0, "implicit tracking pull exit code");
+    assert_eq!(zmin_output.1, git_output.1, "implicit tracking pull stdout");
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path),
+        "implicit tracking pull stderr"
+    );
 
     assert_eq!(
         git(&zmin_client, ["rev-parse", "HEAD"]),

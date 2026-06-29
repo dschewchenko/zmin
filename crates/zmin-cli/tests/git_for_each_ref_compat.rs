@@ -428,6 +428,7 @@ fn for_each_ref_remaining_documented_flags_match_stock_git() {
 
     for args in [
         vec!["for-each-ref", "--color=always", "--format=%(refname:short)", "refs/heads"],
+        vec!["for-each-ref", "--no-color", "--format=%(refname:short)", "refs/heads"],
         vec!["for-each-ref", "--contains", base.trim(), "--format=%(refname:short)"],
         vec!["for-each-ref", "--count=1", "--format=%(refname:short)"],
         vec!["for-each-ref", "--exclude=refs/tags/*", "--format=%(refname)"],

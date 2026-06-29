@@ -313,6 +313,10 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    Lfs {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     UnpackFile {
         object: String,
     },
@@ -6496,6 +6500,8 @@ pub enum Command {
         tcl: bool,
         #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
         color: Option<String>,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
         #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
         ignore_case: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
@@ -6854,10 +6860,28 @@ pub enum ManagedHooksCommand {
     Add {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
+        #[arg(long = "staged-runner", action = ArgAction::SetTrue)]
+        staged_runner: bool,
+        #[arg(long = "ext", value_delimiter = ',', action = ArgAction::Append)]
+        ext: Vec<String>,
         hook_name: String,
-        command: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
     },
     List,
+    Run {
+        hook_name: String,
+        #[arg(long = "staged", action = ArgAction::SetTrue)]
+        staged: bool,
+        #[arg(long = "ext", value_delimiter = ',', action = ArgAction::Append)]
+        ext: Vec<String>,
+        #[arg(long = "list", action = ArgAction::SetTrue)]
+        list: bool,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
     Remove {
         hook_name: String,
     },

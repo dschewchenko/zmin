@@ -8,9 +8,11 @@ pub(crate) fn credential(operation: &str) -> Result<()> {
         });
     }
     let entries = read_credential_entries()?;
+    let helpers = configured_credential_helpers();
     match operation {
-        "approve" | "reject" => Ok(()),
-        "fill" => credential_fill(entries),
+        "approve" => credential_approve_or_reject(entries, &helpers, "store"),
+        "reject" => credential_approve_or_reject(entries, &helpers, "erase"),
+        "fill" => credential_fill(entries, &helpers),
         _ => Err(CliError::Fatal {
             code: 129,
             message: "usage: git credential (fill|approve|reject)".into(),
@@ -42,32 +44,257 @@ fn parse_credential_entries(input: &str) -> Result<Vec<(String, String)>> {
     Ok(entries)
 }
 
-fn credential_fill(entries: Vec<(String, String)>) -> Result<()> {
+fn credential_fill(
+    entries: Vec<(String, String)>,
+    helpers: &[ConfiguredCredentialHelper],
+) -> Result<()> {
     let username = credential_value(&entries, "username");
     let password = credential_value(&entries, "password");
     let protocol = credential_value(&entries, "protocol").unwrap_or("");
     let host = credential_value(&entries, "host").unwrap_or("");
     match (username, password) {
         (Some(_), Some(_)) => {
-            for (key, value) in entries {
+            for (key, value) in &entries {
                 println!("{key}={value}");
             }
             Ok(())
         }
-        (None, _) => Err(CliError::Fatal {
-            code: 128,
-            message: format!(
-                "could not read Username for '{}': Device not configured",
-                credential_url(protocol, None, host)
-            ),
-        }),
-        (Some(username), None) => Err(CliError::Fatal {
-            code: 128,
-            message: format!(
-                "could not read Password for '{}': Device not configured",
-                credential_url(protocol, Some(username), host)
-            ),
-        }),
+        _ => {
+            if let Some(filled) = credential_fill_from_helpers(&entries, helpers)? {
+                for (key, value) in filled {
+                    println!("{key}={value}");
+                }
+                return Ok(());
+            }
+            match (username, password) {
+                (None, _) => Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "could not read Username for '{}': Device not configured",
+                        credential_url(protocol, None, host)
+                    ),
+                }),
+                (Some(username), None) => Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "could not read Password for '{}': Device not configured",
+                        credential_url(protocol, Some(username), host)
+                    ),
+                }),
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+fn credential_fill_from_helpers(
+    entries: &[(String, String)],
+    helpers: &[ConfiguredCredentialHelper],
+) -> Result<Option<Vec<(String, String)>>> {
+    for helper in helpers {
+        let resolved = match helper {
+            ConfiguredCredentialHelper::Store { file } => {
+                credential_fill_from_store_helper(entries, file.clone())?
+            }
+            ConfiguredCredentialHelper::Cache { timeout, socket } => {
+                credential_fill_from_cache_helper(entries, *timeout, socket.clone())?
+            }
+        };
+        if let Some(resolved) = resolved {
+            let mut filled = entries.to_vec();
+            set_credential_entry(&mut filled, "username", &resolved.username);
+            set_credential_entry(&mut filled, "password", &resolved.password);
+            return Ok(Some(filled));
+        }
+    }
+    Ok(None)
+}
+
+fn credential_fill_from_store_helper(
+    entries: &[(String, String)],
+    file: Option<PathBuf>,
+) -> Result<Option<ResolvedCredential>> {
+    let path = credential_store_path(file)?;
+    let rows = read_credential_store_rows(&path)?;
+    for row in rows.iter().rev() {
+        if credential_store_row_matches(row, entries) {
+            return Ok(Some(ResolvedCredential {
+                username: row.username.clone(),
+                password: row.password.clone(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn credential_fill_from_cache_helper(
+    entries: &[(String, String)],
+    timeout: Option<u64>,
+    socket: Option<PathBuf>,
+) -> Result<Option<ResolvedCredential>> {
+    let socket = credential_cache_socket_path(socket)?;
+    #[cfg(unix)]
+    {
+        let response = credential_cache_request(&socket, timeout, "get", entries)?;
+        let resolved = parse_credential_entries(&response)?;
+        let Some(username) = credential_value(&resolved, "username") else {
+            return Ok(None);
+        };
+        let Some(password) = credential_value(&resolved, "password") else {
+            return Ok(None);
+        };
+        return Ok(Some(ResolvedCredential {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        }));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (timeout, socket, entries);
+        Ok(None)
+    }
+}
+
+fn credential_approve_or_reject(
+    entries: Vec<(String, String)>,
+    helpers: &[ConfiguredCredentialHelper],
+    action: &str,
+) -> Result<()> {
+    for helper in helpers {
+        match helper {
+            ConfiguredCredentialHelper::Store { file } => {
+                let path = credential_store_path(file.clone())?;
+                match action {
+                    "store" => credential_store_store(&path, &entries)?,
+                    "erase" => credential_store_erase(&path, &entries)?,
+                    _ => {}
+                }
+            }
+            ConfiguredCredentialHelper::Cache { timeout, socket } => {
+                let socket = credential_cache_socket_path(socket.clone())?;
+                #[cfg(unix)]
+                {
+                    let _ = credential_cache_request(&socket, *timeout, action, &entries)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = (timeout, socket);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedCredential {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConfiguredCredentialHelper {
+    Store {
+        file: Option<PathBuf>,
+    },
+    Cache {
+        timeout: Option<u64>,
+        socket: Option<PathBuf>,
+    },
+}
+
+fn configured_credential_helpers() -> Vec<ConfiguredCredentialHelper> {
+    let Ok(repo) = find_repo() else {
+        return Vec::new();
+    };
+    let Ok(entries) = read_config_entries(&repo) else {
+        return Vec::new();
+    };
+    let mut helpers = Vec::new();
+    for entry in entries {
+        if entry.section != "credential" || !entry.subsection.is_empty() || entry.key != "helper" {
+            continue;
+        }
+        if entry.value.is_empty() {
+            helpers.clear();
+            continue;
+        }
+        if let Ok(Some(helper)) = parse_configured_credential_helper(&entry.value) {
+            helpers.push(helper);
+        }
+    }
+    helpers
+}
+
+fn parse_configured_credential_helper(value: &str) -> Result<Option<ConfiguredCredentialHelper>> {
+    let words = transport_commands::split_shell_words(value)?;
+    let Some(name) = words.first().map(String::as_str) else {
+        return Ok(None);
+    };
+    match name {
+        "store" => {
+            let mut file = None;
+            let mut parts = words.into_iter().skip(1);
+            while let Some(part) = parts.next() {
+                if part == "--file" {
+                    let Some(path) = parts.next() else {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "credential-store helper is missing --file path".into(),
+                        });
+                    };
+                    file = Some(PathBuf::from(path));
+                } else if let Some(path) = part.strip_prefix("--file=") {
+                    file = Some(PathBuf::from(path));
+                }
+            }
+            Ok(Some(ConfiguredCredentialHelper::Store { file }))
+        }
+        "cache" => {
+            let mut timeout = None;
+            let mut socket = None;
+            let mut parts = words.into_iter().skip(1);
+            while let Some(part) = parts.next() {
+                if part == "--timeout" {
+                    let Some(value) = parts.next() else {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "credential-cache helper is missing --timeout value".into(),
+                        });
+                    };
+                    timeout = Some(parse_credential_cache_timeout_value(&value)?);
+                } else if let Some(value) = part.strip_prefix("--timeout=") {
+                    timeout = Some(parse_credential_cache_timeout_value(value)?);
+                } else if part == "--socket" {
+                    let Some(value) = parts.next() else {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "credential-cache helper is missing --socket path".into(),
+                        });
+                    };
+                    socket = Some(PathBuf::from(value));
+                } else if let Some(value) = part.strip_prefix("--socket=") {
+                    socket = Some(PathBuf::from(value));
+                }
+            }
+            Ok(Some(ConfiguredCredentialHelper::Cache { timeout, socket }))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_credential_cache_timeout_value(value: &str) -> Result<u64> {
+    value.parse::<u64>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("credential-cache helper has invalid timeout '{value}'"),
+    })
+}
+
+fn set_credential_entry(entries: &mut Vec<(String, String)>, key: &str, value: &str) {
+    if let Some((_, existing)) = entries.iter_mut().find(|(entry_key, _)| entry_key == key) {
+        *existing = value.to_owned();
+    } else {
+        entries.push((key.to_owned(), value.to_owned()));
     }
 }
 
@@ -244,6 +471,23 @@ fn credential_cache_send(
 }
 
 #[cfg(unix)]
+fn credential_cache_request(
+    socket: &std::path::Path,
+    timeout: Option<u64>,
+    action: &str,
+    entries: &[(String, String)],
+) -> Result<String> {
+    match std::os::unix::net::UnixStream::connect(socket) {
+        Ok(mut stream) => credential_cache_request_to_stream(&mut stream, action, entries),
+        Err(_) => {
+            start_credential_cache_daemon(socket, timeout)?;
+            let mut stream = connect_credential_cache_daemon(socket)?;
+            credential_cache_request_to_stream(&mut stream, action, entries)
+        }
+    }
+}
+
+#[cfg(unix)]
 fn credential_cache_send_to_stream(
     stream: &mut std::os::unix::net::UnixStream,
     action: &str,
@@ -267,6 +511,31 @@ fn credential_cache_send_to_stream(
     stream.read_to_string(&mut response)?;
     print!("{response}");
     Ok(())
+}
+
+#[cfg(unix)]
+fn credential_cache_request_to_stream(
+    stream: &mut std::os::unix::net::UnixStream,
+    action: &str,
+    entries: &[(String, String)],
+) -> Result<String> {
+    let mut request = String::new();
+    request.push_str(action);
+    request.push('\n');
+    for (key, value) in entries {
+        request.push_str(key);
+        request.push('=');
+        request.push_str(value);
+        request.push('\n');
+    }
+    request.push('\n');
+    stream.write_all(request.as_bytes())?;
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(CliError::Io)?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    Ok(response)
 }
 
 #[cfg(unix)]

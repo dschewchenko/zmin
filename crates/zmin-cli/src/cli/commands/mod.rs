@@ -49,6 +49,7 @@ pub(crate) mod diff;
 pub(crate) mod grep;
 pub(crate) mod history;
 pub(crate) mod import;
+pub(crate) mod lfs;
 pub(crate) mod mail;
 pub(crate) mod maintenance;
 pub(crate) mod merge;
@@ -83,6 +84,8 @@ pub(crate) mod grep_commands;
 pub(crate) mod history_commands;
 #[path = "import_impl.rs"]
 pub(crate) mod import_commands;
+#[path = "lfs_impl.rs"]
+pub(crate) mod lfs_commands;
 #[path = "mail_impl.rs"]
 pub(crate) mod mail_commands;
 #[path = "maintenance_impl.rs"]
@@ -295,6 +298,7 @@ pub(crate) fn dispatch(
         command @ (crate::runtime::Command::Quiltimport { .. }
         | crate::runtime::Command::FastExport { .. }
         | crate::runtime::Command::FastImport { .. }) => import::dispatch(command, raw_args),
+        command @ crate::runtime::Command::Lfs { .. } => lfs::dispatch(command),
         command @ (crate::runtime::Command::Merge { .. }
         | crate::runtime::Command::Mergetool { .. }
         | crate::runtime::Command::MergeTree { .. }

@@ -62,10 +62,20 @@ pub(crate) fn managed_hooks(command: ManagedHooksCommand) -> Result<()> {
         ManagedHooksCommand::Init => managed_hooks_init(),
         ManagedHooksCommand::Add {
             force,
+            staged_runner,
+            ext,
             hook_name,
             command,
-        } => managed_hooks_add(force, &hook_name, &command),
+        } => managed_hooks_add(force, staged_runner, &ext, &hook_name, &command),
         ManagedHooksCommand::List => managed_hooks_list(),
+        ManagedHooksCommand::Run {
+            hook_name,
+            staged,
+            ext,
+            list,
+            dry_run,
+            command,
+        } => managed_hooks_run(&hook_name, staged, &ext, list, dry_run, &command),
         ManagedHooksCommand::Remove { hook_name } => managed_hooks_remove(&hook_name),
     }
 }
@@ -261,7 +271,11 @@ fn resolve_stock_git_binary() -> PathBuf {
     for candidate in std::env::var_os("PATH")
         .into_iter()
         .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+        .flat_map(|dir| {
+            stock_git_names()
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
     {
         if is_stock_git_binary(&candidate) {
             return candidate;
@@ -375,6 +389,7 @@ const MANAGED_HOOK_NAMES: &[&str] = &[
     "post-merge",
 ];
 const MANAGED_HOOK_MARKER: &str = "# zmin-managed-hook";
+const MANAGED_HOOK_RUNNER_MARKER: &str = "# zmin-managed-hook-runner";
 
 fn managed_hooks_init() -> Result<()> {
     let repo = find_repo()?;
@@ -392,49 +407,207 @@ fn managed_hooks_init() -> Result<()> {
     Ok(())
 }
 
-fn managed_hooks_add(force: bool, hook_name: &str, command: &str) -> Result<()> {
+fn managed_hooks_add(
+    force: bool,
+    staged_runner: bool,
+    extensions: &[String],
+    hook_name: &str,
+    command: &[String],
+) -> Result<()> {
     let repo = find_repo()?;
     let hook_name = normalize_managed_hook_name(hook_name)?;
-    if command.trim().is_empty() {
-        return Err(CliError::Fatal {
-            code: 1,
-            message: "hook command cannot be empty".into(),
-        });
-    }
     fs::create_dir_all(repo.git_dir.join("hooks"))?;
     fs::create_dir_all(repo.git_dir.join("zmin"))?;
     reject_unmanaged_hook_file(&repo, hook_name, force)?;
-    append_config_value(&repo, &managed_hook_config_key(hook_name), command)?;
-    let commands = managed_hook_commands(&repo, hook_name)?;
-    write_managed_hook_file(&repo, hook_name, &commands)?;
+    if staged_runner {
+        managed_hooks_add_staged_runner(&repo, force, hook_name, extensions, command)?;
+    } else {
+        managed_hooks_add_shell_command(&repo, force, hook_name, command)?;
+    }
+    Ok(())
+}
+
+fn managed_hooks_add_shell_command(
+    repo: &GitRepo,
+    force: bool,
+    hook_name: &str,
+    command: &[String],
+) -> Result<()> {
+    if command.len() != 1 || command[0].trim().is_empty() {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "hook command cannot be empty and must be passed as one shell command".into(),
+        });
+    }
+    if managed_hook_runner_value(repo, hook_name)?.is_some() {
+        if !force {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: format!(
+                    "refusing to mix staged-runner and shell-command hook modes for '{hook_name}'"
+                ),
+            });
+        }
+        unset_config_value(repo, &managed_hook_runner_config_key(hook_name))?;
+    }
+    append_config_value(repo, &managed_hook_config_key(hook_name), &command[0])?;
+    let commands = managed_hook_commands(repo, hook_name)?;
+    write_managed_hook_file(repo, hook_name, &commands)?;
+    Ok(())
+}
+
+fn managed_hooks_add_staged_runner(
+    repo: &GitRepo,
+    force: bool,
+    hook_name: &str,
+    extensions: &[String],
+    command: &[String],
+) -> Result<()> {
+    if hook_name != "pre-commit" {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "staged-runner hook mode is currently supported only for pre-commit".into(),
+        });
+    }
+    if command.is_empty() {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "staged-runner hook mode requires a command after '--'".into(),
+        });
+    }
+    let existing_commands = managed_hook_commands(repo, hook_name)?;
+    if !existing_commands.is_empty() {
+        if !force {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: format!(
+                    "refusing to mix staged-runner and shell-command hook modes for '{hook_name}'"
+                ),
+            });
+        }
+        unset_config_value(repo, &managed_hook_config_key(hook_name))?;
+    }
+    let spec = managed_hook_runner_spec(extensions, command);
+    set_config_value(repo, &managed_hook_runner_config_key(hook_name), &spec)?;
+    write_managed_hook_file(repo, hook_name, &[])?;
     Ok(())
 }
 
 fn managed_hooks_list() -> Result<()> {
     let repo = find_repo()?;
-    let mut entries = read_config_entries(&repo)?
-        .into_iter()
-        .enumerate()
-        .filter(|(_, entry)| managed_hook_entry_is_supported(entry))
-        .collect::<Vec<_>>();
-    entries.sort_by(|(left_index, left), (right_index, right)| {
-        left.key
-            .cmp(&right.key)
+    let config_entries = read_config_entries(&repo)?;
+    let mut rows = Vec::new();
+    for (index, entry) in config_entries.iter().enumerate() {
+        if managed_hook_entry_is_supported(entry) {
+            rows.push((entry.key.clone(), index, entry.value.clone()));
+        }
+    }
+    for hook_name in MANAGED_HOOK_NAMES {
+        if let Some(spec) = managed_hook_runner_value(&repo, hook_name)? {
+            rows.push((
+                (*hook_name).to_owned(),
+                usize::MAX,
+                format!("[staged-runner] {spec}"),
+            ));
+        }
+    }
+    rows.sort_by(|(left_name, left_index, _), (right_name, right_index, _)| {
+        left_name
+            .cmp(right_name)
             .then_with(|| left_index.cmp(right_index))
     });
-    for (_, entry) in entries {
-        println!("{}\t{}", entry.key, entry.value);
+    for (hook_name, _, value) in rows {
+        println!("{hook_name}\t{value}");
     }
     Ok(())
+}
+
+fn managed_hooks_run(
+    hook_name: &str,
+    staged: bool,
+    extensions: &[String],
+    list: bool,
+    dry_run: bool,
+    command: &[String],
+) -> Result<()> {
+    let repo = find_repo()?;
+    let _hook_name = normalize_managed_hook_name(hook_name)?;
+    if !staged {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "hooks run currently requires --staged".into(),
+        });
+    }
+    if list && dry_run {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "hooks run does not allow combining --list and --dry-run".into(),
+        });
+    }
+    let entries = managed_hook_staged_entries(&repo)?;
+    let (runner_extensions, pathspecs, command) =
+        managed_hook_resolve_run_contract(&repo, hook_name, extensions, list, dry_run, command)?;
+    let selected_paths =
+        managed_hook_selected_paths(&repo, &entries, &runner_extensions, &pathspecs)?;
+    if list {
+        for entry in managed_hook_list_entries(&entries, &runner_extensions, &pathspecs) {
+            println!("{}", entry.render());
+        }
+        return Ok(());
+    }
+    if command.is_empty() {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "hooks run requires a command after '--' unless --list is used".into(),
+        });
+    }
+    if dry_run {
+        if selected_paths.is_empty() {
+            println!("would not run: no staged executable paths selected");
+        } else {
+            let preview = command
+                .iter()
+                .cloned()
+                .chain(selected_paths.iter().cloned())
+                .collect::<Vec<_>>();
+            println!("{}", shell_quote_words(&preview));
+        }
+        return Ok(());
+    }
+    if selected_paths.is_empty() {
+        return Ok(());
+    }
+    let status = ProcessCommand::new(&command[0])
+        .args(&command[1..])
+        .args(&selected_paths)
+        .current_dir(&repo.root)
+        .status()
+        .map_err(CliError::Io)?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(CliError::Exit(code)),
+        None => Err(CliError::Exit(1)),
+    }
 }
 
 fn managed_hooks_remove(hook_name: &str) -> Result<()> {
     let repo = find_repo()?;
     let hook_name = normalize_managed_hook_name(hook_name)?;
-    unset_config_value(&repo, &managed_hook_config_key(hook_name))?;
+    unset_config_value_if_present(&repo, &managed_hook_config_key(hook_name))?;
+    unset_config_value_if_present(&repo, &managed_hook_runner_config_key(hook_name))?;
     let hook_path = repo.git_dir.join("hooks").join(hook_name);
     if hook_path.is_file() && managed_hook_file_is_owned(&hook_path)? {
         fs::remove_file(hook_path)?;
+    }
+    Ok(())
+}
+
+fn unset_config_value_if_present(repo: &GitRepo, name: &str) -> Result<()> {
+    if read_config_entry(repo, name)
+        .map_err(CliError::Io)?
+        .is_some()
+    {
+        unset_config_value(repo, name)?;
     }
     Ok(())
 }
@@ -458,6 +631,10 @@ fn managed_hook_config_key(hook_name: &str) -> String {
     format!("zmin.hooks.{hook_name}")
 }
 
+fn managed_hook_runner_config_key(hook_name: &str) -> String {
+    format!("zmin.hooks-runner.{hook_name}")
+}
+
 fn managed_hook_entry_is_supported(entry: &ConfigEntry) -> bool {
     entry.section == "zmin"
         && entry.subsection == "hooks"
@@ -469,6 +646,155 @@ fn managed_hook_commands(repo: &GitRepo, hook_name: &str) -> Result<Vec<String>>
         .into_iter()
         .filter(|entry| managed_hook_entry_is_supported(entry) && entry.key == hook_name)
         .map(|entry| entry.value)
+        .collect())
+}
+
+fn managed_hook_runner_value(repo: &GitRepo, hook_name: &str) -> Result<Option<String>> {
+    Ok(read_config_entries(repo)?
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "zmin" && entry.subsection == "hooks-runner" && entry.key == hook_name
+        })
+        .map(|entry| entry.value))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManagedHookStagedEntry {
+    status: IndexDiffStatus,
+    path: Vec<u8>,
+    old_path: Option<Vec<u8>>,
+}
+
+impl ManagedHookStagedEntry {
+    fn render(&self) -> String {
+        match self.status {
+            IndexDiffStatus::Renamed => format!(
+                "R {} -> {}",
+                self.old_path
+                    .as_ref()
+                    .map(|path| String::from_utf8_lossy(path).into_owned())
+                    .unwrap_or_default(),
+                String::from_utf8_lossy(&self.path)
+            ),
+            status => format!(
+                "{} {}",
+                status.name_status().chars().next().unwrap_or('M'),
+                String::from_utf8_lossy(&self.path)
+            ),
+        }
+    }
+}
+
+fn managed_hook_list_entries<'a>(
+    entries: &'a [ManagedHookStagedEntry],
+    extensions: &[String],
+    pathspecs: &[Vec<u8>],
+) -> Vec<&'a ManagedHookStagedEntry> {
+    entries
+        .iter()
+        .filter(|entry| managed_hook_entry_matches_filters(entry, extensions, pathspecs))
+        .collect()
+}
+
+fn managed_hook_selected_paths(
+    repo: &GitRepo,
+    entries: &[ManagedHookStagedEntry],
+    extensions: &[String],
+    pathspecs: &[Vec<u8>],
+) -> Result<Vec<String>> {
+    let mut selected = Vec::new();
+    for entry in entries {
+        if entry.status == IndexDiffStatus::Deleted {
+            continue;
+        }
+        if !managed_hook_entry_matches_filters(entry, extensions, pathspecs) {
+            continue;
+        }
+        let relative = String::from_utf8_lossy(&entry.path).into_owned();
+        let absolute = repo
+            .root
+            .join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let metadata = match fs::metadata(&absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        if metadata.is_file() {
+            selected.push(relative);
+        }
+    }
+    Ok(selected)
+}
+
+fn managed_hook_entry_matches_filters(
+    entry: &ManagedHookStagedEntry,
+    extensions: &[String],
+    pathspecs: &[Vec<u8>],
+) -> bool {
+    let normalized_extensions = normalize_managed_hook_extensions(extensions);
+    if !normalized_extensions.is_empty()
+        && !managed_hook_path_matches_extensions(&entry.path, &normalized_extensions)
+    {
+        return false;
+    }
+    pathspec_matches(&entry.path, pathspecs)
+}
+
+fn normalize_managed_hook_extensions(extensions: &[String]) -> Vec<String> {
+    extensions
+        .iter()
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+        .collect()
+}
+
+fn managed_hook_path_matches_extensions(path: &[u8], extensions: &[String]) -> bool {
+    let path = String::from_utf8_lossy(path);
+    let Some(extension) = Path::new(path.as_ref())
+        .extension()
+        .and_then(|ext| ext.to_str())
+    else {
+        return false;
+    };
+    let extension = extension.to_ascii_lowercase();
+    extensions.iter().any(|candidate| candidate == &extension)
+}
+
+fn managed_hook_staged_entries(repo: &GitRepo) -> Result<Vec<ManagedHookStagedEntry>> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    if !repo.index_path.exists() {
+        return Ok(Vec::new());
+    }
+    let index = read_index(&repo.index_path).map_err(CliError::Io)?;
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let diff = match refs.resolve("HEAD") {
+        Ok(commit_id) => {
+            let commit = CommitObjectCache::new(&store).read_commit(&commit_id)?;
+            let head_index = TreeObjectCache::new(&store).read_tree_to_index(&commit.tree)?;
+            diff_indexes_with_exact_renames(&head_index, &index).map_err(CliError::Io)?
+        }
+        Err(_) => index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .map(|entry| IndexDiffEntry {
+                status: IndexDiffStatus::Added,
+                path: entry.path.clone(),
+                old_path: None,
+                similarity: None,
+            })
+            .collect(),
+    };
+    Ok(diff
+        .into_iter()
+        .map(|entry| ManagedHookStagedEntry {
+            status: entry.status,
+            path: entry.path,
+            old_path: entry.old_path,
+        })
         .collect())
 }
 
@@ -497,11 +823,21 @@ fn managed_hook_file_is_owned(path: &Path) -> io::Result<bool> {
 fn write_managed_hook_file(repo: &GitRepo, hook_name: &str, commands: &[String]) -> Result<()> {
     let hook_path = repo.git_dir.join("hooks").join(hook_name);
     let mut script = format!("#!/bin/sh\n{MANAGED_HOOK_MARKER}\n# hook: {hook_name}\n");
-    for command in commands {
+    if managed_hook_runner_value(repo, hook_name)?.is_some() {
+        let current_exe = std::env::current_exe().map_err(CliError::Io)?;
+        script.push_str(&format!("{MANAGED_HOOK_RUNNER_MARKER}\n"));
         script.push_str(&format!(
-            "sh -c {} zmin-managed-hook \"$@\" || exit $?\n",
-            shell_quote_single(command)
+            "exec {} hooks run {} --staged \"$@\"\n",
+            shell_quote_single(&current_exe.display().to_string()),
+            shell_quote_single(hook_name)
         ));
+    } else {
+        for command in commands {
+            script.push_str(&format!(
+                "sh -c {} zmin-managed-hook \"$@\" || exit $?\n",
+                shell_quote_single(command)
+            ));
+        }
     }
     fs::write(&hook_path, script)?;
     #[cfg(unix)]
@@ -514,6 +850,100 @@ fn write_managed_hook_file(repo: &GitRepo, hook_name: &str, commands: &[String])
 
 fn shell_quote_single(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn shell_quote_words(words: &[String]) -> String {
+    words
+        .iter()
+        .map(|word| shell_quote_single(word))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn managed_hook_runner_spec(extensions: &[String], command: &[String]) -> String {
+    let mut words = Vec::new();
+    if !extensions.is_empty() {
+        words.push("--ext".to_owned());
+        words.push(
+            extensions
+                .iter()
+                .flat_map(|value| value.split(','))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    words.extend(command.iter().cloned());
+    shell_quote_words(&words)
+}
+
+fn managed_hook_resolve_run_contract(
+    repo: &GitRepo,
+    hook_name: &str,
+    extensions: &[String],
+    list: bool,
+    _dry_run: bool,
+    command: &[String],
+) -> Result<(Vec<String>, Vec<Vec<u8>>, Vec<String>)> {
+    if !command.is_empty() {
+        let (pathspecs, command) = managed_hook_run_pathspecs_and_command(list, command)?;
+        return Ok((extensions.to_vec(), pathspecs, command));
+    }
+    let Some(spec) = managed_hook_runner_value(repo, hook_name)? else {
+        let (pathspecs, command) = managed_hook_run_pathspecs_and_command(list, command)?;
+        return Ok((extensions.to_vec(), pathspecs, command));
+    };
+    let words = transport_commands::split_shell_words(&spec)?;
+    let mut runner_extensions = extensions.to_vec();
+    let mut position = 0;
+    while position < words.len() {
+        let word = &words[position];
+        if word == "--ext" {
+            let Some(value) = words.get(position + 1) else {
+                return Err(CliError::Fatal {
+                    code: 1,
+                    message: "configured staged-runner hook is missing a value after --ext".into(),
+                });
+            };
+            runner_extensions.push(value.clone());
+            position += 2;
+            continue;
+        }
+        if let Some(value) = word.strip_prefix("--ext=") {
+            runner_extensions.push(value.to_owned());
+            position += 1;
+            continue;
+        }
+        break;
+    }
+    let remaining = words[position..].to_vec();
+    let (pathspecs, command) = managed_hook_run_pathspecs_and_command(false, &remaining)?;
+    Ok((runner_extensions, pathspecs, command))
+}
+
+fn managed_hook_run_pathspecs_and_command(
+    list: bool,
+    command: &[String],
+) -> Result<(Vec<Vec<u8>>, Vec<String>)> {
+    if list {
+        return Ok((
+            command
+                .iter()
+                .map(|value| value.as_bytes().to_vec())
+                .collect::<Vec<_>>(),
+            Vec::new(),
+        ));
+    }
+    let Some(separator) = command.iter().position(|value| value == "--") else {
+        return Ok((Vec::new(), command.to_vec()));
+    };
+    let pathspecs = command[..separator]
+        .iter()
+        .map(|value| value.as_bytes().to_vec())
+        .collect::<Vec<_>>();
+    let actual_command = command[separator + 1..].to_vec();
+    Ok((pathspecs, actual_command))
 }
 
 #[derive(Debug, Clone)]
@@ -2291,11 +2721,7 @@ fn cvsserver(
     if help_short || help_short_alt {
         return Ok(());
     }
-    if export_all
-        && args
-            .iter()
-            .all(|arg| arg == "server" || arg == "pserver")
-    {
+    if export_all && args.iter().all(|arg| arg == "server" || arg == "pserver") {
         return Err(CliError::Stderr {
             code: 255,
             text: "--export-all can only be used together with an explicit '<directory>...' list\n"
@@ -2345,7 +2771,10 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
     }
     let same_worktree_state = if options.same_worktree {
         Some(cvsexportcommit_prepare_same_worktree(
-            &repo, &store, parent_id.as_ref(), &options,
+            &repo,
+            &store,
+            parent_id.as_ref(),
+            &options,
         )?)
     } else {
         None
@@ -2769,9 +3198,7 @@ fn cvsexportcommit_check_cvs_status(
     Ok(())
 }
 
-fn cvsexportcommit_existing_files(
-    entries: &[zmin_git_core::IndexDiffEntry],
-) -> Vec<String> {
+fn cvsexportcommit_existing_files(entries: &[zmin_git_core::IndexDiffEntry]) -> Vec<String> {
     entries
         .iter()
         .filter(|entry| entry.status != IndexDiffStatus::Added)
@@ -2883,12 +3310,15 @@ fn cvsexportcommit_collect_orig_backups(
     {
         let path = cvs_dir.join(String::from_utf8_lossy(&entry.path).as_ref());
         if let Ok(bytes) = fs::read(&path) {
-            backups.push((path.with_extension(format!(
-                "{}.orig",
-                path.extension()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or_default()
-            )), bytes));
+            backups.push((
+                path.with_extension(format!(
+                    "{}.orig",
+                    path.extension()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or_default()
+                )),
+                bytes,
+            ));
         }
     }
     Ok(backups)
@@ -3129,7 +3559,11 @@ fn open_or_init_import_repo_with_mode(
     bare: bool,
 ) -> Result<GitRepo> {
     let root = absolute_path_from_arg(path)?;
-    let git_dir = if bare { root.clone() } else { root.join(".git") };
+    let git_dir = if bare {
+        root.clone()
+    } else {
+        root.join(".git")
+    };
     if !git_dir.is_dir() {
         init_repository(
             root.clone(),
@@ -3599,16 +4033,14 @@ fn archimport_revision_timestamp(client: &str, revision: &str) -> Result<(i64, S
         if let Some(value) = line.trim_start().strip_prefix("20")
             && line.starts_with("          ")
         {
-            let timestamp = chrono::NaiveDateTime::parse_from_str(
-                &format!("20{value}"),
-                "%Y-%m-%d %H:%M:%S",
-            )
-            .map_err(|err| CliError::Fatal {
-                code: 128,
-                message: format!("invalid archimport abrowse date for '{revision}': {err}"),
-            })?
-            .and_utc()
-            .timestamp();
+            let timestamp =
+                chrono::NaiveDateTime::parse_from_str(&format!("20{value}"), "%Y-%m-%d %H:%M:%S")
+                    .map_err(|err| CliError::Fatal {
+                        code: 128,
+                        message: format!("invalid archimport abrowse date for '{revision}': {err}"),
+                    })?
+                    .and_utc()
+                    .timestamp();
             return Ok((timestamp, "+0000".to_owned()));
         }
     }
@@ -3874,9 +4306,8 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
                 helper_noop = true;
             }
             "--update-shelve" => {
-                update_shelve = Some(
-                    next_borrowed_option_value(&mut iter, "--update-shelve")?.to_owned(),
-                );
+                update_shelve =
+                    Some(next_borrowed_option_value(&mut iter, "--update-shelve")?.to_owned());
             }
             "--commit" => {
                 let _ = next_borrowed_option_value(&mut iter, "--commit")?;
@@ -3989,7 +4420,8 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
         depot_path,
         target_dir,
         branch: if import_local {
-            branch.strip_prefix("refs/remotes/")
+            branch
+                .strip_prefix("refs/remotes/")
                 .map(|value| format!("refs/heads/{value}"))
                 .unwrap_or(branch)
         } else {
@@ -4104,7 +4536,9 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     } else {
         "master".to_owned()
     };
-    let initializing_repo = !absolute_path_from_arg(&options.target_dir)?.join(".git").is_dir();
+    let initializing_repo = !absolute_path_from_arg(&options.target_dir)?
+        .join(".git")
+        .is_dir();
     let repo = open_or_init_import_repo(&options.target_dir, &initial_branch)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -4189,7 +4623,10 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
             continue;
         }
         if options.verbose && !options.silent {
-            println!("\rb'{}#{}' --> {}#{} (0 B)", file.depot_path, file.revision, relative, file.revision);
+            println!(
+                "\rb'{}#{}' --> {}#{} (0 B)",
+                file.depot_path, file.revision, relative, file.revision
+            );
         }
         let content = p4_print_file(&file.depot_path, &file.revision)?;
         let id = store.write_object(GitObjectKind::Blob, &content)?;
@@ -4222,7 +4659,10 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
         refs.write_ref(&local_head, &id)?;
         refs.write_symbolic_ref("HEAD", &local_head)?;
         if options.verbose && !options.silent {
-            eprintln!("executing git symbolic-ref refs/remotes/p4/HEAD {}", options.branch);
+            eprintln!(
+                "executing git symbolic-ref refs/remotes/p4/HEAD {}",
+                options.branch
+            );
             eprintln!("Reading pipe: git symbolic-ref --short -q HEAD");
             eprintln!("executing git branch {initial_branch} {}", options.branch);
             eprintln!("executing git checkout -f");
@@ -4258,15 +4698,17 @@ fn p4_clone_changesfile_impl(options: &P4SyncOptions) -> Result<()> {
         "Initialized empty Git repository in {}",
         display_path_with_trailing_separator(&repo.git_dir)
     );
-    println!("Importing from {} into {}", options.depot_path, repo.root.display());
+    println!(
+        "Importing from {} into {}",
+        options.depot_path,
+        repo.root.display()
+    );
     println!("Import destination: {}", options.branch);
     print!(
         "\rImporting revision {last_change} (100%)Ignoring revision {last_change} as it would produce an empty commit.\n"
     );
     println!();
-    println!(
-        "Not checking out any branch, use \"git checkout -q -b master <branch>\""
-    );
+    println!("Not checking out any branch, use \"git checkout -q -b master <branch>\"");
     Ok(())
 }
 
@@ -4316,7 +4758,11 @@ fn p4_clone_bare_impl(options: &P4SyncOptions) -> Result<()> {
         "Initialized empty Git repository in {}",
         display_path_with_trailing_separator(&repo.git_dir)
     );
-    println!("Importing from {} into {}", options.depot_path, repo.root.display());
+    println!(
+        "Importing from {} into {}",
+        options.depot_path,
+        repo.root.display()
+    );
     println!(
         "Doing initial import of {depot_root} from revision #head into {}",
         options.branch
@@ -4325,42 +4771,39 @@ fn p4_clone_bare_impl(options: &P4SyncOptions) -> Result<()> {
 }
 
 fn emit_p4_clone_usage_stdout() {
-    print!(
-        concat!(
-            "Usage: git-p4 clone [options] //depot/path[@revRange]\n\n",
-            "Creates a new git repository and imports from Perforce into it\n\n",
-            "Options:\n",
-            "  --branch=BRANCH       \n",
-            "  --detect-branches     \n",
-            "  --changesfile=CHANGESFILE\n",
-            "  --silent              \n",
-            "  --detect-labels       \n",
-            "  --import-labels       \n",
-            "  --import-local        Import into refs/heads/ , not refs/remotes\n",
-            "  --max-changes=MAXCHANGES\n",
-            "                        Maximum number of changes to import\n",
-            "  --changes-block-size=CHANGES_BLOCK_SIZE\n",
-            "                        Internal block size to use when iteratively calling p4\n",
-            "                        changes\n",
-            "  --keep-path           Keep entire BRANCH/DIR/SUBDIR prefix during import\n",
-            "  --use-client-spec     Only sync files that are included in the Perforce\n",
-            "                        Client Spec\n",
-            "  -/ CLONEEXCLUDE       exclude depot path\n",
-            "  --destination=CLONEDESTINATION\n",
-            "                        where to leave result of the clone\n",
-            "  --bare                \n",
-            "  -v, --verbose         \n",
-            "  -h, --help            show this help message and exit\n",
-        )
-    );
+    print!(concat!(
+        "Usage: git-p4 clone [options] //depot/path[@revRange]\n\n",
+        "Creates a new git repository and imports from Perforce into it\n\n",
+        "Options:\n",
+        "  --branch=BRANCH       \n",
+        "  --detect-branches     \n",
+        "  --changesfile=CHANGESFILE\n",
+        "  --silent              \n",
+        "  --detect-labels       \n",
+        "  --import-labels       \n",
+        "  --import-local        Import into refs/heads/ , not refs/remotes\n",
+        "  --max-changes=MAXCHANGES\n",
+        "                        Maximum number of changes to import\n",
+        "  --changes-block-size=CHANGES_BLOCK_SIZE\n",
+        "                        Internal block size to use when iteratively calling p4\n",
+        "                        changes\n",
+        "  --keep-path           Keep entire BRANCH/DIR/SUBDIR prefix during import\n",
+        "  --use-client-spec     Only sync files that are included in the Perforce\n",
+        "                        Client Spec\n",
+        "  -/ CLONEEXCLUDE       exclude depot path\n",
+        "  --destination=CLONEDESTINATION\n",
+        "                        where to leave result of the clone\n",
+        "  --bare                \n",
+        "  -v, --verbose         \n",
+        "  -h, --help            show this help message and exit\n",
+    ));
 }
 
 fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     if options.preserve_user {
         return Err(CliError::Stderr {
             code: 1,
-            text: "Cannot preserve user names without p4 super-user or admin permissions\n"
-                .into(),
+            text: "Cannot preserve user names without p4 super-user or admin permissions\n".into(),
         });
     }
     let repo = find_repo()?;
@@ -4497,7 +4940,9 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
         );
         return Ok(());
     }
-    println!("Importing revision {latest_change} (100%)Current branch {current_branch} is up to date.");
+    println!(
+        "Importing revision {latest_change} (100%)Current branch {current_branch} is up to date."
+    );
     println!("Ignoring revision {latest_change} as it would produce an empty commit.");
     println!();
     println!("Rebasing the current branch onto {rebase_target}");
@@ -4813,10 +5258,7 @@ fn emit_p4_prepare_only_stdout(
     );
     println!();
     println!("To revert the changes, use \"p4 revert ...\", and delete");
-    println!(
-        "the submit template file \"{}\"",
-        template_path.display()
-    );
+    println!("the submit template file \"{}\"", template_path.display());
     if opened.iter().any(|(action, _)| *action == "add") {
         println!("Since the commit adds new files, they must be deleted:");
         for (_, path) in opened.iter().filter(|(action, _)| *action == "add") {
@@ -5374,10 +5816,7 @@ fn svn_cat_file(url: &str, revision: Option<&str>, path: &str) -> Result<Vec<u8>
     if let Some(revision) = revision {
         command.args(["-r", revision]);
     }
-    let output = command
-        .arg(&full_url)
-        .output()
-        .map_err(CliError::Io)?;
+    let output = command.arg(&full_url).output().map_err(CliError::Io)?;
     if output.status.success() {
         Ok(output.stdout)
     } else {

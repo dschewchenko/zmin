@@ -894,6 +894,215 @@ print $log "STOP\n";
     assert!(zmin_log.contains("IN: smudge two.r\n"));
 }
 
+#[test]
+#[cfg(unix)]
+fn lfs_process_filter_pointer_workflow_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    let helper_dir = TempDir::new().expect("helper tempdir");
+    let helper = helper_dir.path().join("fake-lfs-filter.py");
+    fs::write(
+        &helper,
+        r#"#!/usr/bin/env python3
+import hashlib
+import pathlib
+import sys
+
+store = pathlib.Path(sys.argv[1])
+log_path = pathlib.Path(sys.argv[2])
+store.mkdir(parents=True, exist_ok=True)
+log_path.parent.mkdir(parents=True, exist_ok=True)
+
+def read_exact(size):
+    data = sys.stdin.buffer.read(size)
+    if len(data) != size:
+        raise SystemExit("short read")
+    return data
+
+def readpkt():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        return None
+    if len(header) != 4:
+        raise SystemExit("short header")
+    length = int(header, 16)
+    if length == 0:
+        return b""
+    return read_exact(length - 4)
+
+def readtext():
+    value = readpkt()
+    if value is None:
+        return None
+    if value == b"":
+        return ""
+    return value.decode("utf-8").rstrip("\n")
+
+def writepkt(payload: bytes):
+    sys.stdout.buffer.write(f"{len(payload) + 4:04x}".encode("ascii"))
+    sys.stdout.buffer.write(payload)
+
+def writetext(text: str):
+    writepkt(text.encode("utf-8"))
+
+def flushpkt():
+    sys.stdout.buffer.write(b"0000")
+
+def log(text: str):
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(text + "\n")
+
+def read_packetized_content():
+    chunks = []
+    while True:
+        payload = readpkt()
+        if payload is None:
+            raise SystemExit("unexpected eof")
+        if payload == b"":
+            return b"".join(chunks)
+        chunks.append(payload)
+
+def lfs_pointer(content: bytes) -> bytes:
+    oid = hashlib.sha256(content).hexdigest()
+    path = store / oid
+    if not path.exists():
+        path.write_bytes(content)
+    return (
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{oid}\n"
+        f"size {len(content)}\n"
+    ).encode("utf-8")
+
+def lfs_smudge(pointer: bytes) -> bytes:
+    oid = None
+    for line in pointer.decode("utf-8").splitlines():
+        if line.startswith("oid sha256:"):
+            oid = line.split(":", 1)[1]
+            break
+    if oid is None:
+        return pointer
+    return (store / oid).read_bytes()
+
+assert readtext() == "git-filter-client"
+assert readtext() == "version=2"
+assert readtext() == ""
+writetext("git-filter-server")
+writetext("version=2")
+flushpkt()
+sys.stdout.buffer.flush()
+while True:
+    line = readtext()
+    if line == "":
+        break
+    if line is None:
+        raise SystemExit("missing capabilities")
+writetext("capability=clean")
+writetext("capability=smudge")
+flushpkt()
+sys.stdout.buffer.flush()
+log("START")
+while True:
+    command = readtext()
+    if command is None:
+        break
+    command = command.removeprefix("command=")
+    pathname = readtext().removeprefix("pathname=")
+    while True:
+        meta = readtext()
+        if meta == "":
+            break
+    content = read_packetized_content()
+    log(f"{command} {pathname}")
+    if command == "clean":
+        out = lfs_pointer(content)
+    elif command == "smudge":
+        out = lfs_smudge(content)
+    else:
+        writetext("status=abort")
+        flushpkt()
+        flushpkt()
+        sys.stdout.buffer.flush()
+        continue
+    writetext("status=success")
+    flushpkt()
+    if out:
+        writepkt(out)
+    flushpkt()
+    flushpkt()
+    sys.stdout.buffer.flush()
+log("STOP")
+"#,
+    )
+    .expect("write fake lfs helper");
+
+    let git_command = format!(
+        "python3 {} {} {}",
+        shell_quote_for_test(&helper.to_string_lossy()),
+        shell_quote_for_test(&git_repo.path().join("lfs-store").to_string_lossy()),
+        shell_quote_for_test(&git_repo.path().join("lfs.log").to_string_lossy()),
+    );
+    let zmin_command = format!(
+        "python3 {} {} {}",
+        shell_quote_for_test(&helper.to_string_lossy()),
+        shell_quote_for_test(&zmin_repo.path().join("lfs-store").to_string_lossy()),
+        shell_quote_for_test(&zmin_repo.path().join("lfs.log").to_string_lossy()),
+    );
+
+    let payload = b"\x00zmin-lfs-payload\xff\nsecond-line\n";
+    for (repo, command) in [
+        (git_repo.path(), git_command.as_str()),
+        (zmin_repo.path(), zmin_command.as_str()),
+    ] {
+        git(repo, ["config", "filter.lfs.process", command]);
+        git(repo, ["config", "filter.lfs.required", "true"]);
+        fs::write(
+            repo.join(".gitattributes"),
+            b"*.bin filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .expect("write lfs attributes");
+        fs::write(repo.join("asset.bin"), payload).expect("write asset");
+    }
+
+    git(git_repo.path(), ["add", "."]);
+    run_zmin(zmin_repo.path(), ["add", "."]);
+    let git_pointer = command_stdout_bytes("git", git_repo.path(), &["cat-file", "-p", ":asset.bin"]);
+    let zmin_pointer =
+        command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["cat-file", "-p", ":asset.bin"]);
+    assert_eq!(zmin_pointer, git_pointer);
+    assert!(
+        String::from_utf8_lossy(&zmin_pointer).starts_with("version https://git-lfs.github.com/spec/v1\n"),
+        "expected LFS pointer, got {}",
+        String::from_utf8_lossy(&zmin_pointer)
+    );
+
+    git_with_env(git_repo.path(), ["commit", "-m", "lfs asset"]);
+    run_zmin(zmin_repo.path(), ["commit", "-m", "lfs asset"]);
+
+    fs::remove_file(git_repo.path().join("asset.bin")).expect("remove git asset");
+    fs::remove_file(zmin_repo.path().join("asset.bin")).expect("remove zmin asset");
+    git(git_repo.path(), ["checkout", "--", "asset.bin"]);
+    run_zmin(zmin_repo.path(), ["checkout", "--", "asset.bin"]);
+    assert_eq!(
+        fs::read(git_repo.path().join("asset.bin")).expect("read git asset"),
+        payload
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("asset.bin")).expect("read zmin asset"),
+        payload
+    );
+    assert_eq!(
+        command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["cat-file", "--filters", "HEAD:asset.bin"]),
+        command_stdout_bytes("git", git_repo.path(), &["cat-file", "--filters", "HEAD:asset.bin"])
+    );
+
+    let zmin_log = fs::read_to_string(zmin_repo.path().join("lfs.log")).expect("read zmin lfs log");
+    assert!(zmin_log.contains("clean asset.bin\n"));
+    assert!(zmin_log.contains("smudge asset.bin\n"));
+}
+
 #[cfg(unix)]
 fn shell_quote_for_test(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
