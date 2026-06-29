@@ -243,6 +243,19 @@ fn reflog_delete_selectors_match_stock_git() {
 }
 
 #[test]
+fn reflog_drop_all_with_refs_matches_stock_git_usage() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["reflog", "drop", "--all", "HEAD"]),
+        git_failure_output(repo.path(), &["reflog", "drop", "--all", "HEAD"])
+    );
+}
+
+#[test]
 fn branch_create_reflog_handles_nested_branch_names() {
     let git_repo = git_init();
     let zmin_repo = git_init();

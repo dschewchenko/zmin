@@ -21,6 +21,28 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is an evidence-hygiene closure for
+the remaining schema-additional Git tails `scalar`, `reflog-delete`, and
+`reflog-drop`. This batch added one bounded invalid-input stock-Git row for
+`git reflog drop --all HEAD`, corrected two malformed matrix TSV rows whose
+extra tab cells had been preventing the census generator from recognizing the
+existing `scalar` no-subcommand and `reflog delete` evidence, and added a
+focused oracle test for the `reflog drop` usage lane. No new product behavior
+was required: the work was purely matrix/evidence alignment so the schema layer
+now maps cleanly onto already implemented Git-compatible runtime surfaces.
+Focused gates were
+`cargo test -q -p zmin-cli --test git_reflog_compat reflog_drop_all_with_refs_matches_stock_git_usage -- --exact`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7672` matrix rows, `6753` verified rows, `896` invalid-input rows,
+`0` implemented-but-unverified rows, `0` remaining-to-fix-or-verify rows, and
+`131` extension/deferred rows. The active exact backlog is still exhausted; the
+remaining baseline-incomplete command set is now only the helper/deferred tail
+`archimport`, `citool`, `cvsimport`, `cvsexportcommit`, and `svn`. The next
+default follow-up should stay on a larger deferred/helper-backed closure batch
+instead of reopening one-row schema cleanup work.
+
 As of 2026-06-29 the latest completed batch is the bounded helper-free local
 `apply --build-fake-ancestor` completion family across the existing tracked
 single-file patch-file lane. This batch added two exact stock-Git rows and
