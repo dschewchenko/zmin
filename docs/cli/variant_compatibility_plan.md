@@ -22,6 +22,33 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-29 the latest completed batch is a reviewed-complete promotion
+for the remaining foreign-helper baseline commands `archimport`,
+`cvsimport`, `cvsexportcommit`, and `svn`. No new runtime behavior or matrix
+rows were needed: each command already had a bounded closed matrix on its
+currently modeled surface, and the existing foreign-SCM oracle tests confirm
+the import/export/submit lanes that are still in scope while the remaining
+documented helper-option tails stay explicitly deferred in
+`docs/cli/census/deferred_doc_option_pairs.tsv`. This batch simply promoted
+those four commands into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`, which closes the
+baseline Git command-list at the command-matrix layer without pretending the
+deferred helper-option surfaces are now stock-complete. Focused gates were
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat cvsexportcommit_exports_text_commit_to_cvs_checkout -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat cvsimport_imports_cvsps_patchsets_into_git_commits -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat cvsimport_runs_cvsps_when_patchset_file_is_not_provided -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat archimport_imports_tree_snapshot_into_git_repo -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat svn_clone_imports_head_tree_into_git_svn_ref_and_worktree -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat svn_dcommit_adds_deletes_commits_and_updates_git_svn_ref -- --exact`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3150/3212` complete documented
+option pairs, `7672` matrix rows, `6753` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, `0` remaining-to-fix-or-verify
+rows, and `131` extension/deferred rows. The active command-matrix backlog is
+now exhausted; only deferred/helper-blocked documented option tails remain.
+
+As of 2026-06-29 the latest completed batch is a reviewed-complete promotion
 for `citool`. No new runtime behavior or matrix rows were needed: the command
 already had a fully classified bounded helper-launch surface in
 `docs/cli/matrices/citool_v2_47.tsv`, plus the focused stock-oracle proof in
