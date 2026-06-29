@@ -21,6 +21,28 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the final legacy helper-tail
+closure for `cvsimport` and `archimport` across the x86_64 Homebrew stock-Git
+wrapper. This batch added fifteen stock-Git rows, completed the remaining
+documented option pairs for `cvsimport` (`-A`, `-L`, `-M`, `-S`, `-h`, `-i`,
+`-k`, `-m`, `-o`, `-p`, `-r`, `-s`, `-u`, `-v`) and `archimport` (`-o`), and
+removed the last entries from the durable deferral inventory. The runtime
+closure stayed intentionally bounded: Zmin now matches stock Git for the
+entire remaining `cvsimport` option family on the helper-entrypoint help lane,
+including exact usage stderr and exit status after attached option values are
+consumed, and it also matches stock Git for rejecting `git archimport -o ...`
+with `Unknown option: o` plus the stock usage stderr before any import work
+begins. Focused gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat cvsimport_help_option_family_matches_stock_git -- --nocapture`,
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat archimport_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3212/3212` complete documented
+option pairs, `7734` matrix rows, `6812` verified rows, `899` invalid-input
+rows, `0` implemented-but-unverified rows, `0` remaining-to-fix-or-verify
+rows, and readiness `status=complete`.
+
 As of 2026-06-29 the latest completed batch is the bounded `svn set-tree`
 stdin tail closure across the x86_64 Homebrew stock-Git wrapper. This batch
 added one stock-Git row, completed the final documented `svn` option pair

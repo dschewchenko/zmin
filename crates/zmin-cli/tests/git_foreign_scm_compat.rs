@@ -406,6 +406,45 @@ fn cvsimport_runs_cvsps_when_patchset_file_is_not_provided() {
     assert!(cvsps_invocation.contains("module"));
 }
 
+#[cfg(unix)]
+#[test]
+fn cvsimport_help_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let authors_file = dir.path().join("authors.txt");
+    fs::write(&authors_file, "dev = Dev User <dev@example.test>\n").expect("write authors file");
+    let authors_path = authors_file.to_str().expect("authors path");
+
+    let cases: [(&str, &[&str]); 14] = [
+        ("help", &["cvsimport", "-h"]),
+        ("authors_file", &["cvsimport", "-A", authors_path, "-h"]),
+        ("commit_limit", &["cvsimport", "-L", "1", "-h"]),
+        ("merge_regex", &["cvsimport", "-M", "merge (.+)", "-h"]),
+        ("ignore_paths", &["cvsimport", "-S", "skip", "-h"]),
+        ("import_only", &["cvsimport", "-i", "-h"]),
+        ("keep_keywords", &["cvsimport", "-k", "-h"]),
+        ("merge_detect", &["cvsimport", "-m", "-h"]),
+        ("head_branch", &["cvsimport", "-o", "trunk", "-h"]),
+        ("cvsps_opts", &["cvsimport", "-p", "--foo,--bar", "-h"]),
+        ("remote", &["cvsimport", "-r", "upstream", "-h"]),
+        ("subst", &["cvsimport", "-s", ".", "-h"]),
+        ("underscore_to_dot", &["cvsimport", "-u", "-h"]),
+        ("verbose", &["cvsimport", "-v", "-h"]),
+    ];
+
+    for (label, args) in cases {
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            dir.path(),
+            dir.path(),
+            args,
+        );
+        let zmin = run_command_with_path(zmin_bin(), dir.path(), dir.path(), args);
+        assert_eq!(stock.0, zmin.0, "{label}: stock stderr: {}", stock.2);
+        assert_eq!(stock.1, zmin.1, "{label}");
+        assert_eq!(stock.2, zmin.2, "{label}");
+    }
+}
+
 
 #[cfg(unix)]
 #[test]
@@ -2413,6 +2452,27 @@ fn archimport_help_matches_stock_git() {
     assert_eq!(stock.2, zmin.2);
 }
 
+#[cfg(unix)]
+#[test]
+fn archimport_old_style_branch_name_matches_stock_git_invalid_input() {
+    let dir = TempDir::new().expect("temp dir");
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &["archimport", "-o", "archive@example.test/project--main--1--base-0:master"],
+    );
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &["archimport", "-o", "archive@example.test/project--main--1--base-0:master"],
+    );
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.1, zmin.1);
+    assert_eq!(stock.2, zmin.2);
+}
+
 #[test]
 fn archimport_rejects_invalid_or_unsupported_invocations() {
     let dir = TempDir::new().expect("temp dir");
@@ -2424,7 +2484,7 @@ fn archimport_rejects_invalid_or_unsupported_invocations() {
     assert_eq!(run_zmin_status(&target, ["archimport"]), 129);
     assert_eq!(
         run_zmin_status(&target, ["archimport", "-o", "archive/project"]),
-        129
+        1
     );
     assert_ne!(
         run_zmin_with_path_status(

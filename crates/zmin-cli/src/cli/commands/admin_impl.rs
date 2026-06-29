@@ -3026,9 +3026,10 @@ fn parse_cvsimport_args(args: Vec<String>) -> Result<CvsImportOptions> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-h" | "--help" => {
-                return Err(CliError::Fatal {
+                return Err(CliError::Stderr {
                     code: 1,
-                    message: "usage: git cvsimport [-o branch-for-HEAD] [-h] [-v] [-d CVSROOT] [-P file] [-C GIT_repository] [-i] [-r remote] [-R] [CVS_module]".into(),
+                    text: "usage: git cvsimport     # fetch/update GIT from CVS\n       [-o branch-for-HEAD] [-h] [-v] [-d CVSROOT] [-A author-conv-file]\n       [-p opts-for-cvsps] [-P file] [-C GIT_repository] [-z fuzz] [-i] [-k]\n       [-u] [-s subst] [-a] [-m] [-M regex] [-S regex] [-L commitlimit]\n       [-r remote] [-R] [CVS_module]\n"
+                        .into(),
                 });
             }
             "-v" => verbose = true,
@@ -3431,11 +3432,10 @@ fn parse_archimport_args(args: &[String]) -> Result<ArchImportOptions> {
             "-v" | "--verbose" => verbose = true,
             "-f" | "-T" | "-a" => {}
             "-o" => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message:
-                        "git archimport -o old-style branch names are intentionally unsupported"
-                            .into(),
+                return Err(CliError::Stderr {
+                    code: 1,
+                    text: "Unknown option: o\nusage: git archimport     # fetch/update GIT from Arch\n       [ -h ] [ -v ] [ -o ] [ -a ] [ -f ] [ -T ] [ -D depth ] [ -t tempdir ]\n       repository/arch-branch [ repository/arch-branch] ...\n"
+                        .into(),
                 });
             }
             "-D" => {
