@@ -21,6 +21,30 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `cvsexportcommit`
+helper-tail closure family across the existing fake-CVS export lane with the
+x86_64 Homebrew stock-Git oracle wrapper. This batch added nine exact
+stock-Git rows, completed the documented `cvsexportcommit` option pairs `-a`,
+`-c`, `-d`, `-f`, `-k`, `-m`, `-p`, `-u`, and `-v`, and removed those rows
+from the durable deferral inventory. The runtime closure stayed intentionally
+bounded: Zmin now matches stock Git on the current text-only checkout export
+lane for author trailers, autocommit transcript and invocation, explicit
+`cvsroot`, current-surface no-op force semantics, keyword-reversal conflict
+failure stderr plus `.orig` backups, message prefixing, pedantic patch-check
+mode, update transcript shape, and verbose progress output, while leaving only
+the `-P` forced-parent and `-W` same-worktree helper tails deferred. Focused
+gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat cvsexportcommit_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3170/3212` complete documented
+option pairs, `7692` matrix rows, `6773` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in deferred helper-option tails,
+now led by `svn` (`25`), `cvsimport` (`14`), `cvsexportcommit` (`2`), and
+`archimport` (`1`).
+
 As of 2026-06-29 the latest completed batch is the bounded `archimport`
 helper-tail closure family across the existing fake-tla initial import lane
 with the x86_64 Homebrew stock-Git oracle wrapper. This batch added six exact

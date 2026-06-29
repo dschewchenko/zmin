@@ -2378,12 +2378,18 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
     fs::write(cvs_dir.join(".cvsexportcommit.diff"), &patch)?;
 
     println!("Checking if patch will apply");
-    if options.update && !files.is_empty() {
-        run_cvs_command(&cvs_dir, &options, "update", &files)?;
+    if options.update {
+        let update_files = cvsexportcommit_existing_files(&entries);
+        if !update_files.is_empty() {
+            run_cvs_command(&cvs_dir, &options, "update", &update_files)?;
+        }
     }
-    if !options.force {
-        cvsexportcommit_check_cvs_status(&cvs_dir, &options, &entries)?;
-    }
+    cvsexportcommit_check_cvs_status(&cvs_dir, &options, &entries)?;
+    let keyword_reverse_backups = if options.keyword_reverse {
+        Some(cvsexportcommit_collect_orig_backups(&cvs_dir, &entries)?)
+    } else {
+        None
+    };
     if options.keyword_reverse {
         cvsexportcommit_reverse_keywords(&cvs_dir, &entries)?;
     }
@@ -2436,13 +2442,35 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
             patches: Vec::new(),
         };
         for patch in patch_commands::parse_apply_patches(&patch)? {
-            let update = patch_commands::apply_file_patch(
+            let update = match patch_commands::apply_file_patch(
                 &work_repo,
                 &store,
                 &old_index,
                 &patch,
                 &apply_options,
-            )?;
+            ) {
+                Ok(update) => update,
+                Err(CliError::Fatal { code: 1, message })
+                    if message.starts_with("patch failed: ") =>
+                {
+                    if let Some(backups) = keyword_reverse_backups.as_deref() {
+                        cvsexportcommit_write_orig_backups(backups)?;
+                    }
+                    let path = String::from_utf8_lossy(
+                        patch
+                            .new_path
+                            .as_deref()
+                            .or(patch.old_path.as_deref())
+                            .unwrap_or(b"<unknown>"),
+                    )
+                    .to_string();
+                    return Err(CliError::Stderr {
+                        code: 1,
+                        text: cvsexportcommit_patch_conflict_stderr(&path),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             let mut ignored_index = GitIndex::new();
             patch_commands::write_apply_update(
                 &work_repo,
@@ -2465,6 +2493,7 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
     println!("Patch title (first comment line): {title}");
     if options.commit {
         println!("Autocommit");
+        println!("  {}", cvsexportcommit_commit_command(&options, &files));
         run_cvs_command(
             &cvs_dir,
             &options,
@@ -2628,11 +2657,7 @@ fn cvsexportcommit_check_cvs_status(
     options: &CvsExportCommitOptions,
     entries: &[zmin_git_core::IndexDiffEntry],
 ) -> Result<()> {
-    let files = entries
-        .iter()
-        .filter(|entry| entry.status != IndexDiffStatus::Added)
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect::<Vec<_>>();
+    let files = cvsexportcommit_existing_files(entries);
     if files.is_empty() {
         return Ok(());
     }
@@ -2649,6 +2674,16 @@ fn cvsexportcommit_check_cvs_status(
         }
     }
     Ok(())
+}
+
+fn cvsexportcommit_existing_files(
+    entries: &[zmin_git_core::IndexDiffEntry],
+) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| entry.status != IndexDiffStatus::Added)
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect::<Vec<_>>()
 }
 
 fn cvsexportcommit_reverse_keywords(
@@ -2728,8 +2763,49 @@ fn cvsexportcommit_commit_command(options: &CvsExportCommitOptions, files: &[Str
         parts.push(root.to_owned());
     }
     parts.push("commit".to_owned());
-    parts.extend(cvsexportcommit_commit_args(files));
+    let args = cvsexportcommit_commit_args(files);
+    parts.extend(args.iter().take(2).cloned());
+    parts.extend(
+        args.into_iter()
+            .skip(2)
+            .map(|value| shell_quote_single(&value)),
+    );
     parts.join(" ")
+}
+
+fn cvsexportcommit_patch_conflict_stderr(path: &str) -> String {
+    format!(
+        "error: patch failed: {path}:1\nerror: {path}: patch does not apply\ncannot patch at git-cvsexportcommit line 338.\n"
+    )
+}
+
+fn cvsexportcommit_collect_orig_backups(
+    cvs_dir: &Path,
+    entries: &[zmin_git_core::IndexDiffEntry],
+) -> Result<Vec<(PathBuf, Vec<u8>)>> {
+    let mut backups = Vec::new();
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.status != IndexDiffStatus::Added)
+    {
+        let path = cvs_dir.join(String::from_utf8_lossy(&entry.path).as_ref());
+        if let Ok(bytes) = fs::read(&path) {
+            backups.push((path.with_extension(format!(
+                "{}.orig",
+                path.extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+            )), bytes));
+        }
+    }
+    Ok(backups)
+}
+
+fn cvsexportcommit_write_orig_backups(backups: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    for (path, bytes) in backups {
+        fs::write(path, bytes)?;
+    }
+    Ok(())
 }
 
 fn run_cvs_command(
@@ -2754,7 +2830,7 @@ fn run_cvs_command(
         });
     }
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    if !stdout.is_empty() {
+    if subcommand == "update" && !stdout.is_empty() {
         print!("{stdout}");
     }
     Ok(stdout)

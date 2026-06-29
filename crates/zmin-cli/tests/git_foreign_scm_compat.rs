@@ -70,6 +70,130 @@ fn cvsexportcommit_exports_text_commit_to_cvs_checkout() {
     assert!(log.contains("rm -f remove.txt"));
 }
 
+#[cfg(unix)]
+#[test]
+fn cvsexportcommit_option_family_matches_stock_git() {
+    for (label, extra_args) in [
+        ("verbose", vec!["-v"]),
+        ("add-author", vec!["-a"]),
+        ("msgprefix", vec!["-m", "PREFIX:"]),
+        ("cvsroot", vec!["-d", "/tmp/fake-root"]),
+        ("update", vec!["-u"]),
+        ("pedantic", vec!["-p"]),
+        ("force", vec!["-f"]),
+        ("commit", vec!["-c"]),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join("source");
+        let seed_cvs = dir.path().join("seed-cvs");
+        let stock_cvs = dir.path().join("stock-cvs");
+        let zmin_cvs = dir.path().join("zmin-cvs");
+        let stock_bin = dir.path().join("stock-bin");
+        let zmin_bin_dir = dir.path().join("zmin-bin");
+        setup_cvsexportcommit_fixture(&source, &seed_cvs, false);
+        copy_dir_recursive(&seed_cvs, &stock_cvs);
+        copy_dir_recursive(&seed_cvs, &zmin_cvs);
+        write_fake_cvs(&stock_bin, &dir.path().join(format!("{label}-stock.log")));
+        write_fake_cvs(&zmin_bin_dir, &dir.path().join(format!("{label}-zmin.log")));
+
+        let mut stock_args = vec!["cvsexportcommit"];
+        stock_args.extend(extra_args.iter().copied());
+        stock_args.push("-w");
+        stock_args.push(stock_cvs.to_str().expect("stock cvs path"));
+        stock_args.push("HEAD");
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            &source,
+            &stock_bin,
+            &stock_args,
+        );
+
+        let mut zmin_args = vec!["cvsexportcommit"];
+        zmin_args.extend(extra_args.iter().copied());
+        zmin_args.push("-w");
+        zmin_args.push(zmin_cvs.to_str().expect("zmin cvs path"));
+        zmin_args.push("HEAD");
+        let zmin = run_command_with_path(zmin_bin(), &source, &zmin_bin_dir, &zmin_args);
+
+        assert_eq!(zmin.0, stock.0, "{label} zmin stderr: {}", zmin.2);
+        assert_eq!(zmin.1, stock.1, "{label}");
+        assert_eq!(zmin.2, stock.2, "{label}");
+        assert_eq!(
+            visible_non_git_file_contents(&stock_cvs),
+            visible_non_git_file_contents(&zmin_cvs),
+            "{label}"
+        );
+        let stock_log = fs::read_to_string(dir.path().join(format!("{label}-stock.log")))
+            .expect("read stock cvs log");
+        let zmin_log =
+            fs::read_to_string(dir.path().join(format!("{label}-zmin.log"))).expect("read zmin cvs log");
+        assert_eq!(
+            normalize_cvs_log(&stock_log),
+            normalize_cvs_log(&zmin_log),
+            "{label}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cvsexportcommit_keyword_reverse_failure_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let seed_cvs = dir.path().join("seed-cvs");
+    let stock_cvs = dir.path().join("stock-cvs");
+    let zmin_cvs = dir.path().join("zmin-cvs");
+    let stock_bin = dir.path().join("stock-bin");
+    let zmin_bin_dir = dir.path().join("zmin-bin");
+    setup_cvsexportcommit_fixture(&source, &seed_cvs, true);
+    copy_dir_recursive(&seed_cvs, &stock_cvs);
+    copy_dir_recursive(&seed_cvs, &zmin_cvs);
+    write_fake_cvs(&stock_bin, &dir.path().join("reverse-stock.log"));
+    write_fake_cvs(&zmin_bin_dir, &dir.path().join("reverse-zmin.log"));
+
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        &source,
+        &stock_bin,
+        &[
+            "cvsexportcommit",
+            "-k",
+            "-w",
+            stock_cvs.to_str().expect("stock cvs path"),
+            "HEAD",
+        ],
+    );
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        &source,
+        &zmin_bin_dir,
+        &[
+            "cvsexportcommit",
+            "-k",
+            "-w",
+            zmin_cvs.to_str().expect("zmin cvs path"),
+            "HEAD",
+        ],
+    );
+
+    assert_ne!(stock.0, 0, "stock unexpectedly succeeded");
+    assert_eq!(zmin.0, stock.0);
+    assert_eq!(zmin.1, stock.1);
+    assert_eq!(
+        normalize_cvsexportcommit_stderr(&zmin.2),
+        normalize_cvsexportcommit_stderr(&stock.2)
+    );
+    assert_eq!(
+        visible_non_git_file_contents(&stock_cvs),
+        visible_non_git_file_contents(&zmin_cvs)
+    );
+    let stock_log = fs::read_to_string(dir.path().join("reverse-stock.log"))
+        .expect("read stock cvs log");
+    let zmin_log =
+        fs::read_to_string(dir.path().join("reverse-zmin.log")).expect("read zmin cvs log");
+    assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
+}
+
 #[test]
 fn cvsimport_imports_cvsps_patchsets_into_git_commits() {
     let dir = TempDir::new().expect("temp dir");
@@ -1896,6 +2020,96 @@ fn collect_visible_non_git_file_contents(
     }
 }
 
+fn normalize_cvs_log(log: &str) -> Vec<String> {
+    let mut lines = log
+        .lines()
+        .map(normalize_cvs_log_line)
+        .collect::<Vec<_>>();
+    lines.sort();
+    lines
+}
+
+fn normalize_cvsexportcommit_stderr(stderr: &str) -> String {
+    stderr
+        .replace(
+            "/usr/local/opt/git/libexec/git-core/git-cvsexportcommit",
+            "git-cvsexportcommit",
+        )
+        .replace(
+            "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-cvsexportcommit",
+            "git-cvsexportcommit",
+        )
+}
+
+fn normalize_cvs_log_line(line: &str) -> String {
+    let mut parts = line.split_whitespace().collect::<Vec<_>>();
+    let mut prefix = Vec::new();
+    if parts.first() == Some(&"-d") && parts.len() >= 2 {
+        prefix.push(parts.remove(0));
+        prefix.push(parts.remove(0));
+    }
+    if parts.is_empty() {
+        return line.to_owned();
+    }
+    let command = parts.remove(0);
+    let mut normalized = prefix
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    normalized.push(command.to_owned());
+    match command {
+        "status" | "update" => {
+            parts.sort();
+            normalized.extend(parts.into_iter().map(str::to_owned));
+        }
+        "commit" => {
+            if parts.first() == Some(&"-F") && parts.len() >= 2 {
+                normalized.push(parts.remove(0).to_owned());
+                normalized.push(parts.remove(0).to_owned());
+            }
+            parts.sort();
+            normalized.extend(parts.into_iter().map(str::to_owned));
+        }
+        _ => normalized.extend(parts.into_iter().map(str::to_owned)),
+    }
+    normalized.join(" ")
+}
+
+fn setup_cvsexportcommit_fixture(
+    source: &std::path::Path,
+    cvs: &std::path::Path,
+    keyworded_base: bool,
+) {
+    git(
+        source.parent().expect("source parent"),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(source);
+    let base_text = if keyworded_base {
+        "base\n$Id: demo 1.1 $\n"
+    } else {
+        "base\n"
+    };
+    let changed_text = if keyworded_base {
+        "base\n$Id: demo 1.1 $\nchanged\n"
+    } else {
+        "base\nchanged\n"
+    };
+    fs::write(source.join("a.txt"), base_text).expect("write a");
+    fs::write(source.join("remove.txt"), b"remove\n").expect("write remove");
+    git(source, ["add", "-A"]);
+    git_with_env(source, ["commit", "-m", "base"]);
+    fs::create_dir_all(cvs.join("CVS")).expect("create CVS marker");
+    fs::write(cvs.join("a.txt"), base_text).expect("write cvs a");
+    fs::write(cvs.join("remove.txt"), b"remove\n").expect("write cvs remove");
+    fs::write(source.join("a.txt"), changed_text).expect("modify a");
+    fs::remove_file(source.join("remove.txt")).expect("delete remove");
+    fs::create_dir_all(source.join("dir")).expect("create source dir");
+    fs::write(source.join("dir/new.txt"), b"new\n").expect("write new");
+    git(source, ["add", "-A"]);
+    git_with_env(source, ["commit", "-m", "export me"]);
+}
+
 fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
     stdout
         .lines()
@@ -2086,7 +2300,7 @@ fn write_fake_cvs(bin: &std::path::Path, log: &std::path::Path) {
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = status ]; then shift; for f in \"$@\"; do printf 'File: %s Status: Up-to-date\\n' \"$f\"; done; fi\nexit 0\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = '-d' ]; then shift; shift; fi\nif [ \"$1\" = status ]; then shift; for f in \"$@\"; do printf 'File: %s Status: Up-to-date\\n' \"$f\"; done; exit 0; fi\nif [ \"$1\" = update ]; then shift; for f in \"$@\"; do printf 'U %s\\n' \"$f\"; done; exit 0; fi\nexit 0\n",
             log.display()
         ),
     )
