@@ -5,9 +5,9 @@ use std::io::{BufRead, Read, Write};
 use std::path::Path;
 
 use common::{
-    command_failure_output, command_output, configure_identity, git, git_args, git_init,
-    git_with_env, git_with_stdin, git_with_stdin_args, read_named_files, run_zmin,
-    run_zmin_args, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file, zmin_bin,
+    command_failure_output, command_output, command_output_with_env, configure_identity, git,
+    git_args, git_init, git_with_env, git_with_stdin, git_with_stdin_args, read_named_files,
+    run_zmin, run_zmin_args, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -994,6 +994,88 @@ fn send_email_dry_run_matches_stock_git() {
         normalize_send_email_patch_output(&stock.1),
         normalize_send_email_patch_output(&zmin.1)
     );
+}
+
+#[test]
+fn send_email_helper_tail_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let patch = git(repo.path(), ["format-patch", "-1"]);
+    let patch = patch.trim().to_owned();
+    git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
+    git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
+    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
+
+    let cases = [
+        vec![
+            "send-email",
+            "--quiet",
+            "--dry-run",
+            "--suppress-cc=author",
+            patch.as_str(),
+        ],
+        vec![
+            "send-email",
+            "--smtp-ssl",
+            "--dry-run",
+            "--suppress-cc=author",
+            patch.as_str(),
+        ],
+        vec![
+            "send-email",
+            "--annotate",
+            "--dry-run",
+            "--suppress-cc=author",
+            patch.as_str(),
+        ],
+        vec![
+            "send-email",
+            "--compose",
+            "--dry-run",
+            "--confirm=never",
+            "--suppress-cc=author",
+            patch.as_str(),
+        ],
+        vec![
+            "send-email",
+            "--sendmail-cmd=true",
+            "--dry-run",
+            "--suppress-cc=author",
+            patch.as_str(),
+        ],
+    ];
+
+    for args in cases {
+        let stock = command_output_with_env(
+            "git",
+            repo.path(),
+            &args,
+            &[("GIT_EDITOR", "true")],
+            "git send-email helper tail family",
+        );
+        let zmin = command_output_with_env(
+            zmin_bin(),
+            repo.path(),
+            &args,
+            &[("GIT_EDITOR", "true")],
+            "zmin send-email helper tail family",
+        );
+
+        assert_eq!(stock.0, zmin.0, "args: {args:?}");
+        assert_eq!(stock.2, zmin.2, "args: {args:?}");
+        assert_eq!(
+            normalize_send_email_patch_output(&stock.1),
+            normalize_send_email_patch_output(&zmin.1),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]

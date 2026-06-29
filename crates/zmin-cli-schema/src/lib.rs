@@ -5061,6 +5061,8 @@ pub enum Command {
     SendEmail {
         #[arg(long = "8bit-encoding")]
         eight_bit_encoding: Option<String>,
+        #[arg(long = "annotate", action = ArgAction::SetTrue)]
+        annotate: bool,
         #[arg(long = "batch-size")]
         batch_size: Option<String>,
         #[arg(long = "dump-aliases", action = ArgAction::SetTrue)]
@@ -5077,6 +5079,8 @@ pub enum Command {
         chain_reply_to: bool,
         #[arg(long = "cc")]
         cc: Vec<String>,
+        #[arg(long = "compose", action = ArgAction::SetTrue)]
+        compose: bool,
         #[arg(long = "compose-encoding")]
         compose_encoding: Option<String>,
         #[arg(long = "confirm")]
@@ -5113,6 +5117,10 @@ pub enum Command {
         no_mailmap: bool,
         #[arg(long = "no-signed-off-by-cc", action = ArgAction::SetTrue)]
         no_signed_off_by_cc: bool,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "sendmail-cmd")]
+        sendmail_cmd: Option<String>,
         #[arg(long = "smtp-auth")]
         smtp_auth: Option<String>,
         #[arg(long = "smtp-debug")]
@@ -5169,6 +5177,8 @@ pub enum Command {
         smtp_server_option: Vec<String>,
         #[arg(long = "smtp-ssl-cert-path")]
         smtp_ssl_cert_path: Option<String>,
+        #[arg(long = "smtp-ssl", action = ArgAction::SetTrue)]
+        smtp_ssl: bool,
         #[arg(long = "smtp-user")]
         smtp_user: Option<String>,
         #[arg(long = "to-cmd")]

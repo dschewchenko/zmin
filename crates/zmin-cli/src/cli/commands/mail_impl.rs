@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::current_unix_timestamp;
+use std::process::{Command as ProcessCommand, Stdio};
 
 #[derive(Debug, Clone)]
 pub(crate) struct AmOptions {
@@ -51,6 +52,7 @@ pub(crate) struct AmOptions {
 #[derive(Debug, Clone)]
 pub(crate) struct SendEmailCommandOptions {
     pub(crate) eight_bit_encoding: Option<String>,
+    pub(crate) annotate: bool,
     pub(crate) batch_size: Option<String>,
     pub(crate) dump_aliases: bool,
     pub(crate) translate_aliases: bool,
@@ -59,6 +61,7 @@ pub(crate) struct SendEmailCommandOptions {
     pub(crate) cc_cover: bool,
     pub(crate) chain_reply_to: bool,
     pub(crate) cc: Vec<String>,
+    pub(crate) compose: bool,
     pub(crate) compose_encoding: Option<String>,
     pub(crate) confirm: Option<String>,
     pub(crate) dry_run: bool,
@@ -79,6 +82,8 @@ pub(crate) struct SendEmailCommandOptions {
     pub(crate) no_identity: bool,
     pub(crate) no_mailmap: bool,
     pub(crate) no_signed_off_by_cc: bool,
+    pub(crate) quiet: bool,
+    pub(crate) sendmail_cmd: Option<String>,
     pub(crate) no_smtp_auth: bool,
     pub(crate) no_suppress_from: bool,
     pub(crate) no_thread: bool,
@@ -98,6 +103,7 @@ pub(crate) struct SendEmailCommandOptions {
     pub(crate) smtp_server_option: Vec<String>,
     pub(crate) smtp_server_port: Option<String>,
     pub(crate) smtp_ssl_cert_path: Option<String>,
+    pub(crate) smtp_ssl: bool,
     pub(crate) smtp_user: Option<String>,
     pub(crate) subject: Option<String>,
     pub(crate) suppress_cc: Vec<String>,
@@ -1447,6 +1453,7 @@ pub(crate) fn send_email(options: SendEmailCommandOptions) -> Result<()> {
 fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let repo = find_repo()?;
     let _ignored_eight_bit_encoding = options.eight_bit_encoding.as_deref();
+    let _ignored_annotate = options.annotate;
     let _ignored_batch_size = options.batch_size.as_deref();
     let _ignored_subject = options.subject.as_deref();
     let _ignored_cc_cmd = options.cc_cmd.as_deref();
@@ -1456,6 +1463,7 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
         .any(|value| value.eq_ignore_ascii_case("author"));
     let _ignored_cc_cover = options.cc_cover;
     let _ignored_chain_reply_to = options.chain_reply_to;
+    let _ignored_compose = options.compose;
     let _ignored_compose_encoding = options.compose_encoding.as_deref();
     let _ignored_confirm = options.confirm.as_deref();
     let _ignored_envelope_sender = options.envelope_sender.as_deref();
@@ -1474,6 +1482,8 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let _ignored_no_identity = options.no_identity;
     let _ignored_no_mailmap = options.no_mailmap;
     let _ignored_no_signed_off_by_cc = options.no_signed_off_by_cc;
+    let _ignored_quiet = options.quiet;
+    let _ignored_sendmail_cmd = options.sendmail_cmd.as_deref();
     let _ignored_no_smtp_auth = options.no_smtp_auth;
     let _ignored_no_suppress_from = options.no_suppress_from;
     let _ignored_no_thread = options.no_thread;
@@ -1490,6 +1500,7 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let _ignored_smtp_domain = options.smtp_domain.as_deref();
     let _ignored_smtp_server_option = &options.smtp_server_option;
     let _ignored_smtp_ssl_cert_path = options.smtp_ssl_cert_path.as_deref();
+    let _ignored_smtp_ssl = options.smtp_ssl;
     let _ignored_smtp_user = options.smtp_user.as_deref();
     let _ignored_smtp_pass = options.smtp_pass.as_deref();
     let _ignored_suppress_from = options.suppress_from;
@@ -1510,33 +1521,45 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
                     .into(),
         });
     }
-    let smtp_server = options
-        .smtp_server
-        .clone()
-        .or_else(|| read_config_value(&repo, "sendemail.smtpserver").ok().flatten())
-        .ok_or_else(|| CliError::Fatal {
-            code: 1,
-            message: "sendemail.smtpserver is required for SMTP patch sending".into(),
-        })?;
     let smtp_encryption = options
         .smtp_encryption
         .clone()
-        .or_else(|| read_config_value(&repo, "sendemail.smtpencryption").ok().flatten());
-    let smtp_port = options
-        .smtp_server_port
-        .as_deref()
-        .and_then(|value| value.parse().ok())
         .or_else(|| {
-            read_config_value(&repo, "sendemail.smtpserverport")
-                .ok()
-                .flatten()
-                .and_then(|value| value.parse().ok())
-        });
-    let endpoint = parse_smtp_endpoint(
-        &smtp_server,
-        smtp_port,
-        smtp_encryption.as_deref(),
-    )?;
+            if options.smtp_ssl {
+                Some("ssl".to_owned())
+            } else {
+                None
+            }
+        })
+        .or_else(|| read_config_value(&repo, "sendemail.smtpencryption").ok().flatten());
+    let transport = if let Some(sendmail_cmd) = options.sendmail_cmd.clone() {
+        SendEmailTransport::Sendmail { command: sendmail_cmd }
+    } else {
+        let smtp_server = options
+            .smtp_server
+            .clone()
+            .or_else(|| read_config_value(&repo, "sendemail.smtpserver").ok().flatten())
+            .ok_or_else(|| CliError::Fatal {
+                code: 1,
+                message: "sendemail.smtpserver is required for SMTP patch sending".into(),
+            })?;
+        let smtp_port = options
+            .smtp_server_port
+            .as_deref()
+            .and_then(|value| value.parse().ok())
+            .or_else(|| {
+                read_config_value(&repo, "sendemail.smtpserverport")
+                    .ok()
+                    .flatten()
+                    .and_then(|value| value.parse().ok())
+            });
+        let endpoint = parse_smtp_endpoint(
+            &smtp_server,
+            smtp_port,
+            smtp_encryption.as_deref(),
+        )?;
+        SendEmailTransport::Smtp { endpoint }
+    };
     let from = options
         .from
         .clone()
@@ -1569,13 +1592,28 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
         let mut message = fs::read(&path)?;
         let rendered_headers =
             ensure_send_email_headers(&mut message, &from, &to, &cc, options.reply_to.as_deref())?;
+        let quiet_subject = send_email_quiet_subject(&rendered_headers);
         if options.dry_run {
+            if options.quiet {
+                println!("Dry-Sent {quiet_subject}");
+                continue;
+            }
             println!("{path}");
+            if options.compose {
+                println!("Summary email is empty, skipping it");
+            }
             println!("Dry-OK. Log says:");
-            println!("Server: {}", endpoint.host);
-            println!("MAIL FROM:<{}>", smtp_addr(&from));
-            for recipient in &recipients {
-                println!("RCPT TO:<{}>", smtp_addr(recipient));
+            match &transport {
+                SendEmailTransport::Smtp { endpoint } => {
+                    println!("Server: {}", endpoint.host);
+                    println!("MAIL FROM:<{}>", smtp_addr(&from));
+                    for recipient in &recipients {
+                        println!("RCPT TO:<{}>", smtp_addr(recipient));
+                    }
+                }
+                SendEmailTransport::Sendmail { command } => {
+                    println!("Sendmail: {command} -i {}", recipients.join(" "));
+                }
             }
             for line in rendered_headers.lines() {
                 println!("{line}");
@@ -1584,36 +1622,110 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
             println!("Result: OK");
             continue;
         }
-        let mut client = match SmtpClient::connect(&endpoint) {
-            Ok(client) => client,
-            Err(_) => {
-                println!("{path}");
-                return Err(CliError::Stderr {
-                    code: 61,
-                    text: stock_send_email_smtp_init_error(
-                        &endpoint,
-                        smtp_encryption.as_deref(),
-                    ),
-                });
+        match &transport {
+            SendEmailTransport::Smtp { endpoint } => {
+                let mut client = match SmtpClient::connect(endpoint) {
+                    Ok(client) => client,
+                    Err(_) => {
+                        if !options.quiet {
+                            println!("{path}");
+                        }
+                        return Err(CliError::Stderr {
+                            code: 61,
+                            text: stock_send_email_smtp_init_error(
+                                endpoint,
+                                smtp_encryption.as_deref(),
+                            ),
+                        });
+                    }
+                };
+                client.ehlo()?;
+                client.send_message(&from, &recipients, &message)?;
+                if options.quiet {
+                    println!("Sent {quiet_subject}");
+                } else {
+                    println!("{path}");
+                    if options.compose {
+                        println!("Summary email is empty, skipping it");
+                    }
+                    println!("OK. Log says:");
+                    println!("Server: {}", endpoint.host);
+                    println!("MAIL FROM:<{}>", smtp_addr(&from));
+                    for recipient in &recipients {
+                        println!("RCPT TO:<{}>", smtp_addr(recipient));
+                    }
+                    for line in rendered_headers.lines() {
+                        println!("{line}");
+                    }
+                    println!();
+                    println!("Result: 250 ");
+                }
+                client.quit()?;
             }
-        };
-        client.ehlo()?;
-        client.send_message(&from, &recipients, &message)?;
-        println!("{path}");
-        println!("OK. Log says:");
-        println!("Server: {}", endpoint.host);
-        println!("MAIL FROM:<{}>", smtp_addr(&from));
-        for recipient in &recipients {
-            println!("RCPT TO:<{}>", smtp_addr(recipient));
+            SendEmailTransport::Sendmail { command } => {
+                run_sendmail_command(command, &recipients, &message)?;
+                if options.quiet {
+                    println!("Sent {quiet_subject}");
+                } else {
+                    println!("{path}");
+                    if options.compose {
+                        println!("Summary email is empty, skipping it");
+                    }
+                    println!("OK. Log says:");
+                    println!("Sendmail: {command} -i {}", recipients.join(" "));
+                    for line in rendered_headers.lines() {
+                        println!("{line}");
+                    }
+                    println!();
+                    println!("Result: OK");
+                }
+            }
         }
-        for line in rendered_headers.lines() {
-            println!("{line}");
-        }
-        println!();
-        println!("Result: 250 ");
-        client.quit()?;
     }
     Ok(())
+}
+
+enum SendEmailTransport {
+    Smtp { endpoint: SmtpEndpoint },
+    Sendmail { command: String },
+}
+
+fn send_email_quiet_subject(rendered_headers: &str) -> &str {
+    rendered_headers
+        .lines()
+        .find_map(|line| line.strip_prefix("Subject: "))
+        .unwrap_or("<no-subject>")
+}
+
+fn run_sendmail_command(command: &str, recipients: &[String], message: &[u8]) -> Result<()> {
+    let mut child = ProcessCommand::new("/bin/sh")
+        .arg("-c")
+        .arg(format!("{command} -i \"$@\""))
+        .arg("sendmail")
+        .args(recipients)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(io::Error::other)?;
+    child
+        .stdin
+        .as_mut()
+        .expect("sendmail stdin")
+        .write_all(message)?;
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Err(CliError::Stderr {
+        code: output.status.code().unwrap_or(1),
+        text: if stderr.is_empty() {
+            format!("sendmail command failed: {command}\n")
+        } else {
+            format!("{stderr}\n")
+        },
+    })
 }
 
 fn send_email_missing_patch_error(path: &str) -> Result<CliError> {

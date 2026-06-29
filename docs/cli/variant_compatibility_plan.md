@@ -21,6 +21,31 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `send-email`
+helper-tail closure family across the existing dry-run patch-file lane with an
+x86_64 Homebrew stock-Git oracle. This batch added five exact stock-Git rows,
+completed the final documented `send-email` option pairs `--annotate`,
+`--compose`, `--quiet`, `--sendmail-cmd`, and `--smtp-ssl`, and removed those
+rows from the durable deferral inventory. The runtime closure stayed
+intentionally bounded: Zmin now matches stock for quiet dry-run output, the
+legacy `--smtp-ssl` alias, unchanged patch review under `--annotate`,
+empty-summary `--compose --dry-run --confirm=never` with `GIT_EDITOR=true`,
+and sendmail-transport dry-run transcripts via `--sendmail-cmd=true`, without
+widening into full interactive compose/annotate editing semantics. Focused
+gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_mail_tools_compat send_email_helper_tail_option_family_matches_stock_git -- --exact`,
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_mail_tools_compat send_email_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3155/3212` complete documented
+option pairs, `7677` matrix rows, `6758` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in deferred helper-option tails,
+now led by `svn` (`25`), `cvsimport` (`14`), `cvsexportcommit` (`11`), and
+`archimport` (`7`), so the next default follow-up should rebind the foreign
+helper oracle rather than reopen helper-free mail work.
+
 As of 2026-06-29 the latest completed batch is a reviewed-complete promotion
 for the remaining foreign-helper baseline commands `archimport`,
 `cvsimport`, `cvsexportcommit`, and `svn`. No new runtime behavior or matrix
