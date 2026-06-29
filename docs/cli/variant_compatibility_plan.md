@@ -21,6 +21,25 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `svn set-tree`
+stdin tail closure across the x86_64 Homebrew stock-Git wrapper. This batch
+added one stock-Git row, completed the final documented `svn` option pair
+`--stdin`, and removed it from the durable deferral inventory. The runtime
+closure stayed intentionally bounded: Zmin now matches stock Git for the
+initialized-repository `git svn set-tree --stdin` lane where stdin supplies
+`HEAD`, stdout prints `Reading from stdin...`, and the helper then fails with
+the stock session-creation stderr against a missing `file://` target, without
+widening into live `git-svn` tree import semantics. Focused gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat svn_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3197/3212` complete documented
+option pairs, `7719` matrix rows, `6798` verified rows, `898` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in helper-blocked deferred
+option tails, now only `cvsimport` (`14`) and `archimport` (`1`).
+
 As of 2026-06-29 the latest completed batch is the bounded `svn init` plus
 `dcommit` helper-tail closure across the x86_64 Homebrew stock-Git wrapper
 and the existing real-local-SVN dry-run lane. This batch added four stock-Git

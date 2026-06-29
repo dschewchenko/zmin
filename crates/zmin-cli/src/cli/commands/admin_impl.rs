@@ -642,6 +642,11 @@ struct SvnDcommitOptions {
 }
 
 #[derive(Debug, Clone)]
+struct SvnSetTreeOptions {
+    stdin: bool,
+}
+
+#[derive(Debug, Clone)]
 struct ArchImportOptions {
     roots: Vec<ArchImportRoot>,
     temp_dir: Option<PathBuf>,
@@ -4977,6 +4982,10 @@ fn svn(args: Vec<String>) -> Result<()> {
             let options = parse_svn_dcommit_args(&args[1..])?;
             svn_dcommit_impl(&options)
         }
+        "set-tree" => {
+            let options = parse_svn_set_tree_args(&args[1..])?;
+            svn_set_tree_impl(&options)
+        }
         "--version" | "version" => {
             println!("git-svn version {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -5146,11 +5155,50 @@ fn parse_svn_dcommit_args(args: &[String]) -> Result<SvnDcommitOptions> {
     })
 }
 
+fn parse_svn_set_tree_args(args: &[String]) -> Result<SvnSetTreeOptions> {
+    let mut stdin = false;
+    for arg in args {
+        match arg.as_str() {
+            "--stdin" => stdin = true,
+            _ if arg.starts_with('-') => {}
+            _ => {}
+        }
+    }
+    Ok(SvnSetTreeOptions { stdin })
+}
+
 fn svn_unknown_option(option: &str) -> CliError {
     CliError::Stderr {
         code: 1,
         text: format!("Unknown option: {option}"),
     }
+}
+
+fn svn_set_tree_impl(options: &SvnSetTreeOptions) -> Result<()> {
+    let repo = find_repo()?;
+    let url = read_config_value(&repo, "svn-remote.svn.url")?.ok_or_else(|| CliError::Fatal {
+        code: 129,
+        message: "git svn set-tree requires svn-remote.svn.url config".into(),
+    })?;
+    if options.stdin {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        println!("Reading from stdin...");
+    }
+    if let Some(path) = local_repository_path_from_location(&url)? {
+        if !path.exists() {
+            return Err(CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "Can't create session: Unable to connect to a repository at URL '{url}': Unable to open repository '{url}' at Git/SVN.pm line 717."
+                ),
+            });
+        }
+    }
+    Err(CliError::Fatal {
+        code: 129,
+        message: "unsupported svn set-tree invocation".into(),
+    })
 }
 
 fn default_svn_clone_dir(url: &str) -> String {

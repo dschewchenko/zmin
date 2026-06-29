@@ -2209,6 +2209,63 @@ fn svn_dcommit_rebase_merges_option_family_matches_stock_git() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn svn_set_tree_stdin_missing_file_url_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let missing_url = "file:///tmp/zmin-missing-svn-target";
+
+    let stock_init = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &[
+            "svn",
+            "init",
+            missing_url,
+            stock_target.to_str().expect("stock target"),
+        ],
+    );
+    let zmin_init = run_command_with_path(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &[
+            "svn",
+            "init",
+            missing_url,
+            zmin_target.to_str().expect("zmin target"),
+        ],
+    );
+    assert_eq!(stock_init.0, 0, "stock init stderr: {}", stock_init.2);
+    assert_eq!(zmin_init.0, 0, "zmin init stderr: {}", zmin_init.2);
+
+    let stock = run_command_with_path_and_env_and_stdin(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        dir.path(),
+        &[],
+        &["svn", "set-tree", "--stdin"],
+        "HEAD\n",
+    );
+    let zmin = run_command_with_path_and_env_and_stdin(
+        zmin_bin(),
+        &zmin_target,
+        dir.path(),
+        &[],
+        &["svn", "set-tree", "--stdin"],
+        "HEAD\n",
+    );
+    assert_eq!(stock.0, zmin.0, "stock stderr: {}", stock.2);
+    assert_eq!(stock.1, zmin.1);
+    assert_eq!(
+        normalize_svn_set_tree_stderr(&stock.2),
+        normalize_svn_set_tree_stderr(&zmin.2)
+    );
+}
+
 #[test]
 fn archimport_imports_tree_snapshot_into_git_repo() {
     let dir = TempDir::new().expect("temp dir");
@@ -2570,6 +2627,69 @@ fn run_command_with_path_and_env(
         );
     }
     let output = command.output().expect("run command");
+    (
+        output.status.code().expect("command exited by signal"),
+        String::from_utf8(output.stdout)
+            .expect("command stdout utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("command stderr utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
+fn run_command_with_path_and_env_and_stdin(
+    program: &str,
+    cwd: &std::path::Path,
+    path_prefix: &std::path::Path,
+    envs: &[(&str, &str)],
+    args: &[&str],
+    stdin: &str,
+) -> (i32, String, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(path_prefix.to_path_buf()).chain(std::env::split_paths(&current_path)),
+    )
+    .expect("join PATH");
+    let home = envs
+        .iter()
+        .find(|(key, _)| *key == "HOME")
+        .map(|(_, value)| std::path::PathBuf::from(value))
+        .unwrap_or_else(|| cwd.join("home"));
+    fs::create_dir_all(&home).expect("create command home");
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env("PATH", path)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")
+        .current_dir(cwd)
+        .envs(envs.iter().copied())
+        .stdin(Stdio::piped());
+    if program == stock_git_bin().to_str().expect("stock git path") {
+        command.env(
+            "GIT_EXEC_PATH",
+            git(
+                stock_git_bin().parent().expect("stock git dir"),
+                ["--exec-path"],
+            ),
+        );
+    }
+    let mut child = command.spawn().expect("spawn command");
+    child
+        .stdin
+        .take()
+        .expect("command stdin")
+        .write_all(stdin.as_bytes())
+        .expect("write command stdin");
+    let output = child.wait_with_output().expect("wait command");
     (
         output.status.code().expect("command exited by signal"),
         String::from_utf8(output.stdout)
@@ -3151,6 +3271,19 @@ fn normalize_svn_init_stdout(stdout: &str) -> String {
         .replace("zmin-shared", "<target>")
         .replace("stock-template", "<target>")
         .replace("zmin-template", "<target>")
+}
+
+#[cfg(unix)]
+fn normalize_svn_set_tree_stderr(stderr: &str) -> String {
+    let git_svn_path =
+        regex::Regex::new(r" at .*/Git/SVN\.pm line 717\.").expect("git svn path regex");
+    let normalized = stderr
+        .replace("/private/var/", "/var/")
+        .replace("stock-project", "<target>")
+        .replace("zmin-project", "<target>");
+    git_svn_path
+        .replace_all(&normalized, " at Git/SVN.pm line 717.")
+        .into_owned()
 }
 
 #[cfg(unix)]

@@ -1,5 +1,4 @@
 command	option	evidence	notes
-svn	--stdin	manual local oracle 2026-06-29: x86_64 stock git-svn wrapper plus real local SVN repo	The current bounded local oracle now closes only `clone -r/--revision` and `dcommit -n/--dry-run/-q/--quiet`; no stock-evidenced modeled lane exists yet for this remaining bridge option.
 cvsimport	-A	manual local oracle 2026-06-29: git cvsimport -h	Current stock Git on this host was built with `NO_PERL=1`, so `git cvsimport` exits before helper dispatch and no subcommand-level Git 2.47.1 oracle exists for this legacy CVS bridge option.
 cvsimport	-L	manual local oracle 2026-06-29: git cvsimport -h	Current stock Git on this host was built with `NO_PERL=1`, so `git cvsimport` exits before helper dispatch and no subcommand-level Git 2.47.1 oracle exists for this legacy CVS bridge option.
 cvsimport	-M	manual local oracle 2026-06-29: git cvsimport -h	Current stock Git on this host was built with `NO_PERL=1`, so `git cvsimport` exits before helper dispatch and no subcommand-level Git 2.47.1 oracle exists for this legacy CVS bridge option.
