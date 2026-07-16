@@ -750,10 +750,19 @@ fn send_email_override_option_family_matches_stock_git() {
     let patch = patch.trim().to_owned();
     let server = FakeSmtpServer::new(2);
     let port = server.port.to_string();
-    git(repo.path(), ["config", "sendemail.smtpserver", "ignored.example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.smtpserver", "ignored.example.test"],
+    );
     git(repo.path(), ["config", "sendemail.smtpserverport", "2525"]);
-    git(repo.path(), ["config", "sendemail.from", "sender@example.test"]);
-    git(repo.path(), ["config", "sendemail.to", "receiver@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "sender@example.test"],
+    );
+    git(
+        repo.path(),
+        ["config", "sendemail.to", "receiver@example.test"],
+    );
 
     let smtp_port_arg = format!("--smtp-server-port={port}");
     let args = [
@@ -806,7 +815,10 @@ fn send_email_smtp_noop_option_family_matches_stock_git() {
     let port = server.port.to_string();
     git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
     git(repo.path(), ["config", "sendemail.smtpserverport", &port]);
-    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "bench@example.test"],
+    );
     git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
 
     let args = [
@@ -862,13 +874,28 @@ fn send_email_metadata_noop_option_family_matches_stock_git() {
     let port = server.port.to_string();
     git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
     git(repo.path(), ["config", "sendemail.smtpserverport", &port]);
-    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "bench@example.test"],
+    );
     git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
     git(repo.path(), ["config", "sendemail.identity", "default"]);
-    git(repo.path(), ["config", "sendemail.test.smtpserver", "127.0.0.1"]);
-    git(repo.path(), ["config", "sendemail.test.smtpserverport", &port]);
-    git(repo.path(), ["config", "sendemail.test.from", "bench@example.test"]);
-    git(repo.path(), ["config", "sendemail.test.to", "to1@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.test.smtpserver", "127.0.0.1"],
+    );
+    git(
+        repo.path(),
+        ["config", "sendemail.test.smtpserverport", &port],
+    );
+    git(
+        repo.path(),
+        ["config", "sendemail.test.from", "bench@example.test"],
+    );
+    git(
+        repo.path(),
+        ["config", "sendemail.test.to", "to1@example.test"],
+    );
 
     let args = [
         "send-email",
@@ -926,7 +953,10 @@ fn send_email_invalid_smtp_noop_option_family_matches_stock_git() {
     let patch = patch.trim().to_owned();
     git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
     git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
-    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "bench@example.test"],
+    );
     git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
 
     let args = [
@@ -980,10 +1010,18 @@ fn send_email_dry_run_matches_stock_git() {
     let patch = patch.trim().to_owned();
     git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
     git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
-    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "bench@example.test"],
+    );
     git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
 
-    let args = ["send-email", "--dry-run", "--suppress-cc=author", patch.as_str()];
+    let args = [
+        "send-email",
+        "--dry-run",
+        "--suppress-cc=author",
+        patch.as_str(),
+    ];
 
     let stock = command_output("git", repo.path(), &args, "git send-email");
     let zmin = command_output(zmin_bin(), repo.path(), &args, "zmin send-email");
@@ -1010,7 +1048,10 @@ fn send_email_helper_tail_option_family_matches_stock_git() {
     let patch = patch.trim().to_owned();
     git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
     git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
-    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(
+        repo.path(),
+        ["config", "sendemail.from", "bench@example.test"],
+    );
     git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
 
     let cases = [

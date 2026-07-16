@@ -1,4 +1,5 @@
 use super::*;
+use encoding_rs::{Encoding, SHIFT_JIS};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use zmin_git_core::GitObjectStore;
@@ -6,15 +7,117 @@ use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::GitRefsStore;
 
 const SMALL_WORKTREE_BLOB_READ_BYTES: usize = 64 * 1024;
+const BULK_CHECKIN_HASH_BUFFER_BYTES: usize = 16 * 1024;
 const PARALLEL_STAGE_REGULAR_MIN_FILES: usize = 128;
 const PARALLEL_STAGE_REGULAR_MAX_WORKERS: usize = 4;
+const PARALLEL_TRACKED_SCAN_MIN_FILES: usize = 1024;
+const PARALLEL_TRACKED_SCAN_MAX_WORKERS: usize = 8;
+const PARALLEL_STATUS_SCAN_MIN_FILES: usize = 512;
+const PARALLEL_STATUS_SCAN_MAX_WORKERS: usize = 2;
+
+#[derive(Debug, Clone)]
+pub(crate) struct BulkCheckinCandidate {
+    pub(crate) path: PathBuf,
+    pub(crate) relative: Vec<u8>,
+    pub(crate) size: u64,
+}
+
+#[derive(Debug, Clone)]
+struct BulkCheckinObject {
+    path: PathBuf,
+    id: ObjectId,
+    size: u64,
+}
 
 pub(crate) fn read_repo_index(repo: &GitRepo) -> Result<GitIndex> {
-    if repo.index_path.exists() {
-        read_index(&repo.index_path).map_err(map_read_index_error)
+    let index = read_repo_index_raw(repo)?;
+    if index_has_sparse_directories(&index) {
+        Ok(expand_repo_sparse_index(repo, &index)?)
     } else {
-        Ok(GitIndex::new())
+        Ok(index)
     }
+}
+
+pub(crate) fn read_repo_index_raw(repo: &GitRepo) -> Result<GitIndex> {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    if repo.index_path.exists() {
+        read_index_with_algorithm(&repo.index_path, algorithm).map_err(map_read_index_error)
+    } else {
+        Ok(GitIndex::new_with_algorithm(algorithm))
+    }
+}
+
+pub(crate) fn index_has_sparse_directories(index: &GitIndex) -> bool {
+    index
+        .entries()
+        .iter()
+        .any(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree)
+}
+
+pub(crate) fn sparse_index_path_requires_expansion(index: &GitIndex, path: &[u8]) -> bool {
+    !path.iter().any(|byte| matches!(byte, b'*' | b'?' | b'['))
+        && index.entries().iter().any(|entry| {
+            entry.stage == 0
+                && entry.mode == IndexMode::Tree
+                && path.starts_with(&entry.path)
+                && path.len() > entry.path.len()
+        })
+}
+
+pub(crate) fn refresh_materialized_sparse_index_entries(
+    repo: &GitRepo,
+    expanded_index: &mut GitIndex,
+) -> Result<bool> {
+    let mut changed = false;
+    let entries = expanded_index
+        .entries()
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if entry.stage == 0
+                && entry.skip_worktree()
+                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+            {
+                entry.set_skip_worktree(false);
+                changed = true;
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
+    if !changed {
+        return Ok(false);
+    }
+    *expanded_index = GitIndex::from_entries(entries)?;
+    expanded_index.write_to_path(&repo.index_path)?;
+    Ok(true)
+}
+
+pub(crate) fn expand_repo_sparse_index(repo: &GitRepo, index: &GitIndex) -> io::Result<GitIndex> {
+    if !index_has_sparse_directories(index) {
+        return Ok(index.clone());
+    }
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), index.hash_algorithm());
+    let tree_cache = TreeObjectCache::new(&store);
+    let mut entries = Vec::new();
+    for entry in index.entries() {
+        if entry.stage != 0 || entry.mode != IndexMode::Tree {
+            entries.push(entry.clone());
+            continue;
+        }
+        let prefix = entry.path.strip_suffix(b"/").unwrap_or(&entry.path);
+        let subtree = tree_cache.read_tree_to_index(&entry.id)?;
+        for child in subtree.entries() {
+            let mut expanded = child.clone();
+            let mut path = Vec::with_capacity(prefix.len() + 1 + child.path.len());
+            path.extend_from_slice(prefix);
+            path.push(b'/');
+            path.extend_from_slice(&child.path);
+            expanded.path = path;
+            expanded.set_skip_worktree(true);
+            entries.push(expanded);
+        }
+    }
+    Ok(GitIndex::from_entries(entries)?)
 }
 
 fn map_read_index_error(error: std::io::Error) -> CliError {
@@ -56,7 +159,8 @@ pub(crate) fn stage_tracked_worktree_changes(
     store: &LooseObjectStore,
     index: &mut GitIndex,
 ) -> Result<()> {
-    stage_tracked_worktree_changes_matching(repo, store, index, &[], &HashSet::new())
+    let _ = stage_tracked_worktree_changes_matching(repo, store, index, &[], &HashSet::new())?;
+    Ok(())
 }
 
 pub(crate) fn stage_tracked_worktree_changes_matching(
@@ -65,10 +169,48 @@ pub(crate) fn stage_tracked_worktree_changes_matching(
     index: &mut GitIndex,
     pathspecs: &[Vec<u8>],
     already_staged: &HashSet<Vec<u8>>,
-) -> Result<()> {
+) -> Result<bool> {
     let index_mtime = repo_index_mtime(repo)?;
     let stage_options = WorktreeStageOptions::load(repo)?;
     let mut trace = TrackedWorktreeTrace::new();
+    let parallel_regular_scan = try_scan_tracked_regular_files_parallel(
+        repo,
+        index,
+        pathspecs,
+        already_staged,
+        index_mtime,
+        &stage_options,
+        ParallelTrackedScanPolicy::Stage,
+        true,
+        &mut trace,
+    )?;
+    let mut changed = false;
+    let unmerged_paths = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage != 0 && pathspec_matches(&entry.path, pathspecs))
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    for path in unmerged_paths {
+        if already_staged.contains(&path) {
+            continue;
+        }
+        let absolute = worktree_path_for_index_entry(&repo.root, &path);
+        if path_exists(&absolute) {
+            stage_file_with_mode_and_index_mtime_and_options(
+                repo,
+                store,
+                index,
+                &absolute,
+                None,
+                index_mtime,
+                &stage_options,
+            )?;
+        } else {
+            index.remove_path(&path)?;
+        }
+        changed = true;
+    }
     let mut entry_idx = 0;
     while entry_idx < index.entries().len() {
         let entry = &index.entries()[entry_idx];
@@ -94,6 +236,55 @@ pub(crate) fn stage_tracked_worktree_changes_matching(
             entry_idx = next_index_position_after_path(index, &path);
             continue;
         }
+        if let Some(scan) = parallel_regular_scan.as_ref()
+            && let Some(action) = scan.action_for_path(&path)
+        {
+            match action {
+                ParallelTrackedRegularAction::Unchanged => {
+                    entry_idx = next_index_position_after_path(index, &path);
+                    continue;
+                }
+                ParallelTrackedRegularAction::Deleted => {
+                    trace.deleted += 1;
+                    index.remove_path(&path)?;
+                    changed = true;
+                    entry_idx = next_index_position_after_path(index, &path);
+                    continue;
+                }
+                ParallelTrackedRegularAction::RemovedDir => {
+                    trace.removed_dirs += 1;
+                    index.remove_path(&path)?;
+                    changed = true;
+                    entry_idx = next_index_position_after_path(index, &path);
+                    continue;
+                }
+                ParallelTrackedRegularAction::ContentHash(id) if id == &entry.id => {
+                    entry_idx = next_index_position_after_path(index, &path);
+                    continue;
+                }
+                ParallelTrackedRegularAction::ModeChanged
+                | ParallelTrackedRegularAction::Modified
+                | ParallelTrackedRegularAction::NeedsStage(_)
+                | ParallelTrackedRegularAction::ContentHash(_) => {
+                    trace.modified += 1;
+                    let stage_started = trace.started();
+                    stage_file_with_mode_and_index_mtime_and_options(
+                        repo,
+                        store,
+                        index,
+                        &worktree_path_for_index_entry(&repo.root, &path),
+                        None,
+                        index_mtime,
+                        &stage_options,
+                    )?;
+                    trace.record_stage_file(stage_started);
+                    trace.restaged += 1;
+                    changed = true;
+                    entry_idx = next_index_position_after_path(index, &path);
+                    continue;
+                }
+            }
+        }
         let absolute = worktree_path_for_index_entry(&repo.root, &path);
         let metadata_started = trace.started();
         let metadata = match fs::symlink_metadata(&absolute) {
@@ -102,6 +293,7 @@ pub(crate) fn stage_tracked_worktree_changes_matching(
                 trace.record_metadata(metadata_started);
                 trace.deleted += 1;
                 index.remove_path(&path)?;
+                changed = true;
                 entry_idx = next_index_position_after_path(index, &path);
                 continue;
             }
@@ -110,6 +302,7 @@ pub(crate) fn stage_tracked_worktree_changes_matching(
         if metadata.is_dir() && index.entries()[entry_idx].mode != IndexMode::Gitlink {
             trace.removed_dirs += 1;
             index.remove_path(&path)?;
+            changed = true;
             entry_idx = next_index_position_after_path(index, &path);
             continue;
         }
@@ -140,11 +333,407 @@ pub(crate) fn stage_tracked_worktree_changes_matching(
             )?;
             trace.record_stage_file(stage_started);
             trace.restaged += 1;
+            changed = true;
         }
         entry_idx = next_index_position_after_path(index, &path);
     }
     trace.emit();
-    Ok(())
+    Ok(changed)
+}
+
+pub(crate) fn renormalize_tracked_worktree_changes_matching(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &mut GitIndex,
+    pathspecs: &[Vec<u8>],
+) -> Result<bool> {
+    let stage_options = WorktreeStageOptions::load(repo)?;
+    let mut changed = false;
+    let mut selected = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && pathspec_matches(&entry.path, pathspecs))
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    selected.sort();
+    selected.dedup();
+    for path in selected {
+        let absolute = worktree_path_for_index_entry(&repo.root, &path);
+        let Ok(metadata) = fs::symlink_metadata(&absolute) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if !metadata.is_file() {
+            continue;
+        }
+        let Some(before) = find_index_entry(index, &path).cloned() else {
+            continue;
+        };
+        let mode = if before.mode == IndexMode::Executable && !stage_options.filemode_enabled() {
+            IndexMode::Executable
+        } else {
+            stage_options.index_mode_for_metadata(&metadata)
+        };
+        let content =
+            stage_options.renormalize_staged_worktree_content(repo, &path, fs::read(&absolute)?)?;
+        stage_resolved_content(store, index, path.clone(), content, mode, &metadata)?;
+        if before.id
+            != find_index_entry(index, &path)
+                .map(|entry| entry.id.clone())
+                .unwrap_or_else(|| before.id.clone())
+            || before.mode
+                != find_index_entry(index, &path)
+                    .map(|entry| entry.mode)
+                    .unwrap_or(before.mode)
+        {
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+struct ParallelTrackedRegularScan {
+    actions: Vec<Option<ParallelTrackedRegularAction>>,
+    path_positions: Option<HashMap<Vec<u8>, usize>>,
+}
+
+#[derive(Clone, Copy)]
+enum ParallelTrackedScanPolicy {
+    Stage,
+    Status,
+}
+
+#[derive(Clone, Copy)]
+enum WorktreeContentComparison {
+    Raw,
+    RawIfNoCr,
+    Converted,
+}
+
+impl ParallelTrackedScanPolicy {
+    fn min_files(self) -> usize {
+        match self {
+            Self::Stage => PARALLEL_TRACKED_SCAN_MIN_FILES,
+            Self::Status => PARALLEL_STATUS_SCAN_MIN_FILES,
+        }
+    }
+
+    fn max_workers(self) -> usize {
+        match self {
+            Self::Stage => PARALLEL_TRACKED_SCAN_MAX_WORKERS,
+            Self::Status => PARALLEL_STATUS_SCAN_MAX_WORKERS,
+        }
+    }
+}
+
+impl ParallelTrackedRegularScan {
+    fn action_for_path(&self, path: &[u8]) -> Option<&ParallelTrackedRegularAction> {
+        let position = *self.path_positions.as_ref()?.get(path)?;
+        self.actions[position].as_ref()
+    }
+}
+
+enum ParallelTrackedRegularAction {
+    Unchanged,
+    Deleted,
+    RemovedDir,
+    ModeChanged,
+    Modified,
+    NeedsStage(u64),
+    ContentHash(ObjectId),
+}
+
+struct ParallelTrackedRegularCandidate<'a> {
+    index_position: usize,
+    absolute: PathBuf,
+    entry: &'a IndexEntry,
+}
+
+#[derive(Default)]
+struct ParallelTrackedRegularChunk {
+    actions: Vec<(usize, ParallelTrackedRegularAction)>,
+    metadata_seconds: f64,
+    modified_check_seconds: f64,
+    content_hash_seconds: f64,
+    stat_safe: u64,
+    mode_changed: u64,
+    content_hashes: u64,
+}
+
+#[derive(Default)]
+struct ParallelTrackedContentHashChunk {
+    actions: Vec<(usize, ParallelTrackedRegularAction)>,
+    seconds: f64,
+    hashes: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ParallelTrackedHashCandidate {
+    candidate_index: usize,
+    detect_cr: bool,
+}
+
+#[derive(Default)]
+struct ParallelTrackedHashBucket {
+    candidates: Vec<ParallelTrackedHashCandidate>,
+    bytes: u64,
+}
+
+fn try_scan_tracked_regular_files_parallel(
+    repo: &GitRepo,
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+    already_staged: &HashSet<Vec<u8>>,
+    index_mtime: Option<IndexTimestamp>,
+    stage_options: &WorktreeStageOptions,
+    policy: ParallelTrackedScanPolicy,
+    preserve_path_lookup: bool,
+    trace: &mut TrackedWorktreeTrace,
+) -> Result<Option<ParallelTrackedRegularScan>> {
+    if !pathspecs.is_empty() || !already_staged.is_empty() {
+        return Ok(None);
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|threads| threads.get())
+        .unwrap_or(1)
+        .min(policy.max_workers());
+    if workers <= 1 {
+        return Ok(None);
+    }
+    let mut candidates = Vec::new();
+    for (index_position, entry) in index.entries().iter().enumerate() {
+        if entry.stage != 0 || entry.skip_worktree() {
+            continue;
+        }
+        if !matches!(entry.mode, IndexMode::File | IndexMode::Executable) {
+            continue;
+        }
+        candidates.push(ParallelTrackedRegularCandidate {
+            index_position,
+            absolute: worktree_path_for_index_entry(&repo.root, &entry.path),
+            entry,
+        });
+    }
+    if candidates.len() < policy.min_files() {
+        return Ok(None);
+    }
+    let chunks = std::thread::scope(|scope| {
+        let candidates = &candidates;
+        let mut handles = Vec::new();
+        for worker in 0..workers {
+            handles.push(scope.spawn(move || -> Result<ParallelTrackedRegularChunk> {
+                let mut result = ParallelTrackedRegularChunk {
+                    actions: Vec::with_capacity(candidates.len().div_ceil(workers)),
+                    ..ParallelTrackedRegularChunk::default()
+                };
+                for candidate in candidates.iter().skip(worker).step_by(workers) {
+                    let metadata_started = Instant::now();
+                    let metadata = match fs::symlink_metadata(&candidate.absolute) {
+                        Ok(metadata) => metadata,
+                        Err(_) => {
+                            result.metadata_seconds += metadata_started.elapsed().as_secs_f64();
+                            result.actions.push((
+                                candidate.index_position,
+                                ParallelTrackedRegularAction::Deleted,
+                            ));
+                            continue;
+                        }
+                    };
+                    result.metadata_seconds += metadata_started.elapsed().as_secs_f64();
+                    let modified_started = Instant::now();
+                    let action = parallel_tracked_regular_action(
+                        &metadata,
+                        &candidate.entry,
+                        index_mtime,
+                        stage_options.filemode_enabled(),
+                        stage_options.stat_options(),
+                        &mut result,
+                    );
+                    result.modified_check_seconds += modified_started.elapsed().as_secs_f64();
+                    result.actions.push((candidate.index_position, action));
+                }
+                Ok(result)
+            }));
+        }
+        let mut chunks = Vec::with_capacity(handles.len());
+        for handle in handles {
+            chunks.push(handle.join().map_err(|_| {
+                CliError::Message("parallel tracked scan worker panicked".into())
+            })??);
+        }
+        Ok::<_, CliError>(chunks)
+    })?;
+    let mut actions = (0..index.entries().len()).map(|_| None).collect::<Vec<_>>();
+    for chunk in chunks {
+        trace.metadata_seconds += chunk.metadata_seconds;
+        trace.modified_check_seconds += chunk.modified_check_seconds;
+        trace.content_hash_seconds += chunk.content_hash_seconds;
+        trace.stat_safe += chunk.stat_safe;
+        trace.mode_changed += chunk.mode_changed;
+        trace.content_hashes += chunk.content_hashes;
+        for (index_position, action) in chunk.actions {
+            actions[index_position] = Some(action);
+        }
+    }
+    let mut hash_candidates = Vec::new();
+    for (candidate_index, candidate) in candidates.iter().enumerate() {
+        let Some(ParallelTrackedRegularAction::NeedsStage(_)) =
+            actions[candidate.index_position].as_ref()
+        else {
+            continue;
+        };
+        let size = match actions[candidate.index_position].as_ref() {
+            Some(ParallelTrackedRegularAction::NeedsStage(size)) => *size,
+            _ => 0,
+        };
+        if matches!(policy, ParallelTrackedScanPolicy::Status)
+            && index_entry_has_stat_cache(candidate.entry)
+            && u32::try_from(size).is_ok_and(|size| size != candidate.entry.size)
+        {
+            actions[candidate.index_position] = Some(ParallelTrackedRegularAction::Modified);
+            continue;
+        }
+        let conversion_started = Instant::now();
+        let comparison = stage_options.content_comparison(repo, &candidate.entry.path)?;
+        trace.modified_check_seconds += conversion_started.elapsed().as_secs_f64();
+        if matches!(comparison, WorktreeContentComparison::Raw) {
+            hash_candidates.push(ParallelTrackedHashCandidate {
+                candidate_index,
+                detect_cr: false,
+            });
+        } else if matches!(comparison, WorktreeContentComparison::RawIfNoCr) {
+            hash_candidates.push(ParallelTrackedHashCandidate {
+                candidate_index,
+                detect_cr: true,
+            });
+        }
+    }
+    let hash_workers = workers.min(hash_candidates.len());
+    hash_candidates.sort_unstable_by_key(|hash_candidate| {
+        let candidate = &candidates[hash_candidate.candidate_index];
+        let size = match actions[candidate.index_position].as_ref() {
+            Some(ParallelTrackedRegularAction::NeedsStage(size)) => *size,
+            _ => 0,
+        };
+        std::cmp::Reverse(size)
+    });
+    let mut hash_buckets = (0..hash_workers)
+        .map(|_| ParallelTrackedHashBucket::default())
+        .collect::<Vec<_>>();
+    for hash_candidate in hash_candidates {
+        let candidate = &candidates[hash_candidate.candidate_index];
+        let size = match actions[candidate.index_position].as_ref() {
+            Some(ParallelTrackedRegularAction::NeedsStage(size)) => *size,
+            _ => 0,
+        };
+        let bucket = hash_buckets
+            .iter_mut()
+            .min_by_key(|bucket| bucket.bytes)
+            .expect("hash worker count follows non-empty candidates");
+        bucket.candidates.push(hash_candidate);
+        bucket.bytes = bucket.bytes.saturating_add(size);
+    }
+    let hash_chunks = std::thread::scope(|scope| {
+        let actions = &actions;
+        let candidates = &candidates;
+        let mut handles = Vec::new();
+        for bucket in &hash_buckets {
+            handles.push(
+                scope.spawn(move || -> Result<ParallelTrackedContentHashChunk> {
+                    let mut result = ParallelTrackedContentHashChunk {
+                        actions: Vec::with_capacity(bucket.candidates.len()),
+                        ..ParallelTrackedContentHashChunk::default()
+                    };
+                    for hash_candidate in &bucket.candidates {
+                        let candidate = &candidates[hash_candidate.candidate_index];
+                        let Some(ParallelTrackedRegularAction::NeedsStage(size)) =
+                            actions[candidate.index_position].as_ref()
+                        else {
+                            continue;
+                        };
+                        let started = Instant::now();
+                        let (id, usable) = if hash_candidate.detect_cr {
+                            let (id, has_cr) =
+                                hash_worktree_file_blob_detect_cr(&candidate.absolute, *size)?;
+                            (id, !has_cr)
+                        } else {
+                            (hash_worktree_file_blob(&candidate.absolute, *size)?, true)
+                        };
+                        result.seconds += started.elapsed().as_secs_f64();
+                        result.hashes += 1;
+                        if usable {
+                            result.actions.push((
+                                candidate.index_position,
+                                ParallelTrackedRegularAction::ContentHash(id),
+                            ));
+                        }
+                    }
+                    Ok(result)
+                }),
+            );
+        }
+        let mut chunks = Vec::with_capacity(handles.len());
+        for handle in handles {
+            chunks.push(handle.join().map_err(|_| {
+                CliError::Message("parallel tracked hash worker panicked".into())
+            })??);
+        }
+        Ok::<_, CliError>(chunks)
+    })?;
+    for chunk in hash_chunks {
+        trace.content_hash_seconds += chunk.seconds;
+        trace.content_hashes += chunk.hashes;
+        for (index_position, action) in chunk.actions {
+            actions[index_position] = Some(action);
+        }
+    }
+    let path_positions = preserve_path_lookup.then(|| {
+        candidates
+            .iter()
+            .map(|candidate| (candidate.entry.path.clone(), candidate.index_position))
+            .collect()
+    });
+    Ok(Some(ParallelTrackedRegularScan {
+        actions,
+        path_positions,
+    }))
+}
+
+fn parallel_tracked_regular_action(
+    metadata: &fs::Metadata,
+    entry: &IndexEntry,
+    index_mtime: Option<IndexTimestamp>,
+    filemode_enabled: bool,
+    stat_options: IndexStatOptions,
+    chunk: &mut ParallelTrackedRegularChunk,
+) -> ParallelTrackedRegularAction {
+    if metadata.is_dir() {
+        chunk.mode_changed += 1;
+        return ParallelTrackedRegularAction::RemovedDir;
+    }
+    if !metadata.is_file()
+        || parallel_index_mode_for_metadata(metadata, filemode_enabled) != entry.mode
+    {
+        chunk.mode_changed += 1;
+        return ParallelTrackedRegularAction::ModeChanged;
+    }
+    if index_mtime
+        .is_some_and(|mtime| index_entry_stat_match_is_safe(metadata, entry, mtime, stat_options))
+    {
+        chunk.stat_safe += 1;
+        return ParallelTrackedRegularAction::Unchanged;
+    }
+    ParallelTrackedRegularAction::NeedsStage(metadata.len())
+}
+
+fn parallel_index_mode_for_metadata(metadata: &fs::Metadata, filemode_enabled: bool) -> IndexMode {
+    if filemode_enabled {
+        index_mode_for_metadata(metadata)
+    } else {
+        IndexMode::File
+    }
 }
 
 #[derive(Default)]
@@ -206,11 +795,15 @@ impl TrackedWorktreeTrace {
     }
 
     fn emit(&self) {
+        self.emit_with_label("add.stage_tracked.detail");
+    }
+
+    fn emit_with_label(&self, label: &'static str) {
         if !self.enabled {
             return;
         }
         phase_trace_emit(
-            "add.stage_tracked.detail",
+            label,
             self.metadata_seconds + self.modified_check_seconds + self.stage_file_seconds,
             &[
                 ("entries", self.entries.to_string()),
@@ -377,6 +970,9 @@ pub(crate) fn refresh_tracked_index_metadata_matching(
     index: &mut GitIndex,
     pathspecs: &[Vec<u8>],
 ) -> Result<()> {
+    let symlinks_enabled = repo_symlinks_enabled(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let stage_options = WorktreeStageOptions::load(repo)?;
     let entries = index
         .entries()
         .iter()
@@ -391,14 +987,65 @@ pub(crate) fn refresh_tracked_index_metadata_matching(
         };
         let content_matches = match entry.mode {
             IndexMode::File | IndexMode::Executable => {
-                metadata.is_file()
-                    && hash_worktree_file_blob(&absolute, metadata.len())? == entry.id
+                if !metadata.is_file() {
+                    false
+                } else if stage_options.needs_content_conversion(repo, &entry.path)? {
+                    let content = clean_worktree_content_for_comparison_against_index(
+                        repo,
+                        &store,
+                        index,
+                        &entry.path,
+                        fs::read(&absolute)?,
+                    )?;
+                    hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) == entry.id
+                } else {
+                    hash_worktree_file_blob(&absolute, metadata.len())? == entry.id
+                }
             }
-            IndexMode::Symlink => symlink_content_matches(&absolute, &entry)?,
+            IndexMode::Symlink => {
+                symlink_content_matches_with_mode(&absolute, &entry, symlinks_enabled)?
+            }
             IndexMode::Tree => false,
             IndexMode::Gitlink => false,
         };
         if content_matches {
+            let mut refreshed = entry;
+            apply_index_entry_metadata(&mut refreshed, &metadata);
+            index.upsert(refreshed)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn refresh_tracked_index_metadata_after_checkout(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+    pathspecs: &[Vec<u8>],
+) -> Result<()> {
+    let symlinks_enabled = repo_symlinks_enabled(repo)?;
+    let entries = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && pathspec_matches(&entry.path, pathspecs))
+        .cloned()
+        .collect::<Vec<_>>();
+    for entry in entries {
+        let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+        let Ok(metadata) = fs::symlink_metadata(&absolute) else {
+            continue;
+        };
+        let mode_matches = match entry.mode {
+            IndexMode::File | IndexMode::Executable => metadata.is_file(),
+            IndexMode::Symlink => {
+                if symlinks_enabled {
+                    metadata.file_type().is_symlink()
+                } else {
+                    metadata.is_file()
+                }
+            }
+            IndexMode::Tree | IndexMode::Gitlink => false,
+        };
+        if mode_matches {
             let mut refreshed = entry;
             apply_index_entry_metadata(&mut refreshed, &metadata);
             index.upsert(refreshed)?;
@@ -458,7 +1105,14 @@ fn worktree_index_snapshot_with_missing(
 }
 
 pub(crate) fn worktree_diff_index_snapshot(repo: &GitRepo, index: &GitIndex) -> Result<GitIndex> {
-    worktree_diff_index_snapshot_with_missing(repo, index, false)
+    worktree_diff_index_snapshot_with_options(repo, index, false, false)
+}
+
+pub(crate) fn worktree_diff_index_snapshot_ignoring_gitlinks(
+    repo: &GitRepo,
+    index: &GitIndex,
+) -> Result<GitIndex> {
+    worktree_diff_index_snapshot_with_options(repo, index, false, true)
 }
 
 pub(crate) fn worktree_diff_index_snapshot_with_missing(
@@ -466,7 +1120,56 @@ pub(crate) fn worktree_diff_index_snapshot_with_missing(
     index: &GitIndex,
     keep_missing: bool,
 ) -> Result<GitIndex> {
-    worktree_index_snapshot_with_missing(repo, index, keep_missing)
+    worktree_diff_index_snapshot_with_options(repo, index, keep_missing, false)
+}
+
+fn worktree_diff_index_snapshot_with_options(
+    repo: &GitRepo,
+    index: &GitIndex,
+    keep_missing: bool,
+    ignore_gitlinks: bool,
+) -> Result<GitIndex> {
+    let mut snapshot = index.clone();
+    let stage_options = WorktreeStageOptions::load(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        if entry.skip_worktree() {
+            continue;
+        }
+        if ignore_gitlinks && entry.mode == IndexMode::Gitlink {
+            continue;
+        }
+        let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+        if path_exists(&absolute) {
+            if entry.mode == IndexMode::Gitlink {
+                snapshot.upsert(worktree_gitlink_index_entry(entry, &absolute)?)?;
+            } else if fs::symlink_metadata(&absolute)
+                .map(|metadata| metadata.is_file() || metadata.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                match worktree_diff_index_entry_for_existing_entry(
+                    repo,
+                    &store,
+                    index,
+                    &stage_options,
+                    &absolute,
+                    entry,
+                ) {
+                    Ok(worktree_entry) => snapshot.upsert(worktree_entry)?,
+                    Err(error) if should_soften_diff_worktree_encoding_error(&error) => {
+                        emit_softened_diff_worktree_encoding_error(&entry.path, &error);
+                        snapshot.upsert(entry.clone())?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            } else if !keep_missing {
+                snapshot.remove_path(&entry.path)?;
+            }
+        } else if !keep_missing {
+            snapshot.remove_path(&entry.path)?;
+        }
+    }
+    Ok(snapshot)
 }
 
 pub(crate) fn worktree_stat_dirty_diff_entries(
@@ -474,6 +1177,7 @@ pub(crate) fn worktree_stat_dirty_diff_entries(
     index: &GitIndex,
 ) -> Result<Vec<IndexDiffEntry>> {
     let mut entries = Vec::new();
+    let stat_options = IndexStatOptions::from_config(&read_config_entries(repo)?)?;
     for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
         let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
         let Ok(metadata) = fs::symlink_metadata(&absolute) else {
@@ -481,19 +1185,16 @@ pub(crate) fn worktree_stat_dirty_diff_entries(
         };
         if entry.mode == IndexMode::Gitlink
             || !(metadata.is_file() || metadata.file_type().is_symlink())
-            || index_entry_stat_matches(&metadata, entry)
+            || index_entry_stat_matches_with_options(&metadata, entry, stat_options)
         {
             continue;
         }
-        let worktree_entry = worktree_index_entry_for_existing_entry(repo, &absolute, entry)?;
-        if worktree_entry.id == entry.id && worktree_entry.mode == entry.mode {
-            entries.push(IndexDiffEntry {
-                status: IndexDiffStatus::Modified,
-                path: entry.path.clone(),
-                old_path: None,
-                similarity: None,
-            });
-        }
+        entries.push(IndexDiffEntry {
+            status: IndexDiffStatus::Modified,
+            path: entry.path.clone(),
+            old_path: None,
+            similarity: None,
+        });
     }
     Ok(entries)
 }
@@ -564,6 +1265,51 @@ fn worktree_index_entry_for_existing_entry(
         return Ok(worktree_entry);
     }
     worktree_index_entry(repo, path)
+}
+
+fn worktree_diff_index_entry_for_existing_entry(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    stage_options: &WorktreeStageOptions,
+    path: &std::path::Path,
+    entry: &IndexEntry,
+) -> Result<IndexEntry> {
+    let metadata = fs::symlink_metadata(path)?;
+    if entry.mode == IndexMode::Symlink
+        && metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && !repo_symlinks_enabled(repo)?
+    {
+        let content = fs::read(path)?;
+        let mut worktree_entry = IndexEntry::new(
+            entry.path.clone(),
+            hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+            IndexMode::Symlink,
+            content.len().min(u32::MAX as usize) as u32,
+        )?;
+        apply_index_entry_metadata(&mut worktree_entry, &metadata);
+        return Ok(worktree_entry);
+    }
+    if metadata.file_type().is_symlink() {
+        return worktree_index_entry_for_existing_entry(repo, path, entry);
+    }
+    let relative = repo_relative_path(&repo.root, path)?;
+    let content = clean_worktree_content_for_comparison_against_index(
+        repo,
+        store,
+        index,
+        &relative,
+        fs::read(path)?,
+    )?;
+    let mut worktree_entry = IndexEntry::new(
+        entry.path.clone(),
+        hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+        stage_options.index_mode_for_metadata(&metadata),
+        content.len().min(u32::MAX as usize) as u32,
+    )?;
+    apply_index_entry_metadata(&mut worktree_entry, &metadata);
+    Ok(worktree_entry)
 }
 
 pub(crate) fn collect_add_files(
@@ -665,6 +1411,305 @@ pub(crate) fn stage_file(
     )
 }
 
+pub(crate) fn bulk_checkin_candidate(
+    repo: &GitRepo,
+    stage_options: &WorktreeStageOptions,
+    path: &Path,
+    relative: &[u8],
+    threshold: u64,
+) -> Result<Option<BulkCheckinCandidate>> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file()
+        || metadata.len() <= threshold
+        || stage_options.needs_content_conversion(repo, relative)?
+    {
+        return Ok(None);
+    }
+    Ok(Some(BulkCheckinCandidate {
+        path: path.to_path_buf(),
+        relative: relative.to_vec(),
+        size: metadata.len(),
+    }))
+}
+
+pub(crate) fn stage_bulk_checkin_candidates(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &mut GitIndex,
+    candidates: &[BulkCheckinCandidate],
+    stage_options: &WorktreeStageOptions,
+) -> Result<()> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    if let [candidate] = candidates {
+        return stage_single_bulk_checkin_candidate(repo, store, index, candidate, stage_options);
+    }
+    let packed = PackedObjectStore::new(repo.objects_dir.clone(), index.hash_algorithm());
+    let mut objects = Vec::with_capacity(candidates.len());
+    let mut seen = HashSet::with_capacity(candidates.len());
+    for candidate in candidates {
+        let metadata = fs::symlink_metadata(&candidate.path)?;
+        if !metadata.is_file() || metadata.len() != candidate.size {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "{}: file changed while adding it to the index",
+                    candidate.path.display()
+                ),
+            });
+        }
+        let id = hash_bulk_checkin_blob(index.hash_algorithm(), &candidate.path, candidate.size)?;
+        stage_bulk_checkin_index_entry(
+            index,
+            candidate,
+            &metadata,
+            id.clone(),
+            stage_options.index_mode_for_metadata(&metadata),
+        )?;
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if packed.contains_object(&id)? {
+            remove_file_if_exists(&store.loose_object_path(&id)?)?;
+            continue;
+        }
+        if store.loose_object_path(&id)?.is_file() {
+            continue;
+        }
+        objects.push(BulkCheckinObject {
+            path: candidate.path.clone(),
+            id,
+            size: candidate.size,
+        });
+    }
+    if objects.is_empty() {
+        return Ok(());
+    }
+
+    let compression_level = bulk_checkin_compression_level(repo)?;
+    let pack_size_limit = bulk_checkin_pack_size_limit(repo)?;
+    let groups = bulk_checkin_groups(&objects, pack_size_limit);
+    let pack_dir = repo.objects_dir.join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    for group in groups {
+        write_bulk_checkin_pack(index.hash_algorithm(), &pack_dir, group, compression_level)?;
+    }
+    Ok(())
+}
+
+fn stage_single_bulk_checkin_candidate(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &mut GitIndex,
+    candidate: &BulkCheckinCandidate,
+    stage_options: &WorktreeStageOptions,
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(&candidate.path)?;
+    if !metadata.is_file() || metadata.len() != candidate.size {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "{}: file changed while adding it to the index",
+                candidate.path.display()
+            ),
+        });
+    }
+    let algorithm = index.hash_algorithm();
+    let pack_dir = repo.objects_dir.join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let temp_pack = unique_temp_sibling(&pack_dir.join("bulk-checkin.pack"));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_pack)?;
+        let (indexed, id) = write_single_undeltified_blob_pack_with_options(
+            algorithm,
+            candidate.size,
+            bulk_checkin_compression_level(repo)?,
+            |out| {
+                let mut input = fs::File::open(&candidate.path)?;
+                io::copy(&mut input, out)?;
+                Ok(())
+            },
+            &mut file,
+        )?;
+        file.flush()?;
+        stage_bulk_checkin_index_entry(
+            index,
+            candidate,
+            &metadata,
+            id.clone(),
+            stage_options.index_mode_for_metadata(&metadata),
+        )?;
+        let packed = PackedObjectStore::new(repo.objects_dir.clone(), algorithm);
+        if packed.contains_object(&id)? || store.loose_object_path(&id)?.is_file() {
+            remove_file_if_exists(&temp_pack)?;
+            return Ok(());
+        }
+        let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+        let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+        if pack_path.exists() {
+            remove_file_if_exists(&temp_pack)?;
+        } else {
+            fs::rename(&temp_pack, &pack_path)?;
+        }
+        write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+        write_content_addressed_file(
+            &pack_dir.join(format!("{pack_name}.rev")),
+            &indexed.reverse_index,
+        )?;
+        Ok::<_, CliError>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_pack);
+    }
+    result
+}
+
+fn hash_bulk_checkin_blob(algorithm: GitHashAlgorithm, path: &Path, size: u64) -> Result<ObjectId> {
+    let content_len = usize::try_from(size).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("{} is too large to index", path.display()),
+    })?;
+    let mut hasher = GitObjectHash::new(algorithm);
+    hasher.update_object_header(GitObjectKind::Blob, content_len);
+    let mut file = fs::File::open(path)?;
+    let mut buffer = [0_u8; BULK_CHECKIN_HASH_BUFFER_BYTES];
+    let mut read = 0_u64;
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        read = read.saturating_add(count as u64);
+    }
+    if read != size {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "{}: file changed while adding it to the index",
+                path.display()
+            ),
+        });
+    }
+    Ok(hasher.finalize())
+}
+
+fn stage_bulk_checkin_index_entry(
+    index: &mut GitIndex,
+    candidate: &BulkCheckinCandidate,
+    metadata: &fs::Metadata,
+    id: ObjectId,
+    mode: IndexMode,
+) -> Result<()> {
+    if let Some(existing) = find_index_entry(index, &candidate.relative)
+        && existing.id == id
+    {
+        let mut entry = existing.clone();
+        entry.set_mode(mode);
+        apply_index_entry_metadata(&mut entry, metadata);
+        index.upsert(entry)?;
+        return Ok(());
+    }
+    remove_index_path_dir_conflicts(index, &candidate.relative)?;
+    let mut entry = IndexEntry::new(
+        candidate.relative.clone(),
+        id,
+        mode,
+        candidate.size.min(u32::MAX as u64) as u32,
+    )?;
+    apply_index_entry_metadata(&mut entry, metadata);
+    index.upsert(entry)?;
+    Ok(())
+}
+
+fn bulk_checkin_groups(
+    objects: &[BulkCheckinObject],
+    pack_size_limit: Option<u64>,
+) -> Vec<&[BulkCheckinObject]> {
+    let Some(limit) = pack_size_limit.filter(|limit| *limit > 0) else {
+        return vec![objects];
+    };
+    let mut groups = Vec::new();
+    let mut start = 0usize;
+    let mut bytes = 0u64;
+    for (index, object) in objects.iter().enumerate() {
+        if index > start && bytes.saturating_add(object.size) > limit {
+            groups.push(&objects[start..index]);
+            start = index;
+            bytes = 0;
+        }
+        bytes = bytes.saturating_add(object.size);
+    }
+    groups.push(&objects[start..]);
+    groups
+}
+
+fn write_bulk_checkin_pack(
+    algorithm: GitHashAlgorithm,
+    pack_dir: &Path,
+    objects: &[BulkCheckinObject],
+    compression_level: u32,
+) -> Result<()> {
+    let sources = objects
+        .iter()
+        .map(|object| PackBlobSource {
+            id: object.id.clone(),
+            size: object.size,
+        })
+        .collect::<Vec<_>>();
+    let temp_pack = unique_temp_sibling(&pack_dir.join("bulk-checkin.pack"));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_pack)?;
+        let mut source_index = 0usize;
+        let indexed = write_undeltified_blob_pack_with_options(
+            algorithm,
+            &sources,
+            compression_level,
+            |source, out| {
+                let object = objects.get(source_index).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "missing bulk-checkin source")
+                })?;
+                source_index += 1;
+                if object.id != source.id {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "bulk-checkin source order changed",
+                    ));
+                }
+                let mut input = fs::File::open(&object.path)?;
+                io::copy(&mut input, out)?;
+                Ok(())
+            },
+            &mut file,
+        )?;
+        file.flush()?;
+        let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+        let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+        if pack_path.exists() {
+            remove_file_if_exists(&temp_pack)?;
+        } else {
+            fs::rename(&temp_pack, &pack_path)?;
+        }
+        write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+        write_content_addressed_file(
+            &pack_dir.join(format!("{pack_name}.rev")),
+            &indexed.reverse_index,
+        )?;
+        Ok::<_, CliError>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_pack);
+    }
+    result
+}
+
 pub(crate) fn stage_intent_to_add_file(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -672,7 +1717,11 @@ pub(crate) fn stage_intent_to_add_file(
     path: &std::path::Path,
 ) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
-    let relative = repo_relative_path(&repo.root, path)?;
+    let relative = canonical_index_relative_path(
+        index,
+        repo_relative_path(&repo.root, path)?,
+        WorktreeStageOptions::load(repo)?.ignore_case(),
+    );
     if !metadata.is_file() && !metadata.file_type().is_symlink() {
         return Err(CliError::Message(format!(
             "{} is not a file",
@@ -687,6 +1736,7 @@ pub(crate) fn stage_intent_to_add_file(
     let id = store.write_object(GitObjectKind::Blob, &[])?;
     let mut entry = IndexEntry::new(relative, id, mode, 0)?;
     entry.set_intent_to_add(true);
+    remove_index_path_dir_conflicts(index, &entry.path)?;
     index.upsert(entry)?;
     Ok(())
 }
@@ -736,6 +1786,7 @@ pub(crate) fn stage_file_with_trace(
 }
 
 pub(crate) fn try_stage_regular_files_parallel(
+    repo: &GitRepo,
     store: &LooseObjectStore,
     index: &mut GitIndex,
     files: &[(PathBuf, Vec<u8>)],
@@ -762,13 +1813,18 @@ pub(crate) fn try_stage_regular_files_parallel(
         if !metadata.is_file() || file_type.is_symlink() {
             return Ok(false);
         }
-        if stage_options.needs_content_conversion(relative) {
+        if stage_options.needs_content_conversion(repo, relative)? {
             return Ok(false);
         }
         if let Some(existing) = find_index_entry(index, relative) {
-            if index_mtime
-                .is_some_and(|mtime| index_entry_stat_match_is_safe(&metadata, existing, mtime))
-            {
+            if index_mtime.is_some_and(|mtime| {
+                index_entry_stat_match_is_safe(
+                    &metadata,
+                    existing,
+                    mtime,
+                    stage_options.stat_options(),
+                )
+            }) {
                 return Ok(false);
             }
             return Ok(false);
@@ -889,6 +1945,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
         trace.record_metadata(metadata_started);
     }
     let relative = repo_relative_path(&repo.root, path)?;
+    let relative = canonical_index_relative_path(index, relative, stage_options.ignore_case());
     let file_type = metadata.file_type();
     if metadata.is_dir()
         && canonical_or_absolute(path.to_path_buf()) != canonical_or_absolute(repo.root.clone())
@@ -913,7 +1970,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
                 return Err(CliError::Stderr {
                     code: 128,
                     text: format!(
-                        "error: '{display}/' does not have a commit checked out\nerror: unable to index file '{display}/'\nfatal: adding files failed\n"
+                        "error: '{display}/' does not have a commit checked out\nfatal: adding files failed\n"
                     ),
                 });
             }
@@ -975,8 +2032,9 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
         && matches!(mode, IndexMode::File | IndexMode::Executable)
         && let Some(existing) = find_index_entry(index, &relative)
         && existing.mode == mode
-        && index_mtime
-            .is_some_and(|mtime| index_entry_stat_match_is_safe(&metadata, existing, mtime))
+        && index_mtime.is_some_and(|mtime| {
+            index_entry_stat_match_is_safe(&metadata, existing, mtime, stage_options.stat_options())
+        })
     {
         if let Some(trace) = trace.as_deref_mut() {
             trace.stat_safe += 1;
@@ -999,7 +2057,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
     }
 
     if matches!(mode, IndexMode::File | IndexMode::Executable)
-        && stage_options.needs_content_conversion(&relative)
+        && stage_options.needs_content_conversion(repo, &relative)?
     {
         if let Some(trace) = trace.as_deref_mut() {
             trace.converted_files += 1;
@@ -1095,7 +2153,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
     }
 
     let parent_cleanup_started = trace.as_ref().and_then(|trace| trace.started());
-    remove_index_parent_file_entries(index, &relative)?;
+    remove_index_path_dir_conflicts(index, &relative)?;
     if let Some(trace) = trace.as_deref_mut() {
         trace.record_parent_cleanup(parent_cleanup_started);
     }
@@ -1141,7 +2199,7 @@ pub(crate) fn resolve_undo_from_unmerged_entries(
 }
 
 pub(crate) fn repo_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
-    let Some(entry) = read_local_config_entries(repo)?
+    let Some(entry) = read_validated_repository_format_entries(repo)?
         .into_iter()
         .rev()
         .find(|entry| {
@@ -1245,6 +2303,7 @@ fn stage_resolved_content(
     mode: IndexMode,
     metadata: &fs::Metadata,
 ) -> Result<()> {
+    remove_index_path_dir_conflicts(index, &relative)?;
     if let Some(existing) = find_index_entry(index, &relative) {
         let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
         if id == existing.id {
@@ -1264,7 +2323,6 @@ fn stage_resolved_content(
         index.upsert(entry)?;
         return Ok(());
     }
-    remove_index_parent_file_entries(index, &relative)?;
     let id = store.write_object(GitObjectKind::Blob, &content)?;
     let mut entry = IndexEntry::new(
         relative,
@@ -1275,6 +2333,42 @@ fn stage_resolved_content(
     apply_index_entry_metadata(&mut entry, metadata);
     index.upsert(entry)?;
     Ok(())
+}
+
+fn remove_index_path_dir_conflicts(index: &mut GitIndex, path: &[u8]) -> Result<()> {
+    remove_index_parent_file_entries(index, path)?;
+    index.remove_dir(path)?;
+    Ok(())
+}
+
+fn canonical_index_relative_path(
+    index: &GitIndex,
+    relative: Vec<u8>,
+    ignore_case: bool,
+) -> Vec<u8> {
+    if !ignore_case {
+        return relative;
+    }
+    find_index_entry_ignorecase(index, &relative)
+        .map(|entry| entry.path.clone())
+        .unwrap_or(relative)
+}
+
+fn find_index_entry_ignorecase<'a>(index: &'a GitIndex, path: &[u8]) -> Option<&'a IndexEntry> {
+    find_index_entry(index, path).or_else(|| {
+        index
+            .entries()
+            .iter()
+            .find(|entry| entry.stage == 0 && path_eq_ignore_ascii_case(&entry.path, path))
+    })
+}
+
+fn path_eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
 fn hash_worktree_file_blob(path: &std::path::Path, size: u64) -> Result<ObjectId> {
@@ -1290,6 +2384,27 @@ fn hash_worktree_file_blob(path: &std::path::Path, size: u64) -> Result<ObjectId
         hasher.update(&buffer[..read]);
     }
     Ok(hasher.finalize())
+}
+
+fn hash_worktree_file_blob_detect_cr(
+    path: &std::path::Path,
+    size: u64,
+) -> Result<(ObjectId, bool)> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update_object_header(GitObjectKind::Blob, worktree_file_size_usize(size)?);
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut has_cr = false;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        has_cr |= chunk.contains(&b'\r');
+        hasher.update(chunk);
+    }
+    Ok((hasher.finalize(), has_cr))
 }
 
 fn worktree_file_size_usize(size: u64) -> Result<usize> {
@@ -1327,8 +2442,8 @@ pub(crate) fn read_head_index_with_caches(
         Ok(head) => head,
         Err(_) => return Ok(GitIndex::new()),
     };
-    let commit = commit_cache.read_commit(&head)?;
-    Ok(tree_cache.read_tree_to_index(&commit.tree)?)
+    let links = commit_cache.read_commit_links(&head)?;
+    Ok(tree_cache.read_tree_to_index(&links.tree)?)
 }
 
 pub(crate) fn read_head_tree_id_from_primitive_stores(
@@ -1349,7 +2464,7 @@ pub(crate) fn read_head_tree_id_from_primitive_stores(
 
     let head = parse_primitive_object_id(&head)?;
     let commit_cache = CommitObjectCache::new(store);
-    Ok(Some(commit_cache.read_commit(&head)?.tree.clone()))
+    Ok(Some(commit_cache.read_commit_links(&head)?.tree.clone()))
 }
 
 pub(crate) fn read_head_index_from_primitive_stores(
@@ -1370,8 +2485,8 @@ pub(crate) fn read_head_index_from_primitive_stores(
 
     let commit_cache = CommitObjectCache::new(store);
     let tree_cache = TreeObjectCache::new(store);
-    let commit = commit_cache.read_commit(&head)?;
-    Ok(tree_cache.read_tree_to_index(&commit.tree)?)
+    let links = commit_cache.read_commit_links(&head)?;
+    Ok(tree_cache.read_tree_to_index(&links.tree)?)
 }
 
 fn parse_primitive_object_id(raw_oid: &str) -> Result<ObjectId> {
@@ -1404,35 +2519,97 @@ pub(crate) fn worktree_status(repo: &GitRepo, index: &GitIndex) -> Result<Vec<(V
     let mut statuses = Vec::new();
     let index_mtime = repo_index_mtime(repo)?;
     let stage_options = WorktreeStageOptions::load(repo)?;
-    for entry in index.entries() {
+    let mut trace = TrackedWorktreeTrace::new();
+    let parallel_regular_scan = try_scan_tracked_regular_files_parallel(
+        repo,
+        index,
+        &[],
+        &HashSet::new(),
+        index_mtime,
+        &stage_options,
+        ParallelTrackedScanPolicy::Status,
+        false,
+        &mut trace,
+    )?;
+    for (entry_position, entry) in index.entries().iter().enumerate() {
         if entry.stage != 0 {
             return Err(CliError::Message(
                 "status cannot inspect an index with unresolved conflicts".into(),
             ));
         }
-        if entry.skip_worktree() {
+        trace.entries += 1;
+        if entry.skip_worktree()
+            && !path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+        {
+            trace.skipped_worktree += 1;
             continue;
         }
+        if let Some(scan) = parallel_regular_scan.as_ref()
+            && matches!(entry.mode, IndexMode::File | IndexMode::Executable)
+            && let Some(action) = scan.actions[entry_position].as_ref()
+        {
+            match action {
+                ParallelTrackedRegularAction::Unchanged => continue,
+                ParallelTrackedRegularAction::Deleted => {
+                    trace.deleted += 1;
+                    statuses.push((entry.path.to_vec(), 'D'));
+                    continue;
+                }
+                ParallelTrackedRegularAction::RemovedDir => {
+                    trace.removed_dirs += 1;
+                    trace.modified += 1;
+                    statuses.push((entry.path.to_vec(), 'M'));
+                    continue;
+                }
+                ParallelTrackedRegularAction::ModeChanged => {
+                    trace.modified += 1;
+                    statuses.push((entry.path.to_vec(), 'M'));
+                    continue;
+                }
+                ParallelTrackedRegularAction::Modified => {
+                    trace.modified += 1;
+                    statuses.push((entry.path.to_vec(), 'M'));
+                    continue;
+                }
+                ParallelTrackedRegularAction::ContentHash(id) => {
+                    if id != &entry.id {
+                        trace.modified += 1;
+                        statuses.push((entry.path.to_vec(), 'M'));
+                    }
+                    continue;
+                }
+                ParallelTrackedRegularAction::NeedsStage(_) => {}
+            }
+        }
         let path = worktree_path_for_index_entry(&repo.root, &entry.path);
+        let metadata_started = trace.started();
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(_) => {
+                trace.record_metadata(metadata_started);
+                trace.deleted += 1;
                 statuses.push((entry.path.to_vec(), 'D'));
                 continue;
             }
         };
-        if worktree_entry_modified_with_metadata(
+        trace.record_metadata(metadata_started);
+        let modified_started = trace.started();
+        let modified = worktree_entry_modified_with_metadata(
             repo,
             &path,
             &metadata,
             entry,
             index_mtime,
             &stage_options,
-            None,
-        )? {
+            Some(&mut trace),
+        )?;
+        trace.record_stage_needed_check(modified_started);
+        if modified {
+            trace.modified += 1;
             statuses.push((entry.path.to_vec(), 'M'));
         }
     }
+    trace.emit_with_label("status.worktree_status.detail");
     Ok(statuses)
 }
 
@@ -1475,9 +2652,9 @@ fn tracked_entry_needs_stage(
                 }
                 return Ok(true);
             }
-            if index_mtime
-                .is_some_and(|mtime| index_entry_stat_match_is_safe(metadata, entry, mtime))
-            {
+            if index_mtime.is_some_and(|mtime| {
+                index_entry_stat_match_is_safe(metadata, entry, mtime, stage_options.stat_options())
+            }) {
                 if let Some(trace) = trace.as_deref_mut() {
                     trace.stat_safe += 1;
                 }
@@ -1492,13 +2669,23 @@ fn tracked_entry_needs_stage(
             if let Some(trace) = trace.as_deref_mut() {
                 trace.symlink_checks += 1;
             }
-            symlink_entry_modified_with_metadata(path, metadata, entry)
+            symlink_entry_modified_with_metadata(
+                path,
+                metadata,
+                entry,
+                stage_options.symlinks_enabled(),
+                stage_options.stat_options(),
+            )
         }
         IndexMode::Gitlink => {
             if let Some(trace) = trace.as_deref_mut() {
                 trace.gitlink_checks += 1;
             }
-            Ok(!path.is_dir())
+            if !metadata.is_dir() {
+                return Ok(true);
+            }
+            Ok(submodule_head_state(path, &entry.id, false)
+                .is_some_and(|state| state.id != entry.id))
         }
         IndexMode::Tree => Ok(false),
     }
@@ -1541,18 +2728,43 @@ fn worktree_entry_modified_with_metadata(
                 }
                 return Ok(true);
             }
-            if index_mtime
-                .is_some_and(|mtime| index_entry_stat_match_is_safe(&metadata, entry, mtime))
-            {
+            if index_mtime.is_some_and(|mtime| {
+                index_entry_stat_match_is_safe(
+                    &metadata,
+                    entry,
+                    mtime,
+                    stage_options.stat_options(),
+                )
+            }) {
                 if let Some(trace) = trace.as_deref_mut() {
                     trace.stat_safe += 1;
                 }
                 return Ok(false);
             }
-            if stage_options.needs_content_conversion(&entry.path) {
+            if index_entry_has_stat_cache(entry)
+                && u32::try_from(metadata.len()).is_ok_and(|size| size != entry.size)
+            {
+                return Ok(true);
+            }
+            let comparison = stage_options.content_comparison(repo, &entry.path)?;
+            if matches!(comparison, WorktreeContentComparison::RawIfNoCr) {
                 let started = trace.as_ref().and_then(|trace| trace.started());
-                let content =
-                    stage_options.clean_worktree_content(repo, &entry.path, fs::read(path)?)?;
+                let (raw_id, has_cr) = hash_worktree_file_blob_detect_cr(path, metadata.len())?;
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.content_hashes += 1;
+                    trace.record_content_hash(started);
+                }
+                if !has_cr {
+                    return Ok(raw_id != entry.id);
+                }
+            }
+            if !matches!(comparison, WorktreeContentComparison::Raw) {
+                let started = trace.as_ref().and_then(|trace| trace.started());
+                let content = stage_options.clean_worktree_content_for_comparison(
+                    repo,
+                    &entry.path,
+                    fs::read(path)?,
+                )?;
                 if let Some(trace) = trace.as_deref_mut() {
                     trace.converted_hashes += 1;
                     trace.record_conversion(started);
@@ -1573,31 +2785,178 @@ fn worktree_entry_modified_with_metadata(
             if let Some(trace) = trace.as_deref_mut() {
                 trace.symlink_checks += 1;
             }
-            symlink_entry_modified_with_metadata(path, metadata, entry)
+            symlink_entry_modified_with_metadata(
+                path,
+                metadata,
+                entry,
+                stage_options.symlinks_enabled(),
+                stage_options.stat_options(),
+            )
         }
         IndexMode::Gitlink => {
             if let Some(trace) = trace.as_deref_mut() {
                 trace.gitlink_checks += 1;
             }
-            Ok(!path.is_dir())
+            if !metadata.is_dir() {
+                return Ok(true);
+            }
+            Ok(submodule_head_state(path, &entry.id, false)
+                .is_some_and(|state| state.id != entry.id))
         }
         IndexMode::Tree => Ok(false),
     }
 }
 
 pub(crate) struct WorktreeStageOptions {
-    content_rules: WorktreeContentRules,
+    content_rules: Mutex<Option<WorktreeContentRules>>,
+    attribute_base_rules: Mutex<Option<WorktreeAttributeBaseRules>>,
+    path_content_rules_cache: Mutex<HashMap<Vec<u8>, Arc<WorktreeContentRules>>>,
+    emitted_attribute_warnings: Mutex<HashSet<String>>,
+    core_autocrlf: CoreAutoCrlf,
+    core_eol: CoreEol,
+    core_safecrlf: CoreSafeCrlf,
+    roundtrip_encodings: Option<HashSet<String>>,
+    root_index_attributes: Option<GitAttributes>,
+    ignore_case: bool,
     filemode_enabled: bool,
     symlinks_enabled: bool,
+    stat_options: IndexStatOptions,
 }
 
 impl WorktreeStageOptions {
     pub(crate) fn load(repo: &GitRepo) -> Result<Self> {
+        let entries = read_config_entries(repo)?;
         Ok(Self {
-            content_rules: WorktreeContentRules::load(repo)?,
+            content_rules: Mutex::new(None),
+            attribute_base_rules: Mutex::new(None),
+            path_content_rules_cache: Mutex::new(HashMap::new()),
+            emitted_attribute_warnings: Mutex::new(HashSet::new()),
+            core_autocrlf: core_autocrlf_from_config(&entries),
+            core_eol: core_eol_from_config(&entries),
+            core_safecrlf: core_safecrlf_from_config(&entries),
+            roundtrip_encodings: core_check_roundtrip_encodings_from_config(&entries),
+            root_index_attributes: None,
+            ignore_case: core_ignorecase_from_config(&entries),
             filemode_enabled: repo_filemode_enabled(repo)?,
             symlinks_enabled: repo_symlinks_enabled(repo)?,
+            stat_options: IndexStatOptions::from_config(&entries)?,
         })
+    }
+
+    pub(crate) fn load_for_index(
+        repo: &GitRepo,
+        store: &LooseObjectStore,
+        index: &GitIndex,
+    ) -> Result<Self> {
+        let entries = read_config_entries(repo)?;
+        Ok(Self {
+            content_rules: Mutex::new(None),
+            attribute_base_rules: Mutex::new(None),
+            path_content_rules_cache: Mutex::new(HashMap::new()),
+            emitted_attribute_warnings: Mutex::new(HashSet::new()),
+            core_autocrlf: core_autocrlf_from_config(&entries),
+            core_eol: core_eol_from_config(&entries),
+            core_safecrlf: core_safecrlf_from_config(&entries),
+            roundtrip_encodings: core_check_roundtrip_encodings_from_config(&entries),
+            root_index_attributes: load_index_root_attributes(store, index)?,
+            ignore_case: core_ignorecase_from_config(&entries),
+            filemode_enabled: repo_filemode_enabled(repo)?,
+            symlinks_enabled: repo_symlinks_enabled(repo)?,
+            stat_options: IndexStatOptions::from_config(&entries)?,
+        })
+    }
+
+    fn with_content_rules<T>(
+        &self,
+        repo: &GitRepo,
+        apply: impl FnOnce(&WorktreeContentRules) -> Result<T>,
+    ) -> Result<T> {
+        let mut content_rules = self
+            .content_rules
+            .lock()
+            .map_err(|_| CliError::Message("worktree content rules mutex poisoned".into()))?;
+        if content_rules.is_none() {
+            *content_rules = Some(WorktreeContentRules::load_with_config(
+                repo,
+                self.core_autocrlf,
+                self.core_eol,
+                self.core_safecrlf,
+                self.roundtrip_encodings.clone(),
+                self.root_index_attributes.clone(),
+            )?);
+        }
+        apply(content_rules.as_ref().expect("content rules initialized"))
+    }
+
+    fn path_content_rules(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+    ) -> Result<Arc<WorktreeContentRules>> {
+        let parent = relative
+            .iter()
+            .rposition(|byte| *byte == b'/')
+            .map(|index| &relative[..index])
+            .unwrap_or_default();
+        if let Some(rules) = self
+            .path_content_rules_cache
+            .lock()
+            .map_err(|_| CliError::Message("path content rules mutex poisoned".into()))?
+            .get(parent)
+            .cloned()
+        {
+            return Ok(rules);
+        }
+        let (mut attributes, info_attributes) = {
+            let mut base_rules = self
+                .attribute_base_rules
+                .lock()
+                .map_err(|_| CliError::Message("attribute base rules mutex poisoned".into()))?;
+            if base_rules.is_none() {
+                *base_rules = Some(load_worktree_attribute_base_rules(repo, self.ignore_case)?);
+            }
+            let base_rules = base_rules
+                .as_ref()
+                .expect("attribute base rules initialized");
+            (
+                base_rules.before_worktree.clone(),
+                base_rules.after_worktree.clone(),
+            )
+        };
+        load_attributes_for_relative_path(
+            &mut attributes,
+            &repo.root,
+            relative,
+            self.ignore_case,
+            self.root_index_attributes.as_ref(),
+        )?;
+        attributes.append(info_attributes);
+        self.emit_new_attribute_warnings(&attributes)?;
+        let rules = Arc::new(WorktreeContentRules {
+            attributes,
+            core_autocrlf: self.core_autocrlf,
+            core_eol: self.core_eol,
+            core_safecrlf: self.core_safecrlf,
+            roundtrip_encodings: self.roundtrip_encodings.clone(),
+        });
+        self.path_content_rules_cache
+            .lock()
+            .map_err(|_| CliError::Message("path content rules mutex poisoned".into()))?
+            .insert(parent.to_vec(), rules.clone());
+        Ok(rules)
+    }
+
+    fn emit_new_attribute_warnings(&self, attributes: &GitAttributes) -> Result<()> {
+        let mut emitted = self
+            .emitted_attribute_warnings
+            .lock()
+            .map_err(|_| CliError::Message("attribute warning mutex poisoned".into()))?;
+        for warning in attributes.warnings() {
+            if emitted.insert(warning.clone()) {
+                eprintln!("{warning}");
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn index_mode_for_metadata(&self, metadata: &fs::Metadata) -> IndexMode {
@@ -1616,8 +2975,33 @@ impl WorktreeStageOptions {
         self.symlinks_enabled
     }
 
-    pub(crate) fn needs_content_conversion(&self, relative: &[u8]) -> bool {
-        self.content_rules.needs_content_conversion(relative)
+    pub(crate) fn stat_options(&self) -> IndexStatOptions {
+        self.stat_options
+    }
+
+    pub(crate) fn ignore_case(&self) -> bool {
+        self.ignore_case
+    }
+
+    pub(crate) fn needs_content_conversion(&self, repo: &GitRepo, relative: &[u8]) -> Result<bool> {
+        Ok(self
+            .path_content_rules(repo, relative)?
+            .needs_content_conversion(relative))
+    }
+
+    fn content_comparison(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+    ) -> Result<WorktreeContentComparison> {
+        let rules = self.path_content_rules(repo, relative)?;
+        if !rules.needs_content_conversion(relative) {
+            return Ok(WorktreeContentComparison::Raw);
+        }
+        if rules.can_use_raw_blob_hash_when_no_cr(relative) {
+            return Ok(WorktreeContentComparison::RawIfNoCr);
+        }
+        Ok(WorktreeContentComparison::Converted)
     }
 
     pub(crate) fn clean_staged_worktree_content(
@@ -1628,8 +3012,18 @@ impl WorktreeStageOptions {
         relative: &[u8],
         content: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        self.content_rules
+        self.path_content_rules(repo, relative)?
             .clean_staged_worktree_content(repo, store, index, relative, content)
+    }
+
+    pub(crate) fn renormalize_staged_worktree_content(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+        content: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        let rules = self.path_content_rules(repo, relative)?;
+        rules.clean_worktree_content_inner(repo, None, relative, content, self.core_safecrlf, true)
     }
 
     fn clean_worktree_content(
@@ -1638,44 +3032,108 @@ impl WorktreeStageOptions {
         relative: &[u8],
         content: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        self.content_rules
+        self.path_content_rules(repo, relative)?
             .clean_worktree_content(repo, relative, content)
     }
 
-    fn smudge_checkout_content(&self, relative: &[u8], content: &[u8]) -> Option<Vec<u8>> {
-        self.content_rules
-            .smudge_checkout_content(relative, content)
+    fn clean_worktree_content_for_comparison(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+        content: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        self.path_content_rules(repo, relative)?
+            .clean_worktree_content_for_comparison(repo, relative, content)
     }
 
-    fn may_smudge_checkout_entries(&self) -> bool {
-        self.content_rules.may_smudge_checkout_entries()
+    fn smudge_checkout_content(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+        content: &[u8],
+    ) -> Result<Option<Vec<u8>>> {
+        self.with_content_rules(repo, |content_rules| {
+            content_rules.smudge_checkout_content(relative, content)
+        })
     }
 
-    fn attributes(&self) -> &GitAttributes {
-        &self.content_rules.attributes
+    fn may_smudge_checkout_entries(&self, repo: &GitRepo) -> Result<bool> {
+        self.with_content_rules(repo, |content_rules| {
+            Ok(content_rules.may_smudge_checkout_entries())
+        })
+    }
+
+    fn attributes(&self, repo: &GitRepo) -> Result<GitAttributes> {
+        self.with_content_rules(repo, |content_rules| Ok(content_rules.attributes.clone()))
     }
 }
 
+struct WorktreeAttributeBaseRules {
+    before_worktree: GitAttributes,
+    after_worktree: GitAttributes,
+}
+
+#[derive(Clone)]
 pub(crate) struct WorktreeContentRules {
     attributes: GitAttributes,
     core_autocrlf: CoreAutoCrlf,
     core_eol: CoreEol,
+    core_safecrlf: CoreSafeCrlf,
+    roundtrip_encodings: Option<HashSet<String>>,
 }
 
 impl WorktreeContentRules {
     pub(crate) fn load(repo: &GitRepo) -> Result<Self> {
         let entries = read_config_entries(repo)?;
+        Self::load_with_config(
+            repo,
+            core_autocrlf_from_config(&entries),
+            core_eol_from_config(&entries),
+            core_safecrlf_from_config(&entries),
+            core_check_roundtrip_encodings_from_config(&entries),
+            None,
+        )
+    }
+
+    fn load_with_config(
+        repo: &GitRepo,
+        core_autocrlf: CoreAutoCrlf,
+        core_eol: CoreEol,
+        core_safecrlf: CoreSafeCrlf,
+        roundtrip_encodings: Option<HashSet<String>>,
+        root_index_attributes: Option<GitAttributes>,
+    ) -> Result<Self> {
+        let attributes = load_repo_attributes(repo, root_index_attributes.as_ref())?;
+        emit_attribute_warnings(&attributes);
         Ok(Self {
-            attributes: GitAttributes::load_from_root(&repo.root)?,
-            core_autocrlf: core_autocrlf_from_config(&entries),
-            core_eol: core_eol_from_config(&entries),
+            attributes,
+            core_autocrlf,
+            core_eol,
+            core_safecrlf,
+            roundtrip_encodings,
         })
     }
 
     fn needs_content_conversion(&self, relative: &[u8]) -> bool {
         self.attributes.is_set(relative, "ident")
+            || self
+                .working_tree_encoding(relative)
+                .ok()
+                .flatten()
+                .is_some()
             || self.crlf_action(relative) != CrlfAction::Binary
             || worktree_filter_name(&self.attributes, relative).is_some()
+    }
+
+    fn can_use_raw_blob_hash_when_no_cr(&self, relative: &[u8]) -> bool {
+        !self.attributes.is_set(relative, "ident")
+            && self
+                .working_tree_encoding(relative)
+                .ok()
+                .flatten()
+                .is_none()
+            && worktree_filter_name(&self.attributes, relative).is_none()
+            && self.crlf_action(relative) != CrlfAction::Binary
     }
 
     fn clean_staged_worktree_content(
@@ -1686,7 +3144,14 @@ impl WorktreeContentRules {
         relative: &[u8],
         content: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        self.clean_worktree_content_inner(repo, Some((store, index)), relative, content, true)
+        self.clean_worktree_content_inner(
+            repo,
+            Some((store, index)),
+            relative,
+            content,
+            self.core_safecrlf,
+            true,
+        )
     }
 
     fn clean_worktree_content(
@@ -1695,7 +3160,23 @@ impl WorktreeContentRules {
         relative: &[u8],
         content: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        self.clean_worktree_content_inner(repo, None, relative, content, false)
+        self.clean_worktree_content_inner(repo, None, relative, content, CoreSafeCrlf::False, false)
+    }
+
+    fn clean_worktree_content_for_comparison(
+        &self,
+        repo: &GitRepo,
+        relative: &[u8],
+        content: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        self.clean_worktree_content_inner(
+            repo,
+            None,
+            relative,
+            content,
+            self.core_safecrlf.demote_for_worktree_compare(),
+            false,
+        )
     }
 
     fn clean_worktree_content_inner(
@@ -1704,14 +3185,23 @@ impl WorktreeContentRules {
         index_context: Option<(&LooseObjectStore, &GitIndex)>,
         relative: &[u8],
         content: Vec<u8>,
+        safecrlf: CoreSafeCrlf,
         emit_warnings: bool,
     ) -> Result<Vec<u8>> {
+        let content = if let Some(encoding) = self.working_tree_encoding_spec(relative)? {
+            let content = decode_working_tree_encoding_content(relative, &encoding.kind, &content)?;
+            self.maybe_check_working_tree_roundtrip_encoding(relative, &encoding, &content)?;
+            content
+        } else {
+            content
+        };
         let content = if self.attributes.is_set(relative, "ident") {
             apply_ident_clean(&content)
         } else {
             content
         };
-        let content = self.clean_crlf_content(index_context, relative, content, emit_warnings)?;
+        let content =
+            self.clean_crlf_content(index_context, relative, content, safecrlf, emit_warnings)?;
         apply_worktree_filter(repo, &self.attributes, relative, "clean", &[], content)
     }
 
@@ -1720,6 +3210,7 @@ impl WorktreeContentRules {
         index_context: Option<(&LooseObjectStore, &GitIndex)>,
         relative: &[u8],
         content: Vec<u8>,
+        safecrlf: CoreSafeCrlf,
         emit_warnings: bool,
     ) -> Result<Vec<u8>> {
         let action = self.crlf_action(relative);
@@ -1748,7 +3239,10 @@ impl WorktreeContentRules {
                 new_stats.crlf += new_stats.lonelf;
                 new_stats.lonelf = 0;
             }
-            emit_crlf_roundtrip_warning(relative, action, &stats, &new_stats);
+            enforce_safecrlf(relative, action, &stats, &new_stats, safecrlf)?;
+            if safecrlf.emits_warning() {
+                emit_crlf_roundtrip_warning(relative, action, &stats, &new_stats);
+            }
         }
         if !convert_crlf_to_lf {
             return Ok(content);
@@ -1760,22 +3254,33 @@ impl WorktreeContentRules {
         })
     }
 
-    fn smudge_checkout_content(&self, relative: &[u8], content: &[u8]) -> Option<Vec<u8>> {
+    fn smudge_checkout_content(&self, relative: &[u8], content: &[u8]) -> Result<Option<Vec<u8>>> {
+        let original = content;
+        let mut content = content.to_vec();
         let action = self.crlf_action(relative);
-        if !action.output_crlf() || content.is_empty() {
-            return None;
+        if action.output_crlf() && !content.is_empty() {
+            let stats = CrlfStats::gather(&content);
+            if stats.lonelf > 0
+                && (!action.is_auto()
+                    || (stats.lonecr == 0 && stats.crlf == 0 && !stats.is_binary()))
+            {
+                content = zmin_git_core::apply_eol_smudge_to_crlf(&content);
+            }
         }
-        let stats = CrlfStats::gather(&content);
-        if stats.lonelf == 0
-            || (action.is_auto() && (stats.lonecr > 0 || stats.crlf > 0 || stats.is_binary()))
-        {
-            return None;
+        if let Some(encoding) = self.working_tree_encoding_spec(relative)? {
+            content = encode_working_tree_encoding_content(relative, &encoding.kind, &content)?;
         }
-        Some(zmin_git_core::apply_eol_smudge_to_crlf(content))
+        if content != original {
+            Ok(Some(content))
+        } else {
+            Ok(None)
+        }
     }
 
     fn may_smudge_checkout_entries(&self) -> bool {
-        !self.attributes.is_empty() || self.core_autocrlf == CoreAutoCrlf::True
+        !self.attributes.is_empty()
+            || self.core_autocrlf == CoreAutoCrlf::True
+            || self.working_tree_encoding(b"").ok().flatten().is_some()
     }
 
     fn crlf_action(&self, relative: &[u8]) -> CrlfAction {
@@ -1786,6 +3291,811 @@ impl WorktreeContentRules {
             self.core_eol,
         )
     }
+
+    fn working_tree_encoding(&self, relative: &[u8]) -> Result<Option<WorkingTreeEncoding>> {
+        Ok(self
+            .working_tree_encoding_spec(relative)?
+            .map(|encoding| encoding.kind))
+    }
+
+    fn working_tree_encoding_spec(
+        &self,
+        relative: &[u8],
+    ) -> Result<Option<WorkingTreeEncodingSpec>> {
+        let value = self
+            .attributes
+            .check(relative, &["working-tree-encoding".to_owned()])
+            .into_iter()
+            .next()
+            .map(|(_, value)| value)
+            .unwrap_or(AttributeValue::Unspecified);
+        parse_working_tree_encoding_value(relative, value)
+    }
+
+    fn maybe_check_working_tree_roundtrip_encoding(
+        &self,
+        relative: &[u8],
+        encoding: &WorkingTreeEncodingSpec,
+        decoded: &[u8],
+    ) -> Result<()> {
+        if !self.should_check_roundtrip_encoding(&encoding.kind) {
+            return Ok(());
+        }
+        emit_roundtrip_trace_if_enabled(encoding)?;
+        let reencoded = encode_working_tree_encoding_content(relative, &encoding.kind, decoded)?;
+        let redecooded =
+            decode_working_tree_encoding_content(relative, &encoding.kind, &reencoded)?;
+        if redecooded != decoded {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "fatal: {}: encoding round-trip failed for {}\n",
+                    String::from_utf8_lossy(relative),
+                    encoding.kind.display_name()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn should_check_roundtrip_encoding(&self, encoding: &WorkingTreeEncoding) -> bool {
+        let Some(encodings) = &self.roundtrip_encodings else {
+            return matches!(encoding, WorkingTreeEncoding::ShiftJis);
+        };
+        encodings.contains(&encoding.config_key().to_ascii_lowercase())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WorkingTreeEncoding {
+    Utf8,
+    Utf16 { endian: UtfEndian, bom: BomMode },
+    Utf32 { endian: UtfEndian, bom: BomMode },
+    ShiftJis,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkingTreeEncodingSpec {
+    kind: WorkingTreeEncoding,
+    declared_name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UtfEndian {
+    Little,
+    Big,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BomMode {
+    None,
+    Required,
+}
+
+fn parse_working_tree_encoding_value(
+    relative: &[u8],
+    value: AttributeValue,
+) -> Result<Option<WorkingTreeEncodingSpec>> {
+    match value {
+        AttributeValue::Unset | AttributeValue::Unspecified => Ok(None),
+        AttributeValue::Set => Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "fatal: {}: true/false are no valid working-tree-encodings\n",
+                String::from_utf8_lossy(relative)
+            ),
+        }),
+        AttributeValue::Value(value) if value.is_empty() => Ok(None),
+        AttributeValue::Value(value) => Ok(Some(WorkingTreeEncodingSpec {
+            kind: parse_working_tree_encoding_name(relative, &value)?,
+            declared_name: value,
+        })),
+    }
+}
+
+fn parse_working_tree_encoding_name(relative: &[u8], value: &str) -> Result<WorkingTreeEncoding> {
+    let normalized = value.to_ascii_uppercase();
+    match normalized.as_str() {
+        "UTF-8" => Ok(WorkingTreeEncoding::Utf8),
+        "UTF-16" => Ok(WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Big,
+            bom: BomMode::Required,
+        }),
+        "UTF-16LE" => Ok(WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Little,
+            bom: BomMode::None,
+        }),
+        "UTF-16BE" => Ok(WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Big,
+            bom: BomMode::None,
+        }),
+        "UTF-16LE-BOM" => Ok(WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Little,
+            bom: BomMode::Required,
+        }),
+        "UTF-16BE-BOM" => Ok(WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Big,
+            bom: BomMode::Required,
+        }),
+        "UTF-32" => Ok(WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Big,
+            bom: BomMode::Required,
+        }),
+        "UTF-32LE" => Ok(WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Little,
+            bom: BomMode::None,
+        }),
+        "UTF-32BE" => Ok(WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Big,
+            bom: BomMode::None,
+        }),
+        "UTF-32LE-BOM" => Ok(WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Little,
+            bom: BomMode::Required,
+        }),
+        "UTF-32BE-BOM" => Ok(WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Big,
+            bom: BomMode::Required,
+        }),
+        "SHIFT-JIS" => Ok(WorkingTreeEncoding::ShiftJis),
+        _ => Err(failed_to_encode_message(relative, value, "UTF-8")),
+    }
+}
+
+fn decode_working_tree_encoding_content(
+    relative: &[u8],
+    encoding: &WorkingTreeEncoding,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    match encoding {
+        WorkingTreeEncoding::Utf8 => Ok(content.to_vec()),
+        WorkingTreeEncoding::Utf16 { endian, bom } => {
+            decode_utf16_content(relative, *endian, *bom, content)
+        }
+        WorkingTreeEncoding::Utf32 { endian, bom } => {
+            decode_utf32_content(relative, *endian, *bom, content)
+        }
+        WorkingTreeEncoding::ShiftJis => decode_encoding_rs_content(relative, SHIFT_JIS, content),
+    }
+}
+
+fn encode_working_tree_encoding_content(
+    relative: &[u8],
+    encoding: &WorkingTreeEncoding,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    match encoding {
+        WorkingTreeEncoding::Utf8 => Ok(content.to_vec()),
+        WorkingTreeEncoding::Utf16 { endian, bom } => {
+            encode_utf16_content(relative, *endian, *bom, content)
+        }
+        WorkingTreeEncoding::Utf32 { endian, bom } => {
+            encode_utf32_content(relative, *endian, *bom, content)
+        }
+        WorkingTreeEncoding::ShiftJis => encode_encoding_rs_content(relative, SHIFT_JIS, content),
+    }
+}
+
+fn decode_utf16_content(
+    relative: &[u8],
+    endian: UtfEndian,
+    bom: BomMode,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let (content, endian) = match bom {
+        BomMode::Required => decode_required_bom(content, "utf-16", b"\xFF\xFE", b"\xFE\xFF")?,
+        BomMode::None => {
+            let encoded_as = match endian {
+                UtfEndian::Little => "utf-16LE",
+                UtfEndian::Big => "utf-16be",
+            };
+            reject_prohibited_bom(content, encoded_as, "UTF-16")?;
+            (content, endian)
+        }
+    };
+    if content.len() % 2 != 0 {
+        return Err(failed_to_encode_message(relative, "UTF-16", "UTF-8"));
+    }
+    let mut units = Vec::with_capacity(content.len() / 2);
+    for chunk in content.chunks_exact(2) {
+        let unit = match endian {
+            UtfEndian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
+            UtfEndian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
+        };
+        units.push(unit);
+    }
+    String::from_utf16(&units)
+        .map(|value| value.into_bytes())
+        .map_err(|_| failed_to_encode_message(relative, "UTF-16", "UTF-8"))
+}
+
+fn decode_utf32_content(
+    relative: &[u8],
+    endian: UtfEndian,
+    bom: BomMode,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let (content, endian) = match bom {
+        BomMode::Required => {
+            decode_required_bom(content, "utf-32", b"\xFF\xFE\x00\x00", b"\x00\x00\xFE\xFF")?
+        }
+        BomMode::None => {
+            let encoded_as = match endian {
+                UtfEndian::Little => "utf-32LE",
+                UtfEndian::Big => "utf-32be",
+            };
+            reject_prohibited_bom(content, encoded_as, "UTF-32")?;
+            (content, endian)
+        }
+    };
+    if content.len() % 4 != 0 {
+        return Err(failed_to_encode_message(relative, "UTF-32", "UTF-8"));
+    }
+    let mut decoded = String::with_capacity(content.len() / 4);
+    for chunk in content.chunks_exact(4) {
+        let unit = match endian {
+            UtfEndian::Little => u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
+            UtfEndian::Big => u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
+        };
+        let Some(ch) = char::from_u32(unit) else {
+            return Err(failed_to_encode_message(relative, "UTF-32", "UTF-8"));
+        };
+        decoded.push(ch);
+    }
+    Ok(decoded.into_bytes())
+}
+
+fn encode_utf16_content(
+    relative: &[u8],
+    endian: UtfEndian,
+    bom: BomMode,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let text = std::str::from_utf8(content)
+        .map_err(|_| failed_to_encode_message(relative, "UTF-8", "UTF-16"))?;
+    let mut encoded = Vec::with_capacity(content.len() * 2 + 2);
+    if bom == BomMode::Required {
+        match endian {
+            UtfEndian::Little => encoded.extend_from_slice(b"\xFF\xFE"),
+            UtfEndian::Big => encoded.extend_from_slice(b"\xFE\xFF"),
+        }
+    }
+    for unit in text.encode_utf16() {
+        let bytes = match endian {
+            UtfEndian::Little => unit.to_le_bytes(),
+            UtfEndian::Big => unit.to_be_bytes(),
+        };
+        encoded.extend_from_slice(&bytes);
+    }
+    Ok(encoded)
+}
+
+fn encode_utf32_content(
+    relative: &[u8],
+    endian: UtfEndian,
+    bom: BomMode,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let text = std::str::from_utf8(content)
+        .map_err(|_| failed_to_encode_message(relative, "UTF-8", "UTF-32"))?;
+    let mut encoded = Vec::with_capacity(content.len() * 4 + 4);
+    if bom == BomMode::Required {
+        match endian {
+            UtfEndian::Little => encoded.extend_from_slice(b"\xFF\xFE\x00\x00"),
+            UtfEndian::Big => encoded.extend_from_slice(b"\x00\x00\xFE\xFF"),
+        }
+    }
+    for ch in text.chars() {
+        let bytes = match endian {
+            UtfEndian::Little => (ch as u32).to_le_bytes(),
+            UtfEndian::Big => (ch as u32).to_be_bytes(),
+        };
+        encoded.extend_from_slice(&bytes);
+    }
+    Ok(encoded)
+}
+
+fn decode_encoding_rs_content(
+    relative: &[u8],
+    encoding: &'static Encoding,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let (decoded, _, had_errors) = encoding.decode(content);
+    if had_errors {
+        return Err(failed_to_encode_message(relative, encoding.name(), "UTF-8"));
+    }
+    Ok(decoded.into_owned().into_bytes())
+}
+
+fn encode_encoding_rs_content(
+    relative: &[u8],
+    encoding: &'static Encoding,
+    content: &[u8],
+) -> Result<Vec<u8>> {
+    let text = std::str::from_utf8(content)
+        .map_err(|_| failed_to_encode_message(relative, "UTF-8", encoding.name()))?;
+    let (encoded, _, had_errors) = encoding.encode(text);
+    if had_errors {
+        return Err(failed_to_encode_message(relative, "UTF-8", encoding.name()));
+    }
+    Ok(encoded.into_owned())
+}
+
+fn decode_required_bom<'a>(
+    content: &'a [u8],
+    display: &str,
+    little_bom: &[u8],
+    big_bom: &[u8],
+) -> Result<(&'a [u8], UtfEndian)> {
+    if let Some(rest) = content.strip_prefix(little_bom) {
+        return Ok((rest, UtfEndian::Little));
+    }
+    if let Some(rest) = content.strip_prefix(big_bom) {
+        return Ok((rest, UtfEndian::Big));
+    }
+    Err(CliError::Stderr {
+        code: 128,
+        text: format!(
+            "fatal: BOM is required in '{}' if encoded as {}\nuse {}BE or {}LE as working-tree-encoding\n",
+            display,
+            display,
+            display.to_ascii_uppercase(),
+            display.to_ascii_uppercase()
+        ),
+    })
+}
+
+fn reject_prohibited_bom(content: &[u8], display: &str, suggested: &str) -> Result<()> {
+    let has_bom = content.starts_with(b"\xFF\xFE")
+        || content.starts_with(b"\xFE\xFF")
+        || content.starts_with(b"\xFF\xFE\x00\x00")
+        || content.starts_with(b"\x00\x00\xFE\xFF");
+    if has_bom {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "fatal: BOM is prohibited in '{}' if encoded as {}\nuse {} as working-tree-encoding\n",
+                display, display, suggested
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn failed_to_encode_message(relative: &[u8], from: &str, to: &str) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "fatal: {}: failed to encode content from {} to {}\n",
+            String::from_utf8_lossy(relative),
+            from,
+            to
+        ),
+    }
+}
+
+fn should_soften_diff_worktree_encoding_error(error: &CliError) -> bool {
+    match error {
+        CliError::Stderr { text, .. } => {
+            text.contains("BOM is required")
+                || text.contains("BOM is prohibited")
+                || text.contains("failed to encode content")
+        }
+        _ => false,
+    }
+}
+
+fn emit_softened_diff_worktree_encoding_error(relative: &[u8], error: &CliError) {
+    if let CliError::Stderr { text, .. } = error {
+        let path = String::from_utf8_lossy(relative);
+        for (index, line) in text.lines().enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+            if index == 0 {
+                let normalized = line.replacen("fatal:", "error:", 1);
+                if let Some(encoding) = normalized
+                    .strip_prefix("error: BOM is required in '")
+                    .and_then(|rest| rest.strip_suffix("' if encoded as utf-16"))
+                {
+                    eprintln!("error: BOM is required in '{path}' if encoded as {encoding}");
+                } else if let Some(encoding) = normalized
+                    .strip_prefix("error: BOM is prohibited in '")
+                    .and_then(|rest| rest.strip_suffix("' if encoded as utf-16"))
+                {
+                    eprintln!("error: BOM is prohibited in '{path}' if encoded as {encoding}");
+                } else {
+                    eprintln!("{normalized}");
+                }
+            } else {
+                eprintln!("hint: {line}");
+            }
+        }
+    }
+}
+
+fn emit_roundtrip_trace_if_enabled(encoding: &WorkingTreeEncodingSpec) -> Result<()> {
+    let Some(value) = std::env::var_os("GIT_TRACE") else {
+        return Ok(());
+    };
+    let rendered = value.to_string_lossy();
+    if rendered.is_empty() || rendered == "0" || rendered.eq_ignore_ascii_case("false") {
+        return Ok(());
+    }
+    let line = format!(
+        "trace: Checking roundtrip encoding for {}\n",
+        encoding.declared_name
+    );
+    if rendered == "1" || rendered == "2" || rendered.eq_ignore_ascii_case("true") {
+        std::io::stderr()
+            .lock()
+            .write_all(line.as_bytes())
+            .map_err(CliError::Io)?;
+        return Ok(());
+    }
+    let mut trace = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::path::PathBuf::from(value))
+        .map_err(CliError::Io)?;
+    trace.write_all(line.as_bytes()).map_err(CliError::Io)?;
+    Ok(())
+}
+
+fn core_check_roundtrip_encodings_from_config(entries: &[ConfigEntry]) -> Option<HashSet<String>> {
+    entries
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core"
+                && entry.subsection.is_empty()
+                && entry.key == "checkroundtripencoding"
+        })
+        .map(|entry| {
+            entry
+                .value
+                .split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(|item| item.to_ascii_lowercase())
+                .collect::<HashSet<_>>()
+        })
+}
+
+impl WorkingTreeEncoding {
+    fn config_key(&self) -> &'static str {
+        match self {
+            Self::Utf8 => "UTF-8",
+            Self::Utf16 { .. } => "UTF-16",
+            Self::Utf32 { .. } => "UTF-32",
+            Self::ShiftJis => "SHIFT-JIS",
+        }
+    }
+
+    fn display_name(&self) -> &'static str {
+        self.config_key()
+    }
+}
+
+fn emit_attribute_warnings(attributes: &GitAttributes) {
+    for warning in attributes.warnings() {
+        eprintln!("{warning}");
+    }
+}
+
+pub(crate) fn load_repo_attributes(
+    repo: &GitRepo,
+    root_index_attributes: Option<&GitAttributes>,
+) -> Result<GitAttributes> {
+    let entries = read_config_entries(repo)?;
+    let ignore_case = core_ignorecase_from_config(&entries);
+    load_attributes_with_strategy(repo, None, ignore_case, root_index_attributes)
+}
+
+fn load_worktree_attribute_base_rules(
+    repo: &GitRepo,
+    ignore_case: bool,
+) -> Result<WorktreeAttributeBaseRules> {
+    let mut before_worktree = GitAttributes::default();
+    before_worktree.set_ignore_case(ignore_case);
+    if let Some(path) = read_config_value(repo, "core.attributesfile")?
+        .map(|value| expand_attribute_config_path(&value))
+        .or_else(|| git_attr_global_path().ok().flatten().map(PathBuf::from))
+    {
+        append_attribute_file(
+            &mut before_worktree,
+            "",
+            &path,
+            &path.to_string_lossy(),
+            ignore_case,
+            true,
+        )?;
+    }
+    if let Some(path) = git_attr_system_path().map(PathBuf::from) {
+        append_attribute_file(
+            &mut before_worktree,
+            "",
+            &path,
+            &path.to_string_lossy(),
+            ignore_case,
+            true,
+        )?;
+    }
+
+    let mut after_worktree = GitAttributes::default();
+    after_worktree.set_ignore_case(ignore_case);
+    append_attribute_file(
+        &mut after_worktree,
+        "",
+        &repo.git_dir.join("info").join("attributes"),
+        "info/attributes",
+        ignore_case,
+        true,
+    )?;
+    Ok(WorktreeAttributeBaseRules {
+        before_worktree,
+        after_worktree,
+    })
+}
+
+fn load_attributes_with_strategy(
+    repo: &GitRepo,
+    relative: Option<&[u8]>,
+    ignore_case: bool,
+    root_index_attributes: Option<&GitAttributes>,
+) -> Result<GitAttributes> {
+    let mut attributes = GitAttributes::default();
+    attributes.set_ignore_case(ignore_case);
+
+    if let Some(path) = read_config_value(repo, "core.attributesfile")?
+        .map(|value| expand_attribute_config_path(&value))
+        .or_else(|| git_attr_global_path().ok().flatten().map(PathBuf::from))
+    {
+        append_attribute_file(
+            &mut attributes,
+            "",
+            &path,
+            &path.to_string_lossy(),
+            ignore_case,
+            true,
+        )?;
+    }
+    if let Some(path) = git_attr_system_path().map(PathBuf::from) {
+        append_attribute_file(
+            &mut attributes,
+            "",
+            &path,
+            &path.to_string_lossy(),
+            ignore_case,
+            true,
+        )?;
+    }
+    match relative {
+        Some(relative) => load_attributes_for_relative_path(
+            &mut attributes,
+            &repo.root,
+            relative,
+            ignore_case,
+            root_index_attributes,
+        )?,
+        None => load_attributes_from_dir_recursive(
+            &mut attributes,
+            &repo.root,
+            &repo.root,
+            ignore_case,
+            root_index_attributes,
+        )?,
+    }
+    append_attribute_file(
+        &mut attributes,
+        "",
+        &repo.git_dir.join("info").join("attributes"),
+        "info/attributes",
+        ignore_case,
+        true,
+    )?;
+    Ok(attributes)
+}
+
+fn load_attributes_for_relative_path(
+    attributes: &mut GitAttributes,
+    root: &Path,
+    relative: &[u8],
+    ignore_case: bool,
+    root_index_attributes: Option<&GitAttributes>,
+) -> Result<()> {
+    append_root_attribute_source(attributes, root, ignore_case, root_index_attributes)?;
+
+    let absolute = worktree_path_for_index_entry(root, relative);
+    let Some(parent) = absolute.parent() else {
+        return Ok(());
+    };
+    let mut directories = Vec::new();
+    let mut current = parent;
+    while current != root {
+        directories.push(current.to_path_buf());
+        let Some(next) = current.parent() else {
+            break;
+        };
+        current = next;
+    }
+    directories.reverse();
+    for dir in directories {
+        let base = repo_relative_path(root, &dir)
+            .ok()
+            .map(|path| String::from_utf8_lossy(&path).into_owned())
+            .unwrap_or_default();
+        append_attribute_file(
+            attributes,
+            &base,
+            &dir.join(".gitattributes"),
+            &attribute_source_label(&base, ".gitattributes"),
+            ignore_case,
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+fn core_ignorecase_from_config(entries: &[ConfigEntry]) -> bool {
+    entries
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core" && entry.subsection.is_empty() && entry.key == "ignorecase"
+        })
+        .and_then(|entry| entry.bool_value())
+        .unwrap_or(false)
+}
+
+fn expand_attribute_config_path(value: &str) -> PathBuf {
+    if value == "~" {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(value));
+    }
+    if let Some(rest) = value.strip_prefix("~/")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(value)
+}
+
+fn load_attributes_from_dir_recursive(
+    attributes: &mut GitAttributes,
+    root: &Path,
+    dir: &Path,
+    ignore_case: bool,
+    root_index_attributes: Option<&GitAttributes>,
+) -> Result<()> {
+    let base = repo_relative_path(root, dir)
+        .ok()
+        .map(|path| String::from_utf8_lossy(&path).into_owned())
+        .unwrap_or_default();
+    if dir == root {
+        append_root_attribute_source(attributes, root, ignore_case, root_index_attributes)?;
+    } else {
+        append_attribute_file(
+            attributes,
+            &base,
+            &dir.join(".gitattributes"),
+            &attribute_source_label(&base, ".gitattributes"),
+            ignore_case,
+            false,
+        )?;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        if metadata.is_dir() {
+            load_attributes_from_dir_recursive(
+                attributes,
+                root,
+                &entry.path(),
+                ignore_case,
+                root_index_attributes,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn append_root_attribute_source(
+    attributes: &mut GitAttributes,
+    root: &Path,
+    ignore_case: bool,
+    root_index_attributes: Option<&GitAttributes>,
+) -> Result<()> {
+    let path = root.join(".gitattributes");
+    match fs::metadata(&path) {
+        Ok(_) => append_attribute_file(attributes, "", &path, ".gitattributes", ignore_case, false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if let Some(root_attributes) = root_index_attributes {
+                attributes.append(root_attributes.clone());
+            }
+            Ok(())
+        }
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn load_index_root_attributes(
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<Option<GitAttributes>> {
+    let Some(entry) = index.entry(b".gitattributes", 0) else {
+        return Ok(None);
+    };
+    if !matches!(entry.mode, IndexMode::File | IndexMode::Executable) {
+        return Ok(None);
+    }
+    let content = read_index_entry_content(store, entry)?;
+    let mut attributes = GitAttributes::parse_with_base_and_source_and_case(
+        &String::from_utf8_lossy(&content),
+        "",
+        ".gitattributes",
+        false,
+    );
+    Ok(Some({
+        attributes.set_ignore_case(false);
+        attributes
+    }))
+}
+
+fn append_attribute_file(
+    attributes: &mut GitAttributes,
+    base: &str,
+    path: &Path,
+    source: &str,
+    ignore_case: bool,
+    follow_symlinks: bool,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    if metadata.file_type().is_symlink() && !follow_symlinks {
+        eprintln!(
+            "unable to access '{}': symbolic link not supported",
+            path.display()
+        );
+        return Ok(());
+    }
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            eprintln!("unable to access '{}': {}", path.display(), error);
+            return Ok(());
+        }
+    };
+    attributes.append(GitAttributes::parse_with_base_and_source_and_case(
+        &content,
+        base,
+        source,
+        ignore_case,
+    ));
+    Ok(())
+}
+
+fn attribute_source_label(base: &str, name: &str) -> String {
+    if base.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{base}/{name}")
+    }
 }
 
 pub(crate) fn clean_worktree_content(
@@ -1794,6 +4104,25 @@ pub(crate) fn clean_worktree_content(
     content: Vec<u8>,
 ) -> Result<Vec<u8>> {
     WorktreeContentRules::load(repo)?.clean_worktree_content(repo, relative, content)
+}
+
+pub(crate) fn clean_worktree_content_for_comparison_against_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    relative: &[u8],
+    content: Vec<u8>,
+) -> Result<Vec<u8>> {
+    let stage_options = WorktreeStageOptions::load(repo)?;
+    let content_rules = stage_options.path_content_rules(repo, relative)?;
+    content_rules.clean_worktree_content_inner(
+        repo,
+        Some((store, index)),
+        relative,
+        content,
+        content_rules.core_safecrlf.demote_for_worktree_compare(),
+        false,
+    )
 }
 
 pub(crate) fn smudge_worktree_filter_entries(repo: &GitRepo, entries: &GitIndex) -> Result<()> {
@@ -1810,10 +4139,30 @@ pub(crate) fn smudge_worktree_filter_entries_with_metadata(
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
     let content_rules = WorktreeStageOptions::load(repo)?;
-    if !content_rules.may_smudge_checkout_entries() {
+    smudge_worktree_filter_entries_with_options(repo, entries, metadata, &content_rules)
+}
+
+pub(crate) fn smudge_worktree_filter_entries_with_metadata_for_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    entries: &GitIndex,
+    metadata: &WorktreeCheckoutMetadata,
+) -> Result<()> {
+    let content_rules = WorktreeStageOptions::load_for_index(repo, store, index)?;
+    smudge_worktree_filter_entries_with_options(repo, entries, metadata, &content_rules)
+}
+
+fn smudge_worktree_filter_entries_with_options(
+    repo: &GitRepo,
+    entries: &GitIndex,
+    metadata: &WorktreeCheckoutMetadata,
+    content_rules: &WorktreeStageOptions,
+) -> Result<()> {
+    if !content_rules.may_smudge_checkout_entries(repo)? {
         return Ok(());
     }
-    let attributes = content_rules.attributes();
+    let attributes = content_rules.attributes(repo)?;
     if attributes.is_empty() {
         for entry in entries.entries().iter().filter(|entry| entry.stage == 0) {
             smudge_checkout_content_entry(repo, &content_rules, entry)?;
@@ -1852,7 +4201,7 @@ fn smudge_checkout_content_entry(
     }
     let path = worktree_path_for_index_entry(&repo.root, &entry.path);
     let content = fs::read(&path)?;
-    if let Some(smudged) = options.smudge_checkout_content(&entry.path, &content) {
+    if let Some(smudged) = options.smudge_checkout_content(repo, &entry.path, &content)? {
         fs::write(path, smudged)?;
     }
     Ok(())
@@ -1961,6 +4310,42 @@ pub(crate) fn smudge_worktree_filter_content_with_attributes(
     }
 }
 
+pub(crate) fn smudge_worktree_content_with_attributes(
+    repo: &GitRepo,
+    attributes: &GitAttributes,
+    relative: &[u8],
+    blob_id: &ObjectId,
+    checkout_metadata: &WorktreeCheckoutMetadata,
+    content: Vec<u8>,
+) -> Result<Vec<u8>> {
+    let entries = read_config_entries(repo)?;
+    let rules = WorktreeContentRules {
+        attributes: attributes.clone(),
+        core_autocrlf: core_autocrlf_from_config(&entries),
+        core_eol: core_eol_from_config(&entries),
+        core_safecrlf: core_safecrlf_from_config(&entries),
+        roundtrip_encodings: core_check_roundtrip_encodings_from_config(&entries),
+    };
+    let content = rules
+        .smudge_checkout_content(relative, &content)?
+        .unwrap_or(content);
+    match smudge_worktree_filter_content_result_with_attributes(
+        repo,
+        &rules.attributes,
+        relative,
+        blob_id,
+        checkout_metadata,
+        content,
+        false,
+    )? {
+        WorktreeFilterResult::Content(content) => Ok(content),
+        WorktreeFilterResult::Delayed { .. } => Err(CliError::Fatal {
+            code: 128,
+            message: "filter process delayed response is not supported here".to_owned(),
+        }),
+    }
+}
+
 pub(crate) fn smudge_worktree_content(
     repo: &GitRepo,
     relative: &[u8],
@@ -1970,7 +4355,7 @@ pub(crate) fn smudge_worktree_content(
 ) -> Result<Vec<u8>> {
     let rules = WorktreeContentRules::load(repo)?;
     let content = rules
-        .smudge_checkout_content(relative, &content)
+        .smudge_checkout_content(relative, &content)?
         .unwrap_or(content);
     match smudge_worktree_filter_content_result_with_attributes(
         repo,
@@ -2130,7 +4515,7 @@ fn worktree_filter_name(attributes: &GitAttributes, relative: &[u8]) -> Option<S
         })
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CoreAutoCrlf {
     False,
     True,
@@ -2146,6 +4531,27 @@ enum CoreEol {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum CoreSafeCrlf {
+    Unset,
+    False,
+    Warn,
+    True,
+}
+
+impl CoreSafeCrlf {
+    fn demote_for_worktree_compare(self) -> Self {
+        match self {
+            Self::True => Self::Warn,
+            other => other,
+        }
+    }
+
+    fn emits_warning(self) -> bool {
+        !matches!(self, Self::False)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CrlfAction {
     Binary,
     TextInput,
@@ -2251,6 +4657,25 @@ fn core_eol_from_config(entries: &[ConfigEntry]) -> CoreEol {
         .unwrap_or(CoreEol::Unset)
 }
 
+fn core_safecrlf_from_config(entries: &[ConfigEntry]) -> CoreSafeCrlf {
+    entries
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core" && entry.subsection.is_empty() && entry.key == "safecrlf"
+        })
+        .map(|entry| {
+            if entry.value.eq_ignore_ascii_case("warn") {
+                CoreSafeCrlf::Warn
+            } else if entry.bool_value().unwrap_or(false) {
+                CoreSafeCrlf::True
+            } else {
+                CoreSafeCrlf::False
+            }
+        })
+        .unwrap_or(CoreSafeCrlf::Unset)
+}
+
 fn crlf_action_for_path(
     attributes: &GitAttributes,
     relative: &[u8],
@@ -2285,7 +4710,7 @@ fn crlf_action_for_path(
         }
         Some(AttributeValue::Value(value)) if value == "input" => Some(CrlfAction::TextInput),
         _ => match crlf {
-            Some(AttributeValue::Set) => Some(text_action(core_autocrlf, core_eol)),
+            Some(AttributeValue::Set) => Some(CrlfAction::TextCrlf),
             Some(AttributeValue::Unset) => Some(CrlfAction::Binary),
             Some(AttributeValue::Value(value)) if value == "input" => Some(CrlfAction::TextInput),
             Some(AttributeValue::Value(value)) if value == "auto" => {
@@ -2317,7 +4742,12 @@ fn crlf_action_for_path(
 }
 
 fn text_action(core_autocrlf: CoreAutoCrlf, core_eol: CoreEol) -> CrlfAction {
-    if text_eol_is_crlf(core_autocrlf, core_eol) {
+    match core_autocrlf {
+        CoreAutoCrlf::True => return CrlfAction::TextCrlf,
+        CoreAutoCrlf::Input => return CrlfAction::TextInput,
+        CoreAutoCrlf::False => {}
+    }
+    if explicit_text_eol_is_crlf(core_eol) {
         CrlfAction::TextCrlf
     } else {
         CrlfAction::TextInput
@@ -2346,6 +4776,15 @@ fn text_eol_is_crlf(core_autocrlf: CoreAutoCrlf, core_eol: CoreEol) -> bool {
     }
 }
 
+fn explicit_text_eol_is_crlf(core_eol: CoreEol) -> bool {
+    match core_eol {
+        CoreEol::Crlf => true,
+        CoreEol::Native if cfg!(windows) => true,
+        CoreEol::Unset if cfg!(windows) => true,
+        _ => false,
+    }
+}
+
 fn index_has_crlf(store: &LooseObjectStore, index: &GitIndex, relative: &[u8]) -> Result<bool> {
     let Some(entry) = find_index_entry(index, relative) else {
         return Ok(false);
@@ -2365,27 +4804,80 @@ fn will_convert_lf_to_crlf(stats: &CrlfStats, action: CrlfAction) -> bool {
     true
 }
 
+fn enforce_safecrlf(
+    relative: &[u8],
+    action: CrlfAction,
+    old_stats: &CrlfStats,
+    new_stats: &CrlfStats,
+    safecrlf: CoreSafeCrlf,
+) -> Result<()> {
+    let Some(message) = safecrlf_error_message(relative, action, old_stats, new_stats) else {
+        return Ok(());
+    };
+    match safecrlf {
+        CoreSafeCrlf::Unset | CoreSafeCrlf::False | CoreSafeCrlf::Warn => Ok(()),
+        CoreSafeCrlf::True => Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            message,
+        ))),
+    }
+}
+
+fn safecrlf_error_message(
+    relative: &[u8],
+    action: CrlfAction,
+    old_stats: &CrlfStats,
+    new_stats: &CrlfStats,
+) -> Option<String> {
+    let path = String::from_utf8_lossy(relative);
+    let lf_to_crlf = old_stats.lonelf > 0 && new_stats.lonelf == 0;
+    let crlf_to_lf = old_stats.crlf > 0 && new_stats.crlf == 0;
+    if action.output_crlf() && lf_to_crlf {
+        Some(format!("LF would be replaced by CRLF in {path}"))
+    } else if crlf_to_lf {
+        Some(format!("CRLF would be replaced by LF in {path}"))
+    } else if lf_to_crlf {
+        Some(format!("LF would be replaced by CRLF in {path}"))
+    } else {
+        None
+    }
+}
+
 fn emit_crlf_roundtrip_warning(
     relative: &[u8],
     action: CrlfAction,
     old_stats: &CrlfStats,
     new_stats: &CrlfStats,
 ) {
+    let Some(message) = roundtrip_warning_message(relative, action, old_stats, new_stats) else {
+        return;
+    };
+    eprintln!("{message}");
+}
+
+fn roundtrip_warning_message(
+    relative: &[u8],
+    action: CrlfAction,
+    old_stats: &CrlfStats,
+    new_stats: &CrlfStats,
+) -> Option<String> {
     let path = String::from_utf8_lossy(relative);
     let lf_to_crlf = old_stats.lonelf > 0 && new_stats.lonelf == 0;
     let crlf_to_lf = old_stats.crlf > 0 && new_stats.crlf == 0;
     if action.output_crlf() && lf_to_crlf {
-        eprintln!(
+        Some(format!(
             "warning: in the working copy of '{path}', LF will be replaced by CRLF the next time Git touches it"
-        );
+        ))
     } else if crlf_to_lf {
-        eprintln!(
+        Some(format!(
             "warning: in the working copy of '{path}', CRLF will be replaced by LF the next time Git touches it"
-        );
+        ))
     } else if lf_to_crlf {
-        eprintln!(
+        Some(format!(
             "warning: in the working copy of '{path}', LF will be replaced by CRLF the next time Git touches it"
-        );
+        ))
+    } else {
+        None
     }
 }
 
@@ -2516,14 +5008,18 @@ fn run_worktree_filter_command(repo: &GitRepo, command: &str, content: Vec<u8>) 
         .stdin
         .as_mut()
         .ok_or_else(|| CliError::Message("filter stdin unavailable".to_owned()))?
-        .write_all(&content);
+        .pipe_write_all_ignoring_sigpipe(&content);
     drop(child.stdin.take());
     let output = child.wait_with_output().map_err(CliError::Io)?;
-    if output.status.success() {
+    let ignored_broken_pipe = matches!(
+        &write_result,
+        Err(CliError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe
+    );
+    if output.status.success() || (ignored_broken_pipe && exit_status_is_sigpipe(&output.status)) {
         if let Err(error) = write_result
-            && error.kind() != io::ErrorKind::BrokenPipe
+            && !matches!(&error, CliError::Io(io_error) if io_error.kind() == io::ErrorKind::BrokenPipe)
         {
-            return Err(CliError::Io(error));
+            return Err(error);
         }
         Ok(output.stdout)
     } else {
@@ -2532,6 +5028,18 @@ fn run_worktree_filter_command(repo: &GitRepo, command: &str, content: Vec<u8>) 
             text: String::from_utf8_lossy(&output.stderr).into_owned(),
         })
     }
+}
+
+#[cfg(unix)]
+fn exit_status_is_sigpipe(status: &std::process::ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+
+    status.signal() == Some(libc::SIGPIPE)
+}
+
+#[cfg(not(unix))]
+fn exit_status_is_sigpipe(_status: &std::process::ExitStatus) -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -2595,11 +5103,21 @@ fn run_worktree_process_filter(
     let mut filters = worktree_process_filters()
         .lock()
         .map_err(|_| CliError::Message("filter process lock is poisoned".to_owned()))?;
+    let required = worktree_filter_required(repo, filter)?;
     if !filters.contains_key(&key) {
-        let process = start_worktree_process_filter(repo, command)?;
+        let process = match start_worktree_process_filter(repo, command) {
+            Ok(process) => process,
+            Err(ProcessFilterStartError::Unavailable) if required => {
+                return Err(worktree_filter_failed_error(filter, relative, direction));
+            }
+            Err(ProcessFilterStartError::Unavailable) => {
+                eprintln!("error: external filter '{command}' failed");
+                return Ok(Some(WorktreeFilterResult::Content(content.to_vec())));
+            }
+            Err(ProcessFilterStartError::Protocol(error)) => return Err(error),
+        };
         filters.insert(key.clone(), process);
     }
-    let required = worktree_filter_required(repo, filter)?;
     let delay_requested = metadata.iter().any(|item| item == "can-delay=1");
     let (status, delay_capable) = {
         let process = filters
@@ -2669,7 +5187,20 @@ fn run_worktree_process_filter(
     }
 }
 
-fn start_worktree_process_filter(repo: &GitRepo, command: &str) -> Result<ProcessFilter> {
+enum ProcessFilterStartError {
+    Unavailable,
+    Protocol(CliError),
+}
+
+enum ProcessFilterHandshakeError {
+    NoResponse,
+    Protocol(CliError),
+}
+
+fn start_worktree_process_filter(
+    repo: &GitRepo,
+    command: &str,
+) -> std::result::Result<ProcessFilter, ProcessFilterStartError> {
     let mut child = ProcessCommand::new(git_shell_command_path())
         .arg("-c")
         .arg(command)
@@ -2678,15 +5209,15 @@ fn start_worktree_process_filter(repo: &GitRepo, command: &str) -> Result<Proces
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(CliError::Io)?;
+        .map_err(|_| ProcessFilterStartError::Unavailable)?;
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| CliError::Message("filter process stdin unavailable".to_owned()))?;
+        .ok_or(ProcessFilterStartError::Unavailable)?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| CliError::Message("filter process stdout unavailable".to_owned()))?;
+        .ok_or(ProcessFilterStartError::Unavailable)?;
     let mut process = ProcessFilter {
         child,
         stdin: Some(stdin),
@@ -2694,7 +5225,15 @@ fn start_worktree_process_filter(repo: &GitRepo, command: &str) -> Result<Proces
         capabilities: HashSet::new(),
         aborted: false,
     };
-    process.handshake(command)?;
+    match process.handshake(command) {
+        Ok(()) => {}
+        Err(ProcessFilterHandshakeError::NoResponse) => {
+            return Err(ProcessFilterStartError::Unavailable);
+        }
+        Err(ProcessFilterHandshakeError::Protocol(error)) => {
+            return Err(ProcessFilterStartError::Protocol(error));
+        }
+    }
     Ok(process)
 }
 
@@ -2738,38 +5277,66 @@ fn process_filter_request_write_failed(error: &CliError) -> bool {
     )
 }
 
+fn process_filter_handshake_io_error(error: CliError) -> ProcessFilterHandshakeError {
+    if process_filter_request_write_failed(&error) {
+        ProcessFilterHandshakeError::NoResponse
+    } else {
+        ProcessFilterHandshakeError::Protocol(error)
+    }
+}
+
 impl ProcessFilter {
-    fn handshake(&mut self, command: &str) -> Result<()> {
-        self.write_pkt_line(b"git-filter-client")?;
-        self.write_pkt_line(b"version=2")?;
-        self.write_flush()?;
-        self.expect_pkt_line(b"git-filter-server", "expected git-filter-server")?;
-        self.expect_pkt_line(b"version=2", "expected filter protocol version=2")?;
-        self.expect_flush("expected filter protocol version flush")?;
+    fn handshake(&mut self, command: &str) -> std::result::Result<(), ProcessFilterHandshakeError> {
+        self.write_pkt_line(b"git-filter-client")
+            .map_err(process_filter_handshake_io_error)?;
+        self.write_pkt_line(b"version=2")
+            .map_err(process_filter_handshake_io_error)?;
+        self.write_flush()
+            .map_err(process_filter_handshake_io_error)?;
+        let server = self
+            .read_pkt_line()
+            .map_err(process_filter_handshake_io_error)?
+            .ok_or(ProcessFilterHandshakeError::NoResponse)?;
+        if process_filter_control_payload(&server) != b"git-filter-server" {
+            return Err(ProcessFilterHandshakeError::Protocol(CliError::Fatal {
+                code: 128,
+                message: "expected git-filter-server".to_owned(),
+            }));
+        }
+        self.expect_pkt_line(b"version=2", "expected filter protocol version=2")
+            .map_err(ProcessFilterHandshakeError::Protocol)?;
+        self.expect_flush("expected filter protocol version flush")
+            .map_err(ProcessFilterHandshakeError::Protocol)?;
 
         for capability in ["clean", "smudge", "delay"] {
-            self.write_pkt_line(format!("capability={capability}").as_bytes())?;
+            self.write_pkt_line(format!("capability={capability}").as_bytes())
+                .map_err(ProcessFilterHandshakeError::Protocol)?;
         }
-        self.write_flush()?;
-        while let Some(payload) = self.read_pkt_line()? {
-            let line = process_filter_text_payload(&payload)?;
+        self.write_flush()
+            .map_err(ProcessFilterHandshakeError::Protocol)?;
+        while let Some(payload) = self
+            .read_pkt_line()
+            .map_err(ProcessFilterHandshakeError::Protocol)?
+        {
+            let line = process_filter_text_payload(&payload)
+                .map_err(ProcessFilterHandshakeError::Protocol)?;
             let Some(capability) = line.strip_prefix("capability=") else {
-                return Err(CliError::Fatal {
+                return Err(ProcessFilterHandshakeError::Protocol(CliError::Fatal {
                     code: 128,
                     message: format!("unexpected filter capability response '{line}'"),
-                });
+                }));
             };
             match capability {
                 "clean" | "smudge" | "delay" => {
                     self.capabilities.insert(capability.to_owned());
                 }
                 _ => {
-                    return Err(CliError::Fatal {
+                    return Err(ProcessFilterHandshakeError::Protocol(CliError::Fatal {
                         code: 128,
                         message: format!(
                             "subprocess '{command}' requested unsupported capability '{capability}'"
                         ),
-                    });
+                    }));
                 }
             }
         }
@@ -2785,7 +5352,11 @@ impl ProcessFilter {
     ) -> Result<ProcessFilterResponse> {
         self.write_pkt_line(format!("command={direction}").as_bytes())?;
         self.write_pkt_line(format!("pathname={}", String::from_utf8_lossy(relative)).as_bytes())?;
-        for item in metadata {
+        let delay_capable = self.capabilities.contains("delay");
+        for item in metadata
+            .iter()
+            .filter(|item| item.as_str() != "can-delay=1" || delay_capable)
+        {
             self.write_pkt_line(item.as_bytes())?;
         }
         self.write_flush()?;
@@ -2926,8 +5497,8 @@ impl ProcessFilter {
             .stdin
             .as_mut()
             .ok_or_else(|| CliError::Message("filter process stdin unavailable".to_owned()))?;
-        stdin.write_all(b"0000").map_err(CliError::Io)?;
-        stdin.flush().map_err(CliError::Io)
+        stdin.pipe_write_all_ignoring_sigpipe(b"0000")?;
+        stdin.pipe_flush_ignoring_sigpipe()
     }
 
     fn read_pkt_line(&mut self) -> Result<Option<Vec<u8>>> {
@@ -2977,8 +5548,41 @@ fn write_process_filter_pkt_line<W: Write>(writer: &mut W, payload: &[u8]) -> Re
     }
     let mut header = [0_u8; 4];
     write_process_filter_pkt_len(&mut header, len);
-    writer.write_all(&header).map_err(CliError::Io)?;
-    writer.write_all(payload).map_err(CliError::Io)
+    writer.pipe_write_all_ignoring_sigpipe(&header)?;
+    writer.pipe_write_all_ignoring_sigpipe(payload)
+}
+
+trait PipeWriteExt: Write {
+    fn pipe_write_all_ignoring_sigpipe(&mut self, buf: &[u8]) -> Result<()> {
+        write_pipe_ignoring_sigpipe(|| self.write_all(buf)).map_err(CliError::Io)
+    }
+
+    fn pipe_flush_ignoring_sigpipe(&mut self) -> Result<()> {
+        write_pipe_ignoring_sigpipe(|| self.flush()).map_err(CliError::Io)
+    }
+}
+
+impl<T: Write + ?Sized> PipeWriteExt for T {}
+
+#[cfg(unix)]
+fn write_pipe_ignoring_sigpipe<F>(write: F) -> io::Result<()>
+where
+    F: FnOnce() -> io::Result<()>,
+{
+    unsafe {
+        let previous = libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        let result = write();
+        libc::signal(libc::SIGPIPE, previous);
+        result
+    }
+}
+
+#[cfg(not(unix))]
+fn write_pipe_ignoring_sigpipe<F>(write: F) -> io::Result<()>
+where
+    F: FnOnce() -> io::Result<()>,
+{
+    write()
 }
 
 fn read_process_filter_pkt_line<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>> {
@@ -3056,25 +5660,70 @@ fn symlink_content_matches(path: &std::path::Path, entry: &IndexEntry) -> Result
 }
 
 #[cfg(unix)]
+fn symlink_content_matches_with_mode(
+    path: &std::path::Path,
+    entry: &IndexEntry,
+    symlinks_enabled: bool,
+) -> Result<bool> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        let target = fs::read_link(path)?;
+        return Ok(hash_object(
+            GitHashAlgorithm::Sha1,
+            GitObjectKind::Blob,
+            target.as_os_str().as_bytes(),
+        ) == entry.id);
+    }
+    if !symlinks_enabled && metadata.is_file() {
+        let content = fs::read(path)?;
+        return Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) == entry.id);
+    }
+    Ok(false)
+}
+
+#[cfg(not(unix))]
+fn symlink_content_matches_with_mode(
+    path: &std::path::Path,
+    entry: &IndexEntry,
+    _symlinks_enabled: bool,
+) -> Result<bool> {
+    symlink_content_matches(path, entry)
+}
+
+#[cfg(unix)]
 fn symlink_entry_modified_with_metadata(
     path: &std::path::Path,
     metadata: &fs::Metadata,
     entry: &IndexEntry,
+    symlinks_enabled: bool,
+    stat_options: IndexStatOptions,
 ) -> Result<bool> {
     use std::os::unix::ffi::OsStrExt;
 
+    if metadata.file_type().is_symlink() {
+        if index_entry_stat_matches_with_options(metadata, entry, stat_options) {
+            return Ok(false);
+        }
+        let target = fs::read_link(path)?;
+        return Ok(hash_object(
+            GitHashAlgorithm::Sha1,
+            GitObjectKind::Blob,
+            target.as_os_str().as_bytes(),
+        ) != entry.id);
+    }
+    if !symlinks_enabled && metadata.is_file() {
+        if index_entry_stat_matches_with_options(metadata, entry, stat_options) {
+            return Ok(false);
+        }
+        let content = fs::read(path)?;
+        return Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) != entry.id);
+    }
     if !metadata.file_type().is_symlink() {
         return Ok(true);
     }
-    if index_entry_stat_matches(&metadata, entry) {
-        return Ok(false);
-    }
-    let target = fs::read_link(path)?;
-    Ok(hash_object(
-        GitHashAlgorithm::Sha1,
-        GitObjectKind::Blob,
-        target.as_os_str().as_bytes(),
-    ) != entry.id)
+    Ok(true)
 }
 
 #[cfg(not(unix))]
@@ -3082,8 +5731,10 @@ fn symlink_entry_modified_with_metadata(
     path: &std::path::Path,
     metadata: &fs::Metadata,
     entry: &IndexEntry,
+    _symlinks_enabled: bool,
+    stat_options: IndexStatOptions,
 ) -> Result<bool> {
-    if !index_entry_stat_matches(&metadata, entry) {
+    if !index_entry_stat_matches_with_options(metadata, entry, stat_options) {
         return Ok(true);
     }
     let content = fs::read(path)?;
@@ -3112,14 +5763,28 @@ fn index_entry_stat_match_is_safe(
     metadata: &fs::Metadata,
     entry: &IndexEntry,
     index_mtime: IndexTimestamp,
+    options: IndexStatOptions,
 ) -> bool {
-    index_entry_stat_matches(metadata, entry) && index_entry_mtime_older_than(entry, index_mtime)
+    index_entry_stat_matches_with_options(metadata, entry, options)
+        && index_entry_mtime_older_than(entry, index_mtime)
 }
 
 fn index_entry_mtime_older_than(entry: &IndexEntry, timestamp: IndexTimestamp) -> bool {
     entry.mtime_seconds < timestamp.seconds
         || (entry.mtime_seconds == timestamp.seconds
             && entry.mtime_nanoseconds < timestamp.nanoseconds)
+}
+
+fn index_entry_has_stat_cache(entry: &IndexEntry) -> bool {
+    entry.ctime_seconds != 0
+        || entry.ctime_nanoseconds != 0
+        || entry.mtime_seconds != 0
+        || entry.mtime_nanoseconds != 0
+        || entry.dev != 0
+        || entry.ino != 0
+        || entry.uid != 0
+        || entry.gid != 0
+        || entry.size != 0
 }
 
 #[cfg(unix)]
@@ -3134,7 +5799,7 @@ fn apply_index_entry_metadata_platform(entry: &mut IndexEntry, metadata: &fs::Me
     entry.ino = u32_from_u64_lossy(metadata.ino());
     entry.uid = metadata.uid();
     entry.gid = metadata.gid();
-    entry.size = metadata.len().min(u32::MAX as u64) as u32;
+    entry.size = index_stat_size(metadata.len());
 }
 
 #[cfg(unix)]
@@ -3149,7 +5814,7 @@ fn metadata_mtime_index_timestamp(metadata: &fs::Metadata) -> IndexTimestamp {
 
 #[cfg(all(not(unix), not(windows)))]
 fn apply_index_entry_metadata_platform(entry: &mut IndexEntry, metadata: &fs::Metadata) {
-    entry.size = metadata.len().min(u32::MAX as u64) as u32;
+    entry.size = index_stat_size(metadata.len());
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -3176,7 +5841,7 @@ fn apply_index_entry_metadata_platform(entry: &mut IndexEntry, metadata: &fs::Me
     entry.ino = 0;
     entry.uid = 0;
     entry.gid = 0;
-    entry.size = metadata.file_size().min(u32::MAX as u64) as u32;
+    entry.size = index_stat_size(metadata.file_size());
 }
 
 #[cfg(windows)]
@@ -3191,48 +5856,73 @@ fn metadata_mtime_index_timestamp(metadata: &fs::Metadata) -> IndexTimestamp {
 }
 
 pub(crate) fn index_entry_stat_matches(metadata: &fs::Metadata, entry: &IndexEntry) -> bool {
-    index_entry_stat_matches_platform(metadata, entry)
+    index_entry_stat_matches_with_options(metadata, entry, IndexStatOptions::default())
+}
+
+pub(crate) fn index_entry_stat_matches_with_options(
+    metadata: &fs::Metadata,
+    entry: &IndexEntry,
+    options: IndexStatOptions,
+) -> bool {
+    index_entry_stat_matches_platform(metadata, entry, options)
 }
 
 #[cfg(unix)]
-fn index_entry_stat_matches_platform(metadata: &fs::Metadata, entry: &IndexEntry) -> bool {
+fn index_entry_stat_matches_platform(
+    metadata: &fs::Metadata,
+    entry: &IndexEntry,
+    options: IndexStatOptions,
+) -> bool {
     use std::os::unix::fs::MetadataExt;
 
-    entry.ctime_seconds != 0
-        && entry.mtime_seconds != 0
-        && entry.size == metadata.len().min(u32::MAX as u64) as u32
-        && entry.ctime_seconds == u32_from_i64_lossy(metadata.ctime())
-        && entry.ctime_nanoseconds == u32_from_i64_lossy(metadata.ctime_nsec())
+    entry.size == index_stat_size(metadata.len())
         && entry.mtime_seconds == u32_from_i64_lossy(metadata.mtime())
-        && entry.mtime_nanoseconds == u32_from_i64_lossy(metadata.mtime_nsec())
-        && entry.dev == u32_from_u64_lossy(metadata.dev())
-        && entry.ino == u32_from_u64_lossy(metadata.ino())
-        && entry.uid == metadata.uid()
-        && entry.gid == metadata.gid()
+        && (!options.check_stat()
+            || entry.mtime_nanoseconds == u32_from_i64_lossy(metadata.mtime_nsec()))
+        && (!options.trust_ctime()
+            || !options.check_stat()
+            || (entry.ctime_seconds == u32_from_i64_lossy(metadata.ctime())
+                && entry.ctime_nanoseconds == u32_from_i64_lossy(metadata.ctime_nsec())))
+        // Upstream Git deliberately ignores st_dev unless it is compiled with
+        // USE_STDEV because network filesystems can report a different device
+        // to different clients. Mainstream macOS and Linux builds leave that
+        // option disabled, so a stock-Git-created index must not be rejected
+        // solely because its recorded device differs from Rust's metadata.
+        && (!options.check_stat()
+            || (entry.ino == u32_from_u64_lossy(metadata.ino())
+                && entry.uid == metadata.uid()
+                && entry.gid == metadata.gid()))
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn index_entry_stat_matches_platform(_metadata: &fs::Metadata, _entry: &IndexEntry) -> bool {
+fn index_entry_stat_matches_platform(
+    _metadata: &fs::Metadata,
+    _entry: &IndexEntry,
+    _options: IndexStatOptions,
+) -> bool {
     false
 }
 
 #[cfg(windows)]
-fn index_entry_stat_matches_platform(metadata: &fs::Metadata, entry: &IndexEntry) -> bool {
+fn index_entry_stat_matches_platform(
+    metadata: &fs::Metadata,
+    entry: &IndexEntry,
+    options: IndexStatOptions,
+) -> bool {
     use std::os::windows::fs::MetadataExt;
 
     let (ctime_seconds, ctime_nanoseconds) =
         windows_filetime_to_index_time(metadata.creation_time());
     let (mtime_seconds, mtime_nanoseconds) =
         windows_filetime_to_index_time(metadata.last_write_time());
-    entry.ctime_seconds != 0
-        && entry.mtime_seconds != 0
-        && entry.size == metadata.file_size().min(u32::MAX as u64) as u32
-        && entry.ctime_seconds == ctime_seconds
-        && entry.ctime_nanoseconds == ctime_nanoseconds
+    entry.size == index_stat_size(metadata.file_size())
         && entry.mtime_seconds == mtime_seconds
-        && entry.mtime_nanoseconds == mtime_nanoseconds
-        && entry.dev == 0
-        && entry.ino == 0
+        && (!options.check_stat() || entry.mtime_nanoseconds == mtime_nanoseconds)
+        && (!options.trust_ctime()
+            || !options.check_stat()
+            || (entry.ctime_seconds == ctime_seconds
+                && entry.ctime_nanoseconds == ctime_nanoseconds))
+        && (!options.check_stat() || entry.ino == 0)
 }
 
 #[cfg(windows)]
@@ -3259,6 +5949,15 @@ fn u32_from_u64_lossy(value: u64) -> u32 {
     value as u32
 }
 
+fn index_stat_size(size: u64) -> u32 {
+    let truncated = size as u32;
+    if truncated == 0 && size != 0 {
+        0x8000_0000
+    } else {
+        truncated
+    }
+}
+
 pub(crate) fn path_exists(path: &std::path::Path) -> bool {
     fs::symlink_metadata(path).is_ok()
 }
@@ -3279,18 +5978,24 @@ pub(crate) fn checkout_worktree_with_metadata(
     let commit_cache = CommitObjectCache::new(store);
     let tree_cache = TreeObjectCache::new(store);
     let target_commit = commit_cache.read_commit(target_id)?;
-    let old_index = read_head_index_with_caches(repo, &commit_cache, &tree_cache)?;
+    let old_index = read_repo_index(repo)?;
     let mut new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    let sparse_checkout = apply_repo_sparse_checkout_bits(repo, &mut new_index)?;
 
     remove_tracked_paths_missing_from_target(repo, &old_index, &new_index)?;
+    if sparse_checkout {
+        remove_newly_skipped_worktree_paths(repo, &old_index, &new_index)?;
+    }
+    let checkout_index_entries = sparse_checkout_checkout_index(&new_index)?;
     checkout_index(
         store,
-        &new_index,
+        &checkout_index_entries,
         &repo.root,
         CheckoutIndexOptions { force: true },
     )?;
-    smudge_worktree_filter_entries_with_metadata(repo, &new_index, metadata)?;
-    refresh_tracked_index_metadata_matching(repo, &mut new_index, &[])?;
+    smudge_worktree_filter_entries_with_metadata(repo, &checkout_index_entries, metadata)?;
+    refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &[])?;
+    new_index.refresh_cache_tree();
     new_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -3300,20 +6005,84 @@ pub(crate) fn checkout_fresh_worktree(
     store: &LooseObjectStore,
     target_id: &ObjectId,
 ) -> Result<()> {
+    checkout_fresh_worktree_inner(repo, store, target_id, true)
+}
+
+pub(crate) fn checkout_fresh_worktree_plain(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+) -> Result<()> {
     let _trace = phase_trace("checkout_fresh_worktree");
-    let checkout_store = store.packed_first();
     let target_tree = {
         let _trace = phase_trace("checkout_fresh.read_commit_links");
-        let commit_cache = CommitObjectCache::new(&checkout_store);
+        let commit_cache = CommitObjectCache::new(store);
         commit_cache.read_commit_links(target_id)?.tree.clone()
     };
     let _trace = phase_trace("checkout_fresh.read_tree_to_index");
-    let new_index = read_tree_to_index_uncached(&checkout_store, &target_tree)?;
+    let mut new_index = read_tree_to_index_uncached(store, &target_tree)?;
     drop(_trace);
     let _trace = phase_trace("checkout_fresh.checkout_index");
-    let new_index = checkout_index_fresh_into_metadata(&checkout_store, new_index, &repo.root)?;
+    checkout_index(
+        store,
+        &new_index,
+        &repo.root,
+        CheckoutIndexOptions { force: true },
+    )?;
     drop(_trace);
     let _trace = phase_trace("checkout_fresh.write_index");
+    refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &[])?;
+    new_index.refresh_cache_tree();
+    new_index.write_to_path(&repo.index_path)?;
+    drop(_trace);
+    let _trace = phase_trace("checkout_fresh.smudge_filters");
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let checkout_metadata = WorktreeCheckoutMetadata {
+        ref_name: current_branch_ref(&refs)?,
+        treeish: Some(target_id.clone()),
+    };
+    smudge_worktree_filter_entries_with_metadata(repo, &new_index, &checkout_metadata)?;
+    Ok(())
+}
+
+fn checkout_fresh_worktree_inner(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+    packed_first: bool,
+) -> Result<()> {
+    let _trace = phase_trace("checkout_fresh_worktree");
+    let new_index = if packed_first {
+        let checkout_store = store.packed_first();
+        let target_tree = {
+            let _trace = phase_trace("checkout_fresh.read_commit_links");
+            let commit_cache = CommitObjectCache::new(&checkout_store);
+            commit_cache.read_commit_links(target_id)?.tree.clone()
+        };
+        let _trace = phase_trace("checkout_fresh.read_tree_to_index");
+        let new_index = read_tree_to_index_uncached(&checkout_store, &target_tree)?;
+        drop(_trace);
+        let _trace = phase_trace("checkout_fresh.checkout_index");
+        let new_index = checkout_index_fresh_into_metadata(&checkout_store, new_index, &repo.root)?;
+        drop(_trace);
+        new_index
+    } else {
+        let target_tree = {
+            let _trace = phase_trace("checkout_fresh.read_commit_links");
+            let commit_cache = CommitObjectCache::new(store);
+            commit_cache.read_commit_links(target_id)?.tree.clone()
+        };
+        let _trace = phase_trace("checkout_fresh.read_tree_to_index");
+        let new_index = read_tree_to_index_uncached(store, &target_tree)?;
+        drop(_trace);
+        let _trace = phase_trace("checkout_fresh.checkout_index");
+        let new_index = checkout_index_fresh_into_metadata(store, new_index, &repo.root)?;
+        drop(_trace);
+        new_index
+    };
+    let _trace = phase_trace("checkout_fresh.write_index");
+    let mut new_index = new_index;
+    new_index.refresh_cache_tree();
     new_index.write_to_path(&repo.index_path)?;
     drop(_trace);
     let _trace = phase_trace("checkout_fresh.smudge_filters");
@@ -3345,7 +6114,25 @@ pub(crate) fn checkout_clean_worktree_transition_with_metadata(
     target_id: &ObjectId,
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
-    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, false)
+    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, false, true, false)
+}
+
+pub(crate) fn checkout_clean_worktree_replacement_with_metadata(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+    metadata: &WorktreeCheckoutMetadata,
+) -> Result<()> {
+    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, false, false, false)
+}
+
+pub(crate) fn checkout_clean_missing_index_transition_with_metadata(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+    metadata: &WorktreeCheckoutMetadata,
+) -> Result<()> {
+    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, false, false, true)
 }
 
 pub(crate) fn checkout_clean_worktree_transition_after_clean_check_with_metadata(
@@ -3354,7 +6141,24 @@ pub(crate) fn checkout_clean_worktree_transition_after_clean_check_with_metadata
     target_id: &ObjectId,
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
-    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, true)
+    checkout_clean_worktree_transition_inner(repo, store, target_id, metadata, true, true, false)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CheckoutTransitionPathStatus {
+    Added,
+    Deleted,
+    Modified,
+}
+
+struct CheckoutTransitionPathUpdate {
+    status: CheckoutTransitionPathStatus,
+    path: Vec<u8>,
+}
+
+struct CheckoutTransitionIndex {
+    index: GitIndex,
+    updates: Vec<CheckoutTransitionPathUpdate>,
 }
 
 fn checkout_clean_worktree_transition_inner(
@@ -3363,16 +6167,57 @@ fn checkout_clean_worktree_transition_inner(
     target_id: &ObjectId,
     metadata: &WorktreeCheckoutMetadata,
     preserve_unchanged_metadata: bool,
+    preserve_index_changes: bool,
+    protect_untracked_additions: bool,
 ) -> Result<()> {
     let commit_cache = CommitObjectCache::new(store);
     let tree_cache = TreeObjectCache::new(store);
     let target_commit = commit_cache.read_commit(target_id)?;
     let old_index = read_repo_index(repo)?;
-    let mut new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    let mut target_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    let sparse_checkout = apply_repo_sparse_checkout_bits(repo, &mut target_index)?;
+    let transition = if preserve_index_changes {
+        let head_index = read_head_index_with_caches(repo, &commit_cache, &tree_cache)?;
+        let sparse_index = config_bool_enabled(repo, "index.sparse")?;
+        merge_checkout_transition_index(
+            &head_index,
+            &old_index,
+            &target_index,
+            sparse_checkout,
+            sparse_index,
+        )?
+    } else {
+        CheckoutTransitionIndex {
+            index: target_index,
+            updates: Vec::new(),
+        }
+    };
+    let mut new_index = transition.index;
+    if protect_untracked_additions {
+        verify_checkout_untracked_additions(repo, &old_index, &new_index)?;
+    }
     verify_checkout_transition_clean(repo, &old_index, &new_index)?;
     remove_tracked_paths_missing_from_target(repo, &old_index, &new_index)?;
-
-    let checkout_entries = changed_stage_zero_entries(&old_index, &new_index);
+    if sparse_checkout {
+        remove_newly_skipped_worktree_paths(repo, &old_index, &new_index)?;
+    }
+    let mut sparse_warning_paths = Vec::new();
+    let checkout_entries = changed_stage_zero_entries(&old_index, &new_index)
+        .into_iter()
+        .filter(|entry| {
+            if entry.skip_worktree() {
+                return false;
+            }
+            if sparse_checkout
+                && old_index.entry(&entry.path, 0).is_none()
+                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+            {
+                sparse_warning_paths.push(entry.path.clone());
+                return false;
+            }
+            true
+        })
+        .collect::<Vec<_>>();
     let checkout_paths = checkout_entries
         .iter()
         .map(|entry| entry.path.clone())
@@ -3387,16 +6232,171 @@ fn checkout_clean_worktree_transition_inner(
         )?;
         smudge_worktree_filter_entries_with_metadata(repo, &checkout, metadata)?;
     }
+    if !sparse_warning_paths.is_empty() {
+        print_sparse_checkout_update_warning(&sparse_warning_paths);
+    }
     if preserve_unchanged_metadata {
         preserve_unchanged_stage_zero_entries(&old_index, &mut new_index)?;
         if !checkout_paths.is_empty() {
-            refresh_tracked_index_metadata_matching(repo, &mut new_index, &checkout_paths)?;
+            refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &checkout_paths)?;
         }
     } else {
-        refresh_tracked_index_metadata_matching(repo, &mut new_index, &[])?;
+        refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &[])?;
     }
+    new_index.refresh_cache_tree();
     new_index.write_to_path(&repo.index_path)?;
+    print_checkout_transition_path_updates(&transition.updates);
     Ok(())
+}
+
+fn merge_checkout_transition_index(
+    head_index: &GitIndex,
+    current_index: &GitIndex,
+    target_index: &GitIndex,
+    sparse_checkout: bool,
+    sparse_index: bool,
+) -> Result<CheckoutTransitionIndex> {
+    let paths = head_index
+        .entries()
+        .iter()
+        .chain(current_index.entries())
+        .chain(target_index.entries())
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    let mut entries = Vec::with_capacity(paths.len());
+    let mut locally_changed = HashSet::new();
+    let mut conflicts = Vec::new();
+    let mut reported_changes = BTreeMap::new();
+
+    for path in paths {
+        let head = head_index.entry(&path, 0);
+        let current = current_index.entry(&path, 0);
+        let target = target_index.entry(&path, 0);
+        let current_changed = !checkout_index_content_matches(current, head);
+        let target_changed = !checkout_index_content_matches(target, head);
+        if current_changed {
+            locally_changed.insert(path.clone());
+        }
+
+        let selected = if !current_changed {
+            target
+        } else if !target_changed {
+            if let Some(status) = checkout_transition_path_status(current, head) {
+                reported_changes.insert(path.clone(), status);
+            }
+            current
+        } else if checkout_index_content_matches(current, target) {
+            current
+        } else {
+            conflicts.push(path.clone());
+            None
+        };
+        if let Some(entry) = selected {
+            entries.push(entry.clone());
+        }
+    }
+
+    if !conflicts.is_empty() {
+        return Err(checkout_overwrite_error(conflicts));
+    }
+
+    resolve_checkout_directory_file_transitions(
+        head_index,
+        target_index,
+        &locally_changed,
+        sparse_checkout,
+        sparse_index,
+        &mut entries,
+        &mut reported_changes,
+    );
+    let updates = reported_changes
+        .into_iter()
+        .map(|(path, status)| CheckoutTransitionPathUpdate { status, path })
+        .collect();
+    Ok(CheckoutTransitionIndex {
+        index: GitIndex::from_entries(entries)?,
+        updates,
+    })
+}
+
+fn checkout_transition_path_status(
+    current: Option<&IndexEntry>,
+    head: Option<&IndexEntry>,
+) -> Option<CheckoutTransitionPathStatus> {
+    match (current, head) {
+        (Some(_), None) => Some(CheckoutTransitionPathStatus::Added),
+        (None, Some(_)) => Some(CheckoutTransitionPathStatus::Deleted),
+        (Some(_), Some(_)) => Some(CheckoutTransitionPathStatus::Modified),
+        (None, None) => None,
+    }
+}
+
+fn checkout_index_content_matches(left: Option<&IndexEntry>, right: Option<&IndexEntry>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => left.id == right.id && left.mode == right.mode,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn resolve_checkout_directory_file_transitions(
+    head_index: &GitIndex,
+    target_index: &GitIndex,
+    locally_changed: &HashSet<Vec<u8>>,
+    sparse_checkout: bool,
+    sparse_index: bool,
+    entries: &mut Vec<IndexEntry>,
+    reported_changes: &mut BTreeMap<Vec<u8>, CheckoutTransitionPathStatus>,
+) {
+    let target_files = target_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Tree)
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    for target_path in target_files {
+        let mut descendant_prefix = target_path.clone();
+        descendant_prefix.push(b'/');
+        let local_descendants = entries
+            .iter()
+            .filter(|entry| {
+                locally_changed.contains(&entry.path) && entry.path.starts_with(&descendant_prefix)
+            })
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        if local_descendants.is_empty() {
+            continue;
+        }
+
+        let has_adjacent_prefix_peer = head_index.entries().iter().any(|entry| {
+            entry.path.starts_with(&target_path)
+                && entry.path.len() > target_path.len()
+                && entry.path[target_path.len()] != b'/'
+        });
+        let preserve_local_descendants =
+            !sparse_index && (sparse_checkout || has_adjacent_prefix_peer);
+        if preserve_local_descendants {
+            entries.retain(|entry| entry.path != target_path);
+            reported_changes.insert(target_path, CheckoutTransitionPathStatus::Deleted);
+        } else {
+            entries.retain(|entry| !local_descendants.contains(&entry.path));
+            for path in local_descendants {
+                reported_changes.remove(&path);
+            }
+        }
+    }
+}
+
+fn print_checkout_transition_path_updates(updates: &[CheckoutTransitionPathUpdate]) {
+    for update in updates {
+        let status = match update.status {
+            CheckoutTransitionPathStatus::Added => 'A',
+            CheckoutTransitionPathStatus::Deleted => 'D',
+            CheckoutTransitionPathStatus::Modified => 'M',
+        };
+        println!("{status}\t{}", String::from_utf8_lossy(&update.path));
+    }
 }
 
 fn preserve_unchanged_stage_zero_entries(
@@ -3419,7 +6419,7 @@ fn preserve_unchanged_stage_zero_entries(
     Ok(())
 }
 
-fn verify_checkout_transition_clean(
+pub(crate) fn verify_checkout_transition_clean(
     repo: &GitRepo,
     old_index: &GitIndex,
     new_index: &GitIndex,
@@ -3438,10 +6438,46 @@ fn verify_checkout_transition_clean(
     if modified.is_empty() {
         return Ok(());
     }
+    Err(checkout_overwrite_error(modified))
+}
+
+fn verify_checkout_untracked_additions(
+    repo: &GitRepo,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+) -> Result<()> {
+    let untracked = new_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && !entry.skip_worktree())
+        .filter(|entry| old_index.entry(&entry.path, 0).is_none())
+        .filter(|entry| path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path)))
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    if !untracked.is_empty() {
+        return Err(checkout_untracked_overwrite_error(untracked));
+    }
+    Ok(())
+}
+
+fn checkout_untracked_overwrite_error(paths: Vec<Vec<u8>>) -> CliError {
+    let mut text = String::from(
+        "error: The following untracked working tree files would be overwritten by checkout:\n",
+    );
+    for path in paths {
+        text.push('\t');
+        text.push_str(&String::from_utf8_lossy(&path));
+        text.push('\n');
+    }
+    text.push_str("Please move or remove them before you switch branches.\nAborting\n");
+    CliError::Stderr { code: 1, text }
+}
+
+fn checkout_overwrite_error(paths: Vec<Vec<u8>>) -> CliError {
     let mut text = String::from(
         "error: Your local changes to the following files would be overwritten by checkout:\n",
     );
-    for path in modified {
+    for path in paths {
         text.push('\t');
         text.push_str(&String::from_utf8_lossy(&path));
         text.push('\n');
@@ -3449,7 +6485,7 @@ fn verify_checkout_transition_clean(
     text.push_str(
         "Please commit your changes or stash them before you switch branches.\nAborting\n",
     );
-    Err(CliError::Stderr { code: 1, text })
+    CliError::Stderr { code: 1, text }
 }
 
 pub(crate) fn checkout_worktree_updates_to_index_with_metadata(
@@ -3459,7 +6495,11 @@ pub(crate) fn checkout_worktree_updates_to_index_with_metadata(
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
     let mut checkout_entries = Vec::new();
-    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+    for entry in index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && !entry.skip_worktree())
+    {
         let path = worktree_path_for_index_entry(&repo.root, &entry.path);
         if !path_exists(&path) || worktree_entry_modified(repo, &path, entry)? {
             checkout_entries.push(entry.clone());
@@ -3492,12 +6532,147 @@ fn changed_stage_zero_entries(old_index: &GitIndex, new_index: &GitIndex) -> Vec
         .iter()
         .filter(|entry| entry.stage == 0)
         .filter(|entry| {
-            old_entries
-                .get(entry.path.as_slice())
-                .is_none_or(|old| old.id != entry.id || old.mode != entry.mode)
+            old_entries.get(entry.path.as_slice()).is_none_or(|old| {
+                old.id != entry.id
+                    || old.mode != entry.mode
+                    || old.skip_worktree() != entry.skip_worktree()
+            })
         })
         .cloned()
         .collect()
+}
+
+fn sparse_checkout_checkout_index(index: &GitIndex) -> Result<GitIndex> {
+    Ok(GitIndex::from_entries(
+        index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0 && !entry.skip_worktree())
+            .cloned()
+            .collect(),
+    )?)
+}
+
+fn apply_repo_sparse_checkout_bits(repo: &GitRepo, index: &mut GitIndex) -> Result<bool> {
+    if !repo_sparse_checkout_active(repo)? {
+        return Ok(false);
+    }
+    let patterns = repo_sparse_checkout_patterns(repo)?;
+    let cone_mode = config_bool_enabled(repo, "core.sparseCheckoutCone")?;
+    let matcher = GitIgnore::parse(&patterns.join("\n"));
+    let entries = index
+        .entries()
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if entry.stage == 0 {
+                entry.set_skip_worktree(!repo_sparse_path_matches(
+                    &entry.path,
+                    &matcher,
+                    cone_mode,
+                ));
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
+    *index = GitIndex::from_entries(entries)?;
+    Ok(true)
+}
+
+fn repo_sparse_checkout_active(repo: &GitRepo) -> Result<bool> {
+    Ok(repo.git_dir.join("info/sparse-checkout").exists()
+        && config_bool_enabled(repo, "core.sparseCheckout")?)
+}
+
+fn repo_sparse_checkout_patterns(repo: &GitRepo) -> Result<Vec<String>> {
+    let raw = match fs::read_to_string(repo.git_dir.join("info/sparse-checkout")) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+fn repo_sparse_path_matches(path: &[u8], matcher: &GitIgnore, cone_mode: bool) -> bool {
+    if cone_mode && !path.contains(&b'/') {
+        return true;
+    }
+    repo_sparse_path_match(path, matcher, cone_mode).is_some_and(|(_, is_negation)| !is_negation)
+}
+
+fn repo_sparse_path_match(
+    path: &[u8],
+    matcher: &GitIgnore,
+    cone_mode: bool,
+) -> Option<(usize, bool)> {
+    let mut best = matcher
+        .match_path(path, false)
+        .map(|matched| (matched.line_number, matched.is_negation));
+    for ancestor in repo_sparse_path_ancestors(path) {
+        let candidate = matcher.match_path(&ancestor, true).and_then(|matched| {
+            if cone_mode && !matched.is_negation && matched.pattern == "/*" {
+                None
+            } else {
+                Some((matched.line_number, matched.is_negation))
+            }
+        });
+        if repo_sparse_match_is_newer(candidate.as_ref(), best.as_ref()) {
+            best = candidate;
+        }
+    }
+    best
+}
+
+fn repo_sparse_match_is_newer(
+    candidate: Option<&(usize, bool)>,
+    current: Option<&(usize, bool)>,
+) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate.0 >= current.0,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn repo_sparse_path_ancestors(path: &[u8]) -> Vec<Vec<u8>> {
+    path.iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'/')
+        .map(|(index, _)| path[..index].to_vec())
+        .collect()
+}
+
+fn remove_newly_skipped_worktree_paths(
+    repo: &GitRepo,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+) -> Result<()> {
+    for entry in new_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.skip_worktree())
+    {
+        if old_index.entry(&entry.path, 0).is_some() {
+            remove_worktree_path(repo, &entry.path)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn print_sparse_checkout_update_warning(paths: &[Vec<u8>]) {
+    eprintln!(
+        "warning: The following paths were already present and thus not updated despite sparse patterns:"
+    );
+    for path in paths {
+        eprintln!("\t{}", String::from_utf8_lossy(path));
+    }
+    eprintln!();
+    eprintln!("After fixing the above paths, you may want to run `git sparse-checkout reapply`.");
 }
 
 #[cfg(test)]
@@ -3506,6 +6681,133 @@ mod tests {
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId::new(GitHashAlgorithm::Sha1, &[byte; 20])
+    }
+
+    fn index_entry(path: &str, byte: u8) -> IndexEntry {
+        IndexEntry::new(path, oid(byte), IndexMode::File, 0).expect("index entry")
+    }
+
+    fn index_with_entries(entries: Vec<IndexEntry>) -> GitIndex {
+        GitIndex::from_entries(entries).expect("index")
+    }
+
+    #[test]
+    fn checkout_transition_preserves_staged_change_when_target_keeps_head_path() {
+        let head = index_with_entries(vec![index_entry("file", 1)]);
+        let current = index_with_entries(vec![index_entry("file", 2)]);
+        let target = index_with_entries(vec![index_entry("file", 1), index_entry("other", 3)]);
+
+        let transition = merge_checkout_transition_index(&head, &current, &target, false, false)
+            .expect("merge checkout index");
+
+        assert_eq!(transition.index.entry(b"file", 0).expect("file").id, oid(2));
+        assert_eq!(
+            transition.index.entry(b"other", 0).expect("other").id,
+            oid(3)
+        );
+        assert_eq!(transition.updates.len(), 1);
+        assert_eq!(transition.updates[0].path, b"file");
+        assert_eq!(
+            transition.updates[0].status,
+            CheckoutTransitionPathStatus::Modified
+        );
+    }
+
+    #[test]
+    fn checkout_transition_rejects_staged_and_target_changes_to_same_path() {
+        let head = index_with_entries(vec![index_entry("file", 1)]);
+        let current = index_with_entries(vec![index_entry("file", 2)]);
+        let target = index_with_entries(vec![index_entry("file", 3)]);
+
+        let error = merge_checkout_transition_index(&head, &current, &target, false, false)
+            .err()
+            .expect("checkout conflict");
+
+        assert!(matches!(
+            error,
+            CliError::Stderr { text, .. } if text.contains("file")
+        ));
+    }
+
+    #[test]
+    fn checkout_transition_matches_git_directory_file_ordering_and_sparse_modes() {
+        let head_with_peer =
+            index_with_entries(vec![index_entry("folder/a", 1), index_entry("folder-", 2)]);
+        let current_with_peer = index_with_entries(vec![
+            index_entry("folder/a", 1),
+            index_entry("folder/local", 3),
+            index_entry("folder-", 2),
+        ]);
+        let target_with_peer =
+            index_with_entries(vec![index_entry("folder", 3), index_entry("folder-", 2)]);
+        let ordered = merge_checkout_transition_index(
+            &head_with_peer,
+            &current_with_peer,
+            &target_with_peer,
+            false,
+            false,
+        )
+        .expect("ordered D/F transition");
+        assert!(ordered.index.entry(b"folder", 0).is_none());
+        assert!(ordered.index.entry(b"folder/local", 0).is_some());
+        assert_eq!(ordered.updates.len(), 2);
+
+        let head = index_with_entries(vec![index_entry("folder/a", 1)]);
+        let current = index_with_entries(vec![
+            index_entry("folder/a", 1),
+            index_entry("folder/local", 3),
+        ]);
+        let target = index_with_entries(vec![index_entry("folder", 3)]);
+        let full = merge_checkout_transition_index(&head, &current, &target, false, false)
+            .expect("full D/F transition");
+        assert!(full.index.entry(b"folder", 0).is_some());
+        assert!(full.index.entry(b"folder/local", 0).is_none());
+        assert!(full.updates.is_empty());
+
+        let sparse = merge_checkout_transition_index(&head, &current, &target, true, false)
+            .expect("sparse D/F transition");
+        assert!(sparse.index.entry(b"folder", 0).is_none());
+        assert!(sparse.index.entry(b"folder/local", 0).is_some());
+        assert_eq!(sparse.updates.len(), 2);
+
+        let sparse_index = merge_checkout_transition_index(&head, &current, &target, true, true)
+            .expect("sparse-index D/F transition");
+        assert!(sparse_index.index.entry(b"folder", 0).is_some());
+        assert!(sparse_index.index.entry(b"folder/local", 0).is_none());
+        assert!(sparse_index.updates.is_empty());
+    }
+
+    #[test]
+    fn index_stat_size_matches_git_32_bit_munging() {
+        assert_eq!(index_stat_size(0), 0);
+        assert_eq!(index_stat_size(u32::MAX as u64), u32::MAX);
+        assert_eq!(index_stat_size(u32::MAX as u64 + 1), 0x8000_0000);
+        assert_eq!(index_stat_size(u32::MAX as u64 + 2), 1);
+    }
+
+    #[test]
+    fn zeroed_tree_index_entry_has_no_usable_stat_cache() {
+        let mut entry =
+            IndexEntry::new("tracked.txt", oid(1), IndexMode::File, 0).expect("index entry");
+        assert!(!index_entry_has_stat_cache(&entry));
+
+        entry.size = 1;
+        assert!(index_entry_has_stat_cache(&entry));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn index_stat_match_ignores_device_like_mainstream_git() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("tracked.txt");
+        fs::write(&path, b"tracked\n").expect("write fixture");
+        let metadata = fs::metadata(&path).expect("fixture metadata");
+        let mut entry =
+            IndexEntry::new("tracked.txt", oid(1), IndexMode::File, 0).expect("index entry");
+        apply_index_entry_metadata(&mut entry, &metadata);
+        entry.dev = entry.dev.wrapping_add(1);
+
+        assert!(index_entry_stat_matches(&metadata, &entry));
     }
 
     #[test]
@@ -3531,6 +6833,8 @@ mod tests {
             attributes: GitAttributes::default(),
             core_autocrlf: CoreAutoCrlf::False,
             core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
         };
         assert!(!empty_binary_rules.may_smudge_checkout_entries());
 
@@ -3538,6 +6842,8 @@ mod tests {
             attributes: GitAttributes::default(),
             core_autocrlf: CoreAutoCrlf::Input,
             core_eol: CoreEol::Crlf,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
         };
         assert!(!empty_input_rules.may_smudge_checkout_entries());
 
@@ -3545,6 +6851,8 @@ mod tests {
             attributes: GitAttributes::default(),
             core_autocrlf: CoreAutoCrlf::True,
             core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
         };
         assert!(autocrlf_rules.may_smudge_checkout_entries());
 
@@ -3552,7 +6860,134 @@ mod tests {
             attributes: GitAttributes::parse("*.txt text\n"),
             core_autocrlf: CoreAutoCrlf::False,
             core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
         };
         assert!(attribute_rules.may_smudge_checkout_entries());
+    }
+
+    #[test]
+    fn content_rules_allow_raw_hash_shortcut_only_for_crlf_only_paths() {
+        let simple_input_rules = WorktreeContentRules {
+            attributes: GitAttributes::default(),
+            core_autocrlf: CoreAutoCrlf::Input,
+            core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+        assert!(simple_input_rules.can_use_raw_blob_hash_when_no_cr(b"src/main.rs"));
+
+        let ident_rules = WorktreeContentRules {
+            attributes: GitAttributes::parse("*.rs ident\n"),
+            core_autocrlf: CoreAutoCrlf::Input,
+            core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+        assert!(!ident_rules.can_use_raw_blob_hash_when_no_cr(b"src/main.rs"));
+
+        let filter_rules = WorktreeContentRules {
+            attributes: GitAttributes::parse("*.rs filter=lfs\n"),
+            core_autocrlf: CoreAutoCrlf::Input,
+            core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+        assert!(!filter_rules.can_use_raw_blob_hash_when_no_cr(b"src/main.rs"));
+
+        let binary_rules = WorktreeContentRules {
+            attributes: GitAttributes::default(),
+            core_autocrlf: CoreAutoCrlf::False,
+            core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+        assert!(!binary_rules.can_use_raw_blob_hash_when_no_cr(b"src/main.rs"));
+    }
+
+    #[test]
+    fn crlf_attribute_forces_crlf_checkout_even_without_core_eol_override() {
+        let rules = WorktreeContentRules {
+            attributes: GitAttributes::parse("t* crlf\n"),
+            core_autocrlf: CoreAutoCrlf::False,
+            core_eol: CoreEol::Unset,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+
+        let smudged = rules
+            .smudge_checkout_content(b"three", b"hello\n")
+            .expect("smudge")
+            .expect("content changed");
+        assert_eq!(smudged, b"hello\r\n");
+    }
+
+    #[test]
+    fn text_attribute_obeys_core_autocrlf_before_core_eol() {
+        let rules = WorktreeContentRules {
+            attributes: GitAttributes::parse("one text\n"),
+            core_autocrlf: CoreAutoCrlf::True,
+            core_eol: CoreEol::Lf,
+            core_safecrlf: CoreSafeCrlf::False,
+            roundtrip_encodings: None,
+        };
+
+        let smudged = rules
+            .smudge_checkout_content(b"one", b"hello\n")
+            .expect("smudge")
+            .expect("content changed");
+        assert_eq!(smudged, b"hello\r\n");
+    }
+
+    #[test]
+    fn working_tree_encoding_utf16_and_utf32_roundtrip() {
+        let utf16 = WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Little,
+            bom: BomMode::Required,
+        };
+        let utf32 = WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Big,
+            bom: BomMode::None,
+        };
+        let path = b"demo.txt";
+        let original = "Test Тест\n".as_bytes();
+
+        let utf16_bytes =
+            encode_working_tree_encoding_content(path, &utf16, original).expect("encode utf16");
+        let utf32_bytes =
+            encode_working_tree_encoding_content(path, &utf32, original).expect("encode utf32");
+
+        assert_eq!(
+            decode_working_tree_encoding_content(path, &utf16, &utf16_bytes).expect("decode utf16"),
+            original
+        );
+        assert_eq!(
+            decode_working_tree_encoding_content(path, &utf32, &utf32_bytes).expect("decode utf32"),
+            original
+        );
+    }
+
+    #[test]
+    fn working_tree_encoding_rejects_prohibited_and_missing_bom() {
+        let path = b"demo.txt";
+        let utf16be = WorkingTreeEncoding::Utf16 {
+            endian: UtfEndian::Big,
+            bom: BomMode::None,
+        };
+        let utf32 = WorkingTreeEncoding::Utf32 {
+            endian: UtfEndian::Little,
+            bom: BomMode::Required,
+        };
+
+        let utf16_with_bom = b"\xFE\xFF\0A".to_vec();
+        let utf32_without_bom = b"A\0\0\0".to_vec();
+
+        let err = decode_working_tree_encoding_content(path, &utf16be, &utf16_with_bom)
+            .expect_err("utf16 bom should be rejected");
+        assert!(format!("{err:?}").contains("BOM is prohibited"));
+
+        let err = decode_working_tree_encoding_content(path, &utf32, &utf32_without_bom)
+            .expect_err("utf32 missing bom should fail");
+        assert!(format!("{err:?}").contains("BOM is required"));
     }
 }

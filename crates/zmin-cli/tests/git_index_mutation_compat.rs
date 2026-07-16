@@ -33,6 +33,90 @@ fn rm_fixture_repo() -> TempDir {
     repo
 }
 
+fn rm_autocrlf_gitattributes_repo(use_zmin_checkout: bool) -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "core.autocrlf", "false"]);
+
+    write_file(repo.path(), "one", "Hello\nworld\nhow\nare\nyou\n");
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    write_file(
+        repo.path(),
+        "dir/two",
+        "I\nam\nvery\nvery\nfine\nthank\nyou\n",
+    );
+    fs::write(repo.path().join("three"), b"Oh here is NUL\0in text here\n").expect("write three");
+    run_zmin(repo.path(), ["add", "."]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    write_file(repo.path(), ".gitattributes", "t* crlf\n");
+    git(repo.path(), ["read-tree", "--reset", "-u", "HEAD"]);
+    fs::write(repo.path().join(".gitattributes"), b"t* crlf\none -crlf\n")
+        .expect("write attributes");
+    run_zmin(repo.path(), ["add", ".gitattributes"]);
+    git_with_env(repo.path(), ["commit", "-m", "Add .gitattributes"]);
+
+    remove_dir_all_if_exists(repo.path().join("dir"));
+    remove_file_if_exists(repo.path().join("one"));
+    remove_file_if_exists(repo.path().join(".gitattributes"));
+    remove_file_if_exists(repo.path().join("patch.file"));
+    remove_file_if_exists(repo.path().join("three"));
+    git(repo.path(), ["read-tree", "--reset", "HEAD"]);
+    if use_zmin_checkout {
+        run_zmin(
+            repo.path(),
+            ["checkout-index", "-u", "one", "dir/two", "three"],
+        );
+        run_zmin(repo.path(), ["checkout-index", "-u", ".gitattributes"]);
+    } else {
+        git(
+            repo.path(),
+            ["checkout-index", "-u", "one", "dir/two", "three"],
+        );
+        git(repo.path(), ["checkout-index", "-u", ".gitattributes"]);
+    }
+
+    git(repo.path(), ["config", "core.autocrlf", "true"]);
+    let mut attrs = fs::read(repo.path().join(".gitattributes")).expect("read attrs");
+    attrs.extend_from_slice(b".file2 -crlf\r\n");
+    fs::write(repo.path().join(".gitattributes"), attrs).expect("append attrs first");
+    run_zmin(repo.path(), ["add", ".gitattributes"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    let mut attrs = fs::read(repo.path().join(".gitattributes")).expect("read attrs second");
+    attrs.extend_from_slice(b".file -crlf\r\n");
+    fs::write(repo.path().join(".gitattributes"), attrs).expect("append attrs second");
+    write_file(repo.path(), ".file", "contents\n");
+    run_zmin(repo.path(), ["add", ".gitattributes", ".file"]);
+    git_with_env(repo.path(), ["commit", "-m", "second"]);
+
+    if use_zmin_checkout {
+        run_zmin(repo.path(), ["checkout", "main~1"]);
+        run_zmin(repo.path(), ["checkout", "main"]);
+    } else {
+        git(repo.path(), ["checkout", "main~1"]);
+        git(repo.path(), ["checkout", "main"]);
+    }
+
+    repo
+}
+
+fn remove_file_if_exists(path: std::path::PathBuf) {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("remove file: {error}"),
+    }
+}
+
+fn remove_dir_all_if_exists(path: std::path::PathBuf) {
+    match fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("remove dir: {error}"),
+    }
+}
+
 fn mv_fixture_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -791,6 +875,148 @@ fn add_autocrlf_warning_and_blob_normalization_match_stock_git() {
     );
 }
 
+#[test]
+fn add_safecrlf_true_and_false_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("CRLF.txt"), b"LINEONE\r\nLINETWO\r\n").expect("write CRLF");
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(
+            zmin_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=true",
+                "add",
+                "CRLF.txt",
+            ],
+        ),
+        git_failure_output(
+            git_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=true",
+                "add",
+                "CRLF.txt",
+            ],
+        )
+    );
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=false",
+                "add",
+                "CRLF.txt",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=false",
+                "add",
+                "CRLF.txt",
+            ],
+            "git",
+        )
+    );
+}
+
+#[test]
+fn add_safecrlf_warn_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("warn.txt"), b"LINEONE\nLINETWO\n").expect("write LF");
+    }
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=true",
+                "-c",
+                "core.safecrlf=warn",
+                "add",
+                "warn.txt",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=true",
+                "-c",
+                "core.safecrlf=warn",
+                "add",
+                "warn.txt",
+            ],
+            "git",
+        )
+    );
+}
+
+#[test]
+fn diff_demotes_safecrlf_true_to_warn_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("tracked.txt"), b"LINEONE\n").expect("write tracked");
+        git(repo, ["-c", "core.autocrlf=input", "add", "tracked.txt"]);
+        git(repo, ["commit", "-m", "base"]);
+        fs::write(repo.join("tracked.txt"), b"LINEONE\r\n").expect("rewrite tracked");
+    }
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=true",
+                "diff",
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "-c",
+                "core.autocrlf=input",
+                "-c",
+                "core.safecrlf=true",
+                "diff",
+                "HEAD",
+            ],
+            "git",
+        )
+    );
+}
+
 fn zmin_cli_bin() -> &'static str {
     option_env!("CARGO_BIN_EXE_zmin").unwrap_or(env!("CARGO_BIN_EXE_zmin"))
 }
@@ -962,6 +1188,106 @@ fn add_ignore_errors_config_stages_readable_siblings_like_stock_git() {
     assert_eq!(
         run_zmin_status(zmin_repo.path(), ["add", "."]),
         git_status(git_repo.path(), ["add", "."])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "foo1"]),
+        git(git_repo.path(), ["ls-files", "foo1"])
+    );
+}
+
+#[test]
+fn add_renormalize_restages_tracked_glob_pathspec_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "core.autocrlf", "false"]);
+        write_file(repo, "LF.txt", "LINEONE\nLINETWO\nLINETHREE\n");
+        fs::write(
+            repo.join("CRLF.txt"),
+            b"LINEONE\r\nLINETWO\r\nLINETHREE\r\n",
+        )
+        .expect("write CRLF");
+        fs::write(
+            repo.join("CRLF_mix_LF.txt"),
+            b"LINEONE\r\nLINETWO\nLINETHREE\n",
+        )
+        .expect("write mixed");
+        git(repo, ["add", "."]);
+        git_with_env(repo, ["commit", "-m", "initial"]);
+        fs::write(repo.join(".gitattributes"), b"*.txt text=auto\n").expect("write attributes");
+    }
+
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["add", "--renormalize", "*.txt"]),
+        git_status(git_repo.path(), ["add", "--renormalize", "*.txt"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--eol"]),
+        git(git_repo.path(), ["ls-files", "--eol"])
+    );
+}
+
+#[test]
+fn add_ignore_errors_glob_pathspec_is_not_treated_as_missing_literal_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "core.autocrlf", "false"]);
+        write_file(repo, "LF.txt", "LINEONE\nLINETWO\nLINETHREE\n");
+        fs::write(
+            repo.join("CRLF.txt"),
+            b"LINEONE\r\nLINETWO\r\nLINETHREE\r\n",
+        )
+        .expect("write CRLF");
+        fs::write(
+            repo.join("CRLF_mix_LF.txt"),
+            b"LINEONE\r\nLINETWO\nLINETHREE\n",
+        )
+        .expect("write mixed");
+        git(repo, ["add", "."]);
+        git_with_env(repo, ["commit", "-m", "initial"]);
+        fs::write(repo.join(".gitattributes"), b"*.txt text=auto\n").expect("write attributes");
+    }
+
+    let before = git(git_repo.path(), ["ls-files", "--eol"]);
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["add", "--ignore-errors", "*.txt"]),
+        git_status(git_repo.path(), ["add", "--ignore-errors", "*.txt"])
+    );
+    assert_eq!(git(zmin_repo.path(), ["ls-files", "--eol"]), before);
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--eol"]),
+        git(git_repo.path(), ["ls-files", "--eol"])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn add_no_ignore_errors_overrides_config_like_stock_git() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "add.ignore-errors", "true"]);
+        write_file(repo, "foo1", "readable\n");
+        write_file(repo, "foo2", "unreadable\n");
+        let mut permissions = fs::metadata(repo.join("foo2"))
+            .expect("read foo2 metadata")
+            .permissions();
+        permissions.set_mode(0);
+        fs::set_permissions(repo.join("foo2"), permissions).expect("chmod foo2");
+    }
+
+    assert_eq!(
+        run_zmin_status(
+            zmin_repo.path(),
+            ["add", "--verbose", "--no-ignore-errors", "."]
+        ),
+        git_status(
+            git_repo.path(),
+            ["add", "--verbose", "--no-ignore-errors", "."]
+        )
     );
     assert_eq!(
         git(zmin_repo.path(), ["ls-files", "foo1"]),
@@ -1295,6 +1621,35 @@ fn add_case_insensitive_absolute_path_matches_stock_git_when_supported() {
 }
 
 #[test]
+fn add_case_only_recreation_stages_single_canonical_entry_when_ignorecase_enabled() {
+    let probe = TempDir::new().expect("temp probe");
+    write_file(probe.path(), "CamelCase", "good\n");
+    if !probe.path().join("camelcase").exists() {
+        return;
+    }
+
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "camelcase", "");
+    run_zmin(repo.path(), ["add", "camelcase"]);
+    run_zmin_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    fs::remove_file(repo.path().join("camelcase")).expect("remove lowercase path");
+    write_file(repo.path(), "CamelCase", "1\n");
+    run_zmin(repo.path(), ["add", "CamelCase"]);
+
+    assert_eq!(run_zmin(repo.path(), ["ls-files"]), "camelcase");
+    assert_eq!(
+        run_zmin(repo.path(), ["cat-file", "blob", ":camelcase"]),
+        "1\n"
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        "## main\nM  camelcase\n"
+    );
+}
+
+#[test]
 fn add_update_matches_stock_git_state() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
@@ -1526,6 +1881,29 @@ fn update_index_matches_stock_git_for_core_index_mutations() {
 }
 
 #[test]
+fn update_index_add_remove_replaces_tracked_file_with_directory_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "DF", "file\n");
+        git(repo, ["update-index", "--add", "DF"]);
+        fs::remove_file(repo.join("DF")).expect("remove tracked file");
+        fs::create_dir(repo.join("DF")).expect("create replacement directory");
+        write_file(repo, "DF/DF", "nested\n");
+    }
+
+    let args = ["update-index", "--add", "--remove", "DF", "DF/DF"];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin update-index"),
+        command_any_output("git", git_repo.path(), &args, "git update-index")
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+}
+
+#[test]
 fn update_index_add_replace_resolves_directory_file_conflicts_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -1555,6 +1933,48 @@ fn update_index_add_replace_resolves_directory_file_conflicts_like_stock_git() {
         run_zmin(zmin_repo.path(), ["ls-files", "path0"]),
         "path0/file2"
     );
+}
+
+#[test]
+fn update_index_rejects_directory_file_conflicts_without_replace_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "path0", "root\n");
+        write_file(repo, "path1", "link-target\n");
+        write_file(repo, "path2/file2", "nested\n");
+        write_file(repo, "path3/file3", "nested\n");
+        git(
+            repo,
+            [
+                "update-index",
+                "--add",
+                "path0",
+                "path1",
+                "path2/file2",
+                "path3/file3",
+            ],
+        );
+        fs::remove_file(repo.join("path0")).expect("remove path0");
+        fs::remove_file(repo.join("path1")).expect("remove path1");
+        fs::remove_dir_all(repo.join("path2")).expect("remove path2");
+        fs::remove_dir_all(repo.join("path3")).expect("remove path3");
+        fs::create_dir(repo.join("path0")).expect("create path0");
+        fs::create_dir(repo.join("path1")).expect("create path1");
+        write_file(repo, "path0/file0", "file\n");
+        write_file(repo, "path1/file1", "file\n");
+        write_file(repo, "path2", "file\n");
+        write_file(repo, "path3", "file\n");
+    }
+
+    for path in ["path0/file0", "path1/file1", "path2", "path3"] {
+        let args = ["update-index", "--add", "--", path];
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), &args),
+            git_failure_output(git_repo.path(), &args),
+            "update-index conflict mismatch for {path}"
+        );
+    }
 }
 
 #[test]
@@ -2278,6 +2698,30 @@ fn rm_common_options_match_stock_git() {
     assert_eq!(
         run_zmin_failure_output(repo.path(), &["rm", "--pathspec-file-nul"]),
         git_failure_output(repo.path(), &["rm", "--pathspec-file-nul"])
+    );
+}
+
+#[test]
+fn rm_gitattributes_after_autocrlf_checkout_chain_matches_stock_git() {
+    let git_repo = rm_autocrlf_gitattributes_repo(false);
+    let zmin_repo = rm_autocrlf_gitattributes_repo(true);
+
+    assert_eq!(
+        command_output("git", git_repo.path(), &["rm", ".gitattributes"], "git"),
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["rm", ".gitattributes"],
+            "zmin"
+        ),
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["diff-files", "--raw", "--no-abbrev"]),
+        git(git_repo.path(), ["diff-files", "--raw", "--no-abbrev"]),
     );
 }
 

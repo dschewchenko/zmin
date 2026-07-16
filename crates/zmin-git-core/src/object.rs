@@ -176,6 +176,43 @@ impl fmt::Display for ObjectId {
     }
 }
 
+pub(crate) fn object_hex_common_prefix_len_bytes(left: &[u8], right: &[u8]) -> usize {
+    let mut len = 0_usize;
+    for (left, right) in left.iter().zip(right) {
+        if left == right {
+            len += 2;
+            continue;
+        }
+        if left >> 4 == right >> 4 {
+            len += 1;
+        }
+        break;
+    }
+    len
+}
+
+pub(crate) fn update_unique_abbrev_len_for_candidate(
+    sorted_targets: &[ObjectId],
+    candidate: &[u8],
+    required: &mut usize,
+) {
+    let insertion = match sorted_targets.binary_search_by(|id| id.as_bytes().cmp(candidate)) {
+        Ok(_) => return,
+        Err(insertion) => insertion,
+    };
+    if let Some(target) = insertion
+        .checked_sub(1)
+        .and_then(|index| sorted_targets.get(index))
+    {
+        *required =
+            (*required).max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
+    }
+    if let Some(target) = sorted_targets.get(insertion) {
+        *required =
+            (*required).max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
+    }
+}
+
 fn hex_nibble(byte: u8) -> io::Result<u8> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
@@ -304,6 +341,32 @@ pub fn hash_object(algorithm: GitHashAlgorithm, kind: GitObjectKind, content: &[
     hasher.finalize()
 }
 
+/// Hash an object with an arbitrary literal type name.
+pub fn hash_literal_object(
+    algorithm: GitHashAlgorithm,
+    kind: &[u8],
+    content: &[u8],
+) -> io::Result<ObjectId> {
+    validate_literal_object_kind(kind)?;
+    let mut hasher = GitObjectHash::new(algorithm);
+    hasher.update(kind);
+    hasher.update(b" ");
+    update_decimal(&mut hasher, content.len());
+    hasher.update(b"\0");
+    hasher.update(content);
+    Ok(hasher.finalize())
+}
+
+fn validate_literal_object_kind(kind: &[u8]) -> io::Result<()> {
+    if kind.is_empty() || kind.contains(&0) || kind.contains(&b' ') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "literal git object type is invalid",
+        ));
+    }
+    Ok(())
+}
+
 /// Write canonical Git object bytes and return the object id.
 pub fn write_encoded_object<W: Write>(
     writer: W,
@@ -411,10 +474,8 @@ fn parse_decimal(bytes: &[u8]) -> io::Result<usize> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-    use std::process::{Command, Stdio};
-
     use super::*;
+    use crate::stock_git_support;
 
     #[test]
     fn sha1_empty_blob_matches_git_known_id() {
@@ -484,29 +545,6 @@ mod tests {
     }
 
     fn git_hash_object(kind: &str, content: &[u8]) -> String {
-        let mut child = Command::new("git")
-            .args(["hash-object", "-t", kind, "--stdin"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("spawn git hash-object");
-
-        child
-            .stdin
-            .as_mut()
-            .expect("git stdin")
-            .write_all(content)
-            .expect("write git stdin");
-
-        let output = child.wait_with_output().expect("wait git hash-object");
-        assert!(
-            output.status.success(),
-            "git hash-object failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git hash output utf8")
-            .trim()
-            .to_owned()
+        stock_git_support::git_hash_object(kind, content)
     }
 }

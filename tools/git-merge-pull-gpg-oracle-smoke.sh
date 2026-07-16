@@ -37,6 +37,39 @@ compare_files() {
   fi
 }
 
+strip_commit_signature() {
+  awk '
+    /^gpgsig / { in_signature = 1; next }
+    in_signature && /^ / { next }
+    { in_signature = 0; print }
+  ' "$1"
+}
+
+compare_commits() {
+  local label="$1"
+  local left_repo="$2"
+  local right_repo="$3"
+  local left="$4"
+  local right="$5"
+  local left_signed=false
+  local right_signed=false
+  grep -q '^gpgsig ' "$left" && left_signed=true
+  grep -q '^gpgsig ' "$right" && right_signed=true
+  if test "$left_signed" != "$right_signed"; then
+    compare_files "$label" "$left" "$right"
+    return
+  fi
+  if test "$left_signed" = false; then
+    compare_files "$label" "$left" "$right"
+    return
+  fi
+  "$GIT_BIN" -C "$left_repo" verify-commit HEAD >/dev/null 2>&1
+  "$GIT_BIN" -C "$right_repo" verify-commit HEAD >/dev/null 2>&1
+  strip_commit_signature "$left" >"$left.unsigned"
+  strip_commit_signature "$right" >"$right.unsigned"
+  compare_files "$label" "$left.unsigned" "$right.unsigned"
+}
+
 ensure_gpg_fixture() {
   if test -n "${gpg_home:-}"; then
     return
@@ -121,7 +154,7 @@ run_merge_case() {
   compare_files merge_stderr "$git_err" "$zmin_err"
   "$GIT_BIN" -C "$git_repo" cat-file -p HEAD >"$git_commit"
   "$GIT_BIN" -C "$zmin_repo" cat-file -p HEAD >"$zmin_commit"
-  compare_files merge_commit "$git_commit" "$zmin_commit"
+  compare_commits merge_commit "$git_repo" "$zmin_repo" "$git_commit" "$zmin_commit"
   printf '%s\tok\n' "$name"
 }
 
@@ -181,7 +214,7 @@ run_pull_case() {
   compare_files pull_stderr "$git_err" "$zmin_err"
   "$GIT_BIN" -C "$git_client" cat-file -p HEAD >"$git_commit"
   "$GIT_BIN" -C "$zmin_client" cat-file -p HEAD >"$zmin_commit"
-  compare_files pull_commit "$git_commit" "$zmin_commit"
+  compare_commits pull_commit "$git_client" "$zmin_client" "$git_commit" "$zmin_commit"
   printf '%s\tok\n' "$name"
 }
 

@@ -6,8 +6,9 @@ use std::{fs, path::Path};
 use tempfile::TempDir;
 
 use common::{
-    configure_identity, git, git_args, git_init, git_status, git_with_env, git_with_stdin,
-    run_zmin, run_zmin_args, run_zmin_status, write_file, zmin_bin,
+    clone_repo_fixture, command_output_with_env, configure_identity, git, git_args, git_init,
+    git_status, git_with_env, git_with_stdin, run_zmin, run_zmin_args, run_zmin_status, write_file,
+    zmin_bin,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +144,42 @@ fn rerere_multi_conflict_fixture() -> TempDir {
     repo
 }
 
+fn merge_recursive_df_fixture() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir(repo.path().join("subdir")).expect("create subdir");
+    write_file(repo.path(), "file1", "file one\n");
+    write_file(repo.path(), "file2", "file two\n");
+    write_file(repo.path(), "subdir/file1", "file one in subdirectory\n");
+    write_file(repo.path(), "subdir/file2", "file two in subdirectory\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["branch", "side"]);
+    git(repo.path(), ["tag", "-f", "branch-point"]);
+    fs::remove_file(repo.path().join("file2")).expect("remove file2");
+    fs::remove_file(repo.path().join("subdir/file2")).expect("remove subdir/file2");
+    git(
+        repo.path(),
+        ["update-index", "--remove", "file2", "subdir/file2"],
+    );
+    git_with_env(
+        repo.path(),
+        ["commit", "-m", "main removes file2 and subdir/file2"],
+    );
+    git(repo.path(), ["reset", "--hard"]);
+    git(repo.path(), ["checkout", "-b", "side-a", "branch-point"]);
+    fs::remove_file(repo.path().join("subdir/file2")).expect("remove subdir/file2");
+    fs::create_dir(repo.path().join("subdir/file2")).expect("create nested dir");
+    write_file(repo.path(), "subdir/file2/another", "qfwfq\n");
+    git(repo.path(), ["add", "subdir/file2/another"]);
+    git_with_env(
+        repo.path(),
+        ["commit", "-m", "side-a changes file2 to directory"],
+    );
+    git(repo.path(), ["checkout", "-B", "side-b", "branch-point"]);
+    repo
+}
+
 #[test]
 fn merge_file_matches_stock_git_for_clean_and_conflict_cases() {
     let dir = TempDir::new().expect("temp dir");
@@ -233,6 +270,28 @@ fn merge_file_matches_stock_git_for_clean_and_conflict_cases() {
         fs::read_to_string(dir.path().join("zmin-inplace.txt")).expect("read zmin merge file"),
         fs::read_to_string(dir.path().join("git-inplace.txt")).expect("read git merge file")
     );
+}
+
+#[test]
+fn merge_recursive_and_resolve_match_stock_git_for_directory_file_case() {
+    for args in [
+        vec!["merge-resolve", "branch-point", "--", "side-b", "side-a"],
+        vec!["merge-recursive", "branch-point", "--", "side-b", "side-a"],
+    ] {
+        let git_repo = merge_recursive_df_fixture();
+        let zmin_repo = clone_repo_fixture(git_repo.path());
+        let git_args = args.iter().copied().collect::<Vec<_>>();
+        let zmin_args = git_args.clone();
+
+        let git_output = command_all_output("git", git_repo.path(), &git_args);
+        let zmin_output = command_all_output(zmin_bin(), zmin_repo.path(), &zmin_args);
+        assert_eq!(zmin_output, git_output, "args: {git_args:?}");
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["ls-files", "-s"]),
+            git(git_repo.path(), ["ls-files", "-s"]),
+            "args: {git_args:?}"
+        );
+    }
 }
 
 #[test]
@@ -458,6 +517,34 @@ fn mergetool_tool_help_matches_stock_git_with_user_defined_tools() {
         command_all_output("git", git_repo.path(), &["mergetool", "--tool-help"]),
         command_all_output(zmin_bin(), zmin_repo.path(), &["mergetool", "--tool-help"])
     );
+}
+
+#[test]
+fn mergetool_tool_help_does_not_depend_on_stock_git_runtime() {
+    let repo = mergetool_conflict_fixture();
+    git(
+        repo.path(),
+        [
+            "config",
+            "mergetool.zmintest.cmd",
+            "printf 'resolved\\n' > \"$MERGED\"",
+        ],
+    );
+
+    let expected = command_all_output("git", repo.path(), &["mergetool", "--tool-help"]);
+    let poisoned = command_output_with_env(
+        zmin_bin(),
+        repo.path(),
+        &["mergetool", "--tool-help"],
+        &[
+            ("ZMIN_STOCK_GIT", "/definitely/missing/git"),
+            ("GIT_BIN", "/definitely/missing/git"),
+        ],
+        "zmin mergetool --tool-help",
+    );
+    assert_eq!(poisoned.0, expected.0);
+    assert_eq!(poisoned.1, expected.1);
+    assert!(poisoned.2.is_empty(), "unexpected stderr: {}", poisoned.2);
 }
 
 #[test]

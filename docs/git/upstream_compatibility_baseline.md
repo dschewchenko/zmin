@@ -1,19 +1,797 @@
 # Upstream Git Compatibility Baseline
 
+## Current v2.47.1 frontier (2026-07-16)
+
+A fresh integrated `all-nondeprecated` run with offset `0` and limit `50`
+passed `50/50` files against pinned Git `v2.47.1`. The previously failing
+offset-`50` slice is also effectively `50/50`: all fourteen original failures
+now have green complete-file or focused-file reruns, including the final
+`t0613-reftable-write-options.sh` (`11/11`),
+`t1013-read-tree-submodule.sh`, and `t1022-read-tree-partial-clone.sh` closures.
+Together these results cover the first 100 selected top-level files, although
+the second 50-file slice has not yet been replayed as one uninterrupted final
+run. This is a verified frontier, not a claim that the remaining upstream
+manifest is green.
+
+The final offset-`0` run used the current debug binary after the worktree,
+ignore, CRLF, cache-tree, split-index, and interactive-patch fixes. Its summary
+reported `total=50`, `passed=50`, and `failed=0`. A fresh offset-`100`, limit-`50`
+replay reported `total=50`, `passed=39`, and `failed=11`; the current release
+binary has SHA-256
+`0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c`.
+The focused `t1502-rev-parse-parseopt.sh` replay is green at `37/37` after
+closing the complete usage/specification and shell-eval compatibility cluster.
+The upstream suite remains the authoritative compatibility denominator; the
+closed command catalog and local differential tests do not imply universal Git
+parity.
+
+The next pinned v2.47.1 slice (selected files 150–199) initially passed `9/50`.
+Focused reruns now pass the six high-leverage closures found there:
+`t1511-rev-parse-caret.sh`, `t1513-rev-parse-prefix.sh`,
+`t1514-rev-parse-push.sh`, `t1515-rev-parse-outside-repo.sh`,
+`t1601-index-bogus.sh`, and `t2100-update-cache-badpath.sh`. These cover
+negative message search, revision/path prefixing, push-destination resolution,
+separate-git-dir resolution, null-SHA refusal/override in index plumbing, and
+directory/file conflict refusal in `update-index`; the remaining slice failures
+are broader checkout, root-work-tree, split-index, and index-format gaps.
+
+The current release also passes focused `t1600-index.sh` (`7/7`) and
+`t1517-outside-repo.sh` (`10/10`). These close index version/skip-hash policy,
+patch/diff behavior outside a repository, empty IMAP input, and the
+`remote-http` error contract without a runtime Git fallback.
+
+The split-index slice `t1700-split-index.sh` now passes all `29/29` assertions.
+Its validated core covers overlay/replacement/deletion bitmaps, split-index
+collapse and re-enable controls, expiry and permission policy, null-SHA
+cache-tree safety, alternate shared-index lookup, and `GIT_TEST_SPLIT_INDEX`.
+
 Date: 2026-06-18
 
 This document tracks compatibility against selected upstream Git test-suite files.
 It is intentionally stricter than the local command inventory and smoke tests:
 command presence is not counted as behavior parity.
 
+## Upstream strategy
+
+Do not vendor-copy the upstream `t/` suite into this repository.
+
+Use the pinned upstream source in the local cache as the single source of truth:
+
+- pinned source: `~/.cache/zmin/git-upstream/git-v2.54.0`
+- default core allowlist:
+  `tools/git-upstream-compat-tests-core.txt`
+- generated full-core manifest:
+  `tools/git-upstream-compat-manifest.sh full-core`
+- generated all-upstream manifest:
+  `tools/git-upstream-compat-manifest.sh all-top-level`
+- generated all-minus-whole-file-deprecated manifest:
+  `tools/git-upstream-compat-manifest.sh all-nondeprecated`
+- scratch subtree export from the cached upstream suite:
+  `tools/git-upstream-compat-materialize.sh full-core /tmp/zmin-upstream-full-core`
+  `tools/git-upstream-compat-materialize.sh all-nondeprecated /tmp/zmin-upstream-all-nondeprecated`
+- local gitignored snapshot sync:
+  `tools/git-upstream-sync.sh nondeprecated`
+  `tools/git-upstream-sync.sh refresh-all`
+- upstream scope audit:
+  `tools/git-upstream-compat-audit.sh legacy-audit`
+- deprecated-surface audit:
+  `tools/git-upstream-deprecated-audit.sh audit`
+- explicit legacy/external family excludes:
+  `tools/git-upstream-compat-tests-legacy-excludes.tsv`
+- optional per-file excludes:
+  `tools/git-upstream-compat-tests-file-excludes.tsv`
+
+The current cached upstream `t/` tree contains `1042` top-level `tNNNN-*.sh`
+shell test files. The core replace-git track intentionally excludes `119`
+legacy, deprecated or external bridge files and keeps `923` upstream shell
+files in scope for the generated full-core suite. The current explicit
+excludes are:
+
+- `t5323` `pack-redundant`: `1`
+- `t91xx` `git-svn`: `69`
+- `t94xx` `git-cvsserver`: `3`
+- `t95xx` `gitweb`: `3`
+- `t96xx` `cvsimport`: `5`
+- `t98xx` `git-p4`: `38`
+
+These are excluded from the core developer-flow parity track because they are
+external integration families rather than the classic local/transport/history/
+index workflows required for replacing stock Git in common developer use.
+
+The deprecated-surface audit currently shows `19` top-level upstream shell
+files with explicit deprecated/removal markers. Only `1` of them is currently
+fully excluded from full-core (`t5323-pack-redundant.sh` via the explicit
+legacy-exclude manifest). The other `18` remain in scope because they are
+still-supported upstream shell suites with mixed deprecated assertions inside
+live commands and repository flows, for example:
+
+- `t1403-show-ref.sh`: deprecated `--heads` coverage inside live `show-ref`
+- `t5512-ls-remote.sh`: deprecated `--heads` / `-h` coverage inside live
+  `ls-remote`
+- `t6120-describe.sh`: deprecated `name-rev --stdin` lane inside live
+  `describe` / `name-rev`
+- `t4013-diff-various.sh` and `t4202-log.sh`: `whatchanged` lanes mixed into
+  the shared diff/log surface
+
+This distinction is non-negotiable: do not treat every upstream
+"deprecated"/"scheduled for removal" mention as justification for removing the
+whole shell test from full-core. For the Git `2.47.1` baseline, mixed
+deprecated assertions inside still-present commands remain part of practical
+replace-git compatibility.
+
+If a local copied subset is needed for triage or suite consolidation, export
+only the selected subtree from the cache instead of vendoring upstream `t/`
+into this repository:
+
+```bash
+tools/git-upstream-compat-materialize.sh all-top-level /tmp/zmin-upstream-all
+tools/git-upstream-compat-materialize.sh all-nondeprecated /tmp/zmin-upstream-all-nondeprecated
+tools/git-upstream-compat-materialize.sh full-core /tmp/zmin-upstream-full-core
+tools/git-upstream-compat-materialize.sh fully-excluded-deprecated /tmp/zmin-upstream-deprecated-only
+tools/git-upstream-sync.sh refresh-all
+```
+
+The default local sync copies the current `1041` nondeprecated top-level
+upstream shell tests into `.upstream-snapshots/git-v2.54.0/nondeprecated`,
+while the explicit whole-file deprecated surface remains isolated under
+`.upstream-snapshots/git-v2.54.0/deprecated-only`.
+
+Use `tools/git-compat-test-topology.sh audit` to keep the local Rust compat
+layer honest relative to this upstream scope. The policy is:
+
+- upstream shell tests are the authoritative broad contract for stock Git
+  behavior;
+- local Rust compat suites stay only for faster focused stock-Git oracles,
+  invalid-input parity, exact observed IDE/client traces, replace-git dogfood,
+  bounded LFS workflow probes, and Zmin-only surfaces;
+- do not vendor-copy the upstream `t/` tree into this repository and do not
+  answer coverage pressure by adding another parallel pile of issue-specific
+  local test files.
+
+Before adding another top-level family exclusion, run:
+
+```bash
+tools/git-upstream-compat-audit.sh legacy-audit
+tools/git-upstream-deprecated-audit.sh audit
+tools/git-compat-test-topology.sh audit
+```
+
+The audit must continue to show exact count matches for every explicit exclude
+row, and it also prints the neighboring `t90xx`, `t92xx`, `t93xx`, `t97xx`,
+and `t99xx` families that currently remain in scope. This prevents the
+full-core suite from silently dropping still-relevant Git surfaces such as
+`send-email`, `scalar`, `fast-import` / `fast-export`, `Git.pm`, bash
+completion, or `git web--browse` just because they live near the external
+bridge families in the upstream numbering scheme.
+
+## Current core-suite status
+
+As of 2026-07-02 on macOS, the new default core allowlist has current direct
+evidence for:
+
+- `quick`: green at `3/3`
+- `standard`: green at `9/9`
+
+The first broad `all-nondeprecated` macOS batch now also has fresh current
+evidence through the file-level manifest batching path on the current `debug`
+binary:
+
+- batch command:
+  `ZMIN_BIN=/Users/dschewchenko/.cache/skron-git/cargo-target/debug/zmin ZMIN_UPSTREAM_ALLOW_FAILURES=1 ZMIN_UPSTREAM_MANIFEST_OFFSET=0 ZMIN_UPSTREAM_MANIFEST_LIMIT=50 tools/git-upstream-compat-suite.sh all-nondeprecated`
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-current.zPqNil/summary.tsv`
+- result:
+  `50/50` pass, `0/50` fail
+
+Do not treat the older `23/50` and `38/50` manifests for this first
+`all-nondeprecated` slice as the current frontier anymore. They remain useful
+only as historical progression evidence. The entire earliest `0..49`
+top-level file slice is now closed on the current local macOS oracle,
+including the previously noisy help/alias/path/config and CRLF/conversion
+families in that batch.
+
+This latest `50/50` rerun still includes one important
+compatibility-accounting rule in the upstream suite wrapper itself.
+`t0050-filesystem.sh` does not count as a product failure when the log shows
+that every real assertion passed and the shell exits non-zero only because
+upstream `TODO known breakage` markers vanished. The focused evidence for that
+accounting rule is:
+
+- Zmin focused rerun:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0050-rerun.bGAJmb/summary.tsv`
+- stock Git control rerun:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-stock-t0050.EfvX9m/summary.tsv`
+
+In that environment, stock Git still reproduces the upstream known breakages,
+while Zmin now clears the underlying assertions and only trips the stale
+`TODO` bookkeeping. The wrapper therefore records the run as `pass` with the
+reason suffix `upstream TODO breakage vanished only` instead of treating it as
+an active replace-git compatibility gap.
+
+Focused replay evidence now also closes the previous-checkout syntax suite:
+
+- `t0100-previous.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0100-focused.ys4fv1/summary.tsv`
+
+- `t0101-at-syntax.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0101-focused.015rWC/summary.tsv`
+
+That replay covers stock-compatible `@{-n}` handling across branch deletion,
+merge target resolution, ancestor shorthand such as `@{-1}~1`, and reflog
+rendering (`log -g @{-1}`) on the current `compat` binary.
+
+The adjacent `@{...}` replay now also covers date-based reflog selectors in
+revision arguments, including `@{now}`, absolute historical dates such as
+`@{2001-09-17}`, and stock-compatible noisy-token forms like
+`@{3.hot.dogs.on.2001-09-17}`.
+
+The latest focused `t0000-basic.sh` rerun on the current debug binary is now
+green at `1/1`:
+
+- summary:
+  `/tmp/zmin-upstream-t0000.0zvFCQ/summary.tsv`
+
+That closure came from fixing `diff-files`/`diff-index` handling for
+`read-tree` stale-stat entries: Zmin now keeps tracked worktree entries in the
+diff set even when the blob content still matches the index and only the index
+stat cache is stale.
+
+Additional focused upstream replays since that batch have also closed the
+remaining early safety/filesystem blockers except for one still-expected
+known-breakage lane:
+
+- `t0003-attributes.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0003-focused.0qLrjt/summary.tsv`, after fixing
+  `check-attr` path normalization so mixed-case existing directory names no
+  longer get canonicalized to filesystem case before attribute matching.
+- `t0020-crlf.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0020-focused-rerun.Lpy4iG/summary.tsv`, after fixing
+  `crlf` attribute handling so `crlf` forces CRLF checkout output like stock
+  Git even without a separate `core.eol=crlf` override.
+- `t0030-stripspace.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0030-focused.LPkDcd/summary.tsv`.
+- `t0031-lockfile-pid.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0031-focused.HcI9O5/summary.tsv`.
+- `t0035-safe-bare-repository.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0035.UVLgMg/summary.tsv`
+- `t0026-eol-config.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0026-focused.dVbAC8/summary.tsv`, after fixing
+  `text` attribute precedence so `core.autocrlf=true` overrides `core.eol=lf`
+  like stock Git.
+
+The remaining gettext lane is now also closed on the current `compat` binary:
+
+- `t0203-gettext-setlocale-sanity.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0203-check2.IooOPZ/summary.tsv`
+
+That closure came from fixing commit identity environment handling so
+non-UTF-8 `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` values sourced by the
+upstream ISO-8859-1 fixture are no longer dropped by UTF-8-only env decoding
+before commit creation.
+
+## Current second-batch frontier
+
+After the gettext and shell-helper fixes, a fresh partial rerun of the next
+`all-nondeprecated` batch (`offset=50 limit=50`) produced the following
+incremental summary before the run was interrupted during the second half of
+the manifest:
+
+- partial summary:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-all-batch2-refresh.K54oS6/summary.tsv`
+
+The currently observed pass/fail split in that older partial summary was:
+
+- pass: `t0092`, `t0095`, `t0100`, `t0101`, `t0200`, `t0201`, `t0202`,
+  `t0203`, `t0204`, `t0300`, `t0303`, `t0500`
+- fail: `t0091`, `t0210`, `t0211`, `t0212`, `t0213`, `t0301`, `t0302`,
+  `t0410`, `t0411`, `t0450`, `t0600`, `t0601`, `t0602`
+
+This establishes the next real broad upstream frontier after the gettext
+cluster:
+
+- `t0091-bugreport.sh`: report template, system info section, duplicate-file
+  refusal, usage/error shape, and enabled-hooks reporting are still incomplete
+  in the current built-in implementation
+- historical `t0210` to `t0213`: trace2 normal/perf/event/ancestry surfaces
+  appeared red in that partial batch snapshot, but those failures were
+  contaminated by a stale upstream `t/helper/test-tool` wrapper that still
+  pointed at an older `compat`-profile `zmin` path. The runner now rewrites
+  that wrapper against the current `ZMIN_BIN` on every non-Windows prepare,
+  and the focused reruns below have since closed the quartet
+- `t0301` and `t0302`: credential cache/store helper behavior still diverges
+  from stock Git in upstream shell coverage
+- `t0410` and `t0411`: partial-clone broad upstream suites remain red beyond
+  the locally verified bounded demand-hydration scenarios
+- `t0450`: generated help/docs parity is still incomplete for upstream
+  text-doc versus help validation
+- `t0600` to `t0602`: reffiles backend broad shell coverage remains red
+
+Focused replay evidence now also closes the bugreport shell suite:
+
+- `t0091-bugreport.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0091-check5.qLx6XE/summary.tsv`
+
+## Trace2 oracle status
+
+Focused trace2 reruns showed that the earlier red signal for this family was
+contaminated by harness state rather than only by product behavior. Two
+separate harness issues existed:
+
+- the upstream `t/helper/test-tool` helper was built from the pinned
+  `v2.54.0` tree, while `ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1` previously used the
+  ambient `git` from `PATH`, which was a different version on this machine
+- the non-Windows `t/helper/test-tool` trace2 wrapper could remain pinned to a
+  stale `zmin` artifact path from an older run, so later upstream replays
+  silently executed a missing binary instead of the current `ZMIN_BIN`
+
+The harness now builds and uses the pinned upstream `git` binary for
+`ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1`, aligning `git` and `t/helper/test-tool`
+to the same source tree. It also rewrites the non-Windows trace2
+`t/helper/test-tool` shim on every prepare step so focused and broad reruns
+always target the current `ZMIN_BIN`.
+
+Direct evidence after those fixes:
+
+- `t0210-trace2-normal.sh`: stock-control green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-trace2-stock-fixed.h7qELI/out/summary.tsv`
+- `t0211-trace2-perf.sh`: stock-control still red at `0/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-trace2-stock-perf.mPesY6/out/summary.tsv`,
+  but only in the two `_run_dashed_` / `remote-http` / `http-fetch` assertions
+  that depend on dashed helper propagation through a reduced upstream build.
+
+This means:
+
+- the previous all-red `t0210` stock-control result was not valid evidence of a
+  `zmin` product gap;
+- the later broad `offset=50 limit=50` failures for `t0210` to `t0213` were
+  also not valid product evidence once the stale helper wrapper path was
+  identified;
+- the current `trace2` frontier must be split into:
+  a valid oracle/harness lane and a product-implementation lane;
+- `zmin` still does not have enough built-in trace2 behavior to claim parity,
+  but the oracle for the base normal stream is now trustworthy again.
+
+Focused product-side progress after the oracle fix:
+
+- `cargo test -q -p zmin-cli --test git_trace2_compat -- --nocapture`
+  is now green at `5/5` for the currently implemented built-in surface:
+  normal/perf lifecycle emission for `zmin version`, config-driven target
+  resolution, config/env `def_param` emission, and default credential redaction
+  with `GIT_TRACE2_REDACT=0` opt-out, plus unredacted `clone` start/`def_param`
+  URL parity for `url.*.insteadOf` remotes.
+- A focused upstream rerun against `zmin` is still red:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0210-after-trace2b.W9avTA/out/summary.tsv`
+  because most of `t0210` is still driven by upstream `test-tool trace2`
+  helper behaviors (`001return`, `002exit`, `003error`, `007bug` to `010bug`,
+  and global-config helper lanes) rather than only by ordinary Git command
+  execution through the `zmin` CLI.
+
+Latest focused replay after routing upstream `test-tool trace2` helper lanes
+through Zmin's built-in `git test-tool trace2` implementation:
+
+- `t0210-trace2-normal.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/tmp.HzXgHhf6xG/out/summary.tsv`
+- `t0211-trace2-perf.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.jFOMVF/summary.tsv`
+- `t0212-trace2-event.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.1r08OZ/summary.tsv`
+- `t0213-trace2-ancestry.sh`: green at `1/1` in
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.Natbuu/summary.tsv`
+
+The last `t0211` closure came from fixing the `http-fetch` dashed startup path
+so perf targets are prepared before repository discovery truncation and the
+trace emits only one root lifecycle (`version` / `start` / `cmd_name`) while
+still preserving the `_run_dashed_` child-start and `http-fetch`
+depth-1 `def_param` events expected by upstream.
+
+Focused local product coverage expanded alongside that replay:
+
+- `cargo test -q -p zmin-cli --test git_trace2_compat -- --nocapture`: green
+  at `13/13`, now covering built-in helper return/error/bug lanes, nested
+  child-process perf emission, timer/counter perf summaries, config-driven
+  normal/perf/event targets, redaction behavior, clone URL parity, and the
+  synthetic `_query_` trace2 cmd-name lane for `git --man-path`, plus the
+  single-lifecycle dashed `http-fetch` perf path.
+
+So the `t0210` normal, `t0211` perf, `t0212` event, and `t0213` ancestry
+streams are now genuinely closed in the upstream shell suite. The remaining
+trace2 family work, if any, now sits outside this previously failing `t0210`
+to `t0213` cluster rather than in the earlier helper-routing, event-target,
+or `http-fetch` dashed-lifecycle gaps.
+
+That closure came from replacing the previous stub bugreport writer with a
+stock-shaped template/system-info/hooks report, duplicate-target refusal, and
+pre-clap invalid-argument handling that now matches upstream `bugreport`
+stderr/usage shapes for unknown options and stray positional arguments.
+- `t0027-auto-crlf.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0027-focused.37hV9y/summary.tsv`.
+- `t0055-beyond-symlinks.sh`: green at `1/1` in
+  `/tmp/zmin-upstream-t0055.e3nu7i/summary.tsv`
+- `t0050-filesystem.sh`: focused replay now passes all remaining assertions in
+  `/tmp/zmin-upstream-t0050-current/t0050-filesystem.log`
+
+Do not keep treating the older broad-batch mentions of `t0003`, `t0020`,
+`t0030`, `t0031`, or `t0035` as authoritative active frontier evidence without
+rerunning the same broad batch on the current binary. Those older batch
+artifacts predate the focused fixes above and are stale for these files.
+
+The current `t0050-filesystem.sh` evidence is important to read precisely:
+
+- suite summary:
+  `/tmp/zmin-upstream-t0050-current/summary.tsv`
+- focused log:
+  `/tmp/zmin-upstream-t0050-current/t0050-filesystem.log`
+- current upstream harness result:
+  `fail`
+
+That `fail` no longer means the old broad filesystem frontier is still open.
+The current log shows:
+
+The latest post-fix focused rerun still has that exact shape:
+
+- summary:
+  `/tmp/zmin-upstream-t0050-focused.pPG1Tu/summary.tsv`
+- focused log:
+  `/tmp/zmin-upstream-t0050-focused.pPG1Tu/t0050-filesystem.log`
+- current upstream harness result:
+  `fail`
+
+But the reason remains identical: all runtime assertions pass, while upstream
+still exits non-zero only because its local `TODO known breakage vanished`
+markers now fire. Do not treat `t0050` as an active product-parity failure on
+the current macOS `compat` binary.
+
+- `core.ignorecase` init detection is no longer failing
+- case-change rename is no longer failing
+- directory add with mixed-case path segments is no longer failing
+- silent unicode rename/merge lanes are no longer failing
+- the `Gitweb`/`gitweb` orphan-reset checkout flow is no longer failing
+
+The remaining upstream `t0050` status is now purely harness/accounting:
+
+- `add (with different case)` now vanishes as a known breakage
+- `rename (silent unicode normalization)` now vanishes as a known breakage
+- `merge (silent unicode normalization)` now vanishes as a known breakage
+
+So the current earliest upstream frontier must not continue to treat
+`t0050-filesystem.sh` as an unresolved filesystem behavior cluster. All
+remaining assertions are currently green; the shell file exits non-zero only
+because the upstream `expect_failure` markers are now stale for the current
+Zmin behavior and need local tracking cleanup.
+
+The next rerun of the same broad early batch after the focused `t0000` closure
+is:
+
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-rerun4.d3ZsyW/summary.tsv`
+- result:
+  `40/50` pass, `10/50` fail
+
+Current failing top-level suites in that newest refreshed first large batch
+are:
+
+- `t0021-conversion.sh`
+- `t0022-crlf-rename.sh`
+- `t0024-crlf-archive.sh`
+- `t0025-crlf-renormalize.sh`
+- `t0028-working-tree-encoding.sh`
+- `t0030-stripspace.sh`
+- `t0031-lockfile-pid.sh`
+- `t0035-safe-bare-repository.sh`
+- `t0050-filesystem.sh`
+- `t0055-beyond-symlinks.sh`
+
+That broad rerun proves `t0000-basic.sh` is no longer an active member of the
+earliest all-nondeprecated frontier. The remaining early red cluster is now:
+
+- conversion and archive/encoding behavior (`t0021`, `t0022`, `t0024`,
+  `t0025`, `t0028`)
+- text/comment and safety diagnostics (`t0030`, `t0031`, `t0035`)
+- filesystem and symlink edge cases (`t0050`, `t0055`)
+
+The latest focused `t0021-conversion.sh` rerun on the current debug binary is
+now green at `1/1`:
+
+- summary:
+  `/tmp/zmin-upstream-t0021.QoY3rV/summary.tsv`
+
+That closure came from tightening long-running and one-shot filter parity:
+Zmin now avoids `SIGPIPE` self-termination when a clean filter stops reading,
+only sends `can-delay=1` when a process filter actually advertises `delay`,
+preserves the rebased branch ref in filter metadata, and refreshes checkout
+metadata without spuriously rerunning clean filters.
+
+The next rerun of the same broad early batch after the focused `t0021`
+closure is:
+
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-rerun5.K63mUS/summary.tsv`
+- result:
+  `41/50` pass, `9/50` fail
+
+Current failing top-level suites in that newest refreshed first large batch
+are:
+
+- `t0022-crlf-rename.sh`
+- `t0024-crlf-archive.sh`
+- `t0025-crlf-renormalize.sh`
+- `t0028-working-tree-encoding.sh`
+- `t0030-stripspace.sh`
+- `t0031-lockfile-pid.sh`
+- `t0035-safe-bare-repository.sh`
+- `t0050-filesystem.sh`
+- `t0055-beyond-symlinks.sh`
+
+That broad rerun proves `t0021-conversion.sh` is no longer an active member of
+the earliest all-nondeprecated frontier. The remaining early red cluster is
+now:
+
+- archive and encoding behavior (`t0022`, `t0024`, `t0025`, `t0028`)
+- text/comment and safety diagnostics (`t0030`, `t0031`, `t0035`)
+- filesystem and symlink edge cases (`t0050`, `t0055`)
+
+The latest focused `t0022-crlf-rename.sh` rerun on the current debug binary is
+now green at `1/1`:
+
+- summary:
+  `/tmp/zmin-upstream-t0022-fixed.4DcYYK/summary.tsv`
+
+That closure came from correcting rename similarity scoring so CR characters in
+CRLF sequences do not count against the similarity score. Zmin now normalizes
+CRLF-to-LF for similarity-only comparisons before running the LCS byte count,
+which brings `diff-tree -M` back to stock Git rename detection for CRLF-only
+line-ending rewrites.
+
+The next rerun of the same broad early batch after the focused `t0022`
+closure is:
+
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-rerun6.ICLgEa/summary.tsv`
+- result:
+  `42/50` pass, `8/50` fail
+
+Current failing top-level suites in that newest refreshed first large batch
+are:
+
+- `t0024-crlf-archive.sh`
+- `t0025-crlf-renormalize.sh`
+- `t0028-working-tree-encoding.sh`
+- `t0030-stripspace.sh`
+- `t0031-lockfile-pid.sh`
+- `t0035-safe-bare-repository.sh`
+- `t0050-filesystem.sh`
+- `t0055-beyond-symlinks.sh`
+
+That broad rerun proves `t0022-crlf-rename.sh` is no longer an active member
+of the earliest all-nondeprecated frontier. The remaining early red cluster is
+now:
+
+- archive and encoding behavior (`t0024`, `t0025`, `t0028`)
+- text/comment and safety diagnostics (`t0030`, `t0031`, `t0035`)
+- filesystem and symlink edge cases (`t0050`, `t0055`)
+
+The latest focused `t0024-crlf-archive.sh` rerun on the current debug binary is
+now green at `1/1`:
+
+- summary:
+  `/tmp/zmin-upstream-t0024-fixed.cUyMOJ/summary.tsv`
+
+That closure came from routing archive blob export through the shared checkout
+smudge pipeline instead of invoking only filter-smudge logic. Zmin archive
+entries now honor `core.autocrlf` EOL conversion before archive packaging while
+still applying attribute-driven filters through the same runtime path.
+
+The next rerun of the same broad early batch after the focused `t0024`
+closure is:
+
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-rerun7.xtEv6q/summary.tsv`
+- result:
+  `43/50` pass, `7/50` fail
+
+Current failing top-level suites in that newest refreshed first large batch
+are:
+
+- `t0025-crlf-renormalize.sh`
+- `t0028-working-tree-encoding.sh`
+- `t0030-stripspace.sh`
+- `t0031-lockfile-pid.sh`
+- `t0035-safe-bare-repository.sh`
+- `t0050-filesystem.sh`
+- `t0055-beyond-symlinks.sh`
+
+That broad rerun proves `t0024-crlf-archive.sh` is no longer an active member
+of the earliest all-nondeprecated frontier. The remaining early red cluster is
+now:
+
+- renormalize and encoding behavior (`t0025`, `t0028`)
+- text/comment and safety diagnostics (`t0030`, `t0031`, `t0035`)
+- filesystem and symlink edge cases (`t0050`, `t0055`)
+
+The latest focused `t0025-crlf-renormalize.sh` rerun on the current debug
+binary is now green at `1/1`:
+
+- summary:
+  `/tmp/zmin-upstream-t0025-fixed.uEkQTm/summary.tsv`
+
+That closure came from splitting `git add --renormalize` out of the plain
+`-u` lane and forcing tracked matches through a dedicated renormalize clean
+path that ignores the old index CRLF bias. The same change also fixed quoted
+glob pathspec handling in plain `git add` for nonexistent literal arguments by
+expanding matching tracked and worktree paths before staging.
+
+The next rerun of the same broad early batch after the focused `t0025`
+closure is:
+
+- summary:
+  `/tmp/zmin-upstream-all-nondeprecated-batch1-rerun8.ZNCwuh/summary.tsv`
+- result:
+  `44/50` pass, `6/50` fail
+
+Current failing top-level suites in that newest refreshed first large batch
+are:
+
+- `t0028-working-tree-encoding.sh`
+- `t0030-stripspace.sh`
+- `t0031-lockfile-pid.sh`
+- `t0035-safe-bare-repository.sh`
+- `t0050-filesystem.sh`
+- `t0055-beyond-symlinks.sh`
+
+That broad rerun proves `t0025-crlf-renormalize.sh` is no longer an active
+member of the earliest all-nondeprecated frontier. The remaining early red
+cluster is now:
+
+- working-tree encoding behavior (`t0028`)
+- text/comment and safety diagnostics (`t0030`, `t0031`, `t0035`)
+- filesystem and symlink edge cases (`t0050`, `t0055`)
+
+The latest focused `t0028-working-tree-encoding.sh` replay on the current
+`compat` binary is still red, but the shared clean/smudge encoding gap has
+been reduced from a broad `18/22` failure shape down to `3/22`:
+
+- summary:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.LZFlTn/summary.tsv`
+- remaining subcases:
+  - UTF-32 checkout EOL conversion lane
+  - diff/reporting when invalid encoded garbage is already stored in Git
+  - `core.checkRoundtripEncoding` tracing/config parity
+
+That reduction came from adding shared `working-tree-encoding` conversion to
+the stage/checkout content pipeline, including UTF-8/UTF-16/UTF-32 and
+SHIFT-JIS decoding/encoding support plus BOM validation for the UTF-16 and
+UTF-32 families.
+
+Latest core quick summary:
+`/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-core-quick.krhv89/summary.tsv`
+
+Latest core standard summary:
+`/tmp/zmin-t3200-after-fix/summary.tsv`
+
+`tools/git-upstream-compat-suite.sh exhaustive` now defaults to the generated
+full-core manifest instead of a second hand-curated allowlist. The suite
+runner also now has first-class large-batch modes for the broader upstream
+surface:
+
+- `all-nondeprecated`: every top-level upstream shell test except the explicit
+  whole-file deprecated excludes; current count `1041`
+- `all-top-level`: the complete pinned top-level upstream shell suite; current
+  count `1042`
+
+That means future upstream work can run the supported core surface, the
+all-minus-whole-file-deprecated surface, or the literal full top-level shell
+surface directly from the pinned cache without copying Git's `t/` tree into
+this repository.
+
+The focused path/config cluster has moved forward since that first broad slice.
+After adding command-scope config env parsing for `GIT_CONFIG_PARAMETERS` and
+`GIT_CONFIG_COUNT`, stock-style malformed `for-each-repo --config=...`
+diagnostics, `log.decorate` config support for `%d`/`%D` history formatting,
+and linked-worktree decoration loading from the common refs directory,
+`t0068-for-each-repo.sh` is now green again on the current `compat` binary:
+
+- targeted replay summary:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-t0068-replay3.Lg0E64/summary.tsv`
+- result:
+  `1/1` pass
+
+That narrows the previously known path/config frontier to the remaining
+`t0056-git-C.sh` and `t0060-path-utils.sh` lanes.
+
+`t0056-git-C.sh` is now also green on the current `compat` binary. The final
+closure came from reusing repo-aware absolute path resolution for `git add`
+when global `--git-dir` and `--work-tree` are active from a cwd outside the
+worktree, so the upstream lane `git --git-dir c/a.git --work-tree=c/a add a.txt`
+now matches stock Git instead of resolving `a.txt` against the caller cwd.
+
+- targeted replay summary:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-t0056-replay4.EQL2P5/summary.tsv`
+- result:
+  `1/1` pass
+
+`t0060-path-utils.sh` is now also green on the current `compat` binary. The
+final closure came from making `rev-parse --git-path` respect the same
+stock-Git routing rules for `GIT_GRAFT_FILE`, `GIT_INDEX_FILE`, and
+`GIT_OBJECT_DIRECTORY`, plus the worktree-private exceptions that must ignore
+`GIT_COMMON_DIR` (`index`, `index.lock`, `HEAD`, `logs/HEAD*`,
+`logs/refs/bisect/*`, `refs/bisect/*`, and `info/sparse-checkout`). The same
+pass also restored trailing-slash output for directory-form paths such as
+`logs/refs/`.
+
+- targeted replay summary:
+  `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-t0060-replay3.W2Pz3h/summary.tsv`
+- result:
+  `1/1` pass
+
+That closes the previously bounded `t0056` / `t0060` / `t0068` path/config
+cluster on the current `compat` binary.
+
+`t3200-branch.sh` is now green on the current `compat` binary. The final
+closure came from two rebase fixes:
+
+- interactive rebase todo parsing no longer treats decimal-looking abbreviated
+  commit ids as positional indexes, so an upstream-style `edit` stop on a hash
+  such as `9275698` no longer resolves to the wrong later commit;
+- non-root rebase replay now writes the same progress prefix as stock Git on
+  the stop lane (`Rebasing (1/2)\rStopped at ...`), which closes the remaining
+  observed stderr drift on the `--list during rebase` family.
+
+Current direct evidence:
+
+- targeted current-binary summary:
+  `/tmp/zmin-t3200-after-fix/summary.tsv`
+- focused local evidence:
+  `git_rebase_interactive_compat::branch_list_during_real_interactive_rebase_matches_stock_git`
+  `git_rebase_interactive_compat::branch_list_during_real_interactive_rebase_from_detached_head_matches_stock_git`
+  `git_rebase_interactive_compat::rebase_interactive_two_commit_todo_order_matches_stock_git`
+  `git_transport_local_compat::pull_rebase_interactive_edit_stops_and_continue_matches_stock_git`
+  `git_transport_local_compat::pull_rebase_interactive_edit_abort_restores_original_head_like_stock_git`
+
+The earlier `48` `deleting checked-out branch from repo that is a submodule`
+setup gap remains closed by bounded upstream evidence
+`/tmp/zmin-t3200-bounded48/summary.tsv` and the focused local
+`git_submodule_compat::submodule_add_existing_repo_path_matches_stock_git`.
+
+The previously failing `t3700-add.sh` and `t3903-stash.sh` now pass on the
+current `compat` binary:
+
+- `t3700-add.sh` targeted rerun summary:
+  `/tmp/zmin-upstream-current.LH8Q7m/t3700-add/summary.tsv`
+- `t3903-stash.sh` targeted rerun summary:
+  `/tmp/zmin-upstream-t3903-final.reclQS/summary.tsv`
+
+The `stash` closure came from two aligned fixes:
+
+- an in-tree upstream-contract test now covers the invalid export/import reject
+  sequence:
+  `git_stash_compat::stash_import_invalid_exported_commit_contract_matches_upstream_t3903`
+- `checkout --orphan` no longer rejects the follow-up orphan transition in this
+  state, and now matches stock Git's success/stdout shape on the focused path:
+  `git_worktree_state_compat::checkout_orphan_again_after_attaching_current_orphan_branch_matches_stock_git`
+
 ## Local runners
 
 macOS:
 
 ```bash
-ZMIN_BIN=target/debug/zmin \
 ZMIN_UPSTREAM_ALLOW_FAILURES=1 \
 tools/git-upstream-compat-suite.sh standard
+```
+
+The local runner now resolves Cargo's real target directory before selecting
+the built `zmin` binary, so repos with an external `target-dir` no longer need
+manual `ZMIN_BIN=...` just to use the upstream harness.
+
+To run an explicit upstream slice outside the default core allowlist, point
+`ZMIN_UPSTREAM_TEST_LIST` at a narrower manifest such as
+`tools/git-upstream-compat-tests-rev-parse.txt`.
+
+To print the full generated shell-suite scope directly:
+
+```bash
+tools/git-upstream-compat-manifest.sh full-core
+tools/git-upstream-compat-manifest.sh all-nondeprecated
+tools/git-upstream-compat-manifest.sh all-top-level
 ```
 
 Windows / Git for Windows through Parallels:
@@ -42,6 +820,24 @@ tools/parallels-windows-runner.sh upstream-poll \
   'C:\Users\skron\<zmin-upstream-...-out>'
 ```
 
+The same runner entrypoint also accepts `all-nondeprecated` and
+`all-top-level` when a larger guest batch is needed.
+
+For large-batch triage, the suite runner can now shard the selected top-level
+shell manifest directly without creating ad-hoc TSV copies:
+
+```bash
+ZMIN_UPSTREAM_MANIFEST_OFFSET=0 \
+ZMIN_UPSTREAM_MANIFEST_LIMIT=50 \
+tools/git-upstream-compat-suite.sh all-nondeprecated
+```
+
+`ZMIN_UPSTREAM_MANIFEST_OFFSET` skips already-covered top-level shell files
+after mode resolution, and `ZMIN_UPSTREAM_MANIFEST_LIMIT` caps how many more
+top-level shell files run from that point. This is file-level batching across
+the generated manifest, not the upstream shell `--run` selector inside an
+individual test file.
+
 `upstream-fast` is zmin-only tooling. It reuses
 `C:\Users\skron\zmin-target\release\zmin.exe`, skips the Windows native
 preflight, and detaches the upstream task for polling. Use the stricter
@@ -52,12 +848,14 @@ Cargo compatibility profile instead of the production release profile:
 
 ```bash
 ZMIN_UPSTREAM_CARGO_PROFILE=compat tools/git-upstream-compat-suite.sh exhaustive
+ZMIN_UPSTREAM_CARGO_PROFILE=compat tools/git-upstream-compat-suite.sh all-nondeprecated
 ```
 
 The Parallels runner also has a zmin-only compat path:
 
 ```bash
 tools/parallels-windows-runner.sh upstream-compat exhaustive
+tools/parallels-windows-runner.sh upstream-compat all-nondeprecated
 ```
 
 `compat` keeps the release profile untouched for performance gates. On macOS
@@ -248,10 +1046,19 @@ Latest targeted `t1410-reflog.sh` macOS run:
 `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-compat.Jz5EIT/summary.tsv`
 
 Latest targeted `t0000-basic.sh` macOS run:
-`/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-compat.otzjP9/summary.tsv`
+`/tmp/zmin-upstream-t0000.0zvFCQ/summary.tsv`
 
 Latest targeted `t0021-conversion.sh` macOS run:
-`/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-compat.Z0GjZS/summary.tsv`
+`/tmp/zmin-upstream-t0021.QoY3rV/summary.tsv`
+
+Latest targeted `t0022-crlf-rename.sh` macOS run:
+`/tmp/zmin-upstream-t0022-fixed.4DcYYK/summary.tsv`
+
+Latest targeted `t0024-crlf-archive.sh` macOS run:
+`/tmp/zmin-upstream-t0024-fixed.cUyMOJ/summary.tsv`
+
+Latest targeted `t0025-crlf-renormalize.sh` macOS run:
+`/tmp/zmin-upstream-t0025-fixed.uEkQTm/summary.tsv`
 
 Latest targeted `t0027-auto-crlf.sh` macOS run:
 `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-compat.QV7Slc/summary.tsv`
@@ -1018,6 +1825,15 @@ Current broader burn-down status as of 2026-06-18:
   canonical `.git` behavior is currently covered by focused macOS and Windows
   tests for managed hooks, CMS porcelain, local/remote `clone --instant`,
   `--background-fetch`, and `--demand-hydrate`.
+- Practical replace-git dogfood gates are currently green on the main macOS
+  workspace for the audited lanes they model: `cargo test -q -p zmin-cli --test
+  git_runtime_dependency_audit -- --nocapture` passed `1/1`, `cargo test -q -p
+  zmin-cli --test git_replacement_dogfood_compat -- --nocapture` passed `5/5`,
+  and `cargo test -q -p zmin-cli --test git_observed_client_compat --
+  --nocapture` passed `16/16` on 2026-07-02. Those gates strengthen confidence
+  in git-in-PATH replacement, IDE/client command shapes, and test-only
+  confinement of audited stock-Git runtime patterns, but they do not upgrade
+  the project to full Git parity on their own.
 - Performance gates are collected and correctness-clean on macOS and Windows
   with real Gitoxide where comparable. They do not close all optimization work;
   the remaining measured gaps are tracked in
@@ -1079,9 +1895,14 @@ The following surfaces are not approved as complete Git parity:
   (`git_object_plumbing_compat::lfs_process_filter_pointer_workflow_matches_stock_git`)
   plus built-in local `git lfs` foundation commands:
   `version`, `env`, `install --local --skip-repo`,
-  `install --local --skip-smudge`, `track`, `untrack`, `ls-files`, and local
+  `install --local --skip-smudge`, `track`, `untrack`, `ls-files` (including
+  single historical `<ref>` parity plus invalid-ref stderr parity), and local
   `pre-push` stdin-shape validation
-  (`git_lfs_local_compat::{lfs_track_and_untrack_match_stock_git_for_basic_patterns,lfs_install_local_skip_repo_matches_stock_git_filter_config,lfs_install_local_skip_smudge_writes_builtin_pre_push_hook,lfs_ls_files_default_name_only_and_long_match_stock_git_for_pointer_entries,lfs_version_and_env_report_builtin_local_foundation_state,lfs_pre_push_validates_update_stream_shape}`).
+  (`git_lfs_local_compat::{lfs_track_and_untrack_match_stock_git_for_basic_patterns,lfs_install_local_skip_repo_matches_stock_git_filter_config,lfs_install_local_skip_smudge_writes_builtin_pre_push_hook,lfs_ls_files_default_name_only_and_long_match_stock_git_for_pointer_entries,lfs_ls_files_ref_argument_matches_stock_git_for_historical_pointer_tree,lfs_ls_files_invalid_ref_matches_stock_git_error_shape,lfs_version_and_env_report_builtin_local_foundation_state,lfs_pre_push_validates_update_stream_shape}`).
+  The replacement-git smoke also now covers hook-callback dogfood for
+  `git lfs post-commit`, `git lfs post-checkout`, and `git lfs post-merge`
+  through the shim path, so repositories with standard installed Git LFS hook
+  wrappers no longer immediately fall off the local replace-git path.
   Network LFS upload/download, batch API/auth, and full client/plugin
   compatibility are still open.
 - Larger real-repository scale scenarios are not complete. Existing real-repo

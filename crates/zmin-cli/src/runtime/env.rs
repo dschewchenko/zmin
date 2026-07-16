@@ -6,8 +6,9 @@ use std::process::Command as ProcessCommand;
 use zmin_git_core::Signature;
 
 use super::{
-    CliError, GitRepo, Result, find_repo, parse_config_name, read_config_file, read_config_value,
-    read_local_config_entries, system_config_paths, unique_temp_sibling,
+    CliError, GitRepo, Result, explicit_system_config_path, find_repo, global_config_entries,
+    global_config_paths, normalize_windows_input_path, parse_config_name, read_config_file,
+    read_config_value, read_local_config_entries, system_config_paths, unique_temp_sibling,
 };
 
 pub(crate) fn edit_history_message(repo: &GitRepo, message: &[u8]) -> Result<Vec<u8>> {
@@ -46,26 +47,34 @@ pub(crate) fn edit_temp_buffer(
 }
 
 pub(crate) fn read_multi_config_values(name: &str) -> Result<Vec<String>> {
-    let (section, subsection, key) = parse_config_name(name)?;
+    let (section, subsection, key) = parse_config_name(name).map_err(|_| CliError::Fatal {
+        code: 129,
+        message: "invalid config key".into(),
+    })?;
     let mut entries = Vec::new();
     for path in system_config_paths() {
         entries.extend(read_config_file(&path)?);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        entries.extend(read_config_file(&home.join(".gitconfig"))?);
-        entries.extend(read_config_file(&home.join(".config/git/config"))?);
+    for path in global_config_paths() {
+        entries.extend(read_config_file(&path)?);
     }
+    entries.extend(global_config_entries());
     if let Ok(repo) = find_repo() {
         entries.extend(read_local_config_entries(&repo)?);
     }
-    Ok(entries
-        .into_iter()
-        .filter(|entry| {
-            entry.section == section && entry.subsection == subsection && entry.key == key
-        })
-        .map(|entry| entry.value)
-        .collect())
+    let mut values = Vec::new();
+    for entry in entries.into_iter().filter(|entry| {
+        entry.section == section && entry.subsection == subsection && entry.key == key
+    }) {
+        if entry.implicit_bool {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: format!("missing value for '{name}'"),
+            });
+        }
+        values.push(entry.value);
+    }
+    Ok(values)
 }
 
 pub(crate) fn git_editor(repo: &GitRepo) -> Result<Option<String>> {
@@ -189,17 +198,20 @@ fn find_executable_on_path(name: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-pub(crate) fn git_attr_system_path() -> String {
+pub(crate) fn git_attr_system_path() -> Option<String> {
+    if std::env::var_os("GIT_ATTR_NOSYSTEM").is_some() {
+        return None;
+    }
     #[cfg(windows)]
     {
         if let Some(path) = git_attr_system_path_from_shell(&git_shell_command_path()) {
-            return git_var_path_output(&path);
+            return Some(git_var_path_output(&path));
         }
-        "C:/Program Files/Git/etc/gitattributes".to_owned()
+        Some("C:/Program Files/Git/etc/gitattributes".to_owned())
     }
     #[cfg(not(windows))]
     {
-        "/etc/gitattributes".to_owned()
+        Some("/etc/gitattributes".to_owned())
     }
 }
 
@@ -216,20 +228,48 @@ fn git_attr_system_path_from_shell(shell_path: &Path) -> Option<PathBuf> {
     Some(usr_dir.parent()?.join("etc").join("gitattributes"))
 }
 
-pub(crate) fn git_attr_global_path() -> Result<String> {
-    let home = PathBuf::from(std::env::var_os("HOME").ok_or(CliError::Exit(1))?);
+pub(crate) fn git_attr_global_path() -> Result<Option<String>> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(None);
+    };
+    let home = PathBuf::from(home);
     let xdg = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
-    Ok(git_var_path_output(&xdg.join("git/attributes")))
+    Ok(Some(git_var_path_output(&xdg.join("git/attributes"))))
 }
 
 pub(crate) fn git_config_global_paths() -> Result<Vec<PathBuf>> {
-    let home = PathBuf::from(std::env::var_os("HOME").ok_or(CliError::Exit(1))?);
+    if let Some(path) = std::env::var_os("GIT_CONFIG_GLOBAL") {
+        return Ok(vec![normalize_windows_input_path(PathBuf::from(path))]);
+    }
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(Vec::new());
+    };
+    let home = PathBuf::from(home);
     let xdg = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     Ok(vec![xdg.join("git/config"), home.join(".gitconfig")])
+}
+
+pub(crate) fn git_config_system_path() -> Option<String> {
+    if std::env::var_os("GIT_CONFIG_NOSYSTEM").is_some() {
+        return None;
+    }
+    if let Some(path) = std::env::var_os("GIT_CONFIG_SYSTEM") {
+        return Some(git_var_path_output(&normalize_windows_input_path(
+            PathBuf::from(path),
+        )));
+    }
+    #[cfg(windows)]
+    {
+        Some(git_var_path_output(&explicit_system_config_path()))
+    }
+    #[cfg(not(windows))]
+    {
+        Some("/etc/gitconfig".to_owned())
+    }
 }
 
 pub(crate) fn git_var_path_output(path: &std::path::Path) -> String {

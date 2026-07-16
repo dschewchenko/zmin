@@ -1474,10 +1474,7 @@ pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<
         });
     }
     if options.continue_ {
-        return Err(CliError::Stderr {
-            code: 128,
-            text: format!("error: no cherry-pick or revert in progress\nfatal: {command} failed\n"),
-        });
+        return sequencer_continue(command);
     }
     sequencer_pick(SequencerPickOptions {
         revert: command == "revert",
@@ -1503,6 +1500,79 @@ pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<
         print_summary: true,
         commits: options.commits,
     })
+}
+
+fn sequencer_continue(command: &str) -> Result<()> {
+    let repo = find_repo()?;
+    let state_name = if command == "revert" {
+        "REVERT_HEAD"
+    } else {
+        "CHERRY_PICK_HEAD"
+    };
+    let state_path = repo.git_dir.join(state_name);
+    let picked_hex = match fs::read_to_string(&state_path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: no cherry-pick or revert in progress\nfatal: {command} failed\n"
+                ),
+            });
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let picked_id =
+        ObjectId::from_hex(GitHashAlgorithm::Sha1, picked_hex.trim()).map_err(CliError::Io)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let picked = commit_cache.read_commit(&picked_id)?;
+    let index = read_repo_index(&repo)?;
+    if index.entries().iter().any(|entry| entry.stage != 0) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Committing is not possible because you have unmerged files.\n\
+                 hint: Fix them up in the work tree, and then use 'git add/rm <file>'\n\
+                 hint: as appropriate to mark resolution and make a commit.\n\
+                 fatal: Exiting because of an unresolved conflict."
+            ),
+        });
+    }
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head_id = refs.resolve("HEAD")?;
+    let current_head = commit_cache.read_commit(&head_id)?;
+    let tree = write_tree_from_index(&store, &index)?;
+    let author = if command == "revert" {
+        signature_from_identity(&repo, "GIT_AUTHOR")?
+    } else {
+        signature_from_commit_bytes(&picked.author)?
+    };
+    let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+    let message =
+        fs::read(repo.git_dir.join("MERGE_MSG")).unwrap_or_else(|_| picked.message.clone());
+    let commit = CommitBuilder::new(tree.clone(), author.clone(), committer)
+        .parent(head_id)
+        .message(cleanup_commit_message(
+            message.clone(),
+            CommitCleanupMode::Default,
+        ))?
+        .encode()?;
+    let id = store.write_object(GitObjectKind::Commit, &commit)?;
+    update_head_to_commit(&refs, &id)?;
+    remove_file_if_exists(&state_path)?;
+    remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
+    remove_file_if_exists(&repo.git_dir.join("AUTO_MERGE"))?;
+    print_sequencer_commit_summary(
+        &repo,
+        &store,
+        &id,
+        &message,
+        &author,
+        &current_head.tree,
+        &tree,
+        command != "revert",
+    )
 }
 
 pub(crate) struct SequencerPickOptions {
@@ -1608,7 +1678,43 @@ pub(crate) fn sequencer_pick(options: SequencerPickOptions) -> Result<()> {
         return Ok(());
     }
     let current_index = read_head_index_with_caches(&repo, &commit_cache, &tree_cache)?;
-    let new_index = apply_tree_delta(&base_index, &patch_index, &current_index)?;
+    let new_index = match apply_tree_delta(&base_index, &patch_index, &current_index) {
+        Ok(index) => index,
+        Err(_) => {
+            let label = options.commits[0].as_str();
+            match merge_indexes(&store, &base_index, &current_index, &patch_index, label)? {
+                MergeIndexResult::Clean(index) => index,
+                MergeIndexResult::Conflicted { index, files } => {
+                    remove_tracked_paths_missing_from_target(&repo, &current_index, &index)?;
+                    checkout_merged_stage_zero(&repo, &store, &index)?;
+                    for file in files {
+                        merge_commands::write_worktree_file(&repo, &file.path, &file.content)?;
+                        println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        eprintln!(
+                            "CONFLICT (content): Merge conflict in {}",
+                            String::from_utf8_lossy(&file.path)
+                        );
+                    }
+                    index.write_to_path(&repo.index_path)?;
+                    fs::write(repo.git_dir.join("MERGE_MSG"), &picked.message)?;
+                    fs::write(
+                        repo.git_dir.join(if options.revert {
+                            "REVERT_HEAD"
+                        } else {
+                            "CHERRY_PICK_HEAD"
+                        }),
+                        picked_id.to_hex() + "\n",
+                    )?;
+                    eprintln!(
+                        "error: could not apply {}... {}",
+                        short_object_id(&picked_id),
+                        commit_subject(&picked.message)
+                    );
+                    return Err(CliError::Exit(1));
+                }
+            }
+        }
+    };
     remove_tracked_paths_missing_from_target(&repo, &current_index, &new_index)?;
     new_index.write_to_path(&repo.index_path)?;
     checkout_index(
@@ -2043,6 +2149,7 @@ pub(crate) fn rebase(
         rebase_switch_branch_without_checkout(&refs, branch)?;
     }
     let head = refs.resolve("HEAD")?;
+    let original_head_name = current_branch_ref(&refs)?;
     let upstream_id = upstream
         .as_deref()
         .map(|value| resolve_commitish(&repo, &store, value))
@@ -2072,7 +2179,7 @@ pub(crate) fn rebase(
             CheckoutIndexOptions { force: true },
         )?;
         smudge_worktree_filter_entries(&repo, &target_index)?;
-        refresh_tracked_index_metadata_matching(&repo, &mut target_index, &[])?;
+        refresh_tracked_index_metadata_after_checkout(&repo, &mut target_index, &[])?;
         target_index.write_to_path(&repo.index_path)?;
         let branch_name = current_branch_ref(&refs)
             .map(|name| name.map(|value| branch_display_name(&value)))
@@ -2088,9 +2195,16 @@ pub(crate) fn rebase(
         .transpose()?;
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
+    let rebase_start_id = if root {
+        new_base_id.as_ref()
+    } else {
+        new_base_id.as_ref().or(upstream_id.as_ref())
+    };
     let stat_base_id = if root {
         new_base_id.clone().unwrap_or_else(|| head.clone())
-    } else if let (Some(upstream_id), Some(new_base_id)) = (upstream_id.as_ref(), new_base_id.as_ref()) {
+    } else if let (Some(upstream_id), Some(new_base_id)) =
+        (upstream_id.as_ref(), new_base_id.as_ref())
+    {
         if onto.is_some() {
             best_merge_base_cached(&commit_cache, upstream_id, new_base_id)?
                 .unwrap_or_else(|| upstream_id.clone())
@@ -2103,13 +2217,20 @@ pub(crate) fn rebase(
     };
     if !root
         && onto.is_none()
-        && is_ancestor_commit_cached(&commit_cache, &head, upstream_id.as_ref().expect("upstream id"))?
+        && is_ancestor_commit_cached(
+            &commit_cache,
+            &head,
+            upstream_id.as_ref().expect("upstream id"),
+        )?
     {
         let upstream_id = upstream_id.as_ref().expect("upstream id");
         checkout_worktree(&repo, &store, upstream_id)?;
         update_head_to_commit(&refs, upstream_id)?;
         if !quiet && output_mode == RebaseOutputMode::Normal {
-            println!("Fast-forwarded to {}", upstream.as_deref().expect("upstream"));
+            println!(
+                "Fast-forwarded to {}",
+                upstream.as_deref().expect("upstream")
+            );
         }
         return Ok(());
     }
@@ -2155,7 +2276,7 @@ pub(crate) fn rebase(
             &store,
             &refs,
             root,
-            new_base_id.as_ref(),
+            rebase_start_id,
             &pre_switch_index,
         )?;
         Some(edit_interactive_rebase_todo(
@@ -2173,7 +2294,7 @@ pub(crate) fn rebase(
             &store,
             &refs,
             root,
-            new_base_id.as_ref(),
+            rebase_start_id,
             &pre_switch_index,
         )?;
     }
@@ -2183,14 +2304,19 @@ pub(crate) fn rebase(
             &store,
             &refs,
             &commit_cache,
-            new_base_id.as_ref().unwrap_or(&head),
+            rebase_start_id.unwrap_or(&head),
             commits,
             quiet,
+            original_head_name.as_deref(),
         );
     }
     let mut pending_root_parent = root.then(|| new_base_id.clone());
     if let Some(todo) = interactive_todo {
+        let total_steps = todo.len();
         for (index, item) in todo.iter().enumerate() {
+            if !quiet && !output_mode.suppresses_progress_stderr() {
+                eprint!("Rebasing ({}/{})\r", index + 1, total_steps);
+            }
             match item.command {
                 RebaseTodoCommand::Pick => {
                     if pending_root_parent.is_some()
@@ -2212,7 +2338,8 @@ pub(crate) fn rebase(
                             no_gpg_sign,
                         )?;
                     } else {
-                        let mut options = default_sequencer_pick_options(vec![item.commit.to_hex()]);
+                        let mut options =
+                            default_sequencer_pick_options(vec![item.commit.to_hex()]);
                         options.print_summary = false;
                         sequencer_pick(options)?
                     }
@@ -2295,7 +2422,12 @@ pub(crate) fn rebase(
                             no_gpg_sign,
                         )?;
                     }
-                    write_rebase_edit_state(&repo, &head, &todo[index + 1..])?;
+                    write_rebase_edit_state(
+                        &repo,
+                        &head,
+                        original_head_name.as_deref(),
+                        &todo[index + 1..],
+                    )?;
                     eprintln!(
                         "Stopped at {}...  # {}",
                         short_object_id(&item.commit),
@@ -2319,23 +2451,33 @@ pub(crate) fn rebase(
         };
         let mut current_step = 0usize;
         let original_head = head.clone();
-        for commit in commits {
+        for (commit_index, commit) in commits.iter().enumerate() {
+            write_rebase_conflict_state(
+                &repo,
+                &head,
+                original_head_name.as_deref(),
+                commit,
+                &commits[commit_index + 1..],
+            )?;
             if !quiet && !output_mode.suppresses_progress_stderr() {
                 current_step += 1;
-                if matches!(output_mode, RebaseOutputMode::Normal | RebaseOutputMode::Stat) {
+                if matches!(
+                    output_mode,
+                    RebaseOutputMode::Normal | RebaseOutputMode::Stat
+                ) {
                     eprint!("Rebasing ({}/{})\r", current_step, total_steps);
                 } else {
                     eprintln!("Rebasing ({}/{})", current_step, total_steps);
                 }
             }
-            let picked = commit_cache.read_commit(&commit)?;
+            let picked = commit_cache.read_commit(commit)?;
             rebased_head = Some(
                 if pending_root_parent.is_some() && picked.parents.is_empty() {
                     rebase_pick_root_commit_with_message(
                         &repo,
                         &store,
                         &commit_cache,
-                        &commit,
+                        commit,
                         pending_root_parent.take().flatten().as_ref(),
                         None,
                         false,
@@ -2351,7 +2493,7 @@ pub(crate) fn rebase(
                         &repo,
                         &store,
                         &commit_cache,
-                        &commit,
+                        commit,
                         None,
                         false,
                         false,
@@ -2366,7 +2508,10 @@ pub(crate) fn rebase(
             for exec_command in &exec_commands {
                 if !quiet && !output_mode.suppresses_progress_stderr() {
                     current_step += 1;
-                    if matches!(output_mode, RebaseOutputMode::Normal | RebaseOutputMode::Stat) {
+                    if matches!(
+                        output_mode,
+                        RebaseOutputMode::Normal | RebaseOutputMode::Stat
+                    ) {
                         eprint!("Rebasing ({}/{})\r", current_step, total_steps);
                     } else {
                         eprintln!("Rebasing ({}/{})", current_step, total_steps);
@@ -2378,7 +2523,7 @@ pub(crate) fn rebase(
         }
         if let Some(rebased_head) = rebased_head {
             let checkout_metadata = WorktreeCheckoutMetadata {
-                ref_name: current_branch_ref(&refs)?,
+                ref_name: original_head_name.clone(),
                 treeish: Some(rebased_head.clone()),
             };
             let mut final_index = read_repo_index(&repo)?;
@@ -2388,7 +2533,7 @@ pub(crate) fn rebase(
                 &final_index,
                 &checkout_metadata,
             )?;
-            refresh_tracked_index_metadata_matching(&repo, &mut final_index, &[])?;
+            refresh_tracked_index_metadata_after_checkout(&repo, &mut final_index, &[])?;
             final_index.write_to_path(&repo.index_path)?;
             match output_mode {
                 RebaseOutputMode::ApplyBackend => print_rebase_apply_backend_stdout()?,
@@ -2413,7 +2558,11 @@ pub(crate) fn rebase(
                 RebaseOutputMode::Normal => {}
             }
         }
+        remove_path_if_exists(&repo.git_dir.join("rebase-merge"))?;
+        remove_file_if_exists(&repo.git_dir.join("REBASE_HEAD"))?;
+        remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
     }
+    restore_rebase_head_ref(&refs, original_head_name.as_deref())?;
     if !quiet && !output_mode.suppresses_success_stderr() {
         let target = current_branch_ref(&refs)?.unwrap_or_else(|| "HEAD".to_owned());
         eprintln!("Successfully rebased and updated {target}.");
@@ -2508,8 +2657,16 @@ fn print_rebase_verbose_stdout(
         upstream_id.to_hex(),
         new_base_id.to_hex()
     );
-    print_rebase_stat_between_commits(repo, store, tree_cache, commit_cache, upstream_id, new_base_id)?;
-    let old_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(original_head)?.tree)?;
+    print_rebase_stat_between_commits(
+        repo,
+        store,
+        tree_cache,
+        commit_cache,
+        upstream_id,
+        new_base_id,
+    )?;
+    let old_index =
+        tree_cache.read_tree_to_index(&commit_cache.read_commit(original_head)?.tree)?;
     let new_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(rebased_head)?.tree)?;
     print_rebase_stat_for_indexes(repo, store, &old_index, &new_index, false)
 }
@@ -2692,15 +2849,6 @@ fn resolve_rebase_todo_commit(
     commits: &[ObjectId],
     value: &str,
 ) -> Result<ObjectId> {
-    if let Ok(index) = value.parse::<usize>()
-        && !commits.is_empty()
-    {
-        let index = index
-            .checked_sub(1)
-            .unwrap_or(0)
-            .min(commits.len().saturating_sub(1));
-        return Ok(commits[index].clone());
-    }
     if let Some(commit) = commits
         .iter()
         .find(|commit| commit.to_hex().starts_with(value))
@@ -2726,12 +2874,61 @@ fn rebase_continue() -> Result<()> {
     }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let stopped_path = rebase_dir.join("stopped-sha");
+    if stopped_path.is_file() {
+        let stopped_hex = fs::read_to_string(&stopped_path)?;
+        let stopped_id =
+            ObjectId::from_hex(GitHashAlgorithm::Sha1, stopped_hex.trim()).map_err(CliError::Io)?;
+        commit_rebase_resolution(&repo, &store, &commit_cache, &refs, &stopped_id)?;
+        remove_file_if_exists(&repo.git_dir.join("REBASE_HEAD"))?;
+        remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
+        let reattach_ref = rebase_head_name(&rebase_dir)?;
+        let todo = fs::read_to_string(&todo_path)?;
+        let items = parse_interactive_rebase_todo(&repo, &commit_cache, &[], &todo)?;
+        let orig_head_hex = fs::read_to_string(rebase_dir.join("orig-head"))?;
+        let orig_head = ObjectId::from_hex(GitHashAlgorithm::Sha1, orig_head_hex.trim())
+            .map_err(CliError::Io)?;
+        for (index, item) in items.iter().enumerate() {
+            let remaining = items[index + 1..]
+                .iter()
+                .map(|item| item.commit.clone())
+                .collect::<Vec<_>>();
+            write_rebase_conflict_state(
+                &repo,
+                &orig_head,
+                reattach_ref.as_deref(),
+                &item.commit,
+                &remaining,
+            )?;
+            rebase_pick_commit_with_message(
+                &repo,
+                &store,
+                &commit_cache,
+                &item.commit,
+                None,
+                false,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+            )?;
+        }
+        remove_path_if_exists(&rebase_dir)?;
+        restore_rebase_head_ref(&refs, reattach_ref.as_deref())?;
+        let target = current_branch_ref(&refs)?.unwrap_or_else(|| "HEAD".to_owned());
+        println!("Successfully rebased and updated {target}.");
+        return Ok(());
+    }
     if !worktree_clean(&repo, &store)? {
         return Err(CliError::Fatal {
             code: 1,
             message: "cannot continue rebase with local changes".into(),
         });
     }
+    let reattach_ref = rebase_head_name(&rebase_dir)?;
     let todo = fs::read_to_string(&todo_path)?;
     let items = parse_interactive_rebase_todo(&repo, &commit_cache, &[], &todo)?;
     remove_path_if_exists(&rebase_dir)?;
@@ -2768,8 +2965,40 @@ fn rebase_continue() -> Result<()> {
             RebaseTodoCommand::Drop => {}
         }
     }
-    println!("Successfully rebased and updated HEAD.");
+    restore_rebase_head_ref(&refs, reattach_ref.as_deref())?;
+    let target = current_branch_ref(&refs)?.unwrap_or_else(|| "HEAD".to_owned());
+    println!("Successfully rebased and updated {target}.");
     Ok(())
+}
+
+fn commit_rebase_resolution(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    refs: &RefStore,
+    picked_id: &ObjectId,
+) -> Result<ObjectId> {
+    let index = read_repo_index(repo)?;
+    if index.entries().iter().any(|entry| entry.stage != 0) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "You still have unmerged paths in your index".into(),
+        });
+    }
+    let picked = commit_cache.read_commit(picked_id)?;
+    let head_id = refs.resolve("HEAD")?;
+    let tree = write_tree_from_index(store, &index)?;
+    let author = signature_from_commit_bytes(&picked.author)?;
+    let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+    let message =
+        fs::read(repo.git_dir.join("MERGE_MSG")).unwrap_or_else(|_| picked.message.clone());
+    let commit = CommitBuilder::new(tree, author, committer)
+        .parent(head_id)
+        .message(cleanup_commit_message(message, CommitCleanupMode::Default))?
+        .encode()?;
+    let id = store.write_object(GitObjectKind::Commit, &commit)?;
+    update_head_to_commit(refs, &id)?;
+    Ok(id)
 }
 
 fn rebase_abort() -> Result<()> {
@@ -2786,14 +3015,42 @@ fn rebase_abort() -> Result<()> {
         ObjectId::from_hex(GitHashAlgorithm::Sha1, orig_head.trim()).map_err(CliError::Io)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let reattach_ref = rebase_head_name(&rebase_dir)?;
     checkout_worktree(&repo, &store, &orig_head)?;
-    update_head_to_commit(&refs, &orig_head)?;
+    if let Some(ref_name) = reattach_ref.as_deref() {
+        refs.write_ref(ref_name, &orig_head)?;
+        refs.write_symbolic_ref("HEAD", ref_name)?;
+    } else {
+        refs.write_head_direct(&orig_head)?;
+    }
     remove_path_if_exists(&rebase_dir)
+}
+
+fn rebase_head_name(rebase_dir: &Path) -> Result<Option<String>> {
+    match fs::read_to_string(rebase_dir.join("head-name")) {
+        Ok(value) => {
+            let value = value.trim();
+            Ok((!value.is_empty()).then_some(value.to_owned()))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn restore_rebase_head_ref(refs: &RefStore, ref_name: Option<&str>) -> Result<()> {
+    let Some(ref_name) = ref_name else {
+        return Ok(());
+    };
+    let head_id = refs.resolve("HEAD")?;
+    refs.write_ref(ref_name, &head_id)?;
+    refs.write_symbolic_ref("HEAD", ref_name)?;
+    Ok(())
 }
 
 fn write_rebase_edit_state(
     repo: &GitRepo,
     orig_head: &ObjectId,
+    head_name: Option<&str>,
     remaining: &[RebaseTodoItem],
 ) -> Result<()> {
     let rebase_dir = repo.git_dir.join("rebase-merge");
@@ -2811,7 +3068,39 @@ fn write_rebase_edit_state(
         rebase_dir.join("orig-head"),
         format!("{}\n", orig_head.to_hex()),
     )
-    .map_err(CliError::Io)
+    .map_err(CliError::Io)?;
+    if let Some(head_name) = head_name {
+        fs::write(rebase_dir.join("head-name"), format!("{head_name}\n")).map_err(CliError::Io)?;
+    }
+    Ok(())
+}
+
+fn write_rebase_conflict_state(
+    repo: &GitRepo,
+    orig_head: &ObjectId,
+    head_name: Option<&str>,
+    stopped_commit: &ObjectId,
+    remaining: &[ObjectId],
+) -> Result<()> {
+    let rebase_dir = repo.git_dir.join("rebase-merge");
+    fs::create_dir_all(&rebase_dir)?;
+    fs::write(
+        rebase_dir.join("orig-head"),
+        format!("{}\n", orig_head.to_hex()),
+    )?;
+    fs::write(
+        rebase_dir.join("stopped-sha"),
+        format!("{}\n", stopped_commit.to_hex()),
+    )?;
+    let todo = remaining
+        .iter()
+        .map(|commit| format!("pick {}\n", commit.to_hex()))
+        .collect::<String>();
+    fs::write(rebase_dir.join("git-rebase-todo"), todo)?;
+    if let Some(head_name) = head_name {
+        fs::write(rebase_dir.join("head-name"), format!("{head_name}\n"))?;
+    }
+    Ok(())
 }
 
 fn rebase_todo_command_name(command: RebaseTodoCommand) -> &'static str {
@@ -2841,7 +3130,39 @@ fn rebase_squash_commit(
     let base_index = read_treeish_index_cached(repo, store, &tree_cache, &parent_id.to_hex())?;
     let patch_index = tree_cache.read_tree_to_index(&picked.tree)?;
     let current_index = read_head_index_with_caches(repo, commit_cache, &tree_cache)?;
-    let new_index = apply_tree_delta(&base_index, &patch_index, &current_index)?;
+    let new_index = match apply_tree_delta(&base_index, &patch_index, &current_index) {
+        Ok(index) => index,
+        Err(_) => match merge_indexes(
+            store,
+            &base_index,
+            &current_index,
+            &patch_index,
+            &picked_id.to_hex(),
+        )? {
+            MergeIndexResult::Clean(index) => index,
+            MergeIndexResult::Conflicted { index, files } => {
+                remove_tracked_paths_missing_from_target(repo, &current_index, &index)?;
+                checkout_merged_stage_zero(repo, store, &index)?;
+                for file in files {
+                    merge_commands::write_worktree_file(repo, &file.path, &file.content)?;
+                    println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                    eprintln!(
+                        "CONFLICT (content): Merge conflict in {}",
+                        String::from_utf8_lossy(&file.path)
+                    );
+                }
+                index.write_to_path(&repo.index_path)?;
+                fs::write(repo.git_dir.join("REBASE_HEAD"), picked_id.to_hex() + "\n")?;
+                fs::write(repo.git_dir.join("MERGE_MSG"), &picked.message)?;
+                eprintln!(
+                    "error: could not apply {}... {}",
+                    short_object_id(picked_id),
+                    commit_subject(&picked.message)
+                );
+                return Err(CliError::Exit(1));
+            }
+        },
+    };
     remove_tracked_paths_missing_from_target(repo, &current_index, &new_index)?;
     new_index.write_to_path(&repo.index_path)?;
     checkout_index(
@@ -2946,7 +3267,39 @@ fn rebase_pick_commit_with_message(
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
     let current_index = read_head_index_with_caches(repo, commit_cache, &tree_cache)?;
-    let new_index = apply_tree_delta(&base_index, &patch_index, &current_index)?;
+    let new_index = match apply_tree_delta(&base_index, &patch_index, &current_index) {
+        Ok(index) => index,
+        Err(_) => match merge_indexes(
+            store,
+            &base_index,
+            &current_index,
+            &patch_index,
+            &picked_id.to_hex(),
+        )? {
+            MergeIndexResult::Clean(index) => index,
+            MergeIndexResult::Conflicted { index, files } => {
+                remove_tracked_paths_missing_from_target(repo, &current_index, &index)?;
+                checkout_merged_stage_zero(repo, store, &index)?;
+                for file in files {
+                    merge_commands::write_worktree_file(repo, &file.path, &file.content)?;
+                    println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                    eprintln!(
+                        "CONFLICT (content): Merge conflict in {}",
+                        String::from_utf8_lossy(&file.path)
+                    );
+                }
+                index.write_to_path(&repo.index_path)?;
+                fs::write(repo.git_dir.join("REBASE_HEAD"), picked_id.to_hex() + "\n")?;
+                fs::write(repo.git_dir.join("MERGE_MSG"), &picked.message)?;
+                eprintln!(
+                    "error: could not apply {}... {}",
+                    short_object_id(picked_id),
+                    commit_subject(&picked.message)
+                );
+                return Err(CliError::Exit(1));
+            }
+        },
+    };
     remove_tracked_paths_missing_from_target(repo, &current_index, &new_index)?;
     new_index.write_to_path(&repo.index_path)?;
     if update_worktree {
@@ -2965,7 +3318,7 @@ fn rebase_pick_commit_with_message(
     }
     let picked_author = signature_from_commit_bytes(&picked.author)?;
     let author = if ignore_date {
-        let now = chrono::Local::now();
+        let now = crate::runtime::local_now();
         Signature::new(
             picked_author.name.clone(),
             picked_author.email.clone(),
@@ -2976,11 +3329,8 @@ fn rebase_pick_commit_with_message(
     } else {
         picked_author
     };
-    let committer = rebase_replay_committer_signature(
-        repo,
-        &author,
-        committer_date_is_author_date,
-    )?;
+    let committer =
+        rebase_replay_committer_signature(repo, &author, committer_date_is_author_date)?;
     let mut message = message_override.unwrap_or_else(|| picked.message.clone());
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
@@ -2988,11 +3338,9 @@ fn rebase_pick_commit_with_message(
     let builder = CommitBuilder::new(tree, author, committer).parent(head_id);
     let mut builder = builder.message(message.clone())?;
     if !no_gpg_sign {
-        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(
-            repo,
-            &builder,
-            gpg_sign.as_deref(),
-        )? {
+        if let Some(signature) =
+            super::commit_commands::commit_tree_gpg_signature(repo, &builder, gpg_sign.as_deref())?
+        {
             builder = builder.gpg_signature(signature)?;
         }
     }
@@ -3010,20 +3358,20 @@ fn prepare_rebase_root_start(
     store: &LooseObjectStore,
     refs: &RefStore,
     root: bool,
-    new_base_id: Option<&ObjectId>,
+    start_id: Option<&ObjectId>,
     pre_switch_index: &GitIndex,
 ) -> Result<()> {
     if !root {
-        let Some(new_base_id) = new_base_id else {
+        let Some(start_id) = start_id else {
             return Ok(());
         };
-        checkout_worktree(repo, store, new_base_id)?;
-        update_head_to_commit(refs, new_base_id)?;
+        checkout_clean_worktree_transition(repo, store, start_id)?;
+        refs.write_head_direct(start_id)?;
         return Ok(());
     }
-    if let Some(new_base_id) = new_base_id {
-        checkout_worktree(repo, store, new_base_id)?;
-        update_head_to_commit(refs, new_base_id)?;
+    if let Some(start_id) = start_id {
+        checkout_clean_worktree_transition(repo, store, start_id)?;
+        refs.write_head_direct(start_id)?;
         return Ok(());
     }
     let empty_index = GitIndex::new();
@@ -3073,7 +3421,7 @@ fn rebase_pick_root_commit_with_message(
     let tree = write_tree_from_index(store, &new_index)?;
     let picked_author = signature_from_commit_bytes(&picked.author)?;
     let author = if ignore_date {
-        let now = chrono::Local::now();
+        let now = crate::runtime::local_now();
         Signature::new(
             picked_author.name.clone(),
             picked_author.email.clone(),
@@ -3084,11 +3432,8 @@ fn rebase_pick_root_commit_with_message(
     } else {
         picked_author
     };
-    let committer = rebase_replay_committer_signature(
-        repo,
-        &author,
-        committer_date_is_author_date,
-    )?;
+    let committer =
+        rebase_replay_committer_signature(repo, &author, committer_date_is_author_date)?;
     let mut message = message_override.unwrap_or_else(|| picked.message.clone());
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
@@ -3098,11 +3443,9 @@ fn rebase_pick_root_commit_with_message(
         builder = builder.parent(parent_id.clone());
     }
     if !no_gpg_sign {
-        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(
-            repo,
-            &builder,
-            gpg_sign.as_deref(),
-        )? {
+        if let Some(signature) =
+            super::commit_commands::commit_tree_gpg_signature(repo, &builder, gpg_sign.as_deref())?
+        {
             builder = builder.gpg_signature(signature)?;
         }
     }
@@ -3141,6 +3484,7 @@ fn rebase_commits_preserving_merges(
     new_base_id: &ObjectId,
     commits: Vec<ObjectId>,
     quiet: bool,
+    original_head_name: Option<&str>,
 ) -> Result<()> {
     let mut rewritten = HashMap::<String, ObjectId>::new();
     let total = commits.len();
@@ -3179,6 +3523,7 @@ fn rebase_commits_preserving_merges(
         let rebased = rebase_merge_commit(repo, store, commit_cache, &commit, &parents)?;
         rewritten.insert(commit_id.to_hex(), rebased);
     }
+    restore_rebase_head_ref(refs, original_head_name)?;
     if !quiet {
         let target = current_branch_ref(refs)?.unwrap_or_else(|| "HEAD".to_owned());
         eprintln!("Successfully rebased and updated {target}.");

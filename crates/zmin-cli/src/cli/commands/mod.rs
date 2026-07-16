@@ -18,21 +18,23 @@ use zmin_git_core::{
     GitAttributes, GitHashAlgorithm, GitIgnore, GitIndex, GitObjectHash, GitObjectKind,
     GitObjectStore, IndexDiffEntry, IndexDiffStatus, IndexEntry, IndexMode, InitRepositoryOptions,
     LooseObject, LooseObjectStore, MergeFileLabels, ObjectId, PackEncodeOptions, PackIndexEntry,
-    PackIndexVersion, PackRefsOptions, PackedObjectStore, RefStore, RefTarget, ResolveUndoStage,
-    Signature, TagBuilder, TreeEntry, TreeMode, TreeObjectCache, check_ref_format, checkout_index,
-    checkout_index_fresh, checkout_index_fresh_into_metadata, checkout_index_fresh_with_metadata,
+    PackIndexVersion, PackRefsOptions, PackedObjectStore, RefStore, RefTarget, ReftableLogRecord,
+    ResolveUndoStage, Signature, TagBuilder, TreeEntry, TreeMode, TreeObjectCache,
+    check_ref_format, checkout_index, checkout_index_fresh, checkout_index_fresh_into_metadata,
+    checkout_index_fresh_with_metadata,
     collect_reachable_objects_from_roots as collect_reachable_object_ids_from_roots, decode_commit,
     decode_pack_index, decode_pack_index_from_path, decode_pack_index_object_ids,
-    decode_pack_index_object_ids_from_path, decode_tag, diff_indexes,
+    decode_pack_index_object_ids_from_path, decode_tag, decode_tree, diff_indexes,
     diff_indexes_with_exact_renames, diff_indexes_with_exact_renames_and_copies,
     encode_loose_object, encode_pack_from_store_with_options, encode_tree, find_tree_entry,
     for_each_pack_index_entry, for_each_pack_index_entry_from_path,
-    for_each_pack_index_object_id_from_path, for_each_pack_object_file, hash_object,
-    index_pack_bytes, index_pack_bytes_with_store, index_pack_bytes_with_version, index_pack_file,
-    index_pack_file_index_only, index_pack_file_index_only_with_version,
+    for_each_pack_index_object_id_from_path, for_each_pack_object_file, hash_literal_object,
+    hash_object, index_pack_bytes, index_pack_bytes_with_store, index_pack_bytes_with_version,
+    index_pack_file, index_pack_file_index_only, index_pack_file_index_only_with_version,
     index_pack_file_with_store, index_pack_file_with_version, init_repository,
-    merge_file as merge_file_core, pack_index_object_count, pack_index_object_ids_all_from_path,
-    pack_index_object_ids_are_subset_from_paths, read_index, read_tree,
+    merge_file as merge_file_core, merge_file_diff3 as merge_file_diff3_core,
+    pack_index_object_count, pack_index_object_ids_all_from_path,
+    pack_index_object_ids_are_subset_from_paths, read_index, read_index_with_algorithm, read_tree,
     repair_thin_pack_file_to_path, unpack_pack_file_to_loose, unpack_pack_to_loose,
     validate_pack_index_file, validate_pack_reverse_index_file, verify_pack_file,
     write_pack_from_store_with_options, write_tree_from_index, write_undeltified_pack_from_store,
@@ -125,6 +127,51 @@ use pack_commands::{pack_encode_options, verify_tag};
 use reference_commands::remote_repository_unavailable_error;
 use sequencer_commands::apply_tree_delta;
 
+pub(crate) fn object_database_permission_denied_error(
+    repo: &GitRepo,
+    tail: impl AsRef<str>,
+) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "{}{}",
+            object_database_permission_denied_prefix(repo),
+            tail.as_ref()
+        ),
+    }
+}
+
+pub(crate) fn object_database_permission_denied(
+    repo: &GitRepo,
+    error: &CliError,
+) -> Option<CliError> {
+    match error {
+        CliError::Io(io_error) if io_error.kind() == io::ErrorKind::PermissionDenied => {
+            Some(object_database_permission_denied_error(repo, ""))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn object_database_permission_denied_prefix(repo: &GitRepo) -> String {
+    format!(
+        "error: insufficient permission for adding an object to repository database {}\n",
+        repo_objects_dir_display(repo)
+    )
+}
+
+fn repo_objects_dir_display(repo: &GitRepo) -> String {
+    if let Ok(relative) = repo.objects_dir.strip_prefix(&repo.root) {
+        return relative.display().to_string();
+    }
+    if let Some(parent) = repo.git_dir.parent()
+        && let Ok(relative) = repo.objects_dir.strip_prefix(parent)
+    {
+        return relative.display().to_string();
+    }
+    repo.objects_dir.display().to_string()
+}
+
 pub(crate) fn register_runtime_services() {
     crate::runtime::register_clone_service(transport_commands::clone);
     crate::runtime::register_upload_pack_request_service(
@@ -139,7 +186,6 @@ pub(crate) fn dispatch(
     command: crate::runtime::Command,
     raw_args: &[String],
 ) -> std::result::Result<(), crate::runtime::CliError> {
-    register_runtime_services();
     match command {
         crate::runtime::Command::Compatibility { profile, format } => {
             crate::compat::run(profile, format)
@@ -156,7 +202,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::UploadArchive { .. }) => archive::dispatch(command),
         command @ (crate::runtime::Command::Config { .. }
         | crate::runtime::Command::Var { .. }
-        | crate::runtime::Command::Version { .. }) => config::dispatch(command),
+        | crate::runtime::Command::Version { .. }) => config::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Commit { .. }
         | crate::runtime::Command::Citool { .. }
         | crate::runtime::Command::Gui { .. }
@@ -198,7 +244,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::CheckRefFormat { .. }
         | crate::runtime::Command::CheckIgnore { .. }
         | crate::runtime::Command::CheckMailmap { .. }
-        | crate::runtime::Command::CheckAttr { .. }
+        | crate::runtime::Command::CheckAttr(..)
         | crate::runtime::Command::UnpackObjects { .. }) => core::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Clone { .. }
         | crate::runtime::Command::LsRemote { .. }
@@ -213,13 +259,16 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::SendPack { .. }
         | crate::runtime::Command::HttpBackend
         | crate::runtime::Command::ReceivePack { .. }
-        | crate::runtime::Command::Shell { .. }) => transport::dispatch(command, raw_args),
-        command @ (crate::runtime::Command::LsFiles { .. }
+        | crate::runtime::Command::Shell { .. }) => {
+            register_runtime_services();
+            transport::dispatch(command, raw_args)
+        }
+        command @ (crate::runtime::Command::LsFiles(..)
         | crate::runtime::Command::Add { .. }
         | crate::runtime::Command::Stage { .. }
         | crate::runtime::Command::Rm { .. }
         | crate::runtime::Command::Mv { .. }
-        | crate::runtime::Command::Status { .. }
+        | crate::runtime::Command::Status(..)
         | crate::runtime::Command::ReadTree { .. }
         | crate::runtime::Command::Checkout { .. }
         | crate::runtime::Command::CheckoutIndex { .. }
@@ -277,7 +326,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::Reflog { .. }
         | crate::runtime::Command::Log { .. }
         | crate::runtime::Command::Whatchanged { .. }
-        | crate::runtime::Command::Show { .. }
+        | crate::runtime::Command::Show(..)
         | crate::runtime::Command::RevList { .. }
         | crate::runtime::Command::MergeBase { .. }
         | crate::runtime::Command::LastModified { .. }) => history::dispatch(command, raw_args),
@@ -302,6 +351,8 @@ pub(crate) fn dispatch(
         command @ (crate::runtime::Command::Merge { .. }
         | crate::runtime::Command::Mergetool { .. }
         | crate::runtime::Command::MergeTree { .. }
+        | crate::runtime::Command::MergeRecursive { .. }
+        | crate::runtime::Command::MergeResolve { .. }
         | crate::runtime::Command::MergeFile { .. }
         | crate::runtime::Command::MergeOneFile { .. }
         | crate::runtime::Command::MergeIndex { .. }) => merge::dispatch(command, raw_args),

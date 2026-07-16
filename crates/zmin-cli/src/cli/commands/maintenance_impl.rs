@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::commands::core_commands::refresh_shared_repository_permissions;
 use crate::runtime::{current_unix_timestamp, parse_git_date};
 
 const REPACK_CANDIDATE_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -235,16 +236,7 @@ pub(crate) fn maintenance(options: MaintenanceOptions<'_>) -> Result<()> {
                 }
             }
             "pack-refs" => {
-                if !auto {
-                    reference_commands::pack_refs(
-                        true,
-                        false,
-                        Vec::new(),
-                        Vec::new(),
-                        true,
-                        false,
-                    )?;
-                }
+                reference_commands::pack_refs(true, auto, Vec::new(), Vec::new(), true, false)?;
             }
             "loose-objects" => {
                 if !auto {
@@ -301,7 +293,7 @@ fn auto_schedule_failure_message() -> &'static str {
 }
 
 fn maintenance_default_tasks(schedule: Option<&str>) -> Result<Vec<String>> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let Some(schedule) = schedule else {
         return Ok(vec!["gc".to_owned()]);
     };
@@ -372,7 +364,7 @@ fn maintenance_stop() -> Result<()> {
 }
 
 fn maintenance_register(config_file: Option<&Path>) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     set_config_value(&repo, "maintenance.auto", "false")?;
     set_config_value(&repo, "maintenance.strategy", "incremental")?;
     add_config_value_in_file_if_missing(
@@ -383,7 +375,7 @@ fn maintenance_register(config_file: Option<&Path>) -> Result<()> {
 }
 
 fn maintenance_unregister(config_file: Option<&Path>, force: bool) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     match remove_config_value_from_file(
         &maintenance_config_path(config_file)?,
         "maintenance.repo",
@@ -1631,6 +1623,15 @@ fn repack(options: RepackOptions) -> Result<()> {
             text: "fatal: option '--filter-to' can only be used along with '--filter'\n".into(),
         });
     }
+    if options.all && options.delete_redundant {
+        let repo = find_repo()?;
+        if repository_has_extension(&repo, "preciousobjects")? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "cannot repack repository with precious objects".into(),
+            });
+        }
+    }
     let write_cruft_pack = options.cruft && options.delete_redundant;
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
@@ -1667,7 +1668,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         unpack_unreachable_expires_now,
         write_bitmap_index,
     );
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     validate_repack_filter_spec(&repo, &store, options.filter.as_deref())?;
     let old_pack_names =
@@ -1675,7 +1676,22 @@ fn repack(options: RepackOptions) -> Result<()> {
     let pack_dir = repo.objects_dir.join("pack");
     let keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
+    let promisor_object_ids = repack_promisor_object_ids(&repo.objects_dir, &keep_pack_names)?;
+    let promised_missing_object_ids = collect_promised_missing_object_ids(&repo, &store)?;
     let all_reachable = options.all || options.all_and_loosen_unreachable || options.cruft;
+    if write_bitmap_index && !promised_missing_object_ids.is_empty() {
+        let missing = promised_missing_object_ids
+            .iter()
+            .min_by(|left, right| left.as_bytes().cmp(right.as_bytes()))
+            .expect("promised missing object id")
+            .to_hex();
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "warning: Failed to write bitmap index. Packfile doesn't have full closure (object {missing} is missing)\nfatal: failed to write bitmap index\n"
+            ),
+        });
+    }
     let reachable = all_reachable
         .then(|| collect_reachable_objects(&repo, &store, &[]))
         .transpose()?;
@@ -1699,6 +1715,7 @@ fn repack(options: RepackOptions) -> Result<()> {
                 options.local,
                 reachable,
                 &keep_pack_object_ids,
+                &promised_missing_object_ids,
             )?
         } else {
             let mut ids = Vec::new();
@@ -1735,14 +1752,29 @@ fn repack(options: RepackOptions) -> Result<()> {
         return Ok(());
     }
     fs::create_dir_all(&pack_dir)?;
+    let (promisor_ids, regular_ids) = split_repack_ids_by_promisor(&ids, &promisor_object_ids);
+    let preserved_promisor_pack_names =
+        preserved_promisor_pack_names(&repo.objects_dir, &keep_pack_names, &ids)?;
     let pack_name = write_repack_pack(
         &pack_dir,
         &store,
-        &ids,
+        &regular_ids,
         options.window,
         options.depth,
         "pack-repack.pack",
     )?;
+    let promisor_pack_name = if promisor_ids.is_empty() {
+        None
+    } else {
+        Some(write_repack_pack(
+            &pack_dir,
+            &store,
+            &promisor_ids,
+            options.window,
+            options.depth,
+            "pack-repack-promisor.pack",
+        )?)
+    };
     let cruft_pack_name = if cruft_ids.is_empty() {
         None
     } else {
@@ -1774,7 +1806,12 @@ fn repack(options: RepackOptions) -> Result<()> {
     let replace_old_packs = options.delete_redundant && all_reachable;
     if options.delete_redundant {
         if replace_old_packs {
+            let mut keep_old_pack_names = keep_pack_names.clone();
+            keep_old_pack_names.extend(preserved_promisor_pack_names);
             let mut keep_new_pack_names = vec![format!("{pack_name}.pack")];
+            if let Some(promisor_pack_name) = &promisor_pack_name {
+                keep_new_pack_names.push(format!("{promisor_pack_name}.pack"));
+            }
             if let Some(cruft_pack_name) = &cruft_pack_name {
                 keep_new_pack_names.push(format!("{cruft_pack_name}.pack"));
             }
@@ -1782,7 +1819,7 @@ fn repack(options: RepackOptions) -> Result<()> {
                 &pack_dir,
                 &old_pack_names,
                 &keep_new_pack_names,
-                &keep_pack_names,
+                &keep_old_pack_names,
             )?;
         }
         let fresh_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -1801,6 +1838,11 @@ fn repack(options: RepackOptions) -> Result<()> {
         update_server_info()?;
     }
     let _ = options.quiet;
+    if let Some(promisor_pack_name) = &promisor_pack_name {
+        fs::write(pack_dir.join(format!("{promisor_pack_name}.promisor")), b"")
+            .map_err(CliError::Io)?;
+    }
+    refresh_shared_repository_permissions(&repo.git_dir)?;
     Ok(())
 }
 
@@ -2324,6 +2366,7 @@ fn remove_replaced_pack_files(
             pack_path.clone(),
             pack_path.with_extension("idx"),
             pack_path.with_extension("rev"),
+            pack_path.with_extension("promisor"),
         ] {
             match fs::remove_file(path) {
                 Ok(()) => {}
@@ -2333,6 +2376,100 @@ fn remove_replaced_pack_files(
         }
     }
     Ok(())
+}
+
+fn repack_promisor_object_ids(
+    objects_dir: &std::path::Path,
+    keep_pack_names: &HashSet<String>,
+) -> Result<HashSet<ObjectId>> {
+    let pack_dir = objects_dir.join("pack");
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let mut ids = HashSet::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("promisor") {
+            continue;
+        }
+        let pack_path = path.with_extension("pack");
+        let Some(pack_name) = pack_path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if keep_pack_names.contains(pack_name) || !pack_path.is_file() {
+            continue;
+        }
+        for_each_pack_index_object_id_from_path(
+            GitHashAlgorithm::Sha1,
+            &pack_path.with_extension("idx"),
+            &mut |id| {
+                ids.insert(id.clone());
+                Ok(())
+            },
+        )?;
+    }
+    Ok(ids)
+}
+
+fn split_repack_ids_by_promisor(
+    ids: &[ObjectId],
+    promisor_object_ids: &HashSet<ObjectId>,
+) -> (Vec<ObjectId>, Vec<ObjectId>) {
+    let mut promisor_ids = Vec::new();
+    let mut regular_ids = Vec::new();
+    for id in ids {
+        if promisor_object_ids.contains(id) {
+            promisor_ids.push(id.clone());
+        } else {
+            regular_ids.push(id.clone());
+        }
+    }
+    (promisor_ids, regular_ids)
+}
+
+fn preserved_promisor_pack_names(
+    objects_dir: &std::path::Path,
+    keep_pack_names: &HashSet<String>,
+    repacked_ids: &[ObjectId],
+) -> Result<HashSet<String>> {
+    let pack_dir = objects_dir.join("pack");
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let repacked_ids = repacked_ids.iter().cloned().collect::<HashSet<_>>();
+    let mut preserved = HashSet::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("promisor") {
+            continue;
+        }
+        let pack_path = path.with_extension("pack");
+        let Some(pack_name) = pack_path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if keep_pack_names.contains(pack_name) || !pack_path.is_file() {
+            continue;
+        }
+        let mut keep_pack = false;
+        for_each_pack_index_object_id_from_path(
+            GitHashAlgorithm::Sha1,
+            &pack_path.with_extension("idx"),
+            &mut |id| {
+                if !repacked_ids.contains(id) {
+                    keep_pack = true;
+                }
+                Ok(())
+            },
+        )?;
+        if keep_pack {
+            preserved.insert(pack_name.to_owned());
+        }
+    }
+    Ok(preserved)
 }
 
 fn loosen_unreachable_packed_objects(
@@ -2359,7 +2496,20 @@ fn collect_repack_candidate_ids(
     local: bool,
     reachable: &HashSet<ObjectId>,
     keep_pack_object_ids: &HashSet<ObjectId>,
+    promised_missing_object_ids: &HashSet<ObjectId>,
 ) -> Result<Vec<ObjectId>> {
+    if !promised_missing_object_ids.is_empty() {
+        let mut ids = Vec::with_capacity(repack_candidate_initial_capacity(reachable.len()));
+        store.for_each_object_id(&mut |id| {
+            if reachable.contains(id) && !keep_pack_object_ids.contains(id) {
+                ids.push(id.clone());
+            }
+            Ok(())
+        })?;
+        ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
+        return Ok(ids);
+    }
     if !local {
         return collect_repack_candidate_ids_in_walk_order(
             repo,
@@ -2495,6 +2645,7 @@ fn gc(options: GcOptions) -> Result<()> {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
     if options.auto {
+        reference_commands::pack_refs(true, true, Vec::new(), Vec::new(), true, false)?;
         return Ok(());
     }
     let _ = (
@@ -2505,10 +2656,13 @@ fn gc(options: GcOptions) -> Result<()> {
         options.keep_largest_pack,
         max_cruft_size,
     );
+    let repo = find_repo()?;
+    let precious_objects = repository_has_extension(&repo, "preciousobjects")?;
+    history_commands::reflog(vec!["expire".to_owned(), "--all".to_owned()])?;
     repack(RepackOptions {
-        all: true,
+        all: !precious_objects,
         all_and_loosen_unreachable: false,
-        delete_redundant: true,
+        delete_redundant: !precious_objects,
         quiet: options.quiet,
         no_update_server_info: false,
         no_reuse_delta: false,
@@ -2536,7 +2690,7 @@ fn gc(options: GcOptions) -> Result<()> {
         unpack_unreachable: Vec::new(),
         keep_pack: Vec::new(),
     })?;
-    if !options.no_prune {
+    if !options.no_prune && !precious_objects {
         let mut args = Vec::new();
         if let Some(expire) = &options.prune {
             args.push("--expire".to_string());
@@ -2596,6 +2750,12 @@ fn prune(args: Vec<String>) -> Result<()> {
         });
     }
     let repo = find_repo()?;
+    if repository_has_extension(&repo, "preciousobjects")? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "cannot prune repository with precious objects".into(),
+        });
+    }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let Some(cutoff) = prune_expire_cutoff(options.expire.as_deref())? else {
         return Ok(());
@@ -2723,6 +2883,7 @@ fn collect_reachable_objects(
     store: &LooseObjectStore,
     heads: &[String],
 ) -> Result<HashSet<ObjectId>> {
+    let promised_missing = collect_promised_missing_object_ids(repo, store)?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let mut roots = Vec::new();
     if let Ok(id) = refs.resolve("HEAD") {
@@ -2745,19 +2906,98 @@ fn collect_reachable_objects(
         }
     }
 
-    Ok(collect_reachable_object_ids_from_roots(store, &roots)?
-        .into_iter()
-        .collect())
+    collect_reachable_objects_from_roots_with_promised_missing(store, &roots, &promised_missing)
+        .map_err(CliError::Io)
+}
+
+fn collect_reachable_objects_from_roots_with_promised_missing(
+    store: &LooseObjectStore,
+    roots: &[ObjectId],
+    promised_missing: &HashSet<ObjectId>,
+) -> io::Result<HashSet<ObjectId>> {
+    let mut seen = HashSet::new();
+    let mut pending = Vec::new();
+    for root in roots.iter().rev() {
+        if !schedule_reachable_maintenance_object(&mut seen, &mut pending, root) {
+            continue;
+        }
+        while let Some(id) = pending.pop() {
+            mark_reachable_maintenance_object(
+                store,
+                id,
+                promised_missing,
+                &mut seen,
+                &mut pending,
+            )?;
+        }
+    }
+    Ok(seen)
+}
+
+fn mark_reachable_maintenance_object(
+    store: &LooseObjectStore,
+    id: ObjectId,
+    promised_missing: &HashSet<ObjectId>,
+    seen: &mut HashSet<ObjectId>,
+    pending: &mut Vec<ObjectId>,
+) -> io::Result<()> {
+    if matches!(store.object_kind_hint(&id)?, Some(GitObjectKind::Blob)) {
+        return Ok(());
+    }
+    let object = match store.read_object(&id) {
+        Ok(object) => object,
+        Err(error) if error.kind() == io::ErrorKind::NotFound && promised_missing.contains(&id) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    match object.kind {
+        GitObjectKind::Blob => {}
+        GitObjectKind::Tree => {
+            for entry in
+                zmin_git_core::decode_tree_object_refs(object.id.algorithm(), &object.content)?
+            {
+                let mode = entry.mode;
+                let entry_id = entry.id;
+                if mode != TreeMode::Gitlink {
+                    schedule_reachable_maintenance_object(seen, pending, &entry_id);
+                }
+            }
+        }
+        GitObjectKind::Commit => {
+            let commit = decode_commit(object.id.algorithm(), &object.content)?;
+            schedule_reachable_maintenance_object(seen, pending, &commit.tree);
+            for parent in &commit.parents {
+                schedule_reachable_maintenance_object(seen, pending, parent);
+            }
+        }
+        GitObjectKind::Tag => {
+            let tag = decode_tag(object.id.algorithm(), &object.content)?;
+            schedule_reachable_maintenance_object(seen, pending, &tag.target);
+        }
+    }
+    Ok(())
+}
+
+fn schedule_reachable_maintenance_object(
+    seen: &mut HashSet<ObjectId>,
+    pending: &mut Vec<ObjectId>,
+    id: &ObjectId,
+) -> bool {
+    if seen.insert(id.clone()) {
+        pending.push(id.clone());
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
 
     #[test]
     fn collect_reachable_objects_uses_loose_ref_over_packed_ref() {
@@ -2807,9 +3047,15 @@ mod tests {
         };
         let store = LooseObjectStore::new(git_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
 
-        let candidates =
-            collect_repack_candidate_ids(&git_repo, &store, true, &reachable, &HashSet::new())
-                .expect("candidate ids");
+        let candidates = collect_repack_candidate_ids(
+            &git_repo,
+            &store,
+            true,
+            &reachable,
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+        .expect("candidate ids");
 
         assert_eq!(candidates, vec![object_id]);
     }
@@ -2872,124 +3118,15 @@ mod tests {
         repo.join(".git/objects").join(&id[..2]).join(&id[2..])
     }
 
-    fn stock_git_bin() -> PathBuf {
-        for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
-            if let Ok(value) = std::env::var(key)
-                && !value.trim().is_empty()
-            {
-                let path = PathBuf::from(value);
-                assert!(is_stock_git(&path), "{key} does not point to stock Git");
-                return path;
-            }
-        }
-        for path in stock_git_candidates() {
-            if is_stock_git(&path) {
-                return path;
-            }
-        }
-        for path in std::env::var_os("PATH")
-            .into_iter()
-            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-            .flat_map(|dir| {
-                stock_git_names()
-                    .into_iter()
-                    .map(move |name| dir.join(name))
-            })
-        {
-            if is_stock_git(&path) {
-                return path;
-            }
-        }
-        panic!("could not find stock Git; set ZMIN_STOCK_GIT to a Git binary");
-    }
-
-    fn stock_git_candidates() -> Vec<PathBuf> {
-        #[cfg(windows)]
-        {
-            vec![
-                PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
-                PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
-                PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-                PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
-            ]
-        }
-        #[cfg(not(windows))]
-        {
-            vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
-        }
-    }
-
-    fn stock_git_names() -> Vec<&'static str> {
-        if cfg!(windows) {
-            vec!["git.exe", "git"]
-        } else {
-            vec!["git"]
-        }
-    }
-
-    fn is_stock_git(path: &Path) -> bool {
-        let Ok(output) = Command::new(path).arg("--version").output() else {
-            return false;
-        };
-        if !output.status.success() {
-            return false;
-        }
-        let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-        version.starts_with("git version ") && !version.contains("zmin")
-    }
-
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new(stock_git_bin())
-            .arg("init")
-            .args(["-b", "main"])
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        repo
+        stock_git_support::git_init_main()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new(stock_git_bin())
-            .args(["-c", "commit.gpgsign=false"])
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 
     fn git_env<const N: usize>(repo: &TempDir, args: [&str; N]) {
-        let output = Command::new(stock_git_bin())
-            .args(["-c", "commit.gpgsign=false"])
-            .args(args)
-            .env("GIT_AUTHOR_NAME", "Zmin Test")
-            .env("GIT_AUTHOR_EMAIL", "zmin@example.invalid")
-            .env("GIT_AUTHOR_DATE", "1700000000 +0000")
-            .env("GIT_COMMITTER_NAME", "Zmin Test")
-            .env("GIT_COMMITTER_EMAIL", "zmin@example.invalid")
-            .env("GIT_COMMITTER_DATE", "1700000000 +0000")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        stock_git_support::git_env(repo, &args);
     }
 }

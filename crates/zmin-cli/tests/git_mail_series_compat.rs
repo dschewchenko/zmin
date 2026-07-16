@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::process::Command;
 
 use tempfile::TempDir;
 
@@ -83,6 +84,142 @@ fn format_patch_multi_file_fixture_repo() -> TempDir {
     repo
 }
 
+fn format_patch_ignore_if_in_upstream_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n");
+    write_file(repo.path(), "elif", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "Initial"]);
+
+    git(repo.path(), ["checkout", "-b", "side"]);
+    write_file(repo.path(), "file", "1\n2\n5\n6\nA\nB\nC\n7\n8\n9\n10\n");
+    let elif = repo.path().join("elif");
+    let permissions = fs::metadata(&elif).expect("elif metadata").permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut next = permissions;
+        next.set_mode(0o100755);
+        fs::set_permissions(&elif, next).expect("chmod elif");
+    }
+    git(repo.path(), ["add", "file", "elif"]);
+    git_with_env(repo.path(), ["commit", "-m", "Side changes #1"]);
+
+    write_file(
+        repo.path(),
+        "file",
+        "1\n2\n5\n6\nA\nB\nC\n7\n8\n9\n10\nD\nE\nF\n",
+    );
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "Side changes #2"]);
+    git(repo.path(), ["tag", "C2"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    let patch = Command::new("git")
+        .args(["diff-tree", "-p", "C2"])
+        .current_dir(repo.path())
+        .output()
+        .expect("git diff-tree -p C2");
+    assert!(
+        patch.status.success(),
+        "git diff-tree -p C2 stderr: {}",
+        String::from_utf8_lossy(&patch.stderr)
+    );
+    let (code, _, stderr) = command_any_output_with_stdin(
+        "git",
+        repo.path(),
+        &["apply", "--index"],
+        &String::from_utf8_lossy(&patch.stdout),
+        "git apply --index",
+    );
+    assert_eq!(code, 0, "git apply --index stderr: {stderr}");
+    git_with_env(
+        repo.path(),
+        ["commit", "-m", "Main accepts moral equivalent of #2"],
+    );
+
+    git(repo.path(), ["checkout", "side"]);
+    write_file(
+        repo.path(),
+        "file",
+        "5\n6\n1\n2\n3\nA\n4\nB\nC\n7\n8\n9\n10\nD\nE\nF\n",
+    );
+    git(repo.path(), ["add", "file"]);
+    git_with_env(
+        repo.path(),
+        [
+            "commit",
+            "-m",
+            "Side changes #3 with \\n backslash-n in it.",
+        ],
+    );
+
+    git(repo.path(), ["checkout", "-b", "patchid"]);
+    write_file(
+        repo.path(),
+        "file2",
+        "5\n6\n1\n2\n3\nA\n4\nB\nC\n7\n8\n9\n10\nD\nE\nF\n",
+    );
+    write_file(
+        repo.path(),
+        "file3",
+        "1\n2\n3\nA\n4\nB\nC\n7\n8\n9\n10\nD\nE\nF\n5\n6\n",
+    );
+    write_file(repo.path(), "file", "8\n9\n10\n");
+    git(repo.path(), ["add", "file", "file2", "file3"]);
+    git_with_env(repo.path(), ["commit", "-m", "patchid 1"]);
+
+    write_file(repo.path(), "file2", "4\nA\nB\n7\n8\n9\n10\n");
+    write_file(repo.path(), "file3", "8\n9\n10\n5\n6\n");
+    git(repo.path(), ["add", "file2", "file3"]);
+    git_with_env(repo.path(), ["commit", "-m", "patchid 2"]);
+
+    write_file(repo.path(), "file", "10\n5\n6\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "patchid 3"]);
+
+    git(repo.path(), ["checkout", "-b", "empty", "main"]);
+    git_with_env(
+        repo.path(),
+        ["commit", "--allow-empty", "-m", "empty commit"],
+    );
+
+    git(repo.path(), ["checkout", "side"]);
+    repo
+}
+
+fn format_patch_long_subject_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "alpha.txt", "alpha\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(
+        repo.path(),
+        [
+            "commit",
+            "-m",
+            "This is a very long subject line to exercise filename max length behavior exactly",
+        ],
+    );
+    write_file(repo.path(), "beta.txt", "beta\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(
+        repo.path(),
+        [
+            "commit",
+            "-m",
+            "Second commit with another long title for output filename testing",
+        ],
+    );
+    repo
+}
+
 fn format_patch_nested_dir_fixture_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -147,6 +284,61 @@ fn normalize_format_patch_version(output: &str) -> String {
         version_line = line == "-- ";
     }
     normalized.join("\n")
+}
+
+fn normalize_format_patch_named_files(files: Vec<(String, String)>) -> Vec<(String, String)> {
+    files
+        .into_iter()
+        .map(|(name, content)| {
+            let normalized = content
+                .lines()
+                .map(|line| {
+                    if line.starts_with("Date: ") {
+                        "Date: <normalized-date>".to_owned()
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (name, normalize_format_patch_version(&normalized))
+        })
+        .collect()
+}
+
+fn normalize_format_patch_dates(output: &str) -> String {
+    output
+        .lines()
+        .map(|line| {
+            if line.starts_with("Date: ") {
+                "Date: <normalized-date>".to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn header_block(output: &str, header_name: &str) -> String {
+    let mut lines = Vec::new();
+    let header_prefix = format!("{header_name}: ");
+    let mut collecting = false;
+    for line in output.lines() {
+        if !collecting {
+            if line.starts_with(&header_prefix) {
+                lines.push(line);
+                collecting = true;
+            }
+            continue;
+        }
+        if line.starts_with(' ') {
+            lines.push(line);
+            continue;
+        }
+        break;
+    }
+    lines.join("\n")
 }
 
 #[test]
@@ -693,6 +885,473 @@ fn format_patch_mail_render_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_notes_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    git(
+        repo.path(),
+        [
+            "notes",
+            "--ref",
+            "test",
+            "add",
+            "-m",
+            "test message",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        ["notes", "add", "-m", "notes config message", "HEAD"],
+    );
+    git(
+        repo.path(),
+        [
+            "notes",
+            "--ref",
+            "note1",
+            "add",
+            "-m",
+            "this is note 1",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "notes",
+            "--ref",
+            "note2",
+            "add",
+            "-m",
+            "this is note 2",
+            "HEAD",
+        ],
+    );
+
+    let cases: Vec<Vec<&str>> = vec![
+        vec![
+            "format-patch",
+            "-1",
+            "--signoff",
+            "--stdout",
+            "--notes=test",
+        ],
+        vec!["format-patch", "-1", "--stdout", "--notes"],
+        vec!["format-patch", "-1", "--stdout", "--no-notes"],
+        vec!["format-patch", "-1", "--stdout", "--notes", "--no-notes"],
+        vec!["format-patch", "-1", "--stdout", "--no-notes", "--notes"],
+        vec!["format-patch", "-1", "--stdout", "--notes=note1"],
+        vec!["format-patch", "-1", "--stdout", "--notes=note2"],
+        vec![
+            "format-patch",
+            "-1",
+            "--stdout",
+            "--notes=note1",
+            "--notes=note2",
+        ],
+        vec![
+            "format-patch",
+            "-1",
+            "--stdout",
+            "--no-notes",
+            "--notes=note2",
+        ],
+    ];
+
+    for args in cases {
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args),
+            git_status_args(repo.path(), &args),
+            "status case mismatch: {}",
+            args.join(" ")
+        );
+    }
+
+    let config_cases: Vec<Vec<(&str, &str)>> = vec![
+        vec![("format.notes", "true")],
+        vec![("format.notes", "note1")],
+        vec![("format.notes", "note2"), ("format.notes", "note1")],
+    ];
+    let args = ["format-patch", "-1", "--stdout"];
+    for config in config_cases {
+        let git_repo = clone_repo_fixture(repo.path());
+        let zmin_repo = clone_repo_fixture(repo.path());
+        for (key, value) in &config {
+            git(git_repo.path(), ["config", "--add", key, value]);
+            git(zmin_repo.path(), ["config", "--add", key, value]);
+        }
+        let zmin = run_zmin_args(zmin_repo.path(), &args);
+        let stock = git_args(git_repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "config case: {:?}",
+            config
+        );
+        assert_eq!(
+            run_zmin_status_args(zmin_repo.path(), &args),
+            git_status_args(git_repo.path(), &args),
+            "config status mismatch: {:?}",
+            config
+        );
+    }
+}
+
+#[test]
+fn format_patch_output_directory_family_matches_stock_git() {
+    let repo = format_patch_ignore_if_in_upstream_fixture_repo();
+    let cases: Vec<(&str, Vec<&str>, Option<(&str, &str)>, &str)> = vec![
+        (
+            "cli outdir simple",
+            vec!["format-patch", "-o", "patches", "origin/main..origin/side"],
+            None,
+            "patches",
+        ),
+        (
+            "cli outdir nested existing",
+            vec![
+                "format-patch",
+                "-o",
+                "existing-dir/patches",
+                "origin/main..origin/side",
+            ],
+            None,
+            "existing-dir/patches",
+        ),
+        (
+            "cli outdir nested missing",
+            vec![
+                "format-patch",
+                "-o",
+                "non-existing-dir/patches",
+                "origin/main..origin/side",
+            ],
+            None,
+            "non-existing-dir/patches",
+        ),
+        (
+            "config outdir",
+            vec!["format-patch", "origin/main..origin/side"],
+            Some(("format.outputDirectory", "patches")),
+            "patches",
+        ),
+        (
+            "cli overrides config outdir",
+            vec!["format-patch", "origin/main..origin/side", "-o", "patchset"],
+            Some(("format.outputDirectory", "patches")),
+            "patchset",
+        ),
+    ];
+
+    for (label, args, config, outdir) in cases {
+        let git_repo = clone_repo_fixture(repo.path());
+        let zmin_repo = clone_repo_fixture(repo.path());
+        if let Some((key, value)) = config {
+            git(git_repo.path(), ["config", key, value]);
+            git(zmin_repo.path(), ["config", key, value]);
+        }
+        if label == "cli outdir nested existing" {
+            fs::create_dir_all(git_repo.path().join("existing-dir"))
+                .expect("create git existing dir");
+            fs::create_dir_all(zmin_repo.path().join("existing-dir"))
+                .expect("create zmin existing dir");
+        }
+        let git_result = command_any_output("git", git_repo.path(), &args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin");
+        assert_eq!(zmin_result.0, git_result.0, "{label}: status");
+        assert_eq!(zmin_result.2, git_result.2, "{label}: stderr");
+
+        let git_files = read_named_files(&git_repo.path().join(outdir));
+        let zmin_files = read_named_files(&zmin_repo.path().join(outdir));
+        assert_eq!(zmin_files.len(), git_files.len(), "{label}: file count");
+        for ((zmin_name, _zmin_contents), (git_name, _git_contents)) in
+            zmin_files.iter().zip(git_files.iter())
+        {
+            assert_eq!(zmin_name, git_name, "{label}: filename");
+        }
+
+        let git_stdout = git_result
+            .1
+            .lines()
+            .map(|line| line.rsplit('/').next().unwrap_or(line).to_owned())
+            .collect::<Vec<_>>();
+        let zmin_stdout = zmin_result
+            .1
+            .lines()
+            .map(|line| line.rsplit('/').next().unwrap_or(line).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(zmin_stdout, git_stdout, "{label}: stdout filenames");
+
+        if label == "cli overrides config outdir" {
+            assert!(
+                !zmin_repo.path().join("patches").exists(),
+                "{label}: config outdir should stay unused"
+            );
+        }
+    }
+}
+
+#[test]
+fn format_patch_notes_config_no_notes_and_path_output_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "a\n");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "a.txt", "a\nb\n");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "change"]);
+    git(
+        repo.path(),
+        [
+            "notes",
+            "--ref",
+            "note1",
+            "add",
+            "-m",
+            "this is note 1",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "notes",
+            "--ref",
+            "note2",
+            "add",
+            "-m",
+            "this is note 2",
+            "HEAD",
+        ],
+    );
+    git(repo.path(), ["config", "format.notes", "note1"]);
+    git(repo.path(), ["config", "--add", "format.notes", "note2"]);
+
+    let note_cases: Vec<Vec<&str>> = vec![
+        vec!["format-patch", "-1", "--stdout", "--no-notes"],
+        vec![
+            "format-patch",
+            "-1",
+            "--stdout",
+            "--no-notes",
+            "--notes=note2",
+        ],
+    ];
+    for args in note_cases {
+        let stock = git_args(repo.path(), &args);
+        let zmin = run_zmin_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+    }
+
+    let subdir = repo.path().join("sub/dir");
+    fs::create_dir_all(&subdir).expect("create subdir");
+    let stock = command_any_output("git", &subdir, &["format-patch", "-1"], "git");
+    let zmin = command_any_output(zmin_bin(), &subdir, &["format-patch", "-1"], "zmin");
+    assert_eq!(zmin.0, stock.0, "subdir status");
+    assert_eq!(zmin.1, stock.1, "subdir stdout");
+    assert_eq!(zmin.2, stock.2, "subdir stderr");
+}
+
+#[test]
+fn format_patch_unified_context_and_default_filename_limit_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "1\n2\n3\n4\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "file", "1\n2\n3\n4\n5\n6\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "c1"]);
+    write_file(repo.path(), "file", "1\n2\n3\n4\n5\n6\n7\n8\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "c2"]);
+
+    let stock = git_args(repo.path(), &["format-patch", "-U4", "-2", "--stdout"]);
+    let zmin = run_zmin_args(repo.path(), &["format-patch", "-U4", "-2", "--stdout"]);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock),
+        "unified context"
+    );
+
+    let long_subject = "This is an excessively long subject line for a message due to the habit some projects have of not having a short, one-line subject at the start of the commit message, but rather sticking a whole paragraph right at the start as the only thing in the commit message. It had better not become the filename for the patch.";
+    write_file(repo.path(), "file", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", long_subject]);
+
+    let git_repo = clone_repo_fixture(repo.path());
+    let zmin_repo = clone_repo_fixture(repo.path());
+    let git_result = command_any_output(
+        "git",
+        git_repo.path(),
+        &["format-patch", "-o", "patches", "-1"],
+        "git",
+    );
+    let zmin_result = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["format-patch", "-o", "patches", "-1"],
+        "zmin",
+    );
+    assert_eq!(zmin_result.0, git_result.0, "filename limit status");
+    assert_eq!(zmin_result.2, git_result.2, "filename limit stderr");
+    assert_eq!(zmin_result.1, git_result.1, "filename limit stdout");
+    let git_files = read_named_files(&git_repo.path().join("patches"));
+    let zmin_files = read_named_files(&zmin_repo.path().join("patches"));
+    assert_eq!(
+        zmin_files.len(),
+        git_files.len(),
+        "filename limit file count"
+    );
+    for ((zmin_name, _), (git_name, _)) in zmin_files.iter().zip(git_files.iter()) {
+        assert_eq!(zmin_name, git_name, "filename limit filename");
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_signoff_footer_family_matches_stock_git() {
+    let cases: [(&str, &[&str], Option<(&str, &str)>, bool); 8] = [
+        (
+            "existing footer signoff keeps adjacency",
+            &["subject", "", "body", "", "Signed-off-by: my@house"],
+            None,
+            true,
+        ),
+        (
+            "existing matching signoff is not duplicated",
+            &[
+                "subject",
+                "",
+                "body",
+                "",
+                "Signed-off-by: C O Mitter <committer@example.com>",
+            ],
+            None,
+            true,
+        ),
+        (
+            "existing matching signoff without trailing newline is not duplicated",
+            &[
+                "subject",
+                "",
+                "Signed-off-by: C O Mitter <committer@example.com>",
+            ],
+            None,
+            false,
+        ),
+        (
+            "middle signoff paragraph does not make trailing text footer",
+            &[
+                "subject",
+                "",
+                "Signed-off-by: my@house",
+                "",
+                "A lot of houses.",
+            ],
+            None,
+            true,
+        ),
+        (
+            "garbage inside conforming footer still counts as footer",
+            &[
+                "subject",
+                "",
+                "body",
+                "",
+                "Tested-by: my@house",
+                "Some Trash",
+                "Signed-off-by: C O Mitter <committer@example.com>",
+            ],
+            None,
+            true,
+        ),
+        (
+            "wrapped text before trailing signoff stays outside footer",
+            &[
+                "subject",
+                "",
+                "My unfortunate",
+                "Signed-off-by: example happens to be wrapped here.",
+            ],
+            None,
+            true,
+        ),
+        (
+            "footer duplicate is suppressed even with trailing bug trailers",
+            &[
+                "subject",
+                "",
+                "body",
+                "",
+                "Reviewed-id: Noone",
+                "Tested-by: my@house",
+                "Change-id: Ideadbeef",
+                "Signed-off-by: C O Mitter <committer@example.com>",
+                "Bug: 1234",
+            ],
+            None,
+            true,
+        ),
+        (
+            "configured custom trailer makes trailing block footer",
+            &["subject", "", "Myfooter: x", "Some Trash"],
+            Some(("trailer.Myfooter.ifexists", "add")),
+            true,
+        ),
+    ];
+
+    for (label, message_lines, config, trailing_newline) in cases {
+        let git_repo = git_init();
+        configure_identity(git_repo.path());
+        git(git_repo.path(), ["checkout", "-b", "main"]);
+        write_file(git_repo.path(), "file.txt", "base\n");
+        git(git_repo.path(), ["add", "file.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        write_file(git_repo.path(), "file.txt", "base\nnext\n");
+        git(git_repo.path(), ["add", "file.txt"]);
+        let mut message = message_lines.join("\n");
+        if trailing_newline {
+            message.push('\n');
+        }
+        write_file(git_repo.path(), "msg.txt", &message);
+        if let Some((key, value)) = config {
+            git(git_repo.path(), ["config", key, value]);
+        }
+        git_with_env(git_repo.path(), ["commit", "-F", "msg.txt"]);
+
+        let args = ["format-patch", "--stdout", "--signoff", "HEAD^..HEAD"];
+        let git_output = git_args(git_repo.path(), &args);
+        let zmin_output = run_zmin_args(git_repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin_output),
+            normalize_format_patch_version(&git_output),
+            "{label}"
+        );
+        assert_eq!(
+            run_zmin_status_args(git_repo.path(), &args),
+            git_status_args(git_repo.path(), &args),
+            "status mismatch: {label}"
+        );
+    }
+}
+
+#[test]
 fn format_patch_keep_subject_family_matches_stock_git() {
     let repo = format_patch_keep_subject_fixture_repo();
     let cases = [["--keep-subject"], ["-k"]];
@@ -760,6 +1419,595 @@ fn format_patch_mail_header_family_matches_stock_git() {
             git_status_args(repo.path(), &args_ref),
             "status case mismatch"
         );
+    }
+}
+
+#[test]
+fn format_patch_multiline_subject_and_header_folding_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "base\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "file", "base\nnext\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "one\ntwo\nthree\n\nbody\n"]);
+
+    let long_subject = "foo bar ".repeat(64).trim_end().to_owned();
+    write_file(repo.path(), "long.txt", "long\n");
+    git(repo.path(), ["add", "long.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", &long_subject]);
+
+    let long_author = "Foo Bar ".repeat(24).trim_end().to_owned();
+    write_file(repo.path(), "author.txt", "author\n");
+    git(repo.path(), ["add", "author.txt"]);
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["commit", "-m", "author-check"],
+        &[
+            ("GIT_AUTHOR_NAME", &long_author),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+        "git commit long author",
+    );
+
+    let multiline_stock = git_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD~2"]);
+    let multiline_zmin = run_zmin_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD~2"]);
+    assert_eq!(
+        header_block(&multiline_zmin, "Subject"),
+        header_block(&multiline_stock, "Subject"),
+        "multi-line subject"
+    );
+
+    let long_subject_stock = git_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD~1"]);
+    let long_subject_zmin =
+        run_zmin_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD~1"]);
+    assert_eq!(
+        header_block(&long_subject_zmin, "Subject"),
+        header_block(&long_subject_stock, "Subject"),
+        "long ascii subject folding"
+    );
+
+    let long_author_stock = git_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD"]);
+    let long_author_zmin = run_zmin_args(repo.path(), &["format-patch", "--stdout", "-1", "HEAD"]);
+    assert_eq!(
+        header_block(&long_author_zmin, "From"),
+        header_block(&long_author_stock, "From"),
+        "long ascii from folding"
+    );
+}
+
+#[test]
+fn format_patch_encode_email_headers_override_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "base\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "file", "base\nnext\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "Foö"]);
+    git(
+        repo.path(),
+        ["config", "format.encodeEmailHeaders", "false"],
+    );
+
+    let args = ["format-patch", "--encode-email-headers", "-1", "--stdout"];
+    let stock = git_args(repo.path(), &args);
+    let zmin = run_zmin_args(repo.path(), &args);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+}
+
+#[test]
+fn format_patch_non_encoded_utf8_from_and_in_body_headers_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "base\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "file", "base\nnext\n");
+    git(repo.path(), ["add", "file"]);
+    let long_utf8_author = "Foö Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar Foo Bar";
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["commit", "-m", "author-check"],
+        &[
+            ("GIT_AUTHOR_NAME", long_utf8_author),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+        "git commit utf8 long author",
+    );
+
+    let no_encode_args = [
+        "format-patch",
+        "--no-encode-email-headers",
+        "--stdout",
+        "-1",
+        "HEAD",
+    ];
+    let stock = git_args(repo.path(), &no_encode_args);
+    let zmin = run_zmin_args(repo.path(), &no_encode_args);
+    assert_eq!(header_block(&zmin, "From"), header_block(&stock, "From"));
+
+    git(repo.path(), ["reset", "--hard", "HEAD~1"]);
+    write_file(repo.path(), "file", "base\nbody\n");
+    git(repo.path(), ["add", "file"]);
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["commit", "-m", "exotic"],
+        &[
+            ("GIT_AUTHOR_NAME", "éxötìc"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "C O Mitter"),
+            ("GIT_COMMITTER_EMAIL", "committer@example.com"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+        "git commit exotic author",
+    );
+
+    let body_from_args = ["format-patch", "-1", "--stdout", "--from"];
+    let stock = git_args(repo.path(), &body_from_args);
+    let zmin = run_zmin_args(repo.path(), &body_from_args);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+}
+
+#[test]
+fn format_patch_pathspec_and_diff_relative_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "base.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "pathspec", "main"]);
+    write_file(repo.path(), "file_a", "file_a 1\n");
+    write_file(repo.path(), "file_b", "file_b 1\n");
+    git(repo.path(), ["add", "file_a", "file_b"]);
+    git_with_env(repo.path(), ["commit", "-m", "pathspec_initial"]);
+    write_file(repo.path(), "file_a", "file_a 1\nfile_a 2\n");
+    git(repo.path(), ["add", "file_a"]);
+    git_with_env(repo.path(), ["commit", "-m", "pathspec_a"]);
+    write_file(repo.path(), "file_b", "file_b 1\nfile_b 2\n");
+    git(repo.path(), ["add", "file_b"]);
+    git_with_env(repo.path(), ["commit", "-m", "pathspec_b"]);
+
+    let pathspec_args = ["format-patch", "--stdout", "main..pathspec", "--", "file_a"];
+    let stock = git_args(repo.path(), &pathspec_args);
+    let zmin = run_zmin_args(repo.path(), &pathspec_args);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+
+    fs::create_dir_all(repo.path().join("subdir")).expect("create subdir");
+    write_file(repo.path(), "subdir/file2", "other content\n");
+    git(repo.path(), ["add", "subdir/file2"]);
+    git_with_env(repo.path(), ["commit", "-m", "msg"]);
+    let expect = git_args(
+        repo.path(),
+        &["format-patch", "--relative=subdir", "--stdout", "-1"],
+    );
+    git(repo.path(), ["config", "diff.relative", "true"]);
+    let actual = command_any_output(
+        zmin_bin(),
+        &repo.path().join("subdir"),
+        &["format-patch", "--stdout", "-1"],
+        "zmin format-patch diff.relative",
+    );
+    assert_eq!(actual.0, 0);
+    assert_eq!(
+        normalize_format_patch_version(&actual.1),
+        normalize_format_patch_version(&expect)
+    );
+}
+
+#[test]
+fn format_patch_signature_config_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    write_file(
+        repo.path(),
+        "mail-signature",
+        "Test User <test.email@kernel.org>\ncustom sig\n",
+    );
+    let cases: [(&str, Option<(&str, &str)>, &[&str]); 6] = [
+        (
+            "format.signature config",
+            Some(("format.signature", "config sig")),
+            &["format-patch", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "empty format.signature suppresses signature",
+            Some(("format.signature", "")),
+            &["format-patch", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "signature flag overrides format.signature",
+            Some(("format.signature", "config sig")),
+            &[
+                "format-patch",
+                "--stdout",
+                "--signature=override",
+                "-1",
+                "HEAD",
+            ],
+        ),
+        (
+            "empty signature flag suppresses signature",
+            None,
+            &["format-patch", "--stdout", "--signature=", "-1", "HEAD"],
+        ),
+        (
+            "format.signaturefile config",
+            Some(("format.signaturefile", "mail-signature")),
+            &["format-patch", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "signature-file explicit path",
+            None,
+            &[
+                "format-patch",
+                "--stdout",
+                "--signature-file=mail-signature",
+                "-1",
+                "HEAD",
+            ],
+        ),
+    ];
+
+    for (label, config, args) in cases {
+        if let Some((key, value)) = config {
+            git(repo.path(), ["config", key, value]);
+        }
+        let zmin = run_zmin_args(repo.path(), args);
+        let stock = git_args(repo.path(), args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "{label}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status mismatch: {label}"
+        );
+        if let Some((key, _)) = config {
+            git(repo.path(), ["config", "--unset-all", key]);
+        }
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_address_header_family_matches_expected_headers() {
+    let repo = format_patch_fixture_repo();
+    let cases: Vec<(&str, Vec<(&str, &str)>, Vec<&str>, &[&str])> = vec![
+        (
+            "additional command line cc rfc822",
+            vec![("format.headers", "Cc: R E Cipient <rcipient@example.com>")],
+            vec![
+                "format-patch",
+                "--stdout",
+                "--cc=S. E. Cipient <scipient@example.com>",
+                "HEAD~2..HEAD",
+            ],
+            &[
+                "Cc: R E Cipient <rcipient@example.com>,",
+                " \"S. E. Cipient\" <scipient@example.com>",
+            ],
+        ),
+        (
+            "command line to rfc822",
+            vec![],
+            vec![
+                "format-patch",
+                "--stdout",
+                "--to=R. E. Cipient <rcipient@example.com>",
+                "HEAD~2..HEAD",
+            ],
+            &["To: \"R. E. Cipient\" <rcipient@example.com>"],
+        ),
+        (
+            "command line to rfc2047",
+            vec![],
+            vec![
+                "format-patch",
+                "--stdout",
+                "--to=R Ä Cipient <rcipient@example.com>",
+                "HEAD~2..HEAD",
+            ],
+            &["To: =?UTF-8?q?R=20=C3=84=20Cipient?= <rcipient@example.com>"],
+        ),
+        (
+            "config to rfc822",
+            vec![("format.to", "R. E. Cipient <rcipient@example.com>")],
+            vec!["format-patch", "--stdout", "HEAD~2..HEAD"],
+            &["To: \"R. E. Cipient\" <rcipient@example.com>"],
+        ),
+        (
+            "config to rfc2047",
+            vec![("format.to", "R Ä Cipient <rcipient@example.com>")],
+            vec!["format-patch", "--stdout", "HEAD~2..HEAD"],
+            &["To: =?UTF-8?q?R=20=C3=84=20Cipient?= <rcipient@example.com>"],
+        ),
+    ];
+
+    for (label, configs, args, expected_headers) in cases {
+        let zmin_repo = clone_repo_fixture(repo.path());
+        for (key, value) in &configs {
+            git(zmin_repo.path(), ["config", key, value]);
+        }
+
+        let zmin = run_zmin_args(zmin_repo.path(), &args);
+        let header_block = zmin
+            .split("\n\n")
+            .next()
+            .expect("format-patch output should contain headers");
+        for expected_header in expected_headers {
+            assert!(
+                header_block.contains(expected_header),
+                "{label}: missing expected header {expected_header:?}\n{header_block}"
+            );
+        }
+        assert_eq!(run_zmin_status_args(zmin_repo.path(), &args), 0, "{label}");
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_from_header_family_matches_expected_headers() {
+    let repo = format_patch_fixture_repo();
+    let cases: Vec<(&str, Option<&str>, Vec<&str>, &[&str])> = vec![
+        (
+            "quotes dot in from header",
+            Some("Foo B. Bar"),
+            vec!["format-patch", "--stdout", "-1", "HEAD"],
+            &["From: \"Foo B. Bar\" <author@example.com>"],
+        ),
+        (
+            "quotes double quote in from header",
+            Some("Foo \"The Baz\" Bar"),
+            vec!["format-patch", "--stdout", "-1", "HEAD"],
+            &["From: \"Foo \\\"The Baz\\\" Bar\" <author@example.com>"],
+        ),
+        (
+            "uses rfc2047 for non ascii from header",
+            Some("Föo Bar"),
+            vec!["format-patch", "--stdout", "-1", "HEAD"],
+            &["From: =?UTF-8?q?F=C3=B6o=20Bar?= <author@example.com>"],
+        ),
+        (
+            "from applies to cover letter",
+            None,
+            vec![
+                "format-patch",
+                "--cover-letter",
+                "--stdout",
+                "--from=Foo Bar <author@example.com>",
+                "HEAD~1",
+            ],
+            &["From: Foo Bar <author@example.com>"],
+        ),
+        (
+            "from omits redundant in body header",
+            Some("A U Thor"),
+            vec![
+                "format-patch",
+                "--stdout",
+                "--from=A U Thor <author@example.com>",
+                "-1",
+                "HEAD",
+            ],
+            &["From: A U Thor <author@example.com>"],
+        ),
+        (
+            "force in body from keeps redundant header",
+            Some("A U Thor"),
+            vec![
+                "format-patch",
+                "--stdout",
+                "--force-in-body-from",
+                "--from=A U Thor <author@example.com>",
+                "-1",
+                "HEAD",
+            ],
+            &["From: A U Thor <author@example.com>"],
+        ),
+    ];
+
+    for (label, author_name, args, expected_parts) in cases {
+        let zmin_repo = clone_repo_fixture(repo.path());
+        if let Some(author_name) = author_name {
+            write_file(zmin_repo.path(), "extra.txt", "content\n");
+            git(zmin_repo.path(), ["add", "extra.txt"]);
+            command_output_with_env(
+                "git",
+                zmin_repo.path(),
+                &["commit", "-m", "author-check"],
+                &[
+                    ("GIT_AUTHOR_NAME", author_name),
+                    ("GIT_AUTHOR_EMAIL", "author@example.com"),
+                    ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+                    ("GIT_COMMITTER_NAME", "Bench"),
+                    ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+                    ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+                ],
+                "git",
+            );
+        }
+        let zmin = run_zmin_args(zmin_repo.path(), &args);
+        for expected_part in expected_parts {
+            assert!(
+                zmin.contains(expected_part),
+                "{label}: missing expected fragment {expected_part:?}\n{zmin}"
+            );
+        }
+        if label == "from omits redundant in body header" {
+            assert_eq!(zmin.matches("\nFrom: ").count(), 1, "{label}\n{zmin}");
+        }
+        if label == "force in body from keeps redundant header" {
+            assert_eq!(zmin.matches("\nFrom: ").count(), 2, "{label}\n{zmin}");
+        }
+        assert_eq!(run_zmin_status_args(zmin_repo.path(), &args), 0, "{label}");
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_subject_prefix_family_matches_expected_output() {
+    let repo = format_patch_keep_subject_fixture_repo();
+    let cases: Vec<(&str, Vec<&str>, &str)> = vec![
+        (
+            "subject prefix adds separator space",
+            vec![
+                "format-patch",
+                "-n",
+                "-1",
+                "--stdout",
+                "--subject-prefix=PREFIX",
+            ],
+            "Subject: [PREFIX 1/1] [PATCH] update alpha",
+        ),
+        (
+            "empty subject prefix has no extra space",
+            vec!["format-patch", "-n", "-1", "--stdout", "--subject-prefix="],
+            "Subject: [1/1] [PATCH] update alpha",
+        ),
+        (
+            "rfc default prefix",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc"],
+            "Subject: [RFC PATCH 1/1] [PATCH] update alpha",
+        ),
+        (
+            "rfc custom token",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc=WIP"],
+            "Subject: [WIP PATCH 1/1] [PATCH] update alpha",
+        ),
+        (
+            "rfc append variant",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc=-(WIP)"],
+            "Subject: [PATCH (WIP) 1/1] [PATCH] update alpha",
+        ),
+    ];
+
+    for (label, args, expected_subject) in cases {
+        let zmin = run_zmin_args(repo.path(), &args);
+        let subject = zmin
+            .lines()
+            .find(|line| line.starts_with("Subject: "))
+            .expect("subject header");
+        assert_eq!(subject, expected_subject, "{label}\n{zmin}");
+        assert_eq!(run_zmin_status_args(repo.path(), &args), 0, "{label}");
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_subject_prefix_conflicts_match_expected_errors() {
+    let repo = format_patch_keep_subject_fixture_repo();
+    let cases: Vec<(&str, Vec<&str>)> = vec![
+        (
+            "subject-prefix and keep-subject conflict",
+            vec![
+                "format-patch",
+                "-1",
+                "--stdout",
+                "--subject-prefix=MYPREFIX",
+                "-k",
+            ],
+        ),
+        (
+            "empty subject-prefix and keep-subject conflict",
+            vec!["format-patch", "-1", "--stdout", "--subject-prefix=", "-k"],
+        ),
+        (
+            "rfc and keep-subject conflict",
+            vec!["format-patch", "-1", "--stdout", "--rfc", "-k"],
+        ),
+    ];
+
+    for (label, args) in cases {
+        let failure = run_zmin_failure_output(repo.path(), &args);
+        assert_eq!(
+            failure,
+            (
+                128,
+                String::new(),
+                "fatal: options '--subject-prefix/--rfc' and '-k' cannot be used together"
+                    .to_owned(),
+            ),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn format_patch_upstream_style_rfc_prefix_variants_match_expected_output() {
+    let repo = format_patch_fixture_repo();
+    let cases: Vec<(&str, Vec<&str>, &str, Option<(&str, &str)>)> = vec![
+        (
+            "rfc then no-rfc",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc", "--no-rfc"],
+            "Subject: [PATCH 1/1] update alpha",
+            None,
+        ),
+        (
+            "rfc then empty rfc",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc", "--rfc="],
+            "Subject: [PATCH 1/1] update alpha",
+            None,
+        ),
+        (
+            "rfc does not overwrite configured prefix",
+            vec!["format-patch", "-n", "-1", "--stdout", "--rfc"],
+            "Subject: [RFC PATCH foobar 1/1] update alpha",
+            Some(("format.subjectprefix", "PATCH foobar")),
+        ),
+        (
+            "rfc argument order independent",
+            vec![
+                "format-patch",
+                "-n",
+                "-1",
+                "--stdout",
+                "--rfc",
+                "--subject-prefix=PATCH foobar",
+            ],
+            "Subject: [RFC PATCH foobar 1/1] update alpha",
+            None,
+        ),
+    ];
+
+    for (label, args, expected_subject, config) in cases {
+        let zmin_repo = clone_repo_fixture(repo.path());
+        if let Some((key, value)) = config {
+            git(zmin_repo.path(), ["config", key, value]);
+        }
+        let zmin = run_zmin_args(zmin_repo.path(), &args);
+        let subject = zmin
+            .lines()
+            .find(|line| line.starts_with("Subject: "))
+            .expect("subject header");
+        assert_eq!(subject, expected_subject, "{label}\n{zmin}");
     }
 }
 
@@ -888,10 +2136,133 @@ fn format_patch_mail_series_tail_family_matches_stock_git() {
         );
     }
 
-    let invalid_args = ["format-patch", "--stdout", "--base=auto", "HEAD~2..HEAD"];
-    let git_result = git_failure_output(repo.path(), &invalid_args);
-    let zmin_result = run_zmin_failure_output(repo.path(), &invalid_args);
-    assert_eq!(zmin_result, git_result, "args: {invalid_args:?}");
+    git(repo.path(), ["checkout", "-b", "upstream", "HEAD~2"]);
+    git(repo.path(), ["checkout", "-b", "local", "upstream"]);
+    write_file(repo.path(), "n1.txt", "n1\n");
+    git(repo.path(), ["add", "n1.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "N1"]);
+    write_file(repo.path(), "n2.txt", "n2\n");
+    git(repo.path(), ["add", "n2.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "N2"]);
+    git(repo.path(), ["branch", "--set-upstream-to=upstream"]);
+
+    for args in [
+        vec!["format-patch", "--stdout", "--base=auto", "-2"],
+        vec!["format-patch", "--stdout", "-1"],
+    ] {
+        let git_result = git_args(repo.path(), &args);
+        let zmin_result = run_zmin_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin_result),
+            normalize_format_patch_version(&git_result),
+            "args: {args:?}"
+        );
+    }
+
+    git(repo.path(), ["config", "format.useAutoBase", "true"]);
+    let git_result = git_args(repo.path(), &["format-patch", "--stdout", "-1"]);
+    let zmin_result = run_zmin_args(repo.path(), &["format-patch", "--stdout", "-1"]);
+    assert_eq!(
+        normalize_format_patch_version(&zmin_result),
+        normalize_format_patch_version(&git_result),
+        "format.useAutoBase=true"
+    );
+
+    git(
+        repo.path(),
+        ["config", "--replace-all", "format.useAutoBase", "whenAble"],
+    );
+    let git_result = git_args(repo.path(), &["format-patch", "--stdout", "-1"]);
+    let zmin_result = run_zmin_args(repo.path(), &["format-patch", "--stdout", "-1"]);
+    assert_eq!(
+        normalize_format_patch_version(&zmin_result),
+        normalize_format_patch_version(&git_result),
+        "format.useAutoBase=whenAble"
+    );
+}
+
+#[test]
+fn format_patch_default_history_selection_skips_merge_commits_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "file", "1\n2\n3\n");
+    git(repo.path(), ["add", "file"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "file", "1\n2\n3\nAnother line\n");
+    git(repo.path(), ["commit", "-am", "Feature branch change #1"]);
+    write_file(
+        repo.path(),
+        "file",
+        "1\n2\n3\nAnother line\nYet another line\n",
+    );
+    git(repo.path(), ["commit", "-am", "Feature branch change #2"]);
+
+    git(repo.path(), ["checkout", "-b", "merger", "main"]);
+    git(repo.path(), ["merge", "--no-ff", "feature", "-m", "merge"]);
+
+    let args = ["format-patch", "-3", "--stdout"];
+    let zmin = run_zmin_args(repo.path(), &args);
+    let stock = git_args(repo.path(), &args);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+}
+
+#[test]
+fn format_patch_ignore_if_in_upstream_matches_stock_git_on_upstream_fixture() {
+    let repo = format_patch_ignore_if_in_upstream_fixture_repo();
+    for args in [
+        vec!["format-patch", "--stdout", "main..side"],
+        vec![
+            "format-patch",
+            "--stdout",
+            "--ignore-if-in-upstream",
+            "main..side",
+        ],
+        vec![
+            "format-patch",
+            "--stdout",
+            "--ignore-if-in-upstream",
+            "v2..v1",
+        ],
+    ] {
+        if args.last() == Some(&"v2..v1") {
+            git(repo.path(), ["tag", "-a", "v1", "-m", "tag", "side"]);
+            git(repo.path(), ["tag", "-a", "v2", "-m", "tag", "main"]);
+        }
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn format_patch_ignore_if_in_upstream_upstream_style_matches_stock_git() {
+    let repo = format_patch_ignore_if_in_upstream_fixture_repo();
+    let args = [
+        "format-patch",
+        "--stdout",
+        "--ignore-if-in-upstream",
+        "main..side",
+    ];
+    let zmin = run_zmin_args(repo.path(), &args);
+    let stock = git_args(repo.path(), &args);
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+    assert_eq!(
+        run_zmin_status_args(repo.path(), &args),
+        git_status_args(repo.path(), &args)
+    );
 }
 
 #[test]
@@ -1101,6 +2472,83 @@ fn format_patch_merge_diff_and_dirstat_alias_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_cover_letter_subject_output_and_empty_default_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "f", "a\n");
+    git(repo.path(), ["add", "f"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["checkout", "-b", "rebuild-1"]);
+    write_file(repo.path(), "f", "a\nb\n");
+    git(repo.path(), ["add", "f"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "f", "a\nb\nc\n");
+    git(repo.path(), ["add", "f"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    git(
+        repo.path(),
+        ["config", "branch.rebuild-1.description", "Café?\n\nbody"],
+    );
+
+    let cover_utf8_args = [
+        "format-patch",
+        "--stdout",
+        "--cover-letter",
+        "--cover-from-description",
+        "subject",
+        "--encode-email-headers",
+        "main",
+    ];
+    let stock = git_args(repo.path(), &cover_utf8_args);
+    let zmin = run_zmin_args(repo.path(), &cover_utf8_args);
+    assert_eq!(
+        normalize_format_patch_dates(&normalize_format_patch_version(&zmin)),
+        normalize_format_patch_dates(&normalize_format_patch_version(&stock))
+    );
+
+    let zmin_out_repo = clone_repo_fixture(repo.path());
+    let zmin_stdout = run_zmin_args(
+        zmin_out_repo.path(),
+        &["format-patch", "--cover-letter", "-3", "--stdout", "HEAD"],
+    );
+    let _ = command_any_output(
+        zmin_bin(),
+        zmin_out_repo.path(),
+        &[
+            "format-patch",
+            "--cover-letter",
+            "-3",
+            "--output=outfile",
+            "HEAD",
+        ],
+        "zmin format-patch output",
+    );
+    let zmin_file =
+        fs::read_to_string(zmin_out_repo.path().join("outfile")).expect("read zmin outfile");
+    assert_eq!(
+        normalize_format_patch_dates(&normalize_format_patch_version(&zmin_file)),
+        normalize_format_patch_dates(&normalize_format_patch_version(&zmin_stdout))
+    );
+
+    let empty_repo = git_init();
+    configure_identity(empty_repo.path());
+    write_file(empty_repo.path(), "f", "a\n");
+    git(empty_repo.path(), ["add", "f"]);
+    git_with_env(empty_repo.path(), ["commit", "-m", "base"]);
+    let stock_empty = git_args(
+        empty_repo.path(),
+        &["format-patch", "--stdout", "--cover-letter"],
+    );
+    let zmin_empty = run_zmin_args(
+        empty_repo.path(),
+        &["format-patch", "--stdout", "--cover-letter"],
+    );
+    assert_eq!(zmin_empty, stock_empty);
+    assert!(zmin_empty.is_empty());
+}
+
+#[test]
 fn am_applies_stock_format_patch_mail_like_stock_git() {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~2"]);
@@ -1136,6 +2584,157 @@ fn am_applies_stock_format_patch_mail_like_stock_git() {
         git(git_apply.path(), ["log", "--format=%an <%ae>%n%s", "-2"])
     );
     assert_eq!(git(zmin_apply.path(), ["status", "--short"]), "");
+}
+
+#[test]
+fn format_patch_single_since_revision_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let args = ["format-patch", "--stdout", "HEAD~1"];
+    let zmin = run_zmin_args(repo.path(), &args);
+    let stock = git_args(repo.path(), &args);
+
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+    assert_eq!(
+        run_zmin_status_args(repo.path(), &args),
+        git_status_args(repo.path(), &args)
+    );
+}
+
+#[test]
+fn format_patch_output_directory_writes_cover_letter_like_stock_git() {
+    let repo = format_patch_fixture_repo();
+
+    let zmin_dir = repo.path().join("zmin-patches");
+    let stock_dir = repo.path().join("stock-patches");
+    fs::create_dir_all(&zmin_dir).expect("create zmin patch dir");
+    fs::create_dir_all(&stock_dir).expect("create stock patch dir");
+
+    let args = [
+        "format-patch",
+        "--cover-letter",
+        "-o",
+        "zmin-patches",
+        "HEAD~1",
+    ];
+    run_zmin_args(repo.path(), &args);
+    git(
+        repo.path(),
+        [
+            "format-patch",
+            "--cover-letter",
+            "-o",
+            "stock-patches",
+            "HEAD~1",
+        ],
+    );
+
+    assert_eq!(
+        normalize_format_patch_named_files(read_named_files(&zmin_dir)),
+        normalize_format_patch_named_files(read_named_files(&stock_dir)),
+        "cover-letter file output mismatch"
+    );
+}
+
+#[test]
+fn format_patch_respects_format_numbered_config_like_stock_git() {
+    let repo = format_patch_fixture_repo();
+    git(repo.path(), ["config", "format.numbered", "true"]);
+
+    let args = ["format-patch", "--stdout", "HEAD^"];
+    let zmin = run_zmin_args(repo.path(), &args);
+    let stock = git_args(repo.path(), &args);
+
+    assert_eq!(
+        normalize_format_patch_version(&zmin),
+        normalize_format_patch_version(&stock)
+    );
+    assert_eq!(
+        run_zmin_status_args(repo.path(), &args),
+        git_status_args(repo.path(), &args)
+    );
+}
+
+#[test]
+fn format_patch_commit_list_format_auto_cover_letter_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let stock_args = [
+        "format-patch",
+        "--commit-list-format=log:[%(count)/%(total)] %s (%an)",
+        "-o",
+        "stock-patches",
+        "HEAD~1",
+    ];
+    let (status, _, stderr) = command_any_output("git", repo.path(), &stock_args, "git");
+    if status != 0 && stderr.contains("unrecognized argument: --commit-list-format") {
+        return;
+    }
+
+    let zmin_dir = repo.path().join("zmin-patches");
+    let stock_dir = repo.path().join("stock-patches");
+    fs::create_dir_all(&zmin_dir).expect("create zmin patch dir");
+    fs::create_dir_all(&stock_dir).expect("create stock patch dir");
+
+    let args = [
+        "format-patch",
+        "--commit-list-format=log:[%(count)/%(total)] %s (%an)",
+        "-o",
+        "zmin-patches",
+        "HEAD~1",
+    ];
+    run_zmin_args(repo.path(), &args);
+    git(repo.path(), stock_args);
+
+    assert_eq!(
+        normalize_format_patch_named_files(read_named_files(&zmin_dir)),
+        normalize_format_patch_named_files(read_named_files(&stock_dir)),
+        "commit-list-format file output mismatch"
+    );
+}
+
+#[test]
+fn format_patch_filename_max_length_matches_stock_git() {
+    let repo = format_patch_long_subject_fixture_repo();
+
+    let zmin_dir = repo.path().join("zmin-patches");
+    let stock_dir = repo.path().join("stock-patches");
+    fs::create_dir_all(&zmin_dir).expect("create zmin patch dir");
+    fs::create_dir_all(&stock_dir).expect("create stock patch dir");
+
+    let args = [
+        "format-patch",
+        "-o",
+        "zmin-patches",
+        "--filename-max-length=15",
+        "HEAD~2..HEAD",
+    ];
+    run_zmin_args(repo.path(), &args);
+    git(
+        repo.path(),
+        [
+            "format-patch",
+            "-o",
+            "stock-patches",
+            "--filename-max-length=15",
+            "HEAD~2..HEAD",
+        ],
+    );
+
+    let zmin_files = read_named_files(&zmin_dir)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+    let stock_files = read_named_files(&stock_dir)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        zmin_files, stock_files,
+        "filename-max-length names mismatch"
+    );
 }
 
 fn am_single_patch_fixture() -> (TempDir, String, String) {
@@ -1793,7 +3392,13 @@ fn range_diff_matches_stock_git_for_patch_equivalence() {
 fn range_diff_documented_tail_matches_stock_git() {
     let repo = range_diff_fixture_repo();
     for args in [
-        ["range-diff", "--creation-factor=70", "main..old", "main..new"].as_slice(),
+        [
+            "range-diff",
+            "--creation-factor=70",
+            "main..old",
+            "main..new",
+        ]
+        .as_slice(),
         ["range-diff", "--left-only", "main..old", "main..new"].as_slice(),
         ["range-diff", "--right-only", "main..old", "main..new"].as_slice(),
         ["range-diff", "--notes", "main..old", "main..new"].as_slice(),

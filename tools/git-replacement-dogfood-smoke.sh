@@ -4,14 +4,18 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+target_dir="$(
+  awk -F '"' '/^[[:space:]]*target-dir[[:space:]]*=[[:space:]]*"/ { print $2; exit }' \
+    "$repo_root/.cargo/config.toml" 2>/dev/null || true
+)"
+if [[ -z "$target_dir" ]]; then
+  target_dir="$repo_root/target"
+fi
+
 zmin_bin="${ZMIN_BIN:-}"
 if [[ -z "$zmin_bin" ]]; then
-  if [[ -x "$repo_root/target/compat/zmin" ]]; then
-    zmin_bin="$repo_root/target/compat/zmin"
-  else
-    cargo build -p zmin-cli --bin zmin --profile compat --quiet
-    zmin_bin="$repo_root/target/compat/zmin"
-  fi
+  cargo build -p zmin-cli --bin zmin --profile compat --quiet
+  zmin_bin="$target_dir/compat/zmin"
 fi
 
 if [[ ! -x "$zmin_bin" ]]; then
@@ -59,6 +63,9 @@ source_repo="$tmp_dir/source"
 remote_repo="$tmp_dir/remote.git"
 stock_client="$tmp_dir/stock-client"
 zmin_client="$tmp_dir/zmin-client"
+zmin_lfs_hook_client="$tmp_dir/zmin-lfs-hook-client"
+lfs_stock_client="$tmp_dir/lfs-stock-client"
+lfs_zmin_client="$tmp_dir/lfs-zmin-client"
 capture_dir="$tmp_dir/capture"
 mkdir -p "$capture_dir"
 
@@ -75,8 +82,38 @@ printf 'nested\n' >"$source_repo/dir/nested.txt"
 "$stock_git" clone --bare "$source_repo" "$remote_repo" --quiet
 "$stock_git" clone "$remote_repo" "$stock_client" --quiet
 "$stock_git" clone "$remote_repo" "$zmin_client" --quiet
+"$stock_git" clone "$remote_repo" "$zmin_lfs_hook_client" --quiet
+"$stock_git" clone "$remote_repo" "$lfs_stock_client" --quiet
+"$stock_git" clone "$remote_repo" "$lfs_zmin_client" --quiet
+for repo in "$stock_client" "$zmin_client" "$zmin_lfs_hook_client" "$lfs_stock_client" "$lfs_zmin_client"; do
+  "$stock_git" -C "$repo" config user.name "Zmin Dogfood"
+  "$stock_git" -C "$repo" config user.email "zmin-dogfood@example.invalid"
+  "$stock_git" -C "$repo" config commit.gpgsign false
+done
 "$stock_git" -C "$stock_client" lfs install --local --skip-repo >/dev/null
 PATH="$shim_dir:$PATH" git -C "$zmin_client" lfs install --local --skip-repo >/dev/null
+"$stock_git" -C "$zmin_lfs_hook_client" lfs install --local --skip-smudge >/dev/null
+PATH="$shim_dir:$PATH" git -C "$zmin_lfs_hook_client" lfs install --local --skip-smudge >/dev/null
+"$stock_git" -C "$lfs_stock_client" lfs install --local --skip-repo >/dev/null
+PATH="$shim_dir:$PATH" git -C "$lfs_zmin_client" lfs install --local --skip-repo >/dev/null
+for hook_name in pre-push post-checkout post-commit post-merge; do
+  hook_path="$zmin_lfs_hook_client/.git/hooks/$hook_name"
+  if [[ ! -f "$hook_path" ]]; then
+    echo "expected LFS hook to exist after shim reinstall: $hook_path" >&2
+    exit 1
+  fi
+  marker="# zmin-lfs-$hook_name"
+  if ! grep -Fq "$marker" "$hook_path"; then
+    echo "expected shim LFS hook marker '$marker' in $hook_path" >&2
+    cat "$hook_path" >&2
+    exit 1
+  fi
+  if ! grep -Fq "lfs $hook_name \"\$@\"" "$hook_path"; then
+    echo "expected shim LFS hook command in $hook_path" >&2
+    cat "$hook_path" >&2
+    exit 1
+  fi
+done
 
 printf 'changed\n' >"$stock_client/tracked.txt"
 printf 'changed\n' >"$zmin_client/tracked.txt"
@@ -94,6 +131,23 @@ run_capture() {
     "$stock_git" -C "$cwd" "$@" >"$prefix.stdout" 2>"$prefix.stderr"
   else
     PATH="$shim_dir:$PATH" git -C "$cwd" "$@" >"$prefix.stdout" 2>"$prefix.stderr"
+  fi
+  local code=$?
+  set -e
+  printf '%s\n' "$code" >"$prefix.status"
+}
+
+run_capture_with_stdin() {
+  local tool="$1"
+  local cwd="$2"
+  local prefix="$3"
+  local stdin_payload="$4"
+  shift 4
+  set +e
+  if [[ "$tool" == "stock" ]]; then
+    printf '%s' "$stdin_payload" | "$stock_git" -C "$cwd" "$@" >"$prefix.stdout" 2>"$prefix.stderr"
+  else
+    printf '%s' "$stdin_payload" | PATH="$shim_dir:$PATH" git -C "$cwd" "$@" >"$prefix.stdout" 2>"$prefix.stderr"
   fi
   local code=$?
   set -e
@@ -217,6 +271,17 @@ compare_command_at() {
   compare_capture_prefixes "$label ($*)" "$stock_prefix" "$zmin_prefix"
 }
 
+compare_command_with_stdin() {
+  local label="$1"
+  local stdin_payload="$2"
+  shift 2
+  local stock_prefix="$capture_dir/$label.stock"
+  local zmin_prefix="$capture_dir/$label.zmin"
+  run_capture_with_stdin stock "$stock_client" "$stock_prefix" "$stdin_payload" "$@"
+  run_capture_with_stdin zmin "$zmin_client" "$zmin_prefix" "$stdin_payload" "$@"
+  compare_capture_prefixes "$label ($*)" "$stock_prefix" "$zmin_prefix"
+}
+
 compare_readonly_same_repo() {
   local label="$1"
   local cwd="$2"
@@ -315,8 +380,102 @@ if [[ -s "$lfs_env_prefix.stderr" ]]; then
   exit 1
 fi
 
+lfs_oid_local="2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009"
+for repo in "$lfs_stock_client" "$lfs_zmin_client"; do
+  printf '%s\n' '*.bin filter=lfs diff=lfs merge=lfs -text' >"$repo/.gitattributes"
+  cat >"$repo/local-lfs.bin" <<EOF
+version https://git-lfs.github.com/spec/v1
+oid sha256:$lfs_oid_local
+size 9
+EOF
+  "$stock_git" -C "$repo" add .gitattributes local-lfs.bin
+  env \
+    GIT_AUTHOR_NAME="Zmin Dogfood" \
+    GIT_AUTHOR_EMAIL="zmin-dogfood@example.invalid" \
+    GIT_AUTHOR_DATE="1700000000 +0000" \
+    GIT_COMMITTER_NAME="Zmin Dogfood" \
+    GIT_COMMITTER_EMAIL="zmin-dogfood@example.invalid" \
+    GIT_COMMITTER_DATE="1700000000 +0000" \
+    "$stock_git" -C "$repo" commit -m "add local lfs pointer" --quiet
+  mkdir -p "$repo/.git/lfs/objects/${lfs_oid_local:0:2}/${lfs_oid_local:2:2}"
+  printf 'REALDATA\n' >"$repo/.git/lfs/objects/${lfs_oid_local:0:2}/${lfs_oid_local:2:2}/$lfs_oid_local"
+  cat >"$repo/local-lfs.bin" <<EOF
+version https://git-lfs.github.com/spec/v1
+oid sha256:$lfs_oid_local
+size 9
+EOF
+done
+
+compare_command_at lfs_checkout_local_materialize "$lfs_stock_client" "$lfs_zmin_client" lfs checkout
+if [[ "$(cat "$lfs_stock_client/local-lfs.bin")" != "REALDATA" ]]; then
+  echo "stock lfs checkout did not materialize local-lfs.bin" >&2
+  exit 1
+fi
+if [[ "$(cat "$lfs_zmin_client/local-lfs.bin")" != "REALDATA" ]]; then
+  echo "zmin shim lfs checkout did not materialize local-lfs.bin" >&2
+  exit 1
+fi
+
+for repo in "$lfs_stock_client" "$lfs_zmin_client"; do
+  cat >"$repo/local-lfs.bin" <<EOF
+version https://git-lfs.github.com/spec/v1
+oid sha256:$lfs_oid_local
+size 9
+EOF
+done
+compare_command_at lfs_pull_local_materialize "$lfs_stock_client" "$lfs_zmin_client" lfs pull
+if [[ "$(cat "$lfs_stock_client/local-lfs.bin")" != "REALDATA" ]]; then
+  echo "stock lfs pull did not materialize local-lfs.bin" >&2
+  exit 1
+fi
+if [[ "$(cat "$lfs_zmin_client/local-lfs.bin")" != "REALDATA" ]]; then
+  echo "zmin shim lfs pull did not materialize local-lfs.bin" >&2
+  exit 1
+fi
+
 compare_readonly_same_repo lfs_ls_files_empty "$zmin_client" lfs ls-files
 compare_readonly_same_repo lfs_ls_files_name_only_empty "$zmin_client" lfs ls-files --name-only
+compare_readonly_same_repo lfs_install_manual "$zmin_client" lfs install --manual
+compare_readonly_same_repo lfs_install_invalid "$zmin_client" lfs install --bogus
+compare_command lfs_update_basic lfs update
+compare_readonly_same_repo lfs_update_manual "$zmin_client" lfs update --manual
+compare_readonly_same_repo lfs_update_invalid "$zmin_client" lfs update --bogus
+compare_command_with_stdin \
+  lfs_pre_push_valid \
+  "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n" \
+  lfs pre-push origin .
+compare_command_with_stdin \
+  lfs_pre_push_invalid_line \
+  "oops\n" \
+  lfs pre-push origin .
+compare_readonly_same_repo \
+  lfs_pre_push_usage \
+  "$zmin_client" \
+  lfs pre-push
+compare_readonly_same_repo \
+  lfs_post_commit_empty \
+  "$zmin_client" \
+  lfs post-commit
+compare_readonly_same_repo \
+  lfs_post_checkout_invalid \
+  "$zmin_client" \
+  lfs post-checkout
+compare_readonly_same_repo \
+  lfs_post_checkout_hook \
+  "$zmin_client" \
+  lfs post-checkout \
+  1111111111111111111111111111111111111111 \
+  2222222222222222222222222222222222222222 \
+  1
+compare_readonly_same_repo \
+  lfs_post_merge_invalid \
+  "$zmin_client" \
+  lfs post-merge
+compare_readonly_same_repo \
+  lfs_post_merge_hook \
+  "$zmin_client" \
+  lfs post-merge \
+  1
 
 build_options_prefix="$capture_dir/version_build_options.zmin"
 run_capture zmin "$zmin_client" "$build_options_prefix" version --build-options
@@ -355,6 +514,12 @@ printf 'ignored.log\n' >"$stock_client/.gitignore"
 printf 'ignored.log\n' >"$zmin_client/.gitignore"
 printf 'ignored\n' >"$stock_client/ignored.log"
 printf 'ignored\n' >"$zmin_client/ignored.log"
+compare_command_with_stdin \
+  check_ignore_verbose_stdin \
+  "ignored.log\ntracked.txt\n" \
+  check-ignore \
+  -v \
+  --stdin
 compare_command status_ignored_porcelain_z status --ignored --porcelain=v1 -z
 compare_command status_ignored_v2_z_branch status --ignored --porcelain=v2 -z --branch
 rm "$stock_client/.gitignore" "$zmin_client/.gitignore" \
@@ -404,9 +569,140 @@ compare_command config_branch_merge config --get branch.main.merge
 compare_command config_missing_commit_template config --get commit.template
 compare_command config_remote_get_regexp config --get-regexp '^remote\.'
 compare_command config_branch_get_regexp config --get-regexp '^branch\.'
+compare_command_with_stdin \
+  cat_file_batch_check_head_and_tree \
+  "HEAD\nHEAD^{tree}\n" \
+  cat-file \
+  '--batch-check=%(objectname) %(objecttype) %(objectsize)'
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
 compare_command log_date_iso_strict_z log -z --date=iso-strict --format=%H%x00%ad%x00%cd -1
 compare_command log_pathspec_dir_z log -z --format=%H%x00%s -1 -- dir
+compare_command \
+  log_head_branches_remotes_pretty \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  log \
+  HEAD \
+  --branches \
+  --remotes \
+  --max-count=200 \
+  --pretty=format:%x01%x01%H%x02%x02%P%x02%x02%ct%x02%x02%cn%x02%x02%ce%x02%x02%an%x02%x02%at%x02%x02%ae%x02%x02%s%x02%x02%b%x02%x02%B%x03%x03 \
+  --encoding=UTF-8 \
+  --
+compare_command \
+  log_decorate_full_date_order \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  log \
+  --pretty=format:%x01%x01%H%x02%x02%P%x02%x02%ct%x02%x02%an%x02%x02%ae%x02%x02%d%x03%x03 \
+  --encoding=UTF-8 \
+  --decorate=full \
+  HEAD \
+  --branches \
+  --remotes \
+  --tags \
+  --date-order \
+  --
+compare_command \
+  show_fuller_stat_patch_tracked \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --format=fuller \
+  --stat \
+  -p \
+  HEAD \
+  -- \
+  tracked.txt
+compare_command \
+  show_raw_notes_stat_patch_tracked \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --format=raw \
+  --show-notes \
+  --stat \
+  -p \
+  -M \
+  HEAD \
+  -- \
+  tracked.txt
+compare_command \
+  show_numstat_format_hash \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --numstat \
+  --format=%H \
+  -M \
+  HEAD
+compare_command \
+  show_summary_format_hash \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --summary \
+  --format=%H \
+  -M \
+  HEAD
+compare_command \
+  show_name_only_format_hash \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-only \
+  --format=%H \
+  -M \
+  HEAD
+compare_command \
+  show_name_status_format_hash \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-status \
+  --format=%H \
+  -M \
+  HEAD
+compare_command \
+  show_raw_format_hash \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --raw \
+  --format=%H \
+  -M \
+  HEAD
+compare_command \
+  blame_porcelain_tracked \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  blame \
+  --porcelain \
+  -l \
+  -t \
+  --encoding=UTF-8 \
+  -w \
+  HEAD \
+  -- \
+  tracked.txt
+compare_readonly_same_repo \
+  worktree_list_porcelain \
+  "$zmin_client" \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  worktree \
+  list \
+  --porcelain
 
 printf 'nested changed\n' >"$stock_client/dir/nested.txt"
 printf 'nested changed\n' >"$zmin_client/dir/nested.txt"
@@ -424,6 +720,24 @@ compare_command diff_cached_pathspec_name_only_z diff --cached --name-only -z --
 compare_command diff_cached_raw_z diff --cached --raw -z
 compare_command diff_cached_pathspec_raw_z diff --cached --raw -z -- new.txt
 compare_command diff_cached_modified_pathspec_raw_z diff --cached --raw -z -- tracked.txt
+compare_command \
+  diff_head_head_numstat_z \
+  -c diff.mnemonicPrefix=false \
+  -c diff.noprefix=false \
+  -c core.quotePath=false \
+  -c core.hooksPath=/dev/null \
+  -c core.fsmonitor= \
+  diff \
+  --no-ext-diff \
+  --no-textconv \
+  --color=never \
+  --src-prefix=a/ \
+  --dst-prefix=b/ \
+  HEAD \
+  HEAD \
+  --find-renames \
+  --numstat \
+  -z
 
 compare_root_path_command rev_parse_toplevel rev-parse --show-toplevel
 
@@ -449,6 +763,160 @@ if ! cmp -s "$stock_client/.git/FETCH_HEAD" "$zmin_client/.git/FETCH_HEAD"; then
   echo "FETCH_HEAD mismatch after fetch --prune --no-tags" >&2
   exit 1
 fi
+
+compare_command_with_stdin \
+  show_stdin_raw_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --format=raw \
+  --show-notes \
+  --parents \
+  --stdin
+compare_command_with_stdin \
+  show_stdin_fuller_stat_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --format=fuller \
+  --stat \
+  --parents \
+  --stdin
+compare_command_with_stdin \
+  show_stdin_numstat_hash_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --numstat \
+  --format=%H\ %P \
+  --stdin
+compare_command_with_stdin \
+  show_stdin_summary_hash_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --summary \
+  --format=%H\ %P \
+  --stdin
+compare_command_with_stdin \
+  show_stdin_name_only_hash_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-only \
+  --format=%H\ %P \
+  --stdin
+compare_command_with_stdin \
+  show_stdin_name_status_hash_parents \
+  $'refs/remotes/origin/main\nrefs/remotes/origin/main~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-status \
+  --format=%H\ %P \
+  --stdin
+
+rename_observed_repo="$tmp_dir/observed-rename"
+copy_observed_repo="$tmp_dir/observed-copy"
+
+"$stock_git" init "$rename_observed_repo" --quiet
+"$stock_git" -C "$rename_observed_repo" config user.name "Zmin Dogfood"
+"$stock_git" -C "$rename_observed_repo" config user.email "zmin-dogfood@example.invalid"
+printf 'base\n' >"$rename_observed_repo/old.txt"
+"$stock_git" -C "$rename_observed_repo" add -A
+"$stock_git" -C "$rename_observed_repo" commit -m base --quiet
+"$stock_git" -C "$rename_observed_repo" mv old.txt new.txt
+"$stock_git" -C "$rename_observed_repo" commit -m rename --quiet
+
+compare_command_with_stdin_at() {
+  local label="$1"
+  local stock_cwd="$2"
+  local zmin_cwd="$3"
+  local stdin_payload="$4"
+  shift 4
+  local stock_prefix="$capture_dir/$label.stock"
+  local zmin_prefix="$capture_dir/$label.zmin"
+  run_capture_with_stdin stock "$stock_cwd" "$stock_prefix" "$stdin_payload" "$@"
+  run_capture_with_stdin zmin "$zmin_cwd" "$zmin_prefix" "$stdin_payload" "$@"
+  compare_capture_prefixes "$label ($*)" "$stock_prefix" "$zmin_prefix"
+}
+
+compare_command_with_stdin_at \
+  show_stdin_name_only_rename_detection \
+  "$rename_observed_repo" \
+  "$rename_observed_repo" \
+  $'HEAD\nHEAD~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-only \
+  --format=%H\ %P \
+  -M \
+  --stdin
+compare_command_with_stdin_at \
+  show_stdin_name_status_rename_detection \
+  "$rename_observed_repo" \
+  "$rename_observed_repo" \
+  $'HEAD\nHEAD~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-status \
+  --format=%H\ %P \
+  -M \
+  --stdin
+
+"$stock_git" init "$copy_observed_repo" --quiet
+"$stock_git" -C "$copy_observed_repo" config user.name "Zmin Dogfood"
+"$stock_git" -C "$copy_observed_repo" config user.email "zmin-dogfood@example.invalid"
+printf 'base\n' >"$copy_observed_repo/old.txt"
+"$stock_git" -C "$copy_observed_repo" add -A
+"$stock_git" -C "$copy_observed_repo" commit -m base --quiet
+printf 'base\n' >"$copy_observed_repo/new.txt"
+"$stock_git" -C "$copy_observed_repo" add -A
+"$stock_git" -C "$copy_observed_repo" commit -m copy --quiet
+
+compare_command_with_stdin_at \
+  show_stdin_name_only_copy_detection \
+  "$copy_observed_repo" \
+  "$copy_observed_repo" \
+  $'HEAD\nHEAD~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-only \
+  --format=%H\ %P \
+  -C \
+  --find-copies-harder \
+  --stdin
+compare_command_with_stdin_at \
+  show_stdin_name_status_copy_detection \
+  "$copy_observed_repo" \
+  "$copy_observed_repo" \
+  $'HEAD\nHEAD~1\n' \
+  -c credential.helper= \
+  -c core.quotepath=false \
+  -c log.showSignature=false \
+  show \
+  --name-status \
+  --format=%H\ %P \
+  -C \
+  --find-copies-harder \
+  --stdin
 
 workflow_stock_remote="$tmp_dir/workflow-stock.git"
 workflow_zmin_remote="$tmp_dir/workflow-zmin.git"

@@ -494,7 +494,7 @@ def zmin_extension_command_names(root: Path) -> set[str]:
 
     commands = set()
     for line in extension_doc.read_text(errors="replace").splitlines():
-        if not line.startswith("| `zmin "):
+        if not (line.startswith("| `zmin ") or line.startswith("| `git ")):
             continue
         cells = markdown_cells(line)
         if not cells or cells[0] == "Command":
@@ -556,6 +556,11 @@ def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
                 option = "<command>"
                 evidence = cells[2] if len(cells) > 2 else ""
                 notes = cells[3] if len(cells) > 3 else cells[-1]
+        elif command.startswith("git "):
+            item_kind = "deferred_nonbaseline_git_surface"
+            option = "<command>"
+            evidence = cells[2] if len(cells) > 2 else ""
+            notes = cells[3] if len(cells) > 3 else cells[-1]
         elif command.startswith("ZMIN_"):
             item_kind = "zmin_extension_environment"
             option = "<environment>"

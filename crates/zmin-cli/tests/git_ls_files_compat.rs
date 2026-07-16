@@ -88,6 +88,58 @@ fn stock_git_output_any(cwd: &std::path::Path, args: &[&str]) -> (i32, String, S
     command_output_any(stock_git_bin().to_str().expect("stock git path"), cwd, args)
 }
 
+#[test]
+fn ls_files_unknown_options_match_stock_git() {
+    let repo = git_init();
+    for args in [
+        ["ls-files", "--frobnicate"].as_slice(),
+        ["ls-files", "-Q"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_any(zmin_bin(), repo.path(), args),
+            stock_git_output_any(repo.path(), args),
+            "ls-files option error mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn ls_files_negated_options_match_stock_git_ordering() {
+    let repo = git_init();
+    write_file(repo.path(), "tracked.txt", "tracked\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    write_file(repo.path(), "other.txt", "other\n");
+
+    for args in [
+        ["ls-files", "--no-cached"].as_slice(),
+        ["ls-files", "--cached", "--no-cached"].as_slice(),
+        ["ls-files", "--no-cached", "--cached"].as_slice(),
+        ["ls-files", "--others", "--no-others"].as_slice(),
+        ["ls-files", "--stage", "--no-stage"].as_slice(),
+        ["ls-files", "--deleted", "--no-deleted"].as_slice(),
+        ["ls-files", "--modified", "--no-modified"].as_slice(),
+        ["ls-files", "--killed", "--no-killed"].as_slice(),
+        ["ls-files", "--directory", "--no-directory"].as_slice(),
+        ["ls-files", "--eol", "--no-eol"].as_slice(),
+        ["ls-files", "--debug", "--no-debug"].as_slice(),
+        ["ls-files", "--deduplicate", "--no-deduplicate"].as_slice(),
+        ["ls-files", "--sparse", "--no-sparse"].as_slice(),
+        ["ls-files", "--error-unmatch", "--no-error-unmatch"].as_slice(),
+        [
+            "ls-files",
+            "--recurse-submodules",
+            "--no-recurse-submodules",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_output_any(zmin_bin(), repo.path(), args),
+            stock_git_output_any(repo.path(), args),
+            "ls-files negation mismatch for {args:?}"
+        );
+    }
+}
+
 fn sparse_index_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -404,6 +456,131 @@ fn ls_files_no_empty_directory_matches_stock_git() {
 }
 
 #[test]
+fn ls_files_directory_from_subdirectory_uses_dot_slash_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "tracked"]);
+
+    fs::create_dir_all(repo.path().join("dir/sub")).expect("create dir/sub");
+    fs::write(repo.path().join("dir/sub/untracked.txt"), b"payload\n").expect("write payload");
+
+    for cwd in [repo.path().join("dir"), repo.path().join("dir/sub")] {
+        for args in [
+            [
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--directory",
+                "--no-empty-directory",
+                "-z",
+            ]
+            .as_slice(),
+            [
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "--directory",
+                "-z",
+            ]
+            .as_slice(),
+        ] {
+            assert_eq!(
+                command_output_any(zmin_bin(), &cwd, args),
+                stock_git_output_any(&cwd, args),
+                "cwd: {} args: {args:?}",
+                cwd.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn ls_files_observed_client_queries_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join(".idea")).expect("create idea dir");
+    fs::write(repo.path().join(".idea/tracked.xml"), b"<tracked />\n").expect("write tracked");
+    git(repo.path(), ["add", ".idea/tracked.xml"]);
+    git_with_env(repo.path(), ["commit", "-m", "tracked idea"]);
+
+    fs::write(repo.path().join(".idea/.gitignore"), b"workspace.xml\n").expect("write ignore");
+
+    for args in [
+        [
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+            "ls-files",
+            "-s",
+            "--",
+            ".idea",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+            "ls-files",
+            "--exclude-standard",
+            "--others",
+            "-z",
+            "--",
+            ".idea/.gitignore",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_output_any(zmin_bin(), repo.path(), args),
+            stock_git_output_any(repo.path(), args),
+            "observed client ls-files args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn ls_files_observed_client_narrow_cached_and_others_queries_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join(".idea")).expect("create idea dir");
+    fs::write(repo.path().join(".idea/tracked.xml"), b"<tracked />\n").expect("write tracked");
+    git(repo.path(), ["add", ".idea/tracked.xml"]);
+    git_with_env(repo.path(), ["commit", "-m", "tracked idea"]);
+
+    fs::write(repo.path().join(".idea/.gitignore"), b"workspace.xml\n").expect("write ignore");
+    fs::write(repo.path().join(".idea/workspace.xml"), b"<workspace />\n")
+        .expect("write ignored workspace");
+    fs::write(
+        repo.path().join(".idea/workspace.xml~"),
+        b"<workspace backup />\n",
+    )
+    .expect("write untracked backup");
+
+    let args = [
+        "ls-files",
+        "-t",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ".idea/workspace.xml",
+        ".idea/workspace.xml~",
+    ];
+    assert_eq!(
+        command_output_any(zmin_bin(), repo.path(), &args),
+        stock_git_output_any(repo.path(), &args)
+    );
+}
+
+#[test]
 fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -417,6 +594,43 @@ fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
         command_output_any(zmin_bin(), zmin_repo.path(), &["ls-files", "--stage"]),
         command_output_any("git", git_repo.path(), &["ls-files", "--stage"])
     );
+}
+
+#[test]
+fn ls_files_exclude_standard_matches_stock_git_with_nested_gitignores_inside_ignored_dirs() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join(".gitignore"), b"build/\n.idea/\n").expect("write root ignore");
+    fs::create_dir_all(repo.path().join(".idea")).expect("create tracked ignored dir");
+    fs::write(repo.path().join(".idea/tracked.xml"), b"<tracked />\n").expect("write tracked");
+    git(repo.path(), ["add", ".gitignore"]);
+    git(repo.path(), ["add", "-f", ".idea/tracked.xml"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    fs::create_dir_all(repo.path().join("build/deep/nested")).expect("create ignored tree");
+    fs::write(repo.path().join("build/.gitignore"), b"!keep.txt\n").expect("write nested ignore");
+    fs::write(repo.path().join("build/deep/nested/file.txt"), b"ignored\n").expect("write ignored");
+    fs::write(repo.path().join("build/keep.txt"), b"still ignored\n").expect("write keep");
+    fs::write(repo.path().join(".idea/.gitignore"), b"workspace.xml\n").expect("write idea ignore");
+    fs::write(repo.path().join(".idea/workspace.xml"), b"<workspace />\n").expect("write idea");
+
+    for args in [
+        ["ls-files", "--others", "--exclude-standard", "-z"].as_slice(),
+        [
+            "ls-files",
+            "--ignored",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_output_any(zmin_bin(), repo.path(), args),
+            stock_git_output_any(repo.path(), args),
+            "ls-files args: {args:?}"
+        );
+    }
 }
 
 #[test]

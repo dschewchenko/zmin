@@ -9,8 +9,8 @@ use tempfile::TempDir;
 use common::{
     command_any_output, command_any_output_with_stdin, command_stdout_bytes, configure_identity,
     git, git_init, git_status_with_stdin, git_with_env, git_with_stdin, git_with_stdin_args,
-    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file,
-    stock_git_bin, zmin_bin,
+    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, stock_git_bin,
+    write_file, zmin_bin,
 };
 
 fn apply_base_repo() -> TempDir {
@@ -443,7 +443,13 @@ fn apply_build_fake_ancestor_matches_stock_git() {
 
     for args in [
         ["apply", "--build-fake-ancestor=fake.idx", "p.patch"].as_slice(),
-        ["apply", "--build-fake-ancestor=fake.idx", "--check", "p.patch"].as_slice(),
+        [
+            "apply",
+            "--build-fake-ancestor=fake.idx",
+            "--check",
+            "p.patch",
+        ]
+        .as_slice(),
     ] {
         let git_repo = apply_single_file_repo();
         let zmin_repo = apply_single_file_repo();
@@ -481,8 +487,8 @@ fn apply_build_fake_ancestor_matches_stock_git() {
 fn apply_fake_ancestor_patch() -> String {
     let repo = apply_single_file_repo();
     write_file(repo.path(), "a.txt", "two\n");
-    let patch = String::from_utf8(command_stdout_bytes("git", repo.path(), &["diff"]))
-        .expect("diff utf8");
+    let patch =
+        String::from_utf8(command_stdout_bytes("git", repo.path(), &["diff"])).expect("diff utf8");
     write_file(repo.path(), "a.txt", "one\n");
     patch
 }

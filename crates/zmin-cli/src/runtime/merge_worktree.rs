@@ -28,12 +28,9 @@ pub(crate) fn merge_indexes(
     theirs: &GitIndex,
     target_label: &str,
 ) -> Result<MergeIndexResult> {
-    let mut has_conflicts = false;
     let mut files = Vec::new();
     let index = merge_indexes_inner(store, base, ours, theirs, target_label, &mut files)?;
-    if !files.is_empty() {
-        has_conflicts = true;
-    }
+    let has_conflicts = !files.is_empty() || index.entries().iter().any(|entry| entry.stage != 0);
     if has_conflicts {
         Ok(MergeIndexResult::Conflicted { index, files })
     } else {
@@ -70,6 +67,7 @@ fn merge_indexes_inner(
         target_label,
     };
     merge_exact_rename_delete_conflicts(&merge_context, &mut entries, files, &mut consumed_paths)?;
+    merge_directory_file_add_conflicts(&merge_context, &mut entries, &mut consumed_paths);
     for path in paths {
         if consumed_paths.contains(&path) {
             continue;
@@ -171,6 +169,78 @@ fn merge_exact_rename_delete_conflicts(
         }
     }
     Ok(())
+}
+
+fn merge_directory_file_add_conflicts(
+    context: &MergeWorktreeContext<'_>,
+    entries: &mut Vec<IndexEntry>,
+    consumed_paths: &mut BTreeSet<Vec<u8>>,
+) {
+    merge_directory_file_add_conflicts_one_side(
+        context.base,
+        context.ours,
+        context.theirs,
+        2,
+        3,
+        entries,
+        consumed_paths,
+    );
+    merge_directory_file_add_conflicts_one_side(
+        context.base,
+        context.theirs,
+        context.ours,
+        3,
+        2,
+        entries,
+        consumed_paths,
+    );
+}
+
+fn merge_directory_file_add_conflicts_one_side(
+    base: &GitIndex,
+    directory_side: &GitIndex,
+    file_side: &GitIndex,
+    directory_stage: u8,
+    file_stage: u8,
+    entries: &mut Vec<IndexEntry>,
+    consumed_paths: &mut BTreeSet<Vec<u8>>,
+) {
+    for file_entry in file_side.entries().iter().filter(|entry| entry.stage == 0) {
+        if consumed_paths.contains(&file_entry.path)
+            || find_index_entry(base, &file_entry.path).is_some()
+            || find_index_entry(directory_side, &file_entry.path).is_some()
+        {
+            continue;
+        }
+        let Some(prefix) = conflict_prefix(&file_entry.path) else {
+            continue;
+        };
+        let nested_entries = directory_side
+            .entries()
+            .iter()
+            .filter(|entry| {
+                entry.stage == 0
+                    && !consumed_paths.contains(&entry.path)
+                    && entry.path.starts_with(prefix.as_slice())
+                    && find_index_entry(base, &entry.path).is_none()
+            })
+            .collect::<Vec<_>>();
+        if nested_entries.is_empty() {
+            continue;
+        }
+        push_conflict_stage(entries, file_entry, file_stage);
+        consumed_paths.insert(file_entry.path.clone());
+        for nested_entry in nested_entries {
+            push_conflict_stage(entries, nested_entry, directory_stage);
+            consumed_paths.insert(nested_entry.path.clone());
+        }
+    }
+}
+
+fn conflict_prefix(path: &[u8]) -> Option<Vec<u8>> {
+    let mut prefix = path.to_vec();
+    prefix.push(b'/');
+    Some(prefix)
 }
 
 fn exact_rename_entry<'a>(base_entry: &IndexEntry, side: &'a GitIndex) -> Option<&'a IndexEntry> {
@@ -425,11 +495,7 @@ pub(crate) fn merge_index_stages<'a>(
 
 pub(crate) fn worktree_clean(repo: &GitRepo, _store: &LooseObjectStore) -> Result<bool> {
     let head_index = read_head_index(repo)?;
-    let index = if repo.index_path.exists() {
-        read_index(&repo.index_path)?
-    } else {
-        GitIndex::new()
-    };
+    let index = read_repo_index(repo)?;
     Ok(diff_indexes(&head_index, &index)?.is_empty() && worktree_status(repo, &index)?.is_empty())
 }
 
@@ -454,6 +520,30 @@ pub(crate) fn rm_path_matches(
     }
     if find_index_entry(index, relative).is_some() {
         return Ok(vec![relative.to_vec()]);
+    }
+    if !relative
+        .iter()
+        .any(|byte| matches!(byte, b'*' | b'?' | b'['))
+    {
+        let prefix = path_dir_prefix(relative);
+        let descendants = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0 && entry.path.starts_with(&prefix))
+            .map(|entry| entry.path.to_vec())
+            .collect::<Vec<_>>();
+        if !descendants.is_empty() {
+            if !recursive {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "not removing '{}' recursively without -r",
+                        String::from_utf8_lossy(relative)
+                    ),
+                });
+            }
+            return Ok(descendants);
+        }
     }
     let pathspec_matches = matching_index_entries(index, relative);
     if !pathspec_matches.is_empty() {
@@ -506,14 +596,41 @@ pub(crate) fn ensure_rm_safe(
         let worktree_path = repo.root.join(String::from_utf8_lossy(path).as_ref());
         if path_exists(&worktree_path) {
             let metadata = fs::symlink_metadata(&worktree_path)?;
-            let content = if metadata.file_type().is_symlink() {
-                read_symlink_content(&worktree_path)?
+            if index_entry.mode == IndexMode::Gitlink {
+                let matches = if let Some(submodule_repo) = exact_repo_at(&worktree_path) {
+                    RefStore::new(submodule_repo.git_dir, GitHashAlgorithm::Sha1)
+                        .resolve("HEAD")
+                        .is_ok_and(|head| head == index_entry.id)
+                } else {
+                    metadata.is_dir() && directory_tree_contains_no_files(&worktree_path)?
+                };
+                if matches {
+                    return Ok(());
+                }
+                return Err(CliError::Fatal {
+                    code: 1,
+                    message: format!(
+                        "'{}' has local modifications",
+                        String::from_utf8_lossy(path)
+                    ),
+                });
+            }
+            let worktree_id = if metadata.file_type().is_symlink() {
+                let content = read_symlink_content(&worktree_path)?;
+                hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content)
             } else if metadata.is_file() {
-                fs::read(&worktree_path)?
+                let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+                let content = clean_worktree_content_for_comparison_against_index(
+                    repo,
+                    &store,
+                    index,
+                    path,
+                    fs::read(&worktree_path)?,
+                )?;
+                hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content)
             } else {
-                Vec::new()
+                hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &[])
             };
-            let worktree_id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
             if worktree_id != index_entry.id {
                 return Err(CliError::Fatal {
                     code: 1,
@@ -592,6 +709,9 @@ pub(crate) fn ensure_mv_destination_available(
 
 pub(crate) fn rename_worktree_path(source: &Path, target: &Path, force: bool) -> Result<()> {
     if path_exists(target) {
+        if same_existing_worktree_path(source, target) {
+            return rename_case_only_worktree_path(source, target);
+        }
         if !force {
             return Err(CliError::Fatal {
                 code: 128,
@@ -609,6 +729,46 @@ pub(crate) fn rename_worktree_path(source: &Path, target: &Path, force: bool) ->
     }
     fs::rename(source, target)?;
     Ok(())
+}
+
+fn same_existing_worktree_path(source: &Path, target: &Path) -> bool {
+    match (fs::canonicalize(source), fs::canonicalize(target)) {
+        (Ok(source), Ok(target)) => source == target,
+        _ => false,
+    }
+}
+
+fn rename_case_only_worktree_path(source: &Path, target: &Path) -> Result<()> {
+    if source == target {
+        return Ok(());
+    }
+    let Some(parent) = source.parent() else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("bad source '{}'", source.display()),
+        });
+    };
+    let temporary = unique_case_rename_temporary_path(parent, source);
+    fs::rename(source, &temporary)?;
+    if let Err(error) = fs::rename(&temporary, target) {
+        let _ = fs::rename(&temporary, source);
+        return Err(CliError::Io(error));
+    }
+    Ok(())
+}
+
+fn unique_case_rename_temporary_path(parent: &Path, source: &Path) -> PathBuf {
+    let stem = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("rename");
+    for attempt in 0..1024_u32 {
+        let candidate = parent.join(format!(".zmin-case-rename-{stem}-{attempt}"));
+        if !path_exists(&candidate) {
+            return candidate;
+        }
+    }
+    parent.join(format!(".zmin-case-rename-{stem}-fallback"))
 }
 
 pub(crate) fn apply_index_moves(
@@ -650,7 +810,7 @@ pub(crate) fn fast_forward_to_cached(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     target: &str,
     operation: &str,
-    _ff_only: bool,
+    ff_only: bool,
 ) -> Result<()> {
     {
         let _trace = phase_trace("fast_forward.worktree_clean");
@@ -683,7 +843,7 @@ pub(crate) fn fast_forward_to_cached(
         if let Some(current_id) = &current_id
             && !is_ancestor_commit_with_repo_cached(repo, commit_cache, current_id, &target_id)?
         {
-            if _ff_only
+            if ff_only
                 && best_merge_base_with_repo_cached(repo, commit_cache, current_id, &target_id)?
                     .is_none()
             {
@@ -726,10 +886,18 @@ pub(crate) fn fast_forward_to_cached(
         if let Some(current_id) = &current_id {
             write_pseudoref(repo, "ORIG_HEAD", current_id)?;
         }
-        let reflog_message = format!(
-            "{operation} {}: Fast-forward",
-            abbrev_ref_name(repo, target).unwrap_or_else(|_| target.to_owned())
-        );
+        let reflog_message = if operation == "pull" {
+            if ff_only {
+                "pull --ff-only: Fast-forward".to_owned()
+            } else {
+                "pull: Fast-forward".to_owned()
+            }
+        } else {
+            format!(
+                "{operation} {}: Fast-forward",
+                abbrev_ref_name(repo, target).unwrap_or_else(|_| target.to_owned())
+            )
+        };
         update_head_to_commit_with_optional_reflog(repo, &refs, &target_id, &reflog_message)?;
     }
     {

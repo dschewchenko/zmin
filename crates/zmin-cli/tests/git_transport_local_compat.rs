@@ -8,9 +8,9 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, command_output_with_env, configure_identity, git, git_failure_output,
-    git_status, git_status_args, git_with_env, run_zmin, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, zmin_bin,
+    command_any_output, command_output_with_env, command_output_with_identity_env,
+    configure_identity, git, git_failure_output, git_status, git_status_args, git_with_env,
+    run_zmin, run_zmin_failure_output, run_zmin_status, run_zmin_with_env, zmin_bin,
 };
 
 fn write_sequence_editor_replace_pick(
@@ -61,6 +61,15 @@ fn chmod_executable(path: &std::path::Path) {
         permissions.set_mode(0o755);
         fs::set_permissions(path, permissions).expect("chmod hook");
     }
+}
+
+#[cfg(unix)]
+fn case_insensitive_filesystem(root: &std::path::Path) -> bool {
+    let probe = root.join("case-insensitive-probe");
+    fs::create_dir(&probe).expect("create case probe");
+    fs::write(probe.join("CamelCase"), b"good\n").expect("write uppercase probe");
+    fs::write(probe.join("camelcase"), b"bad\n").expect("write lowercase probe");
+    fs::read(probe.join("CamelCase")).expect("read uppercase probe") != b"good\n"
 }
 
 fn assert_matching_depth_fetch_state(
@@ -292,7 +301,10 @@ fn assert_named_local_pull_with_existing_fetch_head_matches_stock_git(label: &st
     let git_prefetch = command_any_output("git", &git_client, &prefetch_args, label);
     let zmin_prefetch = command_any_output(zmin_bin(), &zmin_client, &prefetch_args, label);
     let source_path = source.to_string_lossy();
-    assert_eq!(zmin_prefetch.0, git_prefetch.0, "{label} prefetch exit code");
+    assert_eq!(
+        zmin_prefetch.0, git_prefetch.0,
+        "{label} prefetch exit code"
+    );
     assert_eq!(zmin_prefetch.1, git_prefetch.1, "{label} prefetch stdout");
     assert_eq!(
         normalize_remote_output(&zmin_prefetch.2, &source_path),
@@ -979,8 +991,8 @@ fn pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch() {
 
         let git_head_before = git(&git_repo, ["rev-parse", "HEAD"]);
         let zmin_head_before = git(&zmin_repo, ["rev-parse", "HEAD"]);
-        let git_output = command_any_output("git", &git_repo, &args, label);
-        let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, label);
+        let git_output = command_output_with_identity_env("git", &git_repo, &args, label);
+        let zmin_output = command_output_with_identity_env(zmin_bin(), &zmin_repo, &args, label);
         assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
         assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
         assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
@@ -1363,8 +1375,8 @@ fn pull_merge_acceptance_option_family_matches_stock_git_for_explicit_local_bran
             git_with_env(repo, ["commit", "-m", "main"]);
         }
 
-        let git_output = command_any_output("git", &git_repo, &args, label);
-        let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, label);
+        let git_output = command_output_with_identity_env("git", &git_repo, &args, label);
+        let zmin_output = command_output_with_identity_env(zmin_bin(), &zmin_repo, &args, label);
         assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
         assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
         assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
@@ -5594,6 +5606,141 @@ fn fetch_rejects_remote_tracking_directory_file_conflict_with_prune_hint_like_st
 }
 
 #[test]
+fn fetch_rejects_casefold_ref_conflicts_on_case_insensitive_filesystems_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    if !case_insensitive_filesystem(dir.path()) {
+        return;
+    }
+
+    let base = dir.path().join("base");
+    let source = dir.path().join("case_sensitive");
+    let dest = dir.path().join("case_insensitive");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", base.to_str().expect("base path")],
+    );
+    configure_identity(&base);
+    fs::write(base.join("file"), b"main\n").expect("write base");
+    git(&base, ["add", "-A"]);
+    git_with_env(&base, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--ref-format=reftable",
+            base.to_str().expect("base path"),
+            source.to_str().expect("source path"),
+        ],
+    );
+    git(&source, ["branch", "branch1"]);
+    git(&source, ["branch", "bRanch1"]);
+
+    run_zmin(
+        dir.path(),
+        ["init", "--bare", dest.to_str().expect("dest path")],
+    );
+    git(
+        &dest,
+        [
+            "remote",
+            "add",
+            "origin",
+            source.to_str().expect("source path"),
+        ],
+    );
+
+    let failure = run_zmin_failure_output(
+        &dest,
+        &["fetch", "-f", "origin", "refs/heads/*:refs/heads/*"],
+    );
+    assert_eq!(failure.0, 1, "unexpected fetch exit: {failure:?}");
+    assert!(
+        failure
+            .2
+            .contains("You're on a case-insensitive filesystem"),
+        "stderr: {}",
+        failure.2
+    );
+    assert!(
+        failure
+            .2
+            .contains("reference conflict due to case-insensitive filesystem"),
+        "stderr: {}",
+        failure.2
+    );
+
+    let expected = git(&dest, ["rev-parse", "refs/heads/main"]);
+    let actual = git(&dest, ["rev-parse", "refs/heads/branch1"]);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn fetch_reports_casefold_file_directory_conflict_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    if !case_insensitive_filesystem(dir.path()) {
+        return;
+    }
+
+    let base = dir.path().join("base");
+    let source = dir.path().join("case_sensitive_fd");
+    let dest = dir.path().join("case_insensitive");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", base.to_str().expect("base path")],
+    );
+    configure_identity(&base);
+    fs::write(base.join("file"), b"main\n").expect("write base");
+    git(&base, ["add", "-A"]);
+    git_with_env(&base, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--ref-format=reftable",
+            base.to_str().expect("base path"),
+            source.to_str().expect("source path"),
+        ],
+    );
+    git(&source, ["branch", "foo/bar"]);
+    git(&source, ["branch", "Foo"]);
+
+    run_zmin(
+        dir.path(),
+        ["init", "--bare", dest.to_str().expect("dest path")],
+    );
+    git(
+        &dest,
+        [
+            "remote",
+            "add",
+            "origin",
+            source.to_str().expect("source path"),
+        ],
+    );
+
+    let failure = run_zmin_failure_output(
+        &dest,
+        &["fetch", "-f", "origin", "refs/heads/*:refs/heads/*"],
+    );
+    assert_eq!(failure.0, 1, "unexpected fetch exit: {failure:?}");
+    assert!(
+        failure
+            .2
+            .contains("error: cannot process 'refs/remotes/origin/foo' and 'refs/remotes/origin/foo/bar' at the same time"),
+        "stderr: {}",
+        failure.2
+    );
+
+    let expected = git(&dest, ["rev-parse", "refs/heads/main"]);
+    let actual = git(&dest, ["rev-parse", "refs/heads/foo/bar"]);
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn fetch_verbose_prints_auto_gc_message_when_auto_pack_limit_is_enabled_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
@@ -5815,6 +5962,243 @@ fn fetch_direct_file_url_prune_tags_prunes_tags_but_keeps_remote_tracking_refs_l
     assert_eq!(
         git_status_args(&client, &["rev-parse", "--verify", "refs/tags/gone-tag"]),
         128
+    );
+}
+
+#[test]
+fn fetch_named_remote_prune_with_tag_only_refspec_keeps_remote_tracking_branches_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"main\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+    git(&source, ["branch", "-f", "newbranch"]);
+    git(&source, ["tag", "-f", "newtag"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            [
+                "clone",
+                source.to_str().expect("source path"),
+                client.to_str().expect("client path"),
+            ],
+        );
+    }
+
+    let git_first = command_any_output("git", &git_client, &["fetch"], "git fetch");
+    let zmin_first = command_any_output(zmin_bin(), &zmin_client, &["fetch"], "zmin fetch");
+    assert_eq!(zmin_first.0, git_first.0);
+
+    git(&source, ["branch", "-D", "newbranch"]);
+    git(&source, ["tag", "-d", "newtag"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(client, ["config", "fetch.prune", "true"]);
+        git(client, ["config", "remote.origin.prune", "true"]);
+    }
+
+    let args = ["fetch", "--prune", "origin", "refs/tags/*:refs/tags/*"];
+    let git_second = command_any_output("git", &git_client, &args, "git fetch prune tag-only");
+    let zmin_second =
+        command_any_output(zmin_bin(), &zmin_client, &args, "zmin fetch prune tag-only");
+    assert_eq!(zmin_second.0, git_second.0);
+    assert_eq!(zmin_second.1, git_second.1);
+    assert_eq!(zmin_second.2, git_second.2);
+    assert_eq!(
+        git_status_args(
+            &zmin_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        ),
+        git_status_args(
+            &git_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        )
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["rev-parse", "--verify", "refs/tags/newtag"]),
+        git_status_args(&git_client, &["rev-parse", "--verify", "refs/tags/newtag"])
+    );
+}
+
+#[test]
+fn fetch_direct_file_url_prune_with_tag_only_refspec_keeps_remote_tracking_branches_like_stock_git()
+{
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"main\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            [
+                "clone",
+                source.to_str().expect("source path"),
+                client.to_str().expect("client path"),
+            ],
+        );
+    }
+
+    git(&source, ["branch", "-f", "newbranch"]);
+    git(&source, ["tag", "-f", "newtag"]);
+    let source_url = format!("file://{}", source.display());
+    let remote_fetch = git(&git_client, ["config", "remote.origin.fetch"]);
+
+    let git_first = command_any_output(
+        "git",
+        &git_client,
+        &["fetch", &source_url, &remote_fetch],
+        "git fetch file url branch refspec",
+    );
+    let zmin_first = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", &source_url, &remote_fetch],
+        "zmin fetch file url branch refspec",
+    );
+    assert_eq!(zmin_first.0, git_first.0);
+
+    git(&source, ["branch", "-D", "newbranch"]);
+    git(&source, ["tag", "-d", "newtag"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(client, ["config", "fetch.prune", "true"]);
+        git(client, ["config", "remote.origin.prune", "true"]);
+    }
+
+    let args = ["fetch", "--prune", &source_url, "refs/tags/*:refs/tags/*"];
+    let git_second = command_any_output("git", &git_client, &args, "git fetch file prune tag-only");
+    let zmin_second = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch file prune tag-only",
+    );
+    assert_eq!(zmin_second.0, git_second.0);
+    assert_eq!(zmin_second.1, git_second.1);
+    assert_eq!(zmin_second.2, git_second.2);
+    assert_eq!(
+        git_status_args(
+            &zmin_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        ),
+        git_status_args(
+            &git_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        )
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["rev-parse", "--verify", "refs/tags/newtag"]),
+        git_status_args(&git_client, &["rev-parse", "--verify", "refs/tags/newtag"])
+    );
+}
+
+#[test]
+fn fetch_direct_file_url_prune_with_tag_only_refspec_and_cli_config_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"main\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            [
+                "clone",
+                source.to_str().expect("source path"),
+                client.to_str().expect("client path"),
+            ],
+        );
+    }
+
+    git(&source, ["branch", "-f", "newbranch"]);
+    git(&source, ["tag", "-f", "newtag"]);
+    let source_url = format!("file://{}", source.display());
+    let remote_fetch = git(&git_client, ["config", "remote.origin.fetch"]);
+
+    let first_args = ["fetch", &source_url, &remote_fetch];
+    let git_first = command_any_output(
+        "git",
+        &git_client,
+        &first_args,
+        "git fetch file url branch refspec",
+    );
+    let zmin_first = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &first_args,
+        "zmin fetch file url branch refspec",
+    );
+    assert_eq!(zmin_first.0, git_first.0);
+
+    git(&source, ["branch", "-D", "newbranch"]);
+    git(&source, ["tag", "-d", "newtag"]);
+
+    let second_args = [
+        "-c",
+        "fetch.prune=true",
+        "-c",
+        "fetch.prune=true",
+        "fetch",
+        "--prune",
+        &source_url,
+        "refs/tags/*:refs/tags/*",
+    ];
+    let git_second = command_any_output(
+        "git",
+        &git_client,
+        &second_args,
+        "git fetch file prune tag-only cli config",
+    );
+    let zmin_second = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &second_args,
+        "zmin fetch file prune tag-only cli config",
+    );
+    assert_eq!(zmin_second.0, git_second.0);
+    assert_eq!(zmin_second.1, git_second.1);
+    assert_eq!(zmin_second.2, git_second.2);
+    assert_eq!(
+        git_status_args(
+            &zmin_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        ),
+        git_status_args(
+            &git_client,
+            &["rev-parse", "--verify", "refs/remotes/origin/newbranch"]
+        )
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["rev-parse", "--verify", "refs/tags/newtag"]),
+        git_status_args(&git_client, &["rev-parse", "--verify", "refs/tags/newtag"])
     );
 }
 
@@ -6334,6 +6718,10 @@ fn fetch_writes_fetch_head_even_when_ref_update_fails_like_stock_git() {
     let fetch_head = fs::read_to_string(repo.join("FETCH_HEAD")).expect("read FETCH_HEAD");
     assert!(fetch_head.contains("branch 'branch' of"));
     assert!(fetch_head.contains("branch 'foo' of"));
+    assert_eq!(
+        git(&repo, ["rev-parse", "refs/heads/branch"]),
+        git(&repo, ["rev-parse", "refs/heads/main"])
+    );
 }
 
 #[test]
@@ -6853,6 +7241,7 @@ fn fetch_configured_refspec_describes_new_refs_like_stock_git() {
     fs::write(source.join("README.md"), b"base\n").expect("write base");
     git(&source, ["add", "-A"]);
     git_with_env(&source, ["commit", "-m", "base"]);
+    git(&source, ["tag", "-a", "-m", "annotated", "anno"]);
 
     run_zmin(
         dir.path(),
@@ -9195,9 +9584,16 @@ fn pull_local_remote_fast_forwards_like_stock_git() {
     let git_client = dir.path().join("git-client");
     let zmin_client = dir.path().join("zmin-client");
     let git_output = command_any_output("git", &git_client, &["pull", "--ff-only"], "git pull");
-    let zmin_output =
-        command_any_output(zmin_bin(), &zmin_client, &["pull", "--ff-only"], "zmin pull");
-    assert_eq!(zmin_output.0, git_output.0, "implicit tracking pull exit code");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["pull", "--ff-only"],
+        "zmin pull",
+    );
+    assert_eq!(
+        zmin_output.0, git_output.0,
+        "implicit tracking pull exit code"
+    );
     assert_eq!(zmin_output.1, git_output.1, "implicit tracking pull stdout");
     let source_path = source.to_string_lossy();
     assert_eq!(
@@ -11057,12 +11453,21 @@ fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
     git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
 
     let cases = [
-        ("ls-remote --branches", vec!["ls-remote", "--branches", "origin"]),
+        (
+            "ls-remote --branches",
+            vec!["ls-remote", "--branches", "origin"],
+        ),
         ("ls-remote -b", vec!["ls-remote", "-b", "origin"]),
         ("ls-remote --quiet", vec!["ls-remote", "--quiet", "origin"]),
         ("ls-remote -q", vec!["ls-remote", "-q", "origin"]),
-        ("ls-remote --get-url", vec!["ls-remote", "--get-url", "origin"]),
-        ("ls-remote --symref", vec!["ls-remote", "--symref", "origin"]),
+        (
+            "ls-remote --get-url",
+            vec!["ls-remote", "--get-url", "origin"],
+        ),
+        (
+            "ls-remote --symref",
+            vec!["ls-remote", "--symref", "origin"],
+        ),
         (
             "ls-remote --exit-code match",
             vec!["ls-remote", "--exit-code", "origin", "main"],
@@ -11101,12 +11506,18 @@ fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
             "ls-remote --branches file",
             vec!["ls-remote", "--branches", remote_file_url.as_str()],
         ),
-        ("ls-remote -b file", vec!["ls-remote", "-b", remote_file_url.as_str()]),
+        (
+            "ls-remote -b file",
+            vec!["ls-remote", "-b", remote_file_url.as_str()],
+        ),
         (
             "ls-remote --quiet file",
             vec!["ls-remote", "--quiet", remote_file_url.as_str()],
         ),
-        ("ls-remote -q file", vec!["ls-remote", "-q", remote_file_url.as_str()]),
+        (
+            "ls-remote -q file",
+            vec!["ls-remote", "-q", remote_file_url.as_str()],
+        ),
         (
             "ls-remote --get-url file",
             vec!["ls-remote", "--get-url", remote_file_url.as_str()],
@@ -11121,7 +11532,12 @@ fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
         ),
         (
             "ls-remote --exit-code miss file",
-            vec!["ls-remote", "--exit-code", remote_file_url.as_str(), "no-such*"],
+            vec![
+                "ls-remote",
+                "--exit-code",
+                remote_file_url.as_str(),
+                "no-such*",
+            ],
         ),
         (
             "ls-remote --server-option=foo file",
@@ -11139,7 +11555,10 @@ fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
             "ls-remote --sort=-refname file",
             vec!["ls-remote", "--sort=-refname", remote_file_url.as_str()],
         ),
-        ("ls-remote -t file", vec!["ls-remote", "-t", remote_file_url.as_str()]),
+        (
+            "ls-remote -t file",
+            vec!["ls-remote", "-t", remote_file_url.as_str()],
+        ),
     ];
 
     for (label, args) in file_cases {
@@ -11369,6 +11788,31 @@ fn push_local_remote_does_not_copy_unreachable_objects() {
         git(&remote, ["cat-file", "-p", "refs/heads/main:README.md"]),
         "main"
     );
+}
+
+#[test]
+fn push_to_direct_local_path_does_not_create_a_tracking_ref() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    run_zmin(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write file");
+    run_zmin(&work, ["add", "a.txt"]);
+    run_zmin_with_env(&work, ["commit", "-m", "initial"]);
+
+    run_zmin(
+        &work,
+        ["push", remote.to_str().expect("remote path"), "HEAD:main"],
+    );
+
+    assert_eq!(
+        git(&remote, ["rev-parse", "refs/heads/main"]),
+        git(&work, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(run_zmin(&work, ["remote"]), "");
+    assert!(!work.join(".git/refs/remotes").exists());
 }
 
 #[test]
@@ -11869,6 +12313,58 @@ fn upload_pack_serves_stock_git_clone_protocol_v1() {
     assert_eq!(
         git(&clone, ["rev-parse", "HEAD"]),
         git(&work, ["rev-parse", "HEAD"])
+    );
+}
+
+#[test]
+fn upload_pack_rejects_dubious_repository_before_advertising_refs() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote");
+    git(dir.path(), ["init", remote.to_str().expect("remote path")]);
+
+    let output = Command::new(zmin_bin())
+        .args(["upload-pack", remote.to_str().expect("remote path")])
+        .env("GIT_TEST_ASSUME_DIFFERENT_OWNER", "true")
+        .output()
+        .expect("zmin upload-pack");
+
+    assert_eq!(output.status.code(), Some(128));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("detected dubious ownership"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn fetch_file_location_with_upload_pack_propagates_dubious_ownership_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote");
+    let client = dir.path().join("client");
+    git(dir.path(), ["init", remote.to_str().expect("remote path")]);
+    configure_identity(&remote);
+    fs::write(remote.join("tracked.txt"), b"content\n").expect("write remote file");
+    git(&remote, ["add", "tracked.txt"]);
+    git_with_env(&remote, ["commit", "-m", "remote"]);
+    git(dir.path(), ["init", client.to_str().expect("client path")]);
+
+    let upload_pack = format!(
+        "GIT_TEST_ASSUME_DIFFERENT_OWNER=true {} upload-pack",
+        shell_command_path(zmin_bin())
+    );
+    let location = format!("file://{}", remote.display());
+    let output = Command::new(zmin_bin())
+        .current_dir(&client)
+        .args(["fetch", &format!("--upload-pack={upload_pack}"), &location])
+        .output()
+        .expect("zmin fetch");
+
+    assert_eq!(output.status.code(), Some(128));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("detected dubious ownership"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

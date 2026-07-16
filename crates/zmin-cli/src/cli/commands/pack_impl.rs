@@ -1,4 +1,7 @@
 use super::*;
+use crate::cli::commands::reference_commands::{
+    RefsVerifySeverity, refs_verify_collect_findings, refs_verify_print_findings,
+};
 
 const PACK_OBJECTS_STDIN_OBJECT_CAPACITY_HINT: usize = 1024;
 const FSCK_SEEN_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -13,7 +16,7 @@ const INDEX_PACK_STDIN_BUF_CAPACITY: usize = 256 * 1024;
 const MIN_PACK_SIZE_LIMIT_BYTES: u64 = 1 << 20;
 
 fn mktag() -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
@@ -1807,6 +1810,7 @@ pub(crate) fn fsck(
 fn fsck_impl(options: FsckOptions) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let promised_missing = fsck_promised_missing_objects(&repo, &store)?;
     let mut has_errors = false;
     let mut exit_code = 0;
     let verbose_object_ids = if options.verbose {
@@ -1819,6 +1823,17 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         fsck_print_verbose_ref_database(&repo)?;
     } else if options.progress && !options.no_progress {
         fsck_print_progress_ref_database();
+    }
+    if !options.no_references {
+        let findings = refs_verify_collect_findings(&repo)?;
+        refs_verify_print_findings(&findings);
+        if findings
+            .iter()
+            .any(|finding| finding.severity == RefsVerifySeverity::Error)
+        {
+            has_errors = true;
+            exit_code = exit_code.max(1);
+        }
     }
 
     if !options.connectivity_only {
@@ -2312,8 +2327,13 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
                 println!("root {}", root.to_hex());
             }
         }
-        if let Err(error) = fsck_mark_object(&store, &root, &mut seen, &mut has_connectivity_errors)
-        {
+        if let Err(error) = fsck_mark_object(
+            &store,
+            &root,
+            &mut seen,
+            &mut has_connectivity_errors,
+            &promised_missing,
+        ) {
             eprintln!("error: object {}: {}", root.to_hex(), error);
             has_errors = true;
             exit_code = 3;
@@ -2329,8 +2349,29 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
     }
 
     if options.unreachable || !options.no_dangling {
+        let mut unreachable_references = HashSet::new();
+        if !options.unreachable {
+            let mut collect_unreachable_references = |id: &ObjectId| {
+                if seen.contains(id) {
+                    return Ok(());
+                }
+                let object = match store.read_object(id) {
+                    Ok(object) => object,
+                    Err(error) => {
+                        if !has_errors {
+                            fsck_report_object_read_error(&repo, id, &error);
+                            has_errors = true;
+                            exit_code = 3;
+                        }
+                        return Ok(());
+                    }
+                };
+                fsck_collect_linked_object_ids(&object, &mut unreachable_references)
+            };
+            store.for_each_object_id(&mut collect_unreachable_references)?;
+        }
         let mut report_unreachable = |id: &ObjectId| {
-            if !seen.contains(id) {
+            if !seen.contains(id) && (options.unreachable || !unreachable_references.contains(id)) {
                 let object = match store.read_object(id) {
                     Ok(object) => object,
                     Err(error) => {
@@ -2358,7 +2399,12 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         store.for_each_object_id(&mut report_unreachable)?;
     }
     if options.verbose {
-        fsck_print_verbose_connectivity(verbose_object_ids.as_deref().unwrap_or(&[]));
+        let connectivity_ids = fsck_verbose_connectivity_ids(
+            &store,
+            verbose_object_ids.as_deref().unwrap_or(&[]),
+            &roots,
+        )?;
+        fsck_print_verbose_connectivity(&connectivity_ids);
     }
     let _ = (
         options.strict,
@@ -2428,6 +2474,147 @@ fn fsck_print_verbose_connectivity(ids: &[ObjectId]) {
     eprintln!("Checking connectivity (32 objects)");
     for id in ids {
         eprintln!("Checking {}", id.to_hex());
+    }
+}
+
+fn fsck_verbose_connectivity_ids(
+    store: &LooseObjectStore,
+    sorted_ids: &[ObjectId],
+    roots: &[ObjectId],
+) -> io::Result<Vec<ObjectId>> {
+    let mut indexed = FsckIndexedObjects::new();
+    for root in roots {
+        indexed.lookup_or_insert(root);
+    }
+    let mut scanned = HashSet::with_capacity(sorted_ids.len().max(1));
+    for id in sorted_ids {
+        fsck_emulate_source_scan(store, id, &mut scanned, &mut indexed)?;
+    }
+    Ok(indexed.into_slots())
+}
+
+fn fsck_emulate_source_scan(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    scanned: &mut HashSet<ObjectId>,
+    indexed: &mut FsckIndexedObjects,
+) -> io::Result<()> {
+    if !scanned.insert(id.clone()) {
+        return Ok(());
+    }
+    let object = store.read_object(id)?;
+    indexed.lookup_or_insert(id);
+    let content = object.content.as_slice();
+    match object.kind {
+        GitObjectKind::Blob => {}
+        GitObjectKind::Tree => {
+            let (entries, _) = fsck_decode_tree_entries(id.algorithm(), content)?;
+            for entry in entries {
+                if entry.mode == TreeMode::Gitlink || object_id_is_null(&entry.id) {
+                    continue;
+                }
+                indexed.lookup_or_insert(&entry.id);
+            }
+        }
+        GitObjectKind::Commit => {
+            let (tree, parents) = fsck_commit_links(GitHashAlgorithm::Sha1, content)?;
+            indexed.lookup_or_insert(&tree);
+            for parent in parents {
+                indexed.lookup_or_insert(&parent);
+            }
+        }
+        GitObjectKind::Tag => {
+            let target = fsck_tag_target(GitHashAlgorithm::Sha1, content)?;
+            indexed.lookup_or_insert(&target);
+        }
+    }
+    Ok(())
+}
+
+struct FsckIndexedObjects {
+    slots: Vec<Option<ObjectId>>,
+    nr_objs: usize,
+}
+
+impl FsckIndexedObjects {
+    fn new() -> Self {
+        Self {
+            slots: Vec::new(),
+            nr_objs: 0,
+        }
+    }
+
+    fn lookup_or_insert(&mut self, id: &ObjectId) {
+        if self.lookup_slot(id).is_some() {
+            return;
+        }
+        if self.slots.len().saturating_sub(1) <= self.nr_objs.saturating_mul(2) {
+            self.grow();
+        }
+        let mut slot = self.hash_slot(id);
+        while self.slots[slot].is_some() {
+            slot += 1;
+            if slot >= self.slots.len() {
+                slot = 0;
+            }
+        }
+        self.slots[slot] = Some(id.clone());
+        self.nr_objs += 1;
+    }
+
+    fn into_slots(self) -> Vec<ObjectId> {
+        self.slots.into_iter().flatten().collect()
+    }
+
+    fn lookup_slot(&mut self, id: &ObjectId) -> Option<usize> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        let first = self.hash_slot(id);
+        let mut slot = first;
+        while let Some(existing) = self.slots[slot].as_ref() {
+            if existing.as_bytes() == id.as_bytes() {
+                if slot != first {
+                    self.slots.swap(slot, first);
+                    return Some(first);
+                }
+                return Some(slot);
+            }
+            slot += 1;
+            if slot >= self.slots.len() {
+                slot = 0;
+            }
+        }
+        None
+    }
+
+    fn grow(&mut self) {
+        let new_size = if self.slots.len() < 32 {
+            32
+        } else {
+            self.slots.len() * 2
+        };
+        let old_slots = std::mem::replace(&mut self.slots, vec![None; new_size]);
+        for id in old_slots.into_iter().flatten() {
+            let mut slot = self.hash_slot(&id);
+            while self.slots[slot].is_some() {
+                slot += 1;
+                if slot >= self.slots.len() {
+                    slot = 0;
+                }
+            }
+            self.slots[slot] = Some(id);
+        }
+    }
+
+    fn hash_slot(&self, id: &ObjectId) -> usize {
+        let raw = u32::from_ne_bytes([
+            id.as_bytes()[0],
+            id.as_bytes()[1],
+            id.as_bytes()[2],
+            id.as_bytes()[3],
+        ]) as usize;
+        raw & (self.slots.len() - 1)
     }
 }
 
@@ -3288,8 +3475,10 @@ fn gitmodules_blob_entries(content: &[u8]) -> Option<Vec<ConfigEntry>> {
             .unwrap_or((trimmed, "", true));
         entries.push(ConfigEntry {
             section: section.to_ascii_lowercase(),
+            raw_section: section.clone(),
             subsection: subsection.clone(),
             key: key.to_ascii_lowercase(),
+            raw_key: key.to_owned(),
             value: decode_config_value(value),
             comment: None,
             implicit_bool,
@@ -3659,11 +3848,18 @@ fn fsck_mark_object(
     id: &ObjectId,
     seen: &mut HashSet<ObjectId>,
     has_connectivity_errors: &mut bool,
+    promised_missing: &HashSet<ObjectId>,
 ) -> io::Result<()> {
     if !seen.insert(id.clone()) {
         return Ok(());
     }
-    let object = store.read_object(id)?;
+    let object = match store.read_object(id) {
+        Ok(object) => object,
+        Err(error) if error.kind() == io::ErrorKind::NotFound && promised_missing.contains(id) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     let content = object.content.as_slice();
     match object.kind {
         GitObjectKind::Blob => {}
@@ -3677,11 +3873,19 @@ fn fsck_mark_object(
                     *has_connectivity_errors = true;
                     fsck_print_missing_tree_entry(id, entry.mode, &entry.id);
                 } else {
-                    match fsck_mark_object(store, &entry.id, seen, has_connectivity_errors) {
+                    match fsck_mark_object(
+                        store,
+                        &entry.id,
+                        seen,
+                        has_connectivity_errors,
+                        promised_missing,
+                    ) {
                         Ok(()) => {}
                         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                            *has_connectivity_errors = true;
-                            fsck_print_missing_tree_entry(id, entry.mode, &entry.id);
+                            if !promised_missing.contains(&entry.id) {
+                                *has_connectivity_errors = true;
+                                fsck_print_missing_tree_entry(id, entry.mode, &entry.id);
+                            }
                         }
                         Err(err) => return Err(err),
                     }
@@ -3690,17 +3894,216 @@ fn fsck_mark_object(
         }
         GitObjectKind::Commit => {
             let (tree, parents) = fsck_commit_links(GitHashAlgorithm::Sha1, content)?;
-            fsck_mark_object(store, &tree, seen, has_connectivity_errors)?;
+            fsck_mark_linked_object(
+                store,
+                id,
+                "tree",
+                &tree,
+                seen,
+                has_connectivity_errors,
+                promised_missing,
+            )?;
             for parent in parents {
-                fsck_mark_object(store, &parent, seen, has_connectivity_errors)?;
+                fsck_mark_linked_object(
+                    store,
+                    id,
+                    "commit",
+                    &parent,
+                    seen,
+                    has_connectivity_errors,
+                    promised_missing,
+                )?;
             }
         }
         GitObjectKind::Tag => {
             let target = fsck_tag_target(GitHashAlgorithm::Sha1, content)?;
-            fsck_mark_object(store, &target, seen, has_connectivity_errors)?;
+            fsck_mark_linked_object(
+                store,
+                id,
+                "tag",
+                &target,
+                seen,
+                has_connectivity_errors,
+                promised_missing,
+            )?;
         }
     }
     Ok(())
+}
+
+fn fsck_mark_linked_object(
+    store: &LooseObjectStore,
+    source_id: &ObjectId,
+    target_kind: &str,
+    target_id: &ObjectId,
+    seen: &mut HashSet<ObjectId>,
+    has_connectivity_errors: &mut bool,
+    promised_missing: &HashSet<ObjectId>,
+) -> io::Result<()> {
+    match fsck_mark_object(
+        store,
+        target_id,
+        seen,
+        has_connectivity_errors,
+        promised_missing,
+    ) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound && promised_missing.contains(target_id) =>
+        {
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            *has_connectivity_errors = true;
+            println!(
+                "broken link from  commit {}\n              to  {} {}",
+                source_id.to_hex(),
+                target_kind,
+                target_id.to_hex()
+            );
+            println!("missing {} {}", target_kind, target_id.to_hex());
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn fsck_promised_missing_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+) -> Result<HashSet<ObjectId>> {
+    if !fsck_partial_clone_enabled(repo)? {
+        return Ok(HashSet::new());
+    }
+    let pack_dir = repo.objects_dir.join("pack");
+    let mut promised = HashSet::new();
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(promised),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("promisor") {
+            continue;
+        }
+        let pack_path = path.with_extension("pack");
+        if !pack_path.is_file() {
+            continue;
+        }
+        let ids = decode_pack_index_object_ids_from_path(GitHashAlgorithm::Sha1, &pack_path)
+            .map_err(CliError::Io)?;
+        for id in ids {
+            let object = match store.read_object(&id) {
+                Ok(object) => object,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(CliError::Io(error)),
+            };
+            fsck_collect_promised_missing_links(store, &object, &mut promised)
+                .map_err(CliError::Io)?;
+        }
+    }
+    Ok(promised)
+}
+
+fn fsck_collect_promised_missing_links(
+    store: &LooseObjectStore,
+    object: &LooseObject,
+    promised: &mut HashSet<ObjectId>,
+) -> io::Result<()> {
+    match object.kind {
+        GitObjectKind::Blob => {}
+        GitObjectKind::Tree => {
+            let (entries, _) = fsck_decode_tree_entries(object.id.algorithm(), &object.content)?;
+            for entry in entries {
+                if entry.mode != TreeMode::Gitlink && !store.contains_object(&entry.id)? {
+                    promised.insert(entry.id);
+                }
+            }
+        }
+        GitObjectKind::Commit => {
+            let (tree, parents) = fsck_commit_links(object.id.algorithm(), &object.content)?;
+            if !store.contains_object(&tree)? {
+                promised.insert(tree);
+            }
+            for parent in parents {
+                if !store.contains_object(&parent)? {
+                    promised.insert(parent);
+                }
+            }
+        }
+        GitObjectKind::Tag => {
+            let target = fsck_tag_target(object.id.algorithm(), &object.content)?;
+            if !store.contains_object(&target)? {
+                promised.insert(target);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn fsck_collect_linked_object_ids(
+    object: &LooseObject,
+    linked: &mut HashSet<ObjectId>,
+) -> io::Result<()> {
+    match object.kind {
+        GitObjectKind::Blob => {}
+        GitObjectKind::Tree => {
+            let (entries, _) = fsck_decode_tree_entries(object.id.algorithm(), &object.content)?;
+            linked.extend(
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.mode != TreeMode::Gitlink)
+                    .map(|entry| entry.id),
+            );
+        }
+        GitObjectKind::Commit => {
+            let (tree, parents) = fsck_commit_links(object.id.algorithm(), &object.content)?;
+            linked.insert(tree);
+            linked.extend(parents);
+        }
+        GitObjectKind::Tag => {
+            linked.insert(fsck_tag_target(object.id.algorithm(), &object.content)?);
+        }
+    }
+    Ok(())
+}
+
+fn fsck_partial_clone_enabled(repo: &GitRepo) -> Result<bool> {
+    let mut has_partial_clone = false;
+    let mut has_promisor_remote = false;
+    let mut version = None::<String>;
+    for entry in read_common_config_entries(repo)? {
+        if entry.section == "core"
+            && entry.subsection.is_empty()
+            && entry.key == "repositoryformatversion"
+        {
+            version = Some(entry.value.clone());
+        }
+        if entry.section == "extensions"
+            && entry.subsection.is_empty()
+            && entry.key.eq_ignore_ascii_case("partialclone")
+        {
+            has_partial_clone = true;
+        }
+        if entry.section == "remote"
+            && !entry.subsection.is_empty()
+            && entry.key.eq_ignore_ascii_case("promisor")
+            && matches!(entry.value.to_ascii_lowercase().as_str(), "true" | "1")
+        {
+            has_promisor_remote = true;
+        }
+    }
+    let has_promisor_pack = repo
+        .objects_dir
+        .join("pack")
+        .read_dir()
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(std::result::Result::ok))
+        .any(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("promisor"));
+    Ok(version.as_deref() == Some("1")
+        && (has_partial_clone || has_promisor_remote || has_promisor_pack))
 }
 
 fn fsck_print_missing_tree_entry(tree_id: &ObjectId, mode: TreeMode, entry_id: &ObjectId) {
@@ -3919,11 +4322,33 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
         });
     }
     validate_pack_objects_compat_options(&options)?;
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut ids =
-        collect_pack_objects_input(&repo, &store, options.revs || options.unpacked, options.all)?;
-    apply_pack_objects_filter(&store, &mut ids, options.filter.as_deref(), options.no_filter)?;
+    let reads_revisions = options.revs || options.unpacked;
+    let input = collect_pack_objects_stdin_input(reads_revisions, options.all)?;
+    let walks_history = reads_revisions || options.all;
+    let mut ids = collect_pack_objects_input_from_source(
+        &repo,
+        &store,
+        reads_revisions,
+        options.all,
+        &input,
+    )?;
+    if walks_history && super::admin_commands::backfill_promisor_objects(&repo, &ids)? {
+        ids = collect_pack_objects_input_from_source(
+            &repo,
+            &store,
+            reads_revisions,
+            options.all,
+            &input,
+        )?;
+    }
+    apply_pack_objects_filter(
+        &store,
+        &mut ids,
+        options.filter.as_deref(),
+        options.no_filter,
+    )?;
     let packed_first_store = store.packed_first();
     let encode_options = pack_objects_encode_options(&options);
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
@@ -3989,6 +4414,12 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
     Ok(())
 }
 
+enum PackObjectsStdinInput {
+    RevArgs(Vec<String>),
+    ObjectIds(Vec<ObjectId>),
+    None,
+}
+
 fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<()> {
     let _ = requested_pack_index_version(options.index_version.as_deref())?;
     if options.stdin_packs && (options.all || options.revs) {
@@ -4009,8 +4440,7 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
             text: "fatal: --thin cannot be used to build an indexable pack\n".into(),
         });
     }
-    let max_pack_size =
-        parse_pack_size_limit(options.max_pack_size.as_deref(), "max-pack-size")?;
+    let max_pack_size = parse_pack_size_limit(options.max_pack_size.as_deref(), "max-pack-size")?;
     if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
@@ -4097,9 +4527,7 @@ fn parse_pack_size_with_optional_suffix(raw: &str) -> Option<u64> {
     if raw.is_empty() {
         return None;
     }
-    let split_at = raw
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(raw.len());
+    let split_at = raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len());
     if split_at == 0 {
         return None;
     }
@@ -4178,7 +4606,9 @@ fn pack_objects_encode_options(options: &PackObjectsOptions) -> PackEncodeOption
     pack_encode_options(
         options.window,
         options.depth,
-        parse_pack_objects_compression(options.compression.as_deref()).ok().flatten(),
+        parse_pack_objects_compression(options.compression.as_deref())
+            .ok()
+            .flatten(),
     )
 }
 
@@ -4212,10 +4642,12 @@ fn parse_pack_objects_filter(raw: &str) -> Result<PackObjectsFilter> {
             code: 128,
             message: format!("invalid filter-spec '{raw}'"),
         })?;
-        let size = parsed.checked_mul(multiplier).ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: format!("invalid filter-spec '{raw}'"),
-        })?;
+        let size = parsed
+            .checked_mul(multiplier)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("invalid filter-spec '{raw}'"),
+            })?;
         return Ok(PackObjectsFilter::BlobLimit(size));
     }
     Err(CliError::Fatal {
@@ -4252,17 +4684,48 @@ fn collect_pack_objects_input(
     revs: bool,
     all: bool,
 ) -> Result<Vec<ObjectId>> {
-    let rev_args = if revs {
+    let input = collect_pack_objects_stdin_input(revs, all)?;
+    collect_pack_objects_input_from_source(repo, store, revs, all, &input)
+}
+
+fn collect_pack_objects_stdin_input(revs: bool, all: bool) -> Result<PackObjectsStdinInput> {
+    if revs {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::new(stdin.lock());
-        collect_pack_rev_args_from_reader(&mut stdin)?
+        return Ok(PackObjectsStdinInput::RevArgs(
+            collect_pack_rev_args_from_reader(&mut stdin)?,
+        ));
+    }
+    if !all {
+        let stdin = io::stdin();
+        let mut stdin = io::BufReader::new(stdin.lock());
+        return Ok(PackObjectsStdinInput::ObjectIds(
+            collect_pack_object_ids_from_reader(&mut stdin)?,
+        ));
+    }
+    Ok(PackObjectsStdinInput::None)
+}
+
+fn collect_pack_objects_input_from_source(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: bool,
+    all: bool,
+    input: &PackObjectsStdinInput,
+) -> Result<Vec<ObjectId>> {
+    let rev_args = if revs {
+        match input {
+            PackObjectsStdinInput::RevArgs(values) => values.clone(),
+            _ => Vec::new(),
+        }
     } else {
         Vec::new()
     };
     if !revs && !all {
-        let stdin = io::stdin();
-        let mut stdin = io::BufReader::new(stdin.lock());
-        return collect_pack_object_ids_from_reader(&mut stdin);
+        return match input {
+            PackObjectsStdinInput::ObjectIds(ids) => Ok(ids.clone()),
+            _ => Ok(Vec::new()),
+        };
     }
     let revs = collect_rev_list_revs(repo, store, all, rev_args)?;
     let commits = collect_commits_with_exclusions(repo, store, &revs, None)?;
@@ -6199,10 +6662,18 @@ pub(crate) fn verify_pack(
             message: "verify-pack requires at least one .idx path".into(),
         });
     }
-    for idx_path in packs {
+    for pack_path in packs {
+        let idx_path = normalize_verify_pack_index_path(&pack_path);
         verify_pack_one(algorithm, &idx_path, verbose, stat_only)?;
     }
     Ok(())
+}
+
+fn normalize_verify_pack_index_path(path: &std::path::Path) -> PathBuf {
+    if path.extension().and_then(|value| value.to_str()) == Some("pack") {
+        return path.with_extension("idx");
+    }
+    path.to_path_buf()
 }
 
 fn verify_pack_one(
@@ -6662,7 +7133,7 @@ pub(crate) fn verify_tag(
     }
 }
 
-fn commit_signature_payload(content: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+pub(crate) fn commit_signature_payload(content: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
     let header_end = content
         .windows(2)
         .position(|window| window == b"\n\n")
@@ -6704,6 +7175,182 @@ fn commit_signature_payload(content: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>
     } else {
         Ok(Some((signature, payload)))
     }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CommitSignatureMetadata {
+    pub(crate) grade: String,
+    pub(crate) key: String,
+    pub(crate) signer: String,
+    pub(crate) fingerprint: String,
+    pub(crate) primary_key_fingerprint: String,
+}
+
+pub(crate) fn inspect_commit_signature(
+    repo: &GitRepo,
+    content: &[u8],
+) -> Result<CommitSignatureMetadata> {
+    let Some((signature, payload)) = commit_signature_payload(content)? else {
+        return Ok(CommitSignatureMetadata {
+            grade: "N".to_owned(),
+            ..CommitSignatureMetadata::default()
+        });
+    };
+    if !signature.starts_with(b"-----BEGIN SSH SIGNATURE-----") {
+        return Ok(CommitSignatureMetadata::default());
+    }
+    inspect_ssh_commit_signature(repo, &signature, &payload)
+}
+
+fn inspect_ssh_commit_signature(
+    repo: &GitRepo,
+    signature: &[u8],
+    payload: &[u8],
+) -> Result<CommitSignatureMetadata> {
+    let Some(allowed_signers) = read_config_value(repo, "gpg.ssh.allowedSignersFile")? else {
+        return Ok(CommitSignatureMetadata {
+            grade: "U".to_owned(),
+            ..CommitSignatureMetadata::default()
+        });
+    };
+    let signature_path = write_verify_signature_input(signature)?;
+    let principals = run_ssh_signature_command(
+        [
+            "-Y",
+            "find-principals",
+            "-n",
+            "git",
+            "-f",
+            &allowed_signers,
+            "-s",
+            signature_path.to_string_lossy().as_ref(),
+        ],
+        payload,
+    )?;
+    let signer = String::from_utf8_lossy(&principals.stdout)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let verified = if signer.is_empty() {
+        None
+    } else {
+        Some(run_ssh_signature_command(
+            [
+                "-Y",
+                "verify",
+                "-n",
+                "git",
+                "-f",
+                &allowed_signers,
+                "-I",
+                &signer,
+                "-s",
+                signature_path.to_string_lossy().as_ref(),
+            ],
+            payload,
+        )?)
+    };
+    let _ = fs::remove_file(signature_path);
+    let fingerprint = ssh_allowed_signer_fingerprint(&allowed_signers, &signer)?
+        .or_else(|| {
+            verified
+                .as_ref()
+                .and_then(|output| ssh_signature_fingerprint(&output.stderr))
+        })
+        .unwrap_or_default();
+    let good = principals.status.success()
+        && verified
+            .as_ref()
+            .is_some_and(|output| output.status.success());
+    Ok(CommitSignatureMetadata {
+        grade: if good { "G" } else { "B" }.to_owned(),
+        key: fingerprint.clone(),
+        signer,
+        fingerprint,
+        primary_key_fingerprint: String::new(),
+    })
+}
+
+fn run_ssh_signature_command<'a>(
+    arguments: impl IntoIterator<Item = &'a str>,
+    payload: &[u8],
+) -> Result<std::process::Output> {
+    let mut child = ProcessCommand::new("ssh-keygen")
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(CliError::Io)?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 1,
+            message: "cannot open stdin for ssh-keygen".into(),
+        })?
+        .write_all(payload)?;
+    drop(child.stdin.take());
+    child.wait_with_output().map_err(CliError::Io)
+}
+
+fn ssh_signature_fingerprint(stderr: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stderr)
+        .split_whitespace()
+        .find(|value| value.starts_with("SHA256:"))
+        .map(|value| value.trim_end_matches(['.', ',']).to_owned())
+}
+
+fn ssh_allowed_signer_fingerprint(path: &str, signer: &str) -> Result<Option<String>> {
+    let content = fs::read_to_string(path)?;
+    let key = content.lines().find_map(|line| {
+        let line = line.trim();
+        let (principals, key) = if let Some(rest) = line.strip_prefix('"') {
+            let (principals, key) = rest.split_once("\" ")?;
+            (principals, key)
+        } else {
+            line.split_once(char::is_whitespace)?
+        };
+        principals
+            .split(',')
+            .any(|principal| principal == signer)
+            .then_some(key)
+    });
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    let output = run_ssh_key_fingerprint(key.as_bytes())?;
+    Ok(output
+        .status
+        .success()
+        .then(|| {
+            String::from_utf8_lossy(&output.stdout)
+                .split_whitespace()
+                .nth(1)
+                .map(str::to_owned)
+        })
+        .flatten())
+}
+
+fn run_ssh_key_fingerprint(key: &[u8]) -> Result<std::process::Output> {
+    let mut child = ProcessCommand::new("ssh-keygen")
+        .args(["-l", "-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(CliError::Io)?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 1,
+            message: "cannot open stdin for ssh-keygen".into(),
+        })?
+        .write_all(key)?;
+    drop(child.stdin.take());
+    child.wait_with_output().map_err(CliError::Io)
 }
 
 fn tag_signature_payload(content: &[u8]) -> Option<(&[u8], &[u8])> {

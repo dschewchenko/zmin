@@ -421,14 +421,17 @@ pub(crate) fn stripspace(
         });
     }
 
+    let comment_marker = stripspace_comment_marker()?;
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
     if comment_lines {
         for line in input.lines() {
             if line.is_empty() {
-                println!("#");
+                println!("{comment_marker}");
+            } else if line.starts_with([' ', '\t']) {
+                println!("{comment_marker}{line}");
             } else {
-                println!("# {line}");
+                println!("{comment_marker} {line}");
             }
         }
         return Ok(());
@@ -438,7 +441,7 @@ pub(crate) fn stripspace(
     let mut pending_blank = false;
     for line in input.lines() {
         let trimmed = line.trim_end();
-        if strip_comments && trimmed.starts_with('#') {
+        if strip_comments && trimmed.starts_with(&comment_marker) {
             continue;
         }
         if trimmed.is_empty() {
@@ -455,6 +458,33 @@ pub(crate) fn stripspace(
     }
     if !output.is_empty() {
         println!("{}", output.join("\n"));
+    }
+    Ok(())
+}
+
+fn stripspace_comment_marker() -> Result<String> {
+    let Some(repo) = find_repo().ok() else {
+        return Ok("#".to_owned());
+    };
+    let marker = read_config_value(&repo, "core.commentchar")
+        .map_err(CliError::Io)?
+        .unwrap_or_else(|| "#".to_owned());
+    validate_stripspace_comment_marker(&marker)?;
+    Ok(marker)
+}
+
+fn validate_stripspace_comment_marker(marker: &str) -> Result<()> {
+    if marker.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "core.commentchar must have at least one character".into(),
+        });
+    }
+    if marker.contains(['\n', '\r']) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "core.commentchar cannot contain newline".into(),
+        });
     }
     Ok(())
 }

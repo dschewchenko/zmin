@@ -266,3 +266,29 @@ fn add_process_filter_delayed_clean_status_matches_stock_git() {
         git(git_repo.path(), ["status", "--porcelain=v1"])
     );
 }
+
+#[test]
+fn add_rejects_builtin_attribute_names_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join(".gitattributes"), b"foo* builtin_foo\n").expect("write attributes");
+    }
+
+    assert_eq!(
+        command_any_output(
+            common::zmin_bin(),
+            zmin_repo.path(),
+            &["add", ".gitattributes"],
+            "zmin add builtin attribute names",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["add", ".gitattributes"],
+            "git add builtin attribute names",
+        )
+    );
+}

@@ -89,6 +89,42 @@ fn cms_undo_reverts_last_logged_save_only_when_safe() {
 }
 
 #[test]
+fn cms_undo_after_first_save_restores_no_history_but_keeps_staged_content() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "page.md", "hello\n");
+    assert_eq!(
+        run_zmin(repo.path(), ["save", "first page"]),
+        "Saved: first page"
+    );
+    assert_eq!(
+        git(repo.path(), ["log", "--format=%s", "-n1"]),
+        "first page"
+    );
+
+    assert_eq!(run_zmin(repo.path(), ["undo"]), "Undid save: first page");
+    assert_eq!(
+        run_zmin(repo.path(), ["changes"]),
+        "Changes:\nadded: page.md"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("page.md")).expect("read page after undo"),
+        "hello\n"
+    );
+    assert_eq!(
+        git(repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        "## No commits yet on main\nA  page.md"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join(".git/zmin/operations.log"))
+            .expect("operation log after root undo"),
+        ""
+    );
+    assert_eq!(run_zmin(repo.path(), ["timeline"]), "No history.");
+}
+
+#[test]
 fn cms_publish_and_update_use_safe_remote_operations() {
     let seed = git_init();
     configure_identity(seed.path());
@@ -195,6 +231,34 @@ fn cms_timeline_and_recover_are_safe_human_aliases() {
     assert_eq!(staged.0, 1);
     assert!(
         staged
+            .2
+            .contains("refusing to recover staged changes in page.md")
+    );
+}
+
+#[test]
+fn cms_recover_refuses_staged_rename_targets_and_sources() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "page.md", "base\n");
+    git(repo.path(), ["add", "page.md"]);
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["mv", "page.md", "page-renamed.md"]);
+
+    let renamed_target = run_zmin_failure_output(repo.path(), &["recover", "page-renamed.md"]);
+    assert_eq!(renamed_target.0, 1);
+    assert!(
+        renamed_target
+            .2
+            .contains("refusing to recover staged changes in page-renamed.md")
+    );
+
+    let renamed_source = run_zmin_failure_output(repo.path(), &["recover", "page.md"]);
+    assert_eq!(renamed_source.0, 1);
+    assert!(
+        renamed_source
             .2
             .contains("refusing to recover staged changes in page.md")
     );

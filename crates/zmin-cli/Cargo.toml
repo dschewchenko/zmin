@@ -3,6 +3,7 @@ name = "zmin-cli"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
+build = "build.rs"
 
 [features]
 default = []
@@ -17,11 +18,13 @@ name = "git-http-backend"
 path = "src/bin/git-http-backend.rs"
 
 [dependencies]
-chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.39", default-features = false, features = ["std"] }
 clap = { version = "4.5.47", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+encoding_rs = "0.8.35"
 flate2 = { version = "1.0.35", default-features = false, features = ["zlib"] }
 memmap2 = "0.9.9"
 regex = "1.11.1"
+rustc-hash = "2.1.2"
 native-tls = { version = "0.2.14", optional = true }
 sha1 = "0.10.6"
 similar = { version = "2.7.0" }
@@ -30,5 +33,15 @@ zmin-cli-runtime = { path = "../zmin-cli-runtime" }
 zmin-git-core = { path = "../zmin-git-core" }
 zmin-primitives = { path = "../zmin-primitives" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.174"
+
+[target.'cfg(windows)'.dependencies]
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile = "3.10.1"
+
+[build-dependencies]
+syn = { version = "2.0.106", features = ["full", "parsing"] }

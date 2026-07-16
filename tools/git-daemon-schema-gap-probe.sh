@@ -99,8 +99,10 @@ set -e
 printf 'daemon_strict_paths\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
 printf 'stock stderr:\n'
 sed -n '1,4p' "$tmpdir/git.refs.err"
-printf 'zmin stdout:\n'
-sed -n '1,4p' "$tmpdir/zmin.refs"
+printf 'zmin stderr:\n'
+sed -n '1,4p' "$tmpdir/zmin.refs.err"
 
 test "$git_exit" = 128
-test "$zmin_exit" = 0
+test "$zmin_exit" = "$git_exit"
+cmp -s "$tmpdir/git.refs" "$tmpdir/zmin.refs"
+cmp -s "$tmpdir/git.refs.err" "$tmpdir/zmin.refs.err"

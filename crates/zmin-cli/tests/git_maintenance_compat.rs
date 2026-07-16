@@ -2,6 +2,8 @@ mod common;
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
@@ -11,7 +13,7 @@ use common::{
     command_failure_output_with_env, command_output_with_env, command_stdout_bytes,
     configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
     git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_args, run_zmin_failure_output,
-    write_file, zmin_bin,
+    run_zmin_status, stock_git_bin, write_file, zmin_bin,
 };
 
 fn pack_refs_fixture_repo() -> TempDir {
@@ -61,6 +63,68 @@ fn git_path_output_string(value: String) -> String {
 #[cfg(not(windows))]
 fn git_path_output_string(value: String) -> String {
     value
+}
+
+fn pack_as_from_promisor(repo: &std::path::Path, object_id: &str) {
+    let mut pack_objects = Command::new(stock_git_bin())
+        .args(["pack-objects", ".git/objects/pack/pack"])
+        .current_dir(repo)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pack-objects");
+    pack_objects
+        .stdin
+        .as_mut()
+        .expect("pack-objects stdin")
+        .write_all(format!("{object_id}\n").as_bytes())
+        .expect("write object id");
+    let output = pack_objects.wait_with_output().expect("wait pack-objects");
+    assert!(
+        output.status.success(),
+        "pack-objects failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let pack_hash = String::from_utf8(output.stdout)
+        .expect("pack hash utf8")
+        .trim()
+        .to_owned();
+    assert!(!pack_hash.is_empty(), "missing pack hash");
+    fs::write(
+        repo.join(format!(".git/objects/pack/pack-{pack_hash}.promisor")),
+        b"",
+    )
+    .expect("write promisor marker");
+}
+
+fn delete_loose_object(repo: &std::path::Path, object_id: &str) {
+    fs::remove_file(
+        repo.join(".git/objects")
+            .join(&object_id[..2])
+            .join(&object_id[2..]),
+    )
+    .expect("delete loose object");
+}
+
+fn promisor_repack_fixture(repo: &std::path::Path) -> (String, String) {
+    configure_identity(repo);
+    git(repo, ["config", "core.repositoryformatversion", "1"]);
+    git(
+        repo,
+        ["config", "extensions.partialclone", "arbitrary string"],
+    );
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "two"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "three"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "four"]);
+    let one = git(repo, ["rev-parse", "HEAD^^^"]);
+    let two = git(repo, ["rev-parse", "HEAD^^"]);
+    let three = git(repo, ["rev-parse", "HEAD^"]);
+    pack_as_from_promisor(repo, &two);
+    pack_as_from_promisor(repo, &three);
+    delete_loose_object(repo, &one);
+    (two, three)
 }
 
 fn read_u32_be(bytes: &[u8]) -> u32 {
@@ -4140,5 +4204,46 @@ fn prune_matches_stock_git_for_documented_progress_and_verbose_flags() {
             loose_object_exists(zmin_repo.path(), &zmin_staged),
             loose_object_exists(git_repo.path(), &git_staged)
         );
+    }
+}
+
+#[test]
+fn repack_preserves_promisor_history_without_traversing_missing_ancestors() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let _ = promisor_repack_fixture(git_repo.path());
+    let _ = promisor_repack_fixture(zmin_repo.path());
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["repack", "-ab", "-d"],
+            "zmin"
+        )
+        .0,
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_repo.path(),
+            &["repack", "-ab", "-d"],
+            "stock git",
+        )
+        .0
+    );
+
+    for flag in ["-a", "-A", "-l"] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let (git_two, git_three) = promisor_repack_fixture(git_repo.path());
+        let (zmin_two, zmin_three) = promisor_repack_fixture(zmin_repo.path());
+
+        assert_eq!(
+            run_zmin_status(zmin_repo.path(), ["repack", flag, "-d"]),
+            git_status(git_repo.path(), ["repack", flag, "-d"]),
+            "status mismatch for repack {flag} -d"
+        );
+        assert_eq!(git(zmin_repo.path(), ["cat-file", "-e", &zmin_two]), "");
+        assert_eq!(git(zmin_repo.path(), ["cat-file", "-e", &zmin_three]), "");
+        assert_eq!(git(git_repo.path(), ["cat-file", "-e", &git_two]), "");
+        assert_eq!(git(git_repo.path(), ["cat-file", "-e", &git_three]), "");
     }
 }

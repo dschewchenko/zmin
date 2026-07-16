@@ -4,6 +4,13 @@ use std::path::Path;
 
 use super::{CliError, GitIndex, GitRepo, Result};
 
+fn path_missing_or_not_directory(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
+}
+
 pub(crate) fn remove_worktree_path(repo: &GitRepo, path: &[u8]) -> Result<()> {
     let absolute = repo.root.join(String::from_utf8_lossy(path).as_ref());
     match fs::symlink_metadata(&absolute) {
@@ -12,13 +19,31 @@ pub(crate) fn remove_worktree_path(repo: &GitRepo, path: &[u8]) -> Result<()> {
             remove_empty_parent_dirs(&repo.root, absolute.parent())?;
         }
         Ok(metadata) if metadata.is_dir() => {
+            if directory_tree_contains_no_files(&absolute)? {
+                fs::remove_dir_all(&absolute)?;
+            }
             remove_empty_parent_dirs(&repo.root, Some(&absolute))?;
         }
         Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) if path_missing_or_not_directory(&error) => {}
         Err(error) => return Err(CliError::Io(error)),
     }
     Ok(())
+}
+
+pub(crate) fn directory_tree_contains_no_files(root: &Path) -> Result<bool> {
+    let mut directories = vec![root.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                directories.push(entry.path());
+            } else {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 pub(crate) fn remove_tracked_paths_missing_from_target(
@@ -52,7 +77,7 @@ pub(crate) fn remove_tracked_paths_missing_from_target(
                 remove_empty_parent_dirs(&repo.root, absolute.parent())?;
             }
             Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) if path_missing_or_not_directory(&error) => {}
             Err(error) => return Err(CliError::Io(error)),
         }
     }

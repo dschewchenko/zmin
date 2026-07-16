@@ -15,6 +15,7 @@ fetch_batch_files="${ZMIN_BENCH_FETCH_BATCH_FILES:-2400}"
 push_batch_files="${ZMIN_BENCH_PUSH_BATCH_FILES:-2400}"
 repeats="${ZMIN_BENCH_REPEATS:-10}"
 seed="${ZMIN_BENCH_SEED:-1700000000}"
+repack_max_pack_size="${ZMIN_BENCH_REPACK_MAX_PACK_SIZE:-}"
 ops="${ZMIN_BENCH_OPS:-}"
 out_dir="${ZMIN_BENCH_OUT_DIR:-}"
 phase_trace_dir="${ZMIN_BENCH_PHASE_TRACE_DIR:-}"
@@ -149,7 +150,7 @@ out="$tmp_dir/bench.tsv"
 validation_out="$tmp_dir/validation.tsv"
 src="$tmp_dir/src"
 remote="$tmp_dir/remote.git"
-printf 'tool\top\treal\tuser\tsys\trss\texit\textra\n' >"$out"
+printf 'tool\top\treal\tuser\tsys\trss_bytes\texit\textra\n' >"$out"
 printf 'check\tstatus\tdetails\n' >"$validation_out"
 
 record_validation() {
@@ -197,6 +198,7 @@ measure_sh() {
   local time_file="$tmp_dir/time-$tool-$op-$(date +%s%N).txt"
   local trace_file=""
   local trace_env=()
+  local time_args=(-lp)
   local start_ns end_ns real_seconds
   if [[ "$tool" == "zmin" && -n "$phase_trace_dir" ]]; then
     trace_file="$(phase_trace_file_for "$tool" "$op" "$extra")"
@@ -219,12 +221,15 @@ measure_sh() {
       "GIT_TRACE_PACKET=$(ssh_packet_trace_file_for "$tool" "$op" "$extra")"
     )
   fi
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    time_args=(-p -v)
+  fi
   set +e
   start_ns="$(date +%s%N)"
   if [[ "${#trace_env[@]}" -gt 0 ]]; then
-    env "${trace_env[@]}" /usr/bin/time -lp bash -lc "$script" >/dev/null 2>"$time_file"
+    env "${trace_env[@]}" /usr/bin/time "${time_args[@]}" bash -lc "$script" >/dev/null 2>"$time_file"
   else
-    /usr/bin/time -lp bash -lc "$script" >/dev/null 2>"$time_file"
+    /usr/bin/time "${time_args[@]}" bash -lc "$script" >/dev/null 2>"$time_file"
   fi
   local status=$?
   end_ns="$(date +%s%N)"
@@ -237,13 +242,21 @@ end = int(sys.argv[2])
 print(f"{(end - start) / 1_000_000_000:.6f}")
 PY
   )"
+  local max_rss_raw max_rss_bytes
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    max_rss_raw="$(awk '/maximum resident set size/{print $1}' "$time_file" | tail -1)"
+    max_rss_bytes="${max_rss_raw:-0}"
+  else
+    max_rss_raw="$(awk -F ': *' 'tolower($0) ~ /maximum resident set size/ { print $NF }' "$time_file" | tail -1)"
+    max_rss_bytes="$(( ${max_rss_raw:-0} * 1024 ))"
+  fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$tool" \
     "$op" \
     "$real_seconds" \
     "$(time_field user "$time_file")" \
     "$(time_field sys "$time_file")" \
-    "$(awk '/maximum resident set size/{print $1}' "$time_file" | tail -1)" \
+    "$max_rss_bytes" \
     "$status" \
     "$extra" >>"$out"
 }
@@ -488,7 +501,11 @@ create_source_repo() {
       "$git_bin" -C "$repo" commit -qm "commit $c"
   done
 
-  "$git_bin" -C "$repo" repack -adq
+  if [[ -n "$repack_max_pack_size" ]]; then
+    "$git_bin" -C "$repo" repack -adq --max-pack-size="$repack_max_pack_size"
+  else
+    "$git_bin" -C "$repo" repack -adq
+  fi
   "$git_bin" -C "$repo" fsck --strict >/dev/null
 }
 
@@ -950,6 +967,7 @@ if [[ -n "$out_dir" ]]; then
   cp "$validation_out" "$checks_path"
   python3 - "$rows_path" "$summary_path" "$comparison_path" <<'PY'
 import csv
+import math
 import os
 import statistics
 import sys
@@ -959,6 +977,7 @@ rows_path, summary_path, comparison_path = sys.argv[1:4]
 
 rows_by_op_tool = defaultdict(list)
 rows_by_op_tool_extra = defaultdict(dict)
+rss_by_op_tool = defaultdict(list)
 with open(rows_path, encoding="utf-8", newline="") as handle:
     reader = csv.DictReader(handle, delimiter="\t")
     for row in reader:
@@ -972,6 +991,12 @@ with open(rows_path, encoding="utf-8", newline="") as handle:
         op = row["op"]
         rows_by_op_tool[(op, tool)].append(seconds)
         rows_by_op_tool_extra[(op, tool)][row.get("extra", "")] = seconds
+        try:
+            rss_bytes = int(row["rss_bytes"])
+        except (KeyError, TypeError, ValueError):
+            rss_bytes = 0
+        if rss_bytes > 0:
+            rss_by_op_tool[(op, tool)].append(rss_bytes)
 
 
 def rounded(value):
@@ -982,6 +1007,12 @@ def ratio(numerator, denominator):
     if denominator == 0:
         return ""
     return rounded(numerator / denominator)
+
+
+def percentile(values, fraction):
+    ordered = sorted(values)
+    index = max(0, math.ceil(len(ordered) * fraction) - 1)
+    return ordered[index]
 
 
 def paired_ratios(op, numerator_tool, denominator_tool):
@@ -998,6 +1029,7 @@ def paired_ratios(op, numerator_tool, denominator_tool):
 summary_rows = []
 for (op, tool), values in sorted(rows_by_op_tool.items()):
     values = sorted(values)
+    rss_values = sorted(rss_by_op_tool.get((op, tool), []))
     summary_rows.append(
         {
             "op": op,
@@ -1007,6 +1039,8 @@ for (op, tool), values in sorted(rows_by_op_tool.items()):
             "median_seconds": rounded(statistics.median(values)),
             "min_seconds": rounded(values[0]),
             "max_seconds": rounded(values[-1]),
+            "median_rss_bytes": "" if not rss_values else str(int(statistics.median(rss_values))),
+            "p95_rss_bytes": "" if not rss_values else str(percentile(rss_values, 0.95)),
         }
     )
 
@@ -1019,6 +1053,8 @@ with open(summary_path, "w", encoding="utf-8", newline="") as handle:
         "median_seconds",
         "min_seconds",
         "max_seconds",
+        "median_rss_bytes",
+        "p95_rss_bytes",
     ]
     writer = csv.DictWriter(handle, fieldnames=fieldnames)
     writer.writeheader()
@@ -1030,6 +1066,8 @@ for op in ops:
     git = sorted(rows_by_op_tool.get((op, "git"), []))
     zmin = sorted(rows_by_op_tool.get((op, "zmin"), []))
     gix = sorted(rows_by_op_tool.get((op, "gix"), []))
+    git_rss = sorted(rss_by_op_tool.get((op, "git"), []))
+    zmin_rss = sorted(rss_by_op_tool.get((op, "zmin"), []))
     if not git or not zmin:
         continue
     git_mean = statistics.mean(git)
@@ -1040,6 +1078,8 @@ for op in ops:
     gix_median = statistics.median(gix) if gix else None
     zmin_git_pairs = paired_ratios(op, "zmin", "git")
     zmin_gix_pairs = paired_ratios(op, "zmin", "gix")
+    git_rss_p95 = percentile(git_rss, 0.95) if git_rss else None
+    zmin_rss_p95 = percentile(zmin_rss, 0.95) if zmin_rss else None
     comparison_rows.append(
         {
             "op": op,
@@ -1076,6 +1116,11 @@ for op in ops:
             "zmin_vs_gix_pair_median_ratio": ""
             if not zmin_gix_pairs
             else rounded(statistics.median(zmin_gix_pairs)),
+            "git_p95_rss_bytes": "" if git_rss_p95 is None else str(git_rss_p95),
+            "zmin_p95_rss_bytes": "" if zmin_rss_p95 is None else str(zmin_rss_p95),
+            "zmin_vs_git_p95_rss_ratio": ""
+            if git_rss_p95 is None or zmin_rss_p95 is None
+            else ratio(zmin_rss_p95, git_rss_p95),
         }
     )
 
@@ -1101,6 +1146,9 @@ with open(comparison_path, "w", encoding="utf-8", newline="") as handle:
         "zmin_vs_gix_pair_count",
         "zmin_vs_gix_pair_mean_ratio",
         "zmin_vs_gix_pair_median_ratio",
+        "git_p95_rss_bytes",
+        "zmin_p95_rss_bytes",
+        "zmin_vs_git_p95_rss_ratio",
     ]
     writer = csv.DictWriter(handle, fieldnames=fieldnames)
     writer.writeheader()
@@ -1147,6 +1195,11 @@ assert_max_ratio(
     "zmin_vs_git_pair_median_ratio",
     max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO"),
     "Zmin/Git paired median",
+)
+assert_max_ratio(
+    "zmin_vs_git_p95_rss_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_P95_RSS_RATIO"),
+    "Zmin/Git p95 RSS",
 )
 assert_max_ratio(
     "zmin_vs_gix_mean_ratio",

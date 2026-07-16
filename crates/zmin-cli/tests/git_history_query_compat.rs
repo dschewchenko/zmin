@@ -7,10 +7,11 @@ use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_output, command_output_with_env,
-    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
-    run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
-    stock_git_bin, write_file, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_output,
+    command_output_with_env, command_stdout_bytes, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, stock_git_bin, write_file,
+    zmin_bin,
 };
 
 fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str) {
@@ -37,6 +38,26 @@ fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str
         "git failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn show_option_errors_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
+
+    for args in [
+        ["show", "--frobnicate"].as_slice(),
+        ["show", "-Q"].as_slice(),
+        ["show", "--format"].as_slice(),
+        ["show", "--format", "--frobnicate"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_any_output("git", repo.path(), args, "git"),
+            "show option error mismatch for {args:?}"
+        );
+    }
 }
 
 fn git_commit_with_author(
@@ -178,6 +199,26 @@ fn blame_fixture_repo() -> TempDir {
     repo
 }
 
+fn blame_whitespace_rewrite_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_commit_with_date(
+        repo.path(),
+        "a.txt",
+        "\nUse commands as `zmin <command>`.\n\nThis preview is not 100% Git-compatible yet. Zmin has handlers for all `151`\nGit `2.47.1` command names, but command routing is only the entry point. A\ncommand is complete only after its documented options, option values, option\ncombinations, repository states, transports and platform cases match stock Git.\n\nReal compatibility is counted by behavior variants:\n",
+        "1700000000 +0000",
+        "base",
+    );
+    write_commit_with_date(
+        repo.path(),
+        "a.txt",
+        "\nUse commands as `zmin <command>`.\n\nZmin is not 100% Git-compatible yet. It has handlers for all `151` Git `2.47.1`\ncommand names, but a handler only proves that the command can be routed.\n\nReal compatibility is measured at behavior-row level:\n\n`command + option + value + option combination + repository state + transport + platform`\n",
+        "1700000100 +0000",
+        "rewrite",
+    );
+    repo
+}
+
 fn blame_line_range_fixture_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -213,17 +254,21 @@ fn blame_basic_regex_literal_fixture_repo() -> TempDir {
 }
 
 fn whatchanged_cases() -> Vec<Vec<&'static str>> {
-    if !stock_git_version_at_least(2, 54) {
-        return Vec::new();
+    if stock_git_version_at_least(2, 54) {
+        let prefix = vec!["whatchanged", "--i-still-use-this"];
+        let mut plain = prefix.clone();
+        plain.extend(["--max-count", "1"]);
+        let mut stat = prefix.clone();
+        stat.extend(["--stat", "--max-count", "1"]);
+        let mut oneline = prefix;
+        oneline.extend(["--oneline", "--max-count", "1"]);
+        return vec![plain, stat, oneline];
     }
-    let prefix = vec!["whatchanged", "--i-still-use-this"];
-    let mut plain = prefix.clone();
-    plain.extend(["--max-count", "1"]);
-    let mut stat = prefix.clone();
-    stat.extend(["--stat", "--max-count", "1"]);
-    let mut oneline = prefix;
-    oneline.extend(["--oneline", "--max-count", "1"]);
-    vec![plain, stat, oneline]
+    vec![
+        vec!["whatchanged", "--max-count", "1"],
+        vec!["whatchanged", "--stat", "--max-count", "1"],
+        vec!["whatchanged", "--oneline", "--max-count", "1"],
+    ]
 }
 
 fn stock_git_version_at_least(major: u32, minor: u32) -> bool {
@@ -244,18 +289,128 @@ fn stock_git_version_at_least(major: u32, minor: u32) -> bool {
     }
 }
 
+fn pack_as_from_promisor(repo: &std::path::Path, object_id: &str) {
+    let mut pack_objects = Command::new(stock_git_bin())
+        .args(["pack-objects", ".git/objects/pack/pack"])
+        .current_dir(repo)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn pack-objects");
+    pack_objects
+        .stdin
+        .as_mut()
+        .expect("pack-objects stdin")
+        .write_all(format!("{object_id}\n").as_bytes())
+        .expect("write object id");
+    let output = pack_objects.wait_with_output().expect("wait pack-objects");
+    assert!(
+        output.status.success(),
+        "pack-objects failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let pack_hash = String::from_utf8(output.stdout)
+        .expect("pack hash utf8")
+        .trim()
+        .to_owned();
+    assert!(!pack_hash.is_empty(), "missing pack hash");
+    fs::write(
+        repo.join(format!(".git/objects/pack/pack-{pack_hash}.promisor")),
+        b"",
+    )
+    .expect("write promisor marker");
+}
+
+fn delete_loose_object(repo: &std::path::Path, object_id: &str) {
+    let path = repo
+        .join(".git/objects")
+        .join(&object_id[..2])
+        .join(&object_id[2..]);
+    fs::remove_file(path).expect("delete loose object");
+}
+
+fn promise_and_delete(repo: &std::path::Path, object_name: &str) {
+    let object_id = git(repo, ["rev-parse", object_name]);
+    git(
+        repo,
+        ["tag", "-a", "-m", "message", "my_annotated_tag", &object_id],
+    );
+    let tag_id = git(repo, ["rev-parse", "my_annotated_tag"]);
+    pack_as_from_promisor(repo, &tag_id);
+    git(repo, ["tag", "-d", "my_annotated_tag"]);
+    delete_loose_object(repo, &object_id);
+}
+
+fn bare_filtered_rename_partial_clone_fixture() -> (TempDir, std::path::PathBuf) {
+    let source = git_init();
+    configure_identity(source.path());
+    git(source.path(), ["config", "uploadpack.allowFilter", "true"]);
+    git(
+        source.path(),
+        ["config", "uploadpack.allowAnySHA1InWant", "true"],
+    );
+    write_file(source.path(), "old-file.txt", "content\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "create-a-file"]);
+    git(source.path(), ["mv", "old-file.txt", "new-file.txt"]);
+    git_with_env(source.path(), ["commit", "-am", "rename-the-file"]);
+
+    let partial_root = TempDir::new().expect("partial tempdir");
+    let partial_git = partial_root.path().join("partial.git");
+    let partial_url = format!("file://{}", source.path().display());
+    let output = Command::new(stock_git_bin())
+        .args([
+            "clone",
+            "--filter=blob:none",
+            "--bare",
+            &partial_url,
+            partial_git.to_str().expect("partial path utf8"),
+        ])
+        .output()
+        .expect("clone filtered bare repo");
+    assert!(
+        output.status.success(),
+        "git clone failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (partial_root, partial_git)
+}
+
 #[test]
-fn whatchanged_requires_explicit_opt_in_like_git_2_54() {
+fn whatchanged_default_invocation_matches_stock_git_version_contract() {
     let repo = git_init();
     configure_identity(repo.path());
     write_file(repo.path(), "a.txt", "a\n");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "base"]);
-    let (code, stdout, stderr) = run_zmin_failure_output(repo.path(), &["whatchanged"]);
-    assert_eq!(code, 128);
-    assert!(stdout.is_empty());
-    assert!(stderr.contains("nominated for removal"));
-    assert!(stderr.contains("--i-still-use-this"));
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &["whatchanged"], "zmin"),
+        command_any_output("git", repo.path(), &["whatchanged"], "git")
+    );
+}
+
+#[test]
+fn whatchanged_i_still_use_this_matches_stock_git_invalid_input_contract() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "a\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &["whatchanged", "--i-still-use-this"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            repo.path(),
+            &["whatchanged", "--i-still-use-this"],
+            "git"
+        )
+    );
 }
 
 #[test]
@@ -1772,10 +1927,40 @@ fn log_notes_and_abbrev_commit_family_matches_stock_git() {
         ["log", "--format=%N", "--notes", "-1"].as_slice(),
         ["log", "--abbrev-commit", "-1"].as_slice(),
         ["log", "--oneline", "--no-abbrev-commit", "-1"].as_slice(),
+        ["-c", "core.abbrev=8", "log", "--oneline", "-1"].as_slice(),
+        ["-c", "core.abbrev=no", "log", "--oneline", "-1"].as_slice(),
+        [
+            "-c",
+            "core.abbrev=8",
+            "show",
+            "--oneline",
+            "--no-patch",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["-c", "core.abbrev=8", "rev-list", "--oneline", "-1", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
             git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn history_core_abbrev_errors_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
+
+    for args in [
+        ["-c", "core.abbrev=3", "log", "--oneline", "-1"].as_slice(),
+        ["-c", "core.abbrev=bogus", "log", "--oneline", "-1"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_any_output("git", repo.path(), args, "git"),
             "args: {args:?}"
         );
     }
@@ -2182,6 +2367,23 @@ fn blame_documented_option_family_matches_stock_git() {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),
             git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn blame_ignore_whitespace_rewrite_matches_stock_git() {
+    let git_repo = blame_whitespace_rewrite_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    for args in [
+        ["blame", "--porcelain", "-l", "-w", "HEAD", "--", "a.txt"].as_slice(),
+        ["blame", "--incremental", "-l", "-w", "HEAD", "--", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
             "args: {args:?}"
         );
     }
@@ -3381,6 +3583,47 @@ fn log_and_show_ide_formats_match_stock_git() {
             "HEAD",
         ]
         .as_slice(),
+        [
+            "log",
+            "-z",
+            "--date=iso-strict",
+            "--format=%H%x00%ad%x00%cd",
+            "-1",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn show_rename_detection_ide_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "old.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["mv", "old.txt", "new.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "rename"]);
+
+    for args in [
+        ["show", "--format=%H", "--name-status", "-M", "HEAD"].as_slice(),
+        ["show", "--format=%H", "--raw", "-M", "HEAD"].as_slice(),
+        [
+            "show",
+            "--format=%H%x00%s",
+            "--name-status",
+            "-z",
+            "-M",
+            "--max-count=1",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -3943,6 +4186,49 @@ fn log_no_walk_author_date_matches_stock_git() {
 }
 
 #[test]
+fn log_no_walk_value_forms_with_stdin_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "one\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "one"]);
+        write_file(repo, "a.txt", "two\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "two"]);
+    }
+
+    let git_head = git(git_repo.path(), ["rev-parse", "HEAD"]);
+    let git_parent = git(git_repo.path(), ["rev-parse", "HEAD~1"]);
+    let zmin_head = git(zmin_repo.path(), ["rev-parse", "HEAD"]);
+    let zmin_parent = git(zmin_repo.path(), ["rev-parse", "HEAD~1"]);
+
+    for option in ["--no-walk=unsorted", "--no-walk=sorted"] {
+        let args = ["log", option, "--format=%s", "--stdin"];
+        assert_eq!(
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                &args,
+                &format!("{zmin_head}\n{zmin_parent}\n"),
+                "zmin",
+            ),
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                &args,
+                &format!("{git_head}\n{git_parent}\n"),
+                "git",
+            ),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_and_rev_list_shared_history_schema_batch_matches_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -4038,11 +4324,30 @@ fn log_remaining_documented_tail_matches_stock_git() {
 fn log_line_range_matches_stock_git_for_top_of_file_root_lane() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);
-    write_commit_with_date(repo.path(), "a.txt", "one\ntwo\n", "1700000000 +0000", "base");
+    write_commit_with_date(
+        repo.path(),
+        "a.txt",
+        "one\ntwo\n",
+        "1700000000 +0000",
+        "base",
+    );
 
     assert_eq!(
         run_zmin_args(repo.path(), &["log", "-L", "1,1:a.txt", "HEAD", "--"]),
         git_args(repo.path(), &["log", "-L", "1,1:a.txt", "HEAD", "--"])
+    );
+}
+
+#[test]
+fn log_pathspec_separator_preserves_a_literal_dashdash_path() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "--", "one\n", "1700000000 +0000", "dashdash");
+
+    let args = ["log", "--format=%s", "HEAD", "--", "--"];
+    assert_eq!(
+        run_zmin_args(repo.path(), &args),
+        git_args(repo.path(), &args)
     );
 }
 
@@ -4054,8 +4359,20 @@ fn log_output_surface_tail_matches_stock_git() {
     write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
 
     for args in [
-        ["log", "--decorate-refs=refs/heads/main", "--format=%s", "HEAD"].as_slice(),
-        ["log", "--decorate-refs-exclude=refs/tags/*", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--decorate-refs=refs/heads/main",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--decorate-refs-exclude=refs/tags/*",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
         ["log", "--full-diff", "--format=%s", "HEAD"].as_slice(),
         ["log", "--mailmap", "--format=%s", "HEAD"].as_slice(),
         ["log", "--no-decorate", "--format=%s", "HEAD"].as_slice(),
@@ -4169,6 +4486,390 @@ fn rev_list_documented_tail_batch_matches_stock_git() {
 }
 
 #[test]
+fn rev_list_missing_print_for_tree_root_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"one\n").expect("write tracked file");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    let tree = git(repo.path(), ["rev-parse", "HEAD^{tree}"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+    let blob_path = repo
+        .path()
+        .join(".git/objects")
+        .join(&blob[..2])
+        .join(&blob[2..]);
+    fs::remove_file(&blob_path).expect("remove blob object");
+
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &["rev-list", "--objects", "--missing=print", &tree]
+        ),
+        git_args(
+            repo.path(),
+            &["rev-list", "--objects", "--missing=print", &tree]
+        )
+    );
+}
+
+#[test]
+fn rev_list_exclude_promisor_objects_stops_at_missing_promised_commit() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "foo"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "bar"]);
+
+    let promised_parent = git(repo.path(), ["rev-parse", "HEAD~1"]);
+    pack_as_from_promisor(repo.path(), &promised_parent);
+    delete_loose_object(repo.path(), &promised_parent);
+    git(repo.path(), ["config", "core.repositoryformatversion", "1"]);
+    git(
+        repo.path(),
+        ["config", "extensions.partialclone", "arbitrary string"],
+    );
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &[
+                "rev-list",
+                "--exclude-promisor-objects",
+                "--objects",
+                "HEAD"
+            ],
+            "zmin rev-list exclude-promisor-objects",
+        ),
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path utf8"),
+            repo.path(),
+            &[
+                "rev-list",
+                "--exclude-promisor-objects",
+                "--objects",
+                "HEAD"
+            ],
+            "git rev-list exclude-promisor-objects",
+        )
+    );
+}
+
+#[test]
+fn rev_list_missing_promised_trees_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "foo"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "bar"]);
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "baz"]);
+
+    promise_and_delete(repo.path(), "HEAD~1^{tree}");
+    promise_and_delete(repo.path(), "HEAD~2^{tree}");
+    git(repo.path(), ["config", "core.repositoryformatversion", "1"]);
+    git(
+        repo.path(),
+        ["config", "extensions.partialclone", "arbitrary string"],
+    );
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &["rev-list", "--missing=allow-promisor", "--objects", "HEAD"],
+            "zmin rev-list missing allow-promisor",
+        ),
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path utf8"),
+            repo.path(),
+            &["rev-list", "--missing=allow-promisor", "--objects", "HEAD"],
+            "git rev-list missing allow-promisor",
+        )
+    );
+
+    promise_and_delete(repo.path(), "HEAD^{tree}");
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &[
+                "rev-list",
+                "--exclude-promisor-objects",
+                "--objects",
+                "HEAD"
+            ],
+            "zmin rev-list exclude promised trees",
+        ),
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path utf8"),
+            repo.path(),
+            &[
+                "rev-list",
+                "--exclude-promisor-objects",
+                "--objects",
+                "HEAD"
+            ],
+            "git rev-list exclude promised trees",
+        )
+    );
+}
+
+#[test]
+fn bare_filtered_partial_clone_history_commands_match_stock_git() {
+    let (_temp, repo) = bare_filtered_rename_partial_clone_fixture();
+    let repo_path = repo.to_str().expect("partial repo path utf8").to_owned();
+
+    for args in [
+        ["-C", repo_path.as_str(), "rev-list", "HEAD"].as_slice(),
+        ["-C", repo_path.as_str(), "rev-list", "--no-walk", "HEAD"].as_slice(),
+        [
+            "-C",
+            repo_path.as_str(),
+            "rev-list",
+            "--objects",
+            "--missing=print",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "-C",
+            repo_path.as_str(),
+            "log",
+            "--no-walk",
+            "--oneline",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "-C",
+            repo_path.as_str(),
+            "show",
+            "--no-patch",
+            "--oneline",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                std::path::Path::new("."),
+                args,
+                "zmin bare partial history",
+            ),
+            command_any_output(
+                stock_git_bin().to_str().expect("stock git path utf8"),
+                std::path::Path::new("."),
+                args,
+                "git bare partial history",
+            ),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn rev_list_direct_promised_objects_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "foo"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "bar"]);
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "baz"]);
+
+    let commit = git(repo.path(), ["rev-parse", "HEAD~2"]);
+    let tree = git(repo.path(), ["rev-parse", "HEAD~1^{tree}"]);
+    let blob = git(repo.path(), ["hash-object", "a.txt"]);
+
+    promise_and_delete(repo.path(), &commit);
+    promise_and_delete(repo.path(), &tree);
+    promise_and_delete(repo.path(), &blob);
+    git(repo.path(), ["config", "core.repositoryformatversion", "1"]);
+    git(
+        repo.path(),
+        ["config", "extensions.partialclone", "arbitrary string"],
+    );
+
+    for args in [
+        [
+            "rev-list",
+            "--objects",
+            "--exclude-promisor-objects",
+            &commit,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &commit,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects",
+            "--exclude-promisor-objects",
+            &commit,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &commit,
+        ]
+        .as_slice(),
+        ["rev-list", "--objects", "--exclude-promisor-objects", &tree].as_slice(),
+        [
+            "rev-list",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &tree,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects",
+            "--exclude-promisor-objects",
+            &tree,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &tree,
+        ]
+        .as_slice(),
+        ["rev-list", "--objects", "--exclude-promisor-objects", &blob].as_slice(),
+        [
+            "rev-list",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &blob,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects",
+            "--exclude-promisor-objects",
+            &blob,
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--ignore-missing",
+            "--objects-edge-aggressive",
+            "--exclude-promisor-objects",
+            &blob,
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                repo.path(),
+                args,
+                "zmin rev-list direct promised object",
+            ),
+            command_any_output(
+                stock_git_bin().to_str().expect("stock git path utf8"),
+                repo.path(),
+                args,
+                "git rev-list direct promised object",
+            ),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn rev_list_missing_print_for_direct_promised_commit_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "foo"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "bar"]);
+
+    let commit = git(repo.path(), ["rev-parse", "HEAD~1"]);
+    promise_and_delete(repo.path(), &commit);
+    git(repo.path(), ["config", "core.repositoryformatversion", "1"]);
+    git(
+        repo.path(),
+        ["config", "extensions.partialclone", "arbitrary string"],
+    );
+
+    let args = ["rev-list", "--objects", "--missing=print", commit.as_str()];
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &args,
+            "zmin rev-list missing print direct promised commit",
+        ),
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path utf8"),
+            repo.path(),
+            &args,
+            "git rev-list missing print direct promised commit",
+        )
+    );
+}
+
+#[test]
+fn bare_filtered_partial_clone_log_follow_path_matches_stock_git() {
+    let (_temp, repo) = bare_filtered_rename_partial_clone_fixture();
+    let repo_path = repo.to_str().expect("partial repo path utf8").to_owned();
+    let args = [
+        "-C",
+        repo_path.as_str(),
+        "log",
+        "--follow",
+        "--",
+        "new-file.txt",
+    ];
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            std::path::Path::new("."),
+            &args,
+            "zmin bare partial log follow",
+        ),
+        command_any_output(
+            stock_git_bin().to_str().expect("stock git path utf8"),
+            std::path::Path::new("."),
+            &args,
+            "git bare partial log follow",
+        )
+    );
+}
+
+#[test]
 fn log_date_formats_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -4239,6 +4940,30 @@ fn log_date_formats_match_stock_git() {
         git_args(git_repo.path(), &separate_date_args),
         "date mode separate value"
     );
+}
+
+#[test]
+fn log_metadata_fast_path_record_termination_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+    git(repo.path(), ["commit", "--allow-empty", "-m", "two"]);
+
+    for args in [
+        ["log", "-1", "--format=%ad"].as_slice(),
+        ["log", "-2", "--format=%H"].as_slice(),
+        ["log", "-1", "--pretty=format:%ad"].as_slice(),
+    ] {
+        assert_eq!(
+            command_stdout_bytes(zmin_bin(), repo.path(), args),
+            command_stdout_bytes(
+                stock_git_bin().to_str().expect("stock Git path"),
+                repo.path(),
+                args
+            ),
+            "raw stdout mismatch for {args:?}"
+        );
+    }
 }
 
 #[test]

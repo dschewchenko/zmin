@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::object::{GitHashAlgorithm, ObjectId};
 use crate::object_store::{GitObjectSink, GitObjectStore};
 
 const TREE_OBJECT_CACHE_ENTRY_LIMIT: usize = 8192;
-const TREE_WRITE_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
+const TREE_WRITE_FRAME_INITIAL_CAPACITY: usize = 64;
 const TREE_INDEX_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const TREE_INDEX_STACK_INITIAL_CAPACITY_LIMIT: usize = 64;
 const TREE_INDEX_PATH_INITIAL_CAPACITY: usize = 256;
@@ -57,6 +57,13 @@ pub struct TreeEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeObjectRef {
     pub mode: TreeMode,
+    pub id: ObjectId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntryRef<'a> {
+    pub mode: TreeMode,
+    pub name: &'a [u8],
     pub id: ObjectId,
 }
 
@@ -129,6 +136,48 @@ pub fn decode_tree_object_refs(
     Ok(entries)
 }
 
+pub fn decode_tree_entry_ref<'a>(
+    algorithm: GitHashAlgorithm,
+    bytes: &'a [u8],
+    cursor: &mut usize,
+) -> io::Result<Option<TreeEntryRef<'a>>> {
+    if *cursor == bytes.len() {
+        return Ok(None);
+    }
+    if *cursor > bytes.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tree entry cursor is out of bounds",
+        ));
+    }
+    let mode_end = bytes[*cursor..]
+        .iter()
+        .position(|byte| *byte == b' ')
+        .map(|offset| *cursor + offset)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tree mode missing space"))?;
+    let mode = TreeMode::parse(&bytes[*cursor..mode_end])
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid tree mode"))?;
+    let name_start = mode_end + 1;
+    let name_end = bytes[name_start..]
+        .iter()
+        .position(|byte| *byte == 0)
+        .map(|offset| name_start + offset)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tree name missing NUL"))?;
+    let name = &bytes[name_start..name_end];
+    validate_tree_name(name)?;
+    let id_start = name_end + 1;
+    let id_end = id_start.saturating_add(algorithm.digest_len());
+    if id_end > bytes.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tree object id is truncated",
+        ));
+    }
+    let id = ObjectId::new(algorithm, &bytes[id_start..id_end]);
+    *cursor = id_end;
+    Ok(Some(TreeEntryRef { mode, name, id }))
+}
+
 pub fn for_each_tree_object_ref(
     algorithm: GitHashAlgorithm,
     bytes: &[u8],
@@ -175,7 +224,6 @@ pub fn write_tree_from_index<S: GitObjectSink>(
     store: &S,
     index: &GitIndex,
 ) -> io::Result<ObjectId> {
-    let mut root = TreeNode::default();
     for entry in index.entries() {
         if entry.stage != 0 {
             return Err(io::Error::new(
@@ -183,9 +231,8 @@ pub fn write_tree_from_index<S: GitObjectSink>(
                 "write-tree cannot write an index with unresolved conflicts",
             ));
         }
-        root.insert(entry)?;
     }
-    write_tree_node(store, &root)
+    write_sorted_index_tree(store, index.entries())
 }
 
 pub fn read_tree_to_index<S: GitObjectStore>(
@@ -235,6 +282,14 @@ impl<'a, S: GitObjectStore + ?Sized> TreeObjectCache<'a, S> {
         }
     }
 
+    pub fn transient(store: &'a S) -> Self {
+        Self {
+            store,
+            trees: RefCell::new(HashMap::new()),
+            entry_limit: 0,
+        }
+    }
+
     #[cfg(test)]
     fn with_entry_limit(store: &'a S, entry_limit: usize) -> Self {
         Self {
@@ -258,6 +313,9 @@ impl<'a, S: GitObjectStore + ?Sized> TreeObjectCache<'a, S> {
         }
         let entries: Arc<[TreeEntry]> =
             Arc::from(decode_tree(tree_id.algorithm(), &object.content)?.into_boxed_slice());
+        if self.entry_limit == 0 {
+            return Ok(entries);
+        }
         let mut trees = self.trees.borrow_mut();
         if trees.len() >= self.entry_limit {
             trees.clear();
@@ -472,97 +530,78 @@ fn index_mode_from_tree_mode(mode: TreeMode) -> io::Result<IndexMode> {
     }
 }
 
-#[derive(Default)]
-struct TreeNode {
-    children: BTreeMap<Vec<u8>, TreeNode>,
-    leaves: BTreeMap<Vec<u8>, (IndexMode, ObjectId)>,
+struct WriteSortedIndexTreeFrame<'a> {
+    name_in_parent: Option<&'a [u8]>,
+    prefix_len: usize,
+    cursor: usize,
+    end: usize,
+    entries: Vec<TreeEntry>,
 }
 
-impl Drop for TreeNode {
-    fn drop(&mut self) {
-        let mut pending = std::mem::take(&mut self.children)
-            .into_values()
-            .collect::<Vec<_>>();
-        while let Some(mut node) = pending.pop() {
-            pending.extend(std::mem::take(&mut node.children).into_values());
-        }
-    }
-}
+fn write_sorted_index_tree<S: GitObjectSink>(
+    store: &S,
+    index_entries: &[IndexEntry],
+) -> io::Result<ObjectId> {
+    let mut stack = vec![WriteSortedIndexTreeFrame {
+        name_in_parent: None,
+        prefix_len: 0,
+        cursor: 0,
+        end: index_entries.len(),
+        entries: Vec::with_capacity(
+            index_entries
+                .len()
+                .min(TREE_WRITE_FRAME_INITIAL_CAPACITY)
+                .max(1),
+        ),
+    }];
 
-impl TreeNode {
-    fn insert(&mut self, entry: &IndexEntry) -> io::Result<()> {
-        let mut parts = entry.path.split(|byte| *byte == b'/').peekable();
-        let mut node = self;
-        while let Some(part) = parts.next() {
-            if part.is_empty() {
+    while let Some(frame) = stack.last_mut() {
+        if frame.cursor < frame.end {
+            let entry = &index_entries[frame.cursor];
+            let relative = entry.path.get(frame.prefix_len..).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "git index path is empty")
+            })?;
+            if relative.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "git index path is empty",
+                ));
+            }
+            let Some(separator) = relative.iter().position(|byte| *byte == b'/') else {
+                push_sorted_tree_entry(
+                    &mut frame.entries,
+                    TreeEntry::new(entry.mode.tree_mode(), relative, entry.id.clone())?,
+                )?;
+                frame.cursor += 1;
+                continue;
+            };
+            if separator == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "git index path contains an empty component",
                 ));
             }
-            if parts.peek().is_none() {
-                if node.children.contains_key(part) {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "git index path collides with a tree",
-                    ));
-                }
-                node.leaves
-                    .insert(part.to_vec(), (entry.mode, entry.id.clone()));
-                return Ok(());
+            let child_name = &relative[..separator];
+            let child_prefix_len = frame.prefix_len + separator + 1;
+            let child_prefix = &entry.path[..child_prefix_len];
+            let child_start = frame.cursor;
+            let mut child_end = child_start + 1;
+            while child_end < frame.end && index_entries[child_end].path.starts_with(child_prefix) {
+                child_end += 1;
             }
-            if node.leaves.contains_key(part) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "git index path collides with a file",
-                ));
-            }
-            node = node.children.entry(part.to_vec()).or_default();
-        }
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "git index path is empty",
-        ))
-    }
-}
-
-fn write_tree_node<S: GitObjectSink>(store: &S, node: &TreeNode) -> io::Result<ObjectId> {
-    struct WriteTreeFrame<'a> {
-        name_in_parent: Option<&'a [u8]>,
-        node: &'a TreeNode,
-        children: std::collections::btree_map::Iter<'a, Vec<u8>, TreeNode>,
-        entries: Vec<TreeEntry>,
-    }
-
-    let mut stack = vec![WriteTreeFrame {
-        name_in_parent: None,
-        node,
-        children: node.children.iter(),
-        entries: Vec::with_capacity(tree_write_entry_initial_capacity(
-            node.children.len(),
-            node.leaves.len(),
-        )),
-    }];
-
-    while let Some(frame) = stack.last_mut() {
-        if let Some((name, child)) = frame.children.next() {
-            stack.push(WriteTreeFrame {
-                name_in_parent: Some(name),
-                node: child,
-                children: child.children.iter(),
-                entries: Vec::with_capacity(tree_write_entry_initial_capacity(
-                    child.children.len(),
-                    child.leaves.len(),
-                )),
+            frame.cursor = child_end;
+            stack.push(WriteSortedIndexTreeFrame {
+                name_in_parent: Some(child_name),
+                prefix_len: child_prefix_len,
+                cursor: child_start,
+                end: child_end,
+                entries: Vec::with_capacity(
+                    (child_end - child_start).min(TREE_WRITE_FRAME_INITIAL_CAPACITY),
+                ),
             });
             continue;
         }
 
-        for (name, (mode, id)) in &frame.node.leaves {
-            frame
-                .entries
-                .push(TreeEntry::new(mode.tree_mode(), name.clone(), id.clone())?);
-        }
         frame.entries.sort_by(tree_entry_cmp);
         let encoded = encode_tree(&frame.entries)?;
         let id = store.write_object(GitObjectKind::Tree, &encoded)?;
@@ -572,29 +611,43 @@ fn write_tree_node<S: GitObjectSink>(store: &S, node: &TreeNode) -> io::Result<O
         let Some(parent) = stack.last_mut() else {
             return Ok(id);
         };
-        parent.entries.push(TreeEntry::new(
-            TreeMode::Tree,
-            name_in_parent.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "tree frame missing parent entry name",
-                )
-            })?,
-            id,
-        )?);
+        push_sorted_tree_entry(
+            &mut parent.entries,
+            TreeEntry::new(
+                TreeMode::Tree,
+                name_in_parent.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "tree frame missing parent entry name",
+                    )
+                })?,
+                id,
+            )?,
+        )?;
     }
 
     Err(io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "git index path is empty",
+        io::ErrorKind::InvalidData,
+        "tree writer finished without a root tree",
     ))
 }
 
-fn tree_write_entry_initial_capacity(children_len: usize, leaves_len: usize) -> usize {
-    children_len
-        .saturating_add(leaves_len)
-        .min(TREE_WRITE_ENTRY_INITIAL_CAPACITY_LIMIT)
-        .max(1)
+fn push_sorted_tree_entry(entries: &mut Vec<TreeEntry>, entry: TreeEntry) -> io::Result<()> {
+    if entries
+        .last()
+        .is_some_and(|previous| previous.name == entry.name)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            if entry.mode == TreeMode::Tree {
+                "git index path collides with a file"
+            } else {
+                "git index path collides with a tree"
+            },
+        ));
+    }
+    entries.push(entry);
+    Ok(())
 }
 
 fn tree_encode_initial_capacity(entries: &[TreeEntry]) -> usize {
@@ -663,25 +716,15 @@ fn validate_tree_name(name: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::process::Command;
 
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
     use crate::{
         GitIndex, GitObjectKind, GitObjectSink, GitObjectStore, InMemoryObjectStore, IndexEntry,
         IndexMode, LooseObject, LooseObjectStore,
     };
-
-    #[test]
-    fn tree_write_entry_initial_capacity_is_bounded() {
-        assert_eq!(
-            tree_write_entry_initial_capacity(usize::MAX, 1),
-            TREE_WRITE_ENTRY_INITIAL_CAPACITY_LIMIT
-        );
-        assert_eq!(tree_write_entry_initial_capacity(2, 3), 5);
-        assert_eq!(tree_write_entry_initial_capacity(0, 0), 1);
-    }
 
     #[test]
     fn tree_encode_initial_capacity_is_bounded() {
@@ -722,6 +765,36 @@ mod tests {
         let decoded = decode_tree(GitHashAlgorithm::Sha1, &encoded).expect("decode tree");
 
         assert_eq!(decoded, entries);
+    }
+
+    #[test]
+    fn tree_entry_refs_stream_encoded_entries_without_name_allocations() {
+        let first = crate::hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, b"first\n");
+        let second = crate::hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, b"second\n");
+        let encoded = encode_tree(&[
+            TreeEntry::new(TreeMode::File, b"non-utf8-\xff".to_vec(), first.clone())
+                .expect("first entry"),
+            TreeEntry::new(TreeMode::Executable, "run", second.clone()).expect("second entry"),
+        ])
+        .expect("encode tree");
+        let mut cursor = 0usize;
+
+        let first_ref = decode_tree_entry_ref(GitHashAlgorithm::Sha1, &encoded, &mut cursor)
+            .expect("decode first")
+            .expect("first entry");
+        let second_ref = decode_tree_entry_ref(GitHashAlgorithm::Sha1, &encoded, &mut cursor)
+            .expect("decode second")
+            .expect("second entry");
+
+        assert_eq!(first_ref.name, b"non-utf8-\xff");
+        assert_eq!(first_ref.id, first);
+        assert_eq!(second_ref.name, b"run");
+        assert_eq!(second_ref.id, second);
+        assert!(
+            decode_tree_entry_ref(GitHashAlgorithm::Sha1, &encoded, &mut cursor)
+                .expect("decode end")
+                .is_none()
+        );
     }
 
     #[test]
@@ -1008,35 +1081,10 @@ mod tests {
     }
 
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
-            .arg("init")
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        repo
+        stock_git_support::git_init()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 }

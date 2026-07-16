@@ -8,6 +8,51 @@ use common::{
 };
 
 #[test]
+fn version_refname_sort_matches_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "tracked.txt", "version sort\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "version sort"]);
+
+    for name in [
+        "foo1", "foo1.0", "foo1.001", "foo1.01", "foo1.3", "foo1.6", "foo1.10", "foo02a", "foo2a",
+    ] {
+        git(repo.path(), ["tag", name]);
+    }
+    for name in ["topic-1", "topic-2", "topic-10"] {
+        git(repo.path(), ["branch", name]);
+    }
+
+    for sort in ["version:refname", "v:refname", "-version:refname"] {
+        assert_eq!(
+            run_zmin(
+                repo.path(),
+                [
+                    "for-each-ref",
+                    &format!("--sort={sort}"),
+                    "--format=%(refname:short)",
+                    "refs/tags",
+                ],
+            ),
+            git(
+                repo.path(),
+                [
+                    "for-each-ref",
+                    &format!("--sort={sort}"),
+                    "--format=%(refname:short)",
+                    "refs/tags",
+                ],
+            )
+        );
+        assert_eq!(
+            run_zmin(repo.path(), ["branch", "--list", &format!("--sort={sort}")]),
+            git(repo.path(), ["branch", "--list", &format!("--sort={sort}")])
+        );
+    }
+}
+
+#[test]
 fn for_each_ref_matches_stock_git_for_common_formats() {
     let repo = common::git_init();
     configure_identity(repo.path());
@@ -57,6 +102,24 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
     assert_eq!(
         run_zmin(repo.path(), ["for-each-ref", "refs/heads"]),
         git(repo.path(), ["for-each-ref", "refs/heads"])
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)",
+                "refs/heads",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)",
+                "refs/heads",
+            ],
+        )
     );
     assert_eq!(
         run_zmin(
@@ -261,6 +324,29 @@ fn for_each_ref_objectname_short_invalid_lengths_match_stock_git() {
 }
 
 #[test]
+fn for_each_ref_peeled_tag_objectname_matches_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "tag.gpgSign", "false"]);
+    write_file(repo.path(), "a.txt", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial subject"]);
+    git_with_env(repo.path(), ["tag", "-a", "annotated", "-m", "tag subject"]);
+    git(repo.path(), ["tag", "lightweight"]);
+
+    let args = [
+        "for-each-ref",
+        "refs/tags/**",
+        "--no-color",
+        "--format=%(refname)\t%(*objectname)\t%(objectname)",
+    ];
+    assert_eq!(
+        common::run_zmin_args(repo.path(), &args),
+        common::git_args(repo.path(), &args)
+    );
+}
+
+#[test]
 fn for_each_ref_refname_strip_invalid_values_match_stock_git() {
     let repo = common::git_init();
     configure_identity(repo.path());
@@ -427,22 +513,86 @@ fn for_each_ref_remaining_documented_flags_match_stock_git() {
     let base = git(repo.path(), ["rev-parse", "HEAD^"]);
 
     for args in [
-        vec!["for-each-ref", "--color=always", "--format=%(refname:short)", "refs/heads"],
-        vec!["for-each-ref", "--no-color", "--format=%(refname:short)", "refs/heads"],
-        vec!["for-each-ref", "--contains", base.trim(), "--format=%(refname:short)"],
+        vec![
+            "for-each-ref",
+            "--color=always",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ],
+        vec![
+            "for-each-ref",
+            "--no-color",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ],
+        vec![
+            "for-each-ref",
+            "--contains",
+            base.trim(),
+            "--format=%(refname:short)",
+        ],
         vec!["for-each-ref", "--count=1", "--format=%(refname:short)"],
-        vec!["for-each-ref", "--exclude=refs/tags/*", "--format=%(refname)"],
-        vec!["for-each-ref", "--ignore-case", "refs/HEADS/*", "--format=%(refname)"],
+        vec![
+            "for-each-ref",
+            "--exclude=refs/tags/*",
+            "--format=%(refname)",
+        ],
+        vec![
+            "for-each-ref",
+            "--ignore-case",
+            "refs/HEADS/*",
+            "--format=%(refname)",
+        ],
         vec!["for-each-ref", "--include-root-refs", "--format=%(refname)"],
-        vec!["for-each-ref", "--merged", head.trim(), "--format=%(refname:short)"],
-        vec!["for-each-ref", "--no-contains", head.trim(), "--format=%(refname:short)"],
-        vec!["for-each-ref", "--no-merged", base.trim(), "--format=%(refname:short)"],
+        vec![
+            "for-each-ref",
+            "--merged",
+            head.trim(),
+            "--format=%(refname:short)",
+        ],
+        vec![
+            "for-each-ref",
+            "--no-contains",
+            head.trim(),
+            "--format=%(refname:short)",
+        ],
+        vec![
+            "for-each-ref",
+            "--no-merged",
+            base.trim(),
+            "--format=%(refname:short)",
+        ],
         vec!["for-each-ref", "--omit-empty", "--format="],
-        vec!["for-each-ref", "--shell", "--format=%(refname:short)=%(subject)", "refs/tags"],
-        vec!["for-each-ref", "--python", "--format=%(refname:short)=%(subject)", "refs/tags"],
-        vec!["for-each-ref", "--perl", "--format=%(refname:short)=%(subject)", "refs/tags"],
-        vec!["for-each-ref", "--tcl", "--format=%(refname:short)=%(subject)", "refs/tags"],
-        vec!["for-each-ref", "--points-at", head.trim(), "--format=%(refname:short)"],
+        vec![
+            "for-each-ref",
+            "--shell",
+            "--format=%(refname:short)=%(subject)",
+            "refs/tags",
+        ],
+        vec![
+            "for-each-ref",
+            "--python",
+            "--format=%(refname:short)=%(subject)",
+            "refs/tags",
+        ],
+        vec![
+            "for-each-ref",
+            "--perl",
+            "--format=%(refname:short)=%(subject)",
+            "refs/tags",
+        ],
+        vec![
+            "for-each-ref",
+            "--tcl",
+            "--format=%(refname:short)=%(subject)",
+            "refs/tags",
+        ],
+        vec![
+            "for-each-ref",
+            "--points-at",
+            head.trim(),
+            "--format=%(refname:short)",
+        ],
     ] {
         assert_eq!(
             command_any_output(zmin_bin(), repo.path(), &args, "zmin for-each-ref"),
@@ -472,22 +622,48 @@ fn for_each_ref_remaining_documented_flags_match_stock_git() {
         command_any_output_with_stdin(
             zmin_bin(),
             repo.path(),
-            &["for-each-ref", "--count=1", "--stdin", "--format=%(refname)"],
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--stdin",
+                "--format=%(refname)"
+            ],
             "refs/heads\nrefs/tags\n",
             "zmin for-each-ref --count --stdin",
         ),
         command_any_output_with_stdin(
             "git",
             repo.path(),
-            &["for-each-ref", "--count=1", "--stdin", "--format=%(refname)"],
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--stdin",
+                "--format=%(refname)"
+            ],
             "refs/heads\nrefs/tags\n",
             "git for-each-ref --count --stdin",
         ),
         "for-each-ref --count with --stdin should match stock Git"
     );
     assert_eq!(
-        run_zmin_failure_output(repo.path(), &["for-each-ref", "--stdin", "--format=%(refname)", "refs/heads"]),
-        git_failure_output(repo.path(), &["for-each-ref", "--stdin", "--format=%(refname)", "refs/heads"]),
+        run_zmin_failure_output(
+            repo.path(),
+            &[
+                "for-each-ref",
+                "--stdin",
+                "--format=%(refname)",
+                "refs/heads"
+            ]
+        ),
+        git_failure_output(
+            repo.path(),
+            &[
+                "for-each-ref",
+                "--stdin",
+                "--format=%(refname)",
+                "refs/heads"
+            ]
+        ),
         "for-each-ref should reject extra arguments with --stdin like stock Git"
     );
 }

@@ -157,8 +157,7 @@ pub fn decode_tag(algorithm: GitHashAlgorithm, bytes: &[u8]) -> io::Result<TagOb
         target_kind: target_kind
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tag missing type"))?,
         name: name.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tag missing name"))?,
-        tagger: tagger
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "tag missing tagger"))?,
+        tagger: tagger.unwrap_or_default(),
         message,
     })
 }

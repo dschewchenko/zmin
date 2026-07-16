@@ -1,0 +1,7 @@
+family	prefix	count	reason	scope_decision
+t5323-pack-redundant	t5323	1	deprecated command scheduled for removal, not practical replace-git core flow	exclude from core upstream suite
+git-svn	t91	69	external Subversion bridge, not core replace-git CLI parity	exclude from core upstream suite
+git-cvsserver	t94	3	legacy CVS server integration, not common developer flow	exclude from core upstream suite
+gitweb	t95	3	web UI surface, not CLI replacement parity	exclude from core upstream suite
+cvsimport	t96	5	legacy CVS import bridge, not core replace-git CLI parity	exclude from core upstream suite
+git-p4	t98	38	external Perforce bridge, not core replace-git CLI parity	exclude from core upstream suite

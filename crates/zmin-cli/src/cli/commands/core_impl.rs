@@ -69,11 +69,14 @@ pub(crate) fn hash_object_command(
     path: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
-    let kind = parse_object_kind(object_type)?;
-    let _ = literally;
     if stdin && stdin_paths {
         return Err(hash_object_usage_error(
             "Can't use --stdin-paths with --stdin",
+        ));
+    }
+    if stdin_paths && !paths.is_empty() {
+        return Err(hash_object_usage_error(
+            "Can't specify files with --stdin-paths",
         ));
     }
     if path.is_some() && no_filters {
@@ -97,10 +100,30 @@ pub(crate) fn hash_object_command(
     } else {
         None
     };
+    let algorithm = write_repo
+        .as_ref()
+        .or(worktree_repo.as_ref())
+        .map(|repo| repo_hash_algorithm_from_config(repo))
+        .transpose()?
+        .unwrap_or(GitHashAlgorithm::Sha1);
     let store = write_repo
         .as_ref()
-        .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1));
+        .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), algorithm));
     let hash_repo = (!no_filters).then_some(worktree_repo.as_ref()).flatten();
+    let kind = match parse_object_kind(object_type) {
+        Ok(kind) => kind,
+        Err(error) if !literally => return Err(error),
+        Err(_) => {
+            return hash_literal_object_command(
+                object_type,
+                store.as_ref(),
+                algorithm,
+                stdin,
+                stdin_paths,
+                paths,
+            );
+        }
+    };
 
     if stdin {
         println!(
@@ -108,6 +131,7 @@ pub(crate) fn hash_object_command(
             write_or_hash_stdin(
                 store.as_ref(),
                 hash_repo,
+                algorithm,
                 kind,
                 path.as_deref().map(Path::new),
             )?
@@ -124,18 +148,92 @@ pub(crate) fn hash_object_command(
             }
             println!(
                 "{}",
-                write_or_hash_path(store.as_ref(), hash_repo, kind, Path::new(line))?.to_hex()
+                write_or_hash_path(
+                    store.as_ref(),
+                    hash_repo,
+                    algorithm,
+                    kind,
+                    Path::new(line),
+                    None,
+                )?
+                .to_hex()
             );
         }
     }
 
-    for path in paths {
+    for input_path in paths {
         println!(
             "{}",
-            write_or_hash_path(store.as_ref(), hash_repo, kind, &path)?.to_hex()
+            write_or_hash_path(
+                store.as_ref(),
+                hash_repo,
+                algorithm,
+                kind,
+                &input_path,
+                path.as_deref().map(Path::new),
+            )?
+            .to_hex()
         );
     }
     Ok(())
+}
+
+fn hash_literal_object_command(
+    object_type: &str,
+    store: Option<&LooseObjectStore>,
+    algorithm: GitHashAlgorithm,
+    stdin: bool,
+    stdin_paths: bool,
+    paths: Vec<PathBuf>,
+) -> Result<()> {
+    if stdin {
+        let mut content = Vec::new();
+        io::stdin().read_to_end(&mut content)?;
+        println!(
+            "{}",
+            write_or_hash_literal(store, algorithm, object_type.as_bytes(), &content)?.to_hex()
+        );
+    }
+    if stdin_paths {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        for line in input.lines().filter(|line| !line.is_empty()) {
+            let path = Path::new(line);
+            let content = if is_git_null_path(path) {
+                Vec::new()
+            } else {
+                fs::read(path)?
+            };
+            println!(
+                "{}",
+                write_or_hash_literal(store, algorithm, object_type.as_bytes(), &content)?.to_hex()
+            );
+        }
+    }
+    for path in paths {
+        let content = if is_git_null_path(&path) {
+            Vec::new()
+        } else {
+            fs::read(path)?
+        };
+        println!(
+            "{}",
+            write_or_hash_literal(store, algorithm, object_type.as_bytes(), &content)?.to_hex()
+        );
+    }
+    Ok(())
+}
+
+fn write_or_hash_literal(
+    store: Option<&LooseObjectStore>,
+    algorithm: GitHashAlgorithm,
+    object_type: &[u8],
+    content: &[u8],
+) -> Result<ObjectId> {
+    match store {
+        Some(store) => Ok(store.write_literal_object(object_type, content)?),
+        None => Ok(hash_literal_object(algorithm, object_type, content)?),
+    }
 }
 
 fn hash_object_usage_error(message: &str) -> CliError {
@@ -181,6 +279,12 @@ pub(crate) fn cat_file(
     let has_batch_check = batch_check.is_some();
     let has_batch = batch.is_some();
     let has_batch_command = batch_command.is_some();
+    if allow_unknown_type && (exists || has_batch_check || has_batch || has_batch_command) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--allow-unknown-type cannot be combined with this mode".into(),
+        });
+    }
     let selected = [
         type_only,
         pretty,
@@ -308,7 +412,8 @@ pub(crate) fn cat_file(
         });
     }
     let objectish = &objects[0];
-    let id = match resolve_objectish(&repo, objectish) {
+    let mut object_formats = ObjectFormatTranslator::new(&repo)?;
+    let id = match resolve_compatible_objectish(&repo, &object_formats, objectish) {
         Ok(id) => id,
         Err(_) => {
             return Err(CliError::Fatal {
@@ -317,12 +422,46 @@ pub(crate) fn cat_file(
             });
         }
     };
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), object_formats.storage_algorithm());
     if filters {
         return cat_file_filters(&repo, &store, objectish, &id, path.as_deref());
     }
     if textconv {
         return cat_file_textconv(&repo, &store, objectish, &id, path.as_deref());
+    }
+    if id.algorithm() != object_formats.storage_algorithm() {
+        let object = object_formats
+            .read_object(&id)
+            .map_err(|error| cat_file_object_read_error(error, objectish, pretty))?;
+        return cat_file_output_compatible_object(
+            &repo,
+            &object,
+            type_only,
+            pretty,
+            size,
+            exists,
+            use_mailmap,
+        );
+    }
+    if allow_unknown_type && (type_only || size) {
+        let read_id = cat_file_replacement_id(&repo, &id)?.unwrap_or_else(|| id.clone());
+        if let Some(header) = store.literal_object_header_hint(&read_id)? {
+            if type_only {
+                io::stdout().write_all(&header.kind)?;
+                io::stdout().write_all(b"\n")?;
+            } else {
+                println!("{}", header.size);
+            }
+            return Ok(());
+        }
+        if let Some((kind, object_size)) = store.object_header_hint(&read_id)? {
+            if type_only {
+                println!("{}", kind.as_str());
+            } else {
+                println!("{object_size}");
+            }
+            return Ok(());
+        }
     }
     if exists {
         return if store.contains_object(&id)? {
@@ -330,6 +469,11 @@ pub(crate) fn cat_file(
         } else {
             Err(CliError::Exit(1))
         };
+    }
+    if (type_only || size)
+        && let Err(error) = store.verify_loose_object(&id)
+    {
+        return Err(cat_file_loose_verification_error(error, &id));
     }
     if type_only {
         match store.object_header_hint(&id) {
@@ -391,6 +535,38 @@ pub(crate) fn cat_file(
             io::stdout().write_all(content.as_ref())?;
         }
     }
+    Ok(())
+}
+
+fn cat_file_output_compatible_object(
+    repo: &GitRepo,
+    object: &LooseObject,
+    type_only: bool,
+    pretty: bool,
+    size: bool,
+    exists: bool,
+    use_mailmap: bool,
+) -> Result<()> {
+    if exists {
+        return Ok(());
+    }
+    if type_only {
+        println!("{}", object.kind.as_str());
+        return Ok(());
+    }
+    let content = cat_file_display_content(repo, object, use_mailmap)?;
+    if size {
+        println!("{}", content.len());
+        return Ok(());
+    }
+    if pretty && object.kind == GitObjectKind::Tree {
+        for entry in decode_tree(object.id.algorithm(), &object.content)? {
+            let path = entry.name.clone();
+            print_tree_entry(&entry, &path, false)?;
+        }
+        return Ok(());
+    }
+    io::stdout().write_all(content.as_ref())?;
     Ok(())
 }
 
@@ -538,7 +714,11 @@ fn cat_file_read_object(
     match store.read_object(id) {
         Ok(object) => Ok(object),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            match admin_commands::backfill_promisor_objects(repo, std::slice::from_ref(id)) {
+            match admin_commands::backfill_promisor_objects_filtered(
+                repo,
+                std::slice::from_ref(id),
+                Some("blob:none"),
+            ) {
                 Ok(true) => store.read_object(id),
                 Ok(false) => Err(error),
                 Err(CliError::Io(io_error)) => Err(io_error),
@@ -579,6 +759,20 @@ fn cat_file_object_read_error(error: io::Error, objectish: &str, pretty: bool) -
     CliError::Io(error)
 }
 
+fn cat_file_loose_verification_error(error: io::Error, id: &ObjectId) -> CliError {
+    let message = error.to_string();
+    if message.contains("inflate") || message.contains("deflate") || message.contains("corrupt") {
+        return CliError::Stderr {
+            code: 128,
+            text: format!(
+                "error: inflate: {message}\nerror: unable to unpack {} header\nfatal: git cat-file: could not get object info\n",
+                id.to_hex()
+            ),
+        };
+    }
+    CliError::Io(error)
+}
+
 fn cat_file_typed_object(
     object_type: &str,
     objectish: &str,
@@ -589,20 +783,31 @@ fn cat_file_typed_object(
         message: format!("invalid object type \"{object_type}\""),
     })?;
     let repo = find_repo_or_bare()?;
-    let id = resolve_objectish(&repo, objectish).map_err(|_| CliError::Fatal {
-        code: 128,
-        message: format!("Not a valid object name {objectish}"),
+    let mut object_formats = ObjectFormatTranslator::new(&repo)?;
+    let id = resolve_compatible_objectish(&repo, &object_formats, objectish).map_err(|_| {
+        CliError::Fatal {
+            code: 128,
+            message: format!("Not a valid object name {objectish}"),
+        }
     })?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut object = cat_file_read_object(&repo, &store, &id)
-        .map_err(|error| cat_file_typed_object_read_error(error, objectish))?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), object_formats.storage_algorithm());
+    let mut object = if id.algorithm() == object_formats.storage_algorithm() {
+        cat_file_read_object(&repo, &store, &id)
+    } else {
+        object_formats.read_object(&id)
+    }
+    .map_err(|error| cat_file_typed_object_read_error(error, objectish))?;
     for _ in 0..8 {
         if object.kind != GitObjectKind::Tag || expected == GitObjectKind::Tag {
             break;
         }
-        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
-        object = cat_file_read_object(&repo, &store, &tag.target)
-            .map_err(|error| cat_file_typed_object_read_error(error, &tag.target.to_hex()))?;
+        let tag = decode_tag(object.id.algorithm(), &object.content)?;
+        object = if tag.target.algorithm() == object_formats.storage_algorithm() {
+            cat_file_read_object(&repo, &store, &tag.target)
+        } else {
+            object_formats.read_object(&tag.target)
+        }
+        .map_err(|error| cat_file_typed_object_read_error(error, &tag.target.to_hex()))?;
     }
     if object.kind != expected {
         return Err(CliError::Fatal {
@@ -807,7 +1012,8 @@ fn cat_file_batch(
     object_filter: Option<CatFileFilter>,
     use_mailmap: bool,
 ) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let mut object_formats = ObjectFormatTranslator::new(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), object_formats.storage_algorithm());
     let stdout = io::stdout();
     let stdout = stdout.lock();
     if buffer {
@@ -815,6 +1021,7 @@ fn cat_file_batch(
         cat_file_batch_with_writer(
             repo,
             &store,
+            &mut object_formats,
             &mut stdout,
             mode,
             &format,
@@ -839,6 +1046,7 @@ fn cat_file_batch(
     cat_file_batch_with_writer(
         repo,
         &store,
+        &mut object_formats,
         &mut stdout,
         mode,
         &format,
@@ -856,6 +1064,7 @@ fn cat_file_batch(
 fn cat_file_batch_with_writer<W: io::Write>(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    object_formats: &mut ObjectFormatTranslator,
     mut stdout: &mut W,
     mode: BatchMode,
     format: &BatchFormat,
@@ -974,7 +1183,13 @@ fn cat_file_batch_with_writer<W: io::Write>(
             stdout.flush()?;
             continue;
         };
-        let resolved = match resolve_batch_objectish(repo, store, objectish, follow_symlinks) {
+        let resolved = match resolve_batch_objectish(
+            repo,
+            store,
+            object_formats,
+            objectish,
+            follow_symlinks,
+        ) {
             Ok(BatchLookup::Object(resolved)) => resolved,
             Ok(BatchLookup::Special { kind, payload }) => {
                 write_batch_special(&mut stdout, kind, &payload, output_nul)?;
@@ -1004,6 +1219,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
                 &mut stdout,
                 repo,
                 store,
+                object_formats,
                 &resolved.id,
                 &read_id,
                 format,
@@ -1015,7 +1231,12 @@ fn cat_file_batch_with_writer<W: io::Write>(
         {
             continue;
         }
-        match store.read_object(&read_id) {
+        let object = if read_id.algorithm() == object_formats.storage_algorithm() {
+            store.read_object(&read_id)
+        } else {
+            object_formats.read_object(&read_id)
+        };
+        match object {
             Ok(object) => write_batch_object(
                 &mut stdout,
                 repo,
@@ -1321,7 +1542,8 @@ pub(crate) fn update_server_info() -> Result<()> {
     let repo = find_repo_or_bare()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     fs::create_dir_all(repo.git_dir.join("info"))?;
-    let mut info_refs = BufWriter::new(fs::File::create(repo.git_dir.join("info/refs"))?);
+    let info_refs_path = repo.git_dir.join("info/refs");
+    let mut info_refs = Vec::new();
     let server_info_refs = runtime
         .refs_store_adapter()
         .server_info_refs()
@@ -1331,18 +1553,107 @@ pub(crate) fn update_server_info() -> Result<()> {
         })?;
 
     for (name, id) in server_info_refs {
-        writeln!(info_refs, "{}\t{}", id, name)?;
+        writeln!(&mut info_refs, "{}\t{}", id, name)?;
     }
-    info_refs.flush()?;
+    write_server_info_file(&info_refs_path, &info_refs)?;
+    apply_shared_file_permission(&repo, &info_refs_path)?;
 
     let packs = PackedObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1).pack_names()?;
     fs::create_dir_all(repo.git_dir.join("objects/info"))?;
-    let mut packs_info = BufWriter::new(fs::File::create(repo.git_dir.join("objects/info/packs"))?);
+    let packs_info_path = repo.git_dir.join("objects/info/packs");
+    let mut packs_info = Vec::new();
     for pack in packs {
-        writeln!(packs_info, "P {pack}")?;
+        writeln!(&mut packs_info, "P {pack}")?;
     }
     packs_info.write_all(b"\n")?;
-    packs_info.flush()?;
+    write_server_info_file(&packs_info_path, &packs_info)?;
+    apply_shared_file_permission(&repo, &packs_info_path)?;
+    Ok(())
+}
+
+fn write_server_info_file(path: &Path, contents: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("invalid server-info path: {}", path.display()),
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("server-info");
+    let mut suffix = 0u32;
+    let temporary = loop {
+        let candidate = parent.join(format!(
+            ".{file_name}.zmin-tmp-{}-{suffix}",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(contents).and_then(|()| file.flush()) {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(CliError::Io(error));
+                }
+                break candidate;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                suffix = suffix.checked_add(1).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!("cannot create temporary file for {}", path.display()),
+                })?;
+            }
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    };
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(CliError::Io(error));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn apply_shared_file_permission(repo: &GitRepo, path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(value) = read_config_value(repo, "core.sharedrepository")? else {
+        return Ok(());
+    };
+    let shared = parse_shared_repository_mode(&value)?;
+    let current = fs::metadata(path)?.permissions().mode() & 0o777;
+    let mode = match shared {
+        SharedRepositoryMode::Umask => current,
+        SharedRepositoryMode::Group => propagate_owner_permissions(current, 0o660),
+        SharedRepositoryMode::All => propagate_owner_permissions(current, 0o664),
+        SharedRepositoryMode::Forced(mode) => propagate_owner_permissions(current, mode),
+    };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn propagate_owner_permissions(current: u32, allowed: u32) -> u32 {
+    let owner = current & 0o600;
+    let mut mode = owner;
+    if allowed & 0o040 != 0 && owner & 0o400 != 0 {
+        mode |= 0o040;
+    }
+    if allowed & 0o020 != 0 && owner & 0o200 != 0 {
+        mode |= 0o020;
+    }
+    if allowed & 0o004 != 0 && owner & 0o400 != 0 {
+        mode |= 0o004;
+    }
+    if allowed & 0o002 != 0 && owner & 0o200 != 0 {
+        mode |= 0o002;
+    }
+    mode
+}
+
+#[cfg(not(unix))]
+fn apply_shared_file_permission(_repo: &GitRepo, _path: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -2110,13 +2421,13 @@ fn print_check_ignore_verbose(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MailmapIdentity {
-    name: String,
-    email: String,
+pub(crate) struct MailmapIdentity {
+    pub(crate) name: String,
+    pub(crate) email: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct MailmapEntry {
+pub(crate) struct MailmapEntry {
     canonical_name: Option<String>,
     canonical_email: String,
     old_name: Option<String>,
@@ -2176,7 +2487,7 @@ fn check_mailmap_input(entries: &[MailmapEntry], input: &str) {
     println!("{} <{}>", mapped.name, mapped.email);
 }
 
-fn read_mailmap(
+pub(crate) fn read_mailmap(
     repo: &GitRepo,
     mailmap_file: Option<PathBuf>,
     mailmap_blob: Option<&str>,
@@ -2270,7 +2581,10 @@ fn non_empty_name(name: &str) -> Option<String> {
     }
 }
 
-fn apply_mailmap(entries: &[MailmapEntry], identity: &MailmapIdentity) -> MailmapIdentity {
+pub(crate) fn apply_mailmap(
+    entries: &[MailmapEntry],
+    identity: &MailmapIdentity,
+) -> MailmapIdentity {
     for entry in entries {
         if entry.old_email == identity.email
             && entry
@@ -2297,10 +2611,12 @@ pub(crate) fn check_attr(
     nul: bool,
     source: Option<String>,
     args: Vec<String>,
+    raw_args: &[String],
 ) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
+    let (attr_names, paths) = parse_check_attr_args(all, stdin, args, raw_args)?;
     let attrs = load_check_attr_source(&repo, cached, source.as_deref())?;
-    let (attr_names, paths) = parse_check_attr_args(all, stdin, args)?;
+    emit_check_attr_warnings(&attrs);
     if stdin {
         if nul {
             let mut input = Vec::new();
@@ -2310,7 +2626,7 @@ pub(crate) fn check_attr(
                     continue;
                 }
                 let path = String::from_utf8_lossy(path).into_owned();
-                check_attr_path(&repo, &attrs, all, nul, &attr_names, &path)?;
+                check_attr_path(&repo, &attrs, all, cached, nul, &attr_names, &path)?;
             }
         } else {
             let stdin = io::stdin();
@@ -2325,6 +2641,7 @@ pub(crate) fn check_attr(
                     &repo,
                     &attrs,
                     all,
+                    cached,
                     nul,
                     &attr_names,
                     line.trim_end_matches(['\r', '\n']),
@@ -2333,10 +2650,16 @@ pub(crate) fn check_attr(
         }
     } else {
         for path in &paths {
-            check_attr_path(&repo, &attrs, all, nul, &attr_names, path)?;
+            check_attr_path(&repo, &attrs, all, cached, nul, &attr_names, path)?;
         }
     }
     Ok(())
+}
+
+fn emit_check_attr_warnings(attrs: &GitAttributes) {
+    for warning in attrs.warnings() {
+        eprintln!("{warning}");
+    }
 }
 
 fn load_check_attr_source(
@@ -2344,77 +2667,277 @@ fn load_check_attr_source(
     cached: bool,
     source: Option<&str>,
 ) -> Result<GitAttributes> {
-    if let Some(source) = source {
-        return load_check_attr_source_treeish(repo, source);
+    let explicit_source = source.map(str::to_owned).or_else(global_attr_source_option);
+    if let Some(source) = explicit_source.as_deref() {
+        return load_check_attr_source_treeish(repo, source).map_err(|_| bad_attr_source_error());
+    }
+    if let Ok(source) = std::env::var("GIT_ATTR_SOURCE") {
+        return load_check_attr_source_treeish(repo, &source).map_err(|_| bad_attr_source_error());
+    }
+    if let Some(source) = read_config_value(repo, "attr.tree").ok().flatten()
+        && let Ok(attributes) = load_check_attr_source_treeish(repo, &source)
+    {
+        return Ok(attributes);
     }
     if cached {
         return load_check_attr_source_index(repo);
     }
-    Ok(GitAttributes::load_from_root(&repo.root)?)
+    if repo_is_bare(repo) {
+        return load_check_attr_source_bare(repo);
+    }
+    load_repo_attributes(repo, None)
 }
 
 fn load_check_attr_source_index(repo: &GitRepo) -> Result<GitAttributes> {
-    let index = read_index(&repo.index_path)?;
+    let ignore_case = check_attr_ignore_case(repo)?;
+    let index = read_repo_index(repo)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let mut attributes = GitAttributes::default();
+    attributes.set_ignore_case(ignore_case);
     for entry in index.entries() {
-        if entry.path.as_slice() != b".gitattributes" {
+        if entry.stage != 0 || !entry.path.ends_with(b".gitattributes") {
             continue;
         }
         let object = store.read_object(&entry.id)?;
         if object.kind != GitObjectKind::Blob {
             return Err(CliError::Fatal {
                 code: 128,
-                message: "index .gitattributes is not a blob".into(),
+                message: format!(
+                    "index {} is not a blob",
+                    String::from_utf8_lossy(&entry.path)
+                ),
             });
         }
-        return Ok(GitAttributes::parse(&String::from_utf8_lossy(
+        append_check_attr_content(
+            &mut attributes,
+            &index_attribute_base(&entry.path),
+            &String::from_utf8_lossy(&entry.path),
             &object.content,
-        )));
+            ignore_case,
+        );
     }
-    Ok(GitAttributes::default())
+    Ok(attributes)
 }
 
 fn load_check_attr_source_treeish(repo: &GitRepo, source: &str) -> Result<GitAttributes> {
+    let ignore_case = check_attr_ignore_case(repo)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree = resolve_treeish(repo, &store, source).map_err(CliError::Io)?;
-    let Some(entry) = find_tree_entry(&store, &tree, b".gitattributes").map_err(CliError::Io)?
-    else {
-        return Ok(GitAttributes::default());
-    };
-    let object = store.read_object(&entry.id)?;
-    if object.kind != GitObjectKind::Blob {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "tree-ish .gitattributes is not a blob".into(),
-        });
+    let tree_cache = TreeObjectCache::new(&store);
+    let index = tree_cache.read_tree_to_index(&tree).map_err(CliError::Io)?;
+    let mut attributes = GitAttributes::default();
+    attributes.set_ignore_case(ignore_case);
+    for entry in index.entries() {
+        if entry.stage != 0 || !entry.path.ends_with(b".gitattributes") {
+            continue;
+        }
+        let object = store.read_object(&entry.id)?;
+        if object.kind != GitObjectKind::Blob {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "tree-ish {} is not a blob",
+                    String::from_utf8_lossy(&entry.path)
+                ),
+            });
+        }
+        append_check_attr_content(
+            &mut attributes,
+            &index_attribute_base(&entry.path),
+            &String::from_utf8_lossy(&entry.path),
+            &object.content,
+            ignore_case,
+        );
     }
-    Ok(GitAttributes::parse(&String::from_utf8_lossy(
-        &object.content,
-    )))
+    Ok(attributes)
+}
+
+fn load_check_attr_source_bare(repo: &GitRepo) -> Result<GitAttributes> {
+    let ignore_case = check_attr_ignore_case(repo)?;
+    let mut attributes = GitAttributes::default();
+    attributes.set_ignore_case(ignore_case);
+    let info_attributes = repo.git_dir.join("info").join("attributes");
+    let content = match fs::read(&info_attributes) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(attributes),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    append_check_attr_content(
+        &mut attributes,
+        "",
+        "info/attributes",
+        &content,
+        ignore_case,
+    );
+    Ok(attributes)
+}
+
+fn check_attr_ignore_case(repo: &GitRepo) -> Result<bool> {
+    Ok(read_config_entries(repo)?
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core" && entry.subsection.is_empty() && entry.key == "ignorecase"
+        })
+        .and_then(|entry| entry.bool_value())
+        .unwrap_or(false))
+}
+
+fn index_attribute_base(path: &[u8]) -> String {
+    let path = String::from_utf8_lossy(path);
+    path.rsplit_once('/')
+        .map(|(base, _)| base.to_owned())
+        .unwrap_or_default()
+}
+
+fn append_check_attr_content(
+    attributes: &mut GitAttributes,
+    base: &str,
+    source: &str,
+    content: &[u8],
+    ignore_case: bool,
+) {
+    attributes.append(GitAttributes::parse_with_base_and_source_and_case(
+        &String::from_utf8_lossy(content),
+        base,
+        source,
+        ignore_case,
+    ));
+}
+
+fn bad_attr_source_error() -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: "fatal: bad --attr-source or GIT_ATTR_SOURCE\n".into(),
+    }
 }
 
 fn check_attr_path(
     repo: &GitRepo,
     attrs: &GitAttributes,
     all: bool,
+    cached: bool,
     nul: bool,
     attr_names: &[String],
     path: &str,
 ) -> Result<()> {
-    let relative = path_arg_to_repo_relative(repo, std::path::Path::new(path))?;
+    let relative = path_arg_to_repo_relative_lexical(repo, std::path::Path::new(path))?;
     let rows = if all {
         attrs.check_all(&relative)
     } else {
-        attrs.check(&relative, attr_names)
+        attr_names
+            .iter()
+            .map(|name| {
+                let value = if name == "builtin_objectmode" {
+                    builtin_objectmode_attr_value(repo, &relative, cached)?
+                } else {
+                    attrs
+                        .check(&relative, std::slice::from_ref(name))
+                        .into_iter()
+                        .next()
+                        .map(|(_, value)| value)
+                        .unwrap_or(AttributeValue::Unspecified)
+                };
+                Ok((name.clone(), value))
+            })
+            .collect::<Result<Vec<_>>>()?
     };
+    let display_path = check_attr_display_path(nul, path);
     for (name, value) in rows {
         if nul {
             print!("{path}\0{name}\0{}\0", value.as_check_attr_value());
         } else {
-            println!("{path}: {name}: {}", value.as_check_attr_value());
+            println!("{display_path}: {name}: {}", value.as_check_attr_value());
         }
     }
     Ok(())
+}
+
+fn check_attr_display_path(nul: bool, path: &str) -> String {
+    if nul || !path.contains('"') {
+        return path.to_owned();
+    }
+    let mut quoted = String::with_capacity(path.len() + 2);
+    quoted.push('"');
+    for ch in path.chars() {
+        if ch == '\\' || ch == '"' {
+            quoted.push('\\');
+        }
+        quoted.push(ch);
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn builtin_objectmode_attr_value(
+    repo: &GitRepo,
+    relative: &[u8],
+    cached: bool,
+) -> Result<AttributeValue> {
+    if cached {
+        let index = read_repo_index(repo)?;
+        let value = index
+            .entries()
+            .iter()
+            .find(|entry| entry.stage == 0 && entry.path.as_slice() == relative)
+            .map(|entry| match entry.mode {
+                IndexMode::File => "100644",
+                IndexMode::Executable => "100755",
+                IndexMode::Symlink => "120000",
+                IndexMode::Tree => "040000",
+                IndexMode::Gitlink => "160000",
+            });
+        return Ok(value
+            .map(|mode| AttributeValue::Value(mode.to_owned()))
+            .unwrap_or(AttributeValue::Unspecified));
+    }
+
+    let absolute = worktree_path_for_index_entry(&repo.root, relative);
+    let metadata = match fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "fatal: unable to stat '{}': No such file or directory\n",
+                    String::from_utf8_lossy(relative)
+                ),
+            });
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let value = if metadata.file_type().is_symlink() {
+        Some("120000")
+    } else if metadata.is_dir() {
+        Some(if exact_repo_at(&absolute).is_some() {
+            "160000"
+        } else {
+            "040000"
+        })
+    } else if metadata.is_file() {
+        Some(if worktree_file_is_executable(&metadata) {
+            "100755"
+        } else {
+            "100644"
+        })
+    } else {
+        None
+    };
+    Ok(value
+        .map(|mode| AttributeValue::Value(mode.to_owned()))
+        .unwrap_or(AttributeValue::Unspecified))
+}
+
+#[cfg(unix)]
+fn worktree_file_is_executable(metadata: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn worktree_file_is_executable(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 pub(crate) fn unpack_objects(
@@ -2496,53 +3019,105 @@ fn parse_check_attr_args(
     all: bool,
     stdin: bool,
     args: Vec<String>,
+    raw_args: &[String],
 ) -> Result<(Vec<String>, Vec<String>)> {
+    let raw_separator = raw_args.iter().position(|arg| arg == "--");
     let separator = args.iter().position(|arg| arg == "--");
     if stdin {
-        if separator.is_some() {
-            return Err(CliError::Fatal {
+        if raw_separator.is_some() {
+            if !all && args.len() <= 1 {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: check_attr_usage_error("No attribute specified"),
+                });
+            }
+            return Err(CliError::Stderr {
                 code: 129,
-                message: "check-attr --stdin does not take path arguments".into(),
+                text: check_attr_usage_error("Can't specify files with --stdin"),
             });
         }
         if all {
             return Ok((Vec::new(), Vec::new()));
         }
         if args.is_empty() {
-            return Err(CliError::Fatal {
+            return Err(CliError::Stderr {
                 code: 129,
-                message: "check-attr requires attributes".into(),
+                text: check_attr_usage_error("No attribute specified"),
             });
         }
+        validate_check_attr_names(&args)?;
         return Ok((args, Vec::new()));
     }
     let Some(separator) = separator else {
+        if !all && args.len() >= 2 {
+            validate_check_attr_names(&args[..1])?;
+            return Ok((vec![args[0].clone()], args[1..].to_vec()));
+        }
         if all && !args.is_empty() {
             return Ok((Vec::new(), args));
         }
-        return Err(CliError::Fatal {
+        if check_attr_raw_args_have_separator() {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: check_attr_usage_error("No attribute specified"),
+            });
+        }
+        return Err(CliError::Stderr {
             code: 129,
-            message: "check-attr requires `--` before path arguments".into(),
+            text: check_attr_usage_error(if args.is_empty() || args == ["--"] {
+                "No attribute specified"
+            } else {
+                "No file specified"
+            }),
         });
     };
     let attrs = args[..separator].to_vec();
     let paths = args[separator + 1..].to_vec();
-    if paths.is_empty() {
-        return Err(CliError::Fatal {
+    if attrs.is_empty() && !all {
+        return Err(CliError::Stderr {
             code: 129,
-            message: "check-attr requires path arguments".into(),
+            text: check_attr_usage_error("No attribute specified"),
+        });
+    }
+    if paths.is_empty() {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: check_attr_usage_error("No file specified"),
         });
     }
     if all {
         Ok((Vec::new(), paths))
     } else if attrs.is_empty() {
-        Err(CliError::Fatal {
+        Err(CliError::Stderr {
             code: 129,
-            message: "check-attr requires attributes".into(),
+            text: check_attr_usage_error("No attribute specified"),
         })
     } else {
+        validate_check_attr_names(&attrs)?;
         Ok((attrs, paths))
     }
+}
+
+fn check_attr_raw_args_have_separator() -> bool {
+    std::env::args_os().any(|arg| arg == "--")
+}
+
+fn validate_check_attr_names(attrs: &[String]) -> Result<()> {
+    for name in attrs {
+        if name.is_empty() {
+            return Err(CliError::Stderr {
+                code: 255,
+                text: "error: : not a valid attribute name\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn check_attr_usage_error(message: &str) -> String {
+    format!(
+        "error: {message}\nusage: git check-attr [--source <tree-ish>] [-a | --all | <attr>...] [--] <pathname>...\n   or: git check-attr --stdin [-z] [--source <tree-ish>] [-a | --all | <attr>...]\n\n    -a, --[no-]all        report all attributes set on file\n    --[no-]cached         use .gitattributes only from the index\n    --[no-]stdin          read file names from stdin\n    -z                    terminate input and output records by a NUL character\n    --[no-]source <tree-ish>\n                          which tree-ish to check attributes at\n"
+    )
 }
 
 fn print_tree(store: &LooseObjectStore, tree_id: &ObjectId) -> Result<()> {
@@ -2727,11 +3302,13 @@ fn split_batch_object_input(input: &str) -> (&str, &str) {
 fn resolve_batch_objectish(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    object_formats: &ObjectFormatTranslator,
     objectish: &str,
     follow_symlinks: bool,
 ) -> io::Result<BatchLookup> {
     if !follow_symlinks {
-        return resolve_objectish_with_mode(repo, objectish).map(BatchLookup::Object);
+        return resolve_compatible_objectish_with_mode(repo, object_formats, objectish)
+            .map(BatchLookup::Object);
     }
     let Some((base, path)) = objectish.split_once(':') else {
         return resolve_objectish_with_mode(repo, objectish).map(BatchLookup::Object);
@@ -2917,6 +3494,7 @@ fn write_object_batch_header(
     out: &mut impl Write,
     repo: &GitRepo,
     store: &LooseObjectStore,
+    object_formats: &mut ObjectFormatTranslator,
     display_id: &ObjectId,
     read_id: &ObjectId,
     format: &BatchFormat,
@@ -2925,6 +3503,27 @@ fn write_object_batch_header(
     output_nul: bool,
     use_mailmap: bool,
 ) -> Result<bool> {
+    if read_id.algorithm() != object_formats.storage_algorithm() {
+        let object = match object_formats.read_object(read_id) {
+            Ok(object) => object,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        let content = cat_file_display_content(repo, &object, use_mailmap)?;
+        write_batch_header(
+            out,
+            display_id,
+            object.kind,
+            content.len(),
+            format,
+            rest,
+            mode_atom,
+            "",
+            "",
+            output_nul,
+        )?;
+        return Ok(true);
+    }
     if use_mailmap {
         let object = match store.read_object(read_id) {
             Ok(object) => object,
@@ -3239,18 +3838,154 @@ fn render_batch_format(
 
 fn write_or_hash(
     store: Option<&LooseObjectStore>,
+    algorithm: GitHashAlgorithm,
     kind: GitObjectKind,
     content: &[u8],
 ) -> Result<ObjectId> {
+    validate_hash_object_input(kind, content)?;
     match store {
         Some(store) => Ok(store.write_object(kind, content)?),
-        None => Ok(hash_object(GitHashAlgorithm::Sha1, kind, content)),
+        None => Ok(hash_object(algorithm, kind, content)),
     }
+}
+
+fn validate_hash_object_input(kind: GitObjectKind, content: &[u8]) -> Result<()> {
+    match kind {
+        GitObjectKind::Blob => Ok(()),
+        GitObjectKind::Tree => validate_hash_object_tree(content),
+        GitObjectKind::Commit => decode_commit(GitHashAlgorithm::Sha1, content)
+            .map(|_| ())
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "corrupt commit".into(),
+            }),
+        GitObjectKind::Tag => decode_tag(GitHashAlgorithm::Sha1, content)
+            .map(|_| ())
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "corrupt tag".into(),
+            }),
+    }
+}
+
+fn validate_hash_object_tree(content: &[u8]) -> Result<()> {
+    let entries = decode_hash_object_tree_entries(content)?;
+    let mut sorted = entries.clone();
+    sorted.sort_by(hash_object_compare_tree_entries);
+    for pair in sorted.windows(2) {
+        if hash_object_compare_tree_entries(&pair[0], &pair[1]).is_eq() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "duplicateEntries".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct HashObjectTreeEntry {
+    mode: TreeMode,
+    name: Vec<u8>,
+}
+
+fn decode_hash_object_tree_entries(content: &[u8]) -> Result<Vec<HashObjectTreeEntry>> {
+    let mut cursor = 0usize;
+    let mut entries = Vec::new();
+    while cursor < content.len() {
+        let Some(mode_end_offset) = content[cursor..].iter().position(|byte| *byte == b' ') else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "too-short tree object".into(),
+            });
+        };
+        let mode_end = cursor + mode_end_offset;
+        let mode = parse_hash_object_tree_mode(&content[cursor..mode_end])?;
+        cursor = mode_end + 1;
+
+        let Some(name_end_offset) = content[cursor..].iter().position(|byte| *byte == 0) else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "too-short tree object".into(),
+            });
+        };
+        let name_end = cursor + name_end_offset;
+        let name = content[cursor..name_end].to_vec();
+        if name.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "empty filename in tree entry".into(),
+            });
+        }
+        cursor = name_end + 1;
+
+        let digest_len = GitHashAlgorithm::Sha1.digest_len();
+        if content.len().saturating_sub(cursor) < digest_len {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "too-short tree object".into(),
+            });
+        }
+        cursor += digest_len;
+        entries.push(HashObjectTreeEntry { mode, name });
+    }
+    Ok(entries)
+}
+
+fn parse_hash_object_tree_mode(raw_mode: &[u8]) -> Result<TreeMode> {
+    let normalized = raw_mode
+        .iter()
+        .position(|byte| *byte != b'0')
+        .map(|offset| &raw_mode[offset..])
+        .unwrap_or(&[]);
+    let mode = TreeMode::parse(normalized).or_else(|| {
+        if normalized == b"100664" {
+            Some(TreeMode::File)
+        } else {
+            None
+        }
+    });
+    mode.ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "malformed mode in tree entry".into(),
+    })
+}
+
+fn hash_object_compare_tree_entries(
+    left: &HashObjectTreeEntry,
+    right: &HashObjectTreeEntry,
+) -> std::cmp::Ordering {
+    hash_object_compare_tree_names(
+        &left.name,
+        left.mode == TreeMode::Tree,
+        &right.name,
+        right.mode == TreeMode::Tree,
+    )
+}
+
+fn hash_object_compare_tree_names(
+    left: &[u8],
+    left_has_trailing_slash: bool,
+    right: &[u8],
+    right_has_trailing_slash: bool,
+) -> std::cmp::Ordering {
+    let left_len = left.len() + usize::from(left_has_trailing_slash);
+    let right_len = right.len() + usize::from(right_has_trailing_slash);
+    for idx in 0..left_len.min(right_len) {
+        let left_byte = if idx < left.len() { left[idx] } else { b'/' };
+        let right_byte = if idx < right.len() { right[idx] } else { b'/' };
+        match left_byte.cmp(&right_byte) {
+            std::cmp::Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+    left_len.cmp(&right_len)
 }
 
 fn write_or_hash_stdin(
     store: Option<&LooseObjectStore>,
     repo: Option<&GitRepo>,
+    algorithm: GitHashAlgorithm,
     kind: GitObjectKind,
     path: Option<&Path>,
 ) -> Result<ObjectId> {
@@ -3263,15 +3998,15 @@ fn write_or_hash_stdin(
             let absolute = absolute_path_from_arg(path)?;
             if let Ok(relative) = repo_relative_path(&repo.root, &absolute) {
                 let content = clean_worktree_content(repo, &relative, content)?;
-                return write_or_hash(store, kind, &content);
+                return write_or_hash(store, algorithm, kind, &content);
             }
         }
-        return write_or_hash(store, kind, &content);
+        return write_or_hash(store, algorithm, kind, &content);
     }
     if kind != GitObjectKind::Blob {
         let mut content = Vec::new();
         io::stdin().read_to_end(&mut content)?;
-        return write_or_hash(store, kind, &content);
+        return write_or_hash(store, algorithm, kind, &content);
     }
 
     let temp_path = unique_temp_sibling(&std::env::temp_dir().join("zmin-hash-object-stdin"));
@@ -3285,7 +4020,7 @@ fn write_or_hash_stdin(
         let mut stdin = io::BufReader::with_capacity(HASH_OBJECT_STREAM_BUF_CAPACITY, io::stdin());
         io::copy(&mut stdin, &mut temp_file)?;
         temp_file.flush()?;
-        write_or_hash_path(store, None, kind, &temp_path)
+        write_or_hash_path(store, None, algorithm, kind, &temp_path, None)
     })();
     let _ = fs::remove_file(&temp_path);
     result
@@ -3294,26 +4029,30 @@ fn write_or_hash_stdin(
 fn write_or_hash_path(
     store: Option<&LooseObjectStore>,
     repo: Option<&GitRepo>,
+    algorithm: GitHashAlgorithm,
     kind: GitObjectKind,
-    path: &Path,
+    input_path: &Path,
+    filter_path: Option<&Path>,
 ) -> Result<ObjectId> {
-    if is_git_null_path(path) {
-        return write_or_hash(store, kind, &[]);
+    if is_git_null_path(input_path) {
+        return write_or_hash(store, algorithm, kind, &[]);
     }
     if kind != GitObjectKind::Blob {
-        let content = fs::read(path)?;
-        return write_or_hash(store, kind, &content);
+        let content = fs::read(input_path)?;
+        return write_or_hash(store, algorithm, kind, &content);
     }
 
     if let Some(repo) = repo {
-        let absolute = absolute_path_from_arg(path)?;
-        if let Ok(relative) = repo_relative_path(&repo.root, &absolute) {
+        let absolute = absolute_path_from_arg(input_path)?;
+        let attribute_path = filter_path.unwrap_or(input_path);
+        let attribute_absolute = absolute_path_from_arg(attribute_path)?;
+        if let Ok(relative) = repo_relative_path(&repo.root, &attribute_absolute) {
             let content = clean_worktree_content(repo, &relative, fs::read(&absolute)?)?;
-            return write_or_hash(store, kind, &content);
+            return write_or_hash(store, algorithm, kind, &content);
         }
     }
 
-    let file = fs::File::open(path)?;
+    let file = fs::File::open(input_path)?;
     let size = usize::try_from(file.metadata()?.len()).map_err(|_| {
         CliError::Message("`hash-object` input is too large for this platform".into())
     })?;
@@ -3323,7 +4062,7 @@ fn write_or_hash_path(
             io::copy(&mut reader, writer).map(|_| ())
         })?),
         None => {
-            let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+            let mut hasher = GitObjectHash::new(algorithm);
             hasher.update_object_header(kind, size);
             let mut buffer = vec![0_u8; HASH_OBJECT_STREAM_BUF_CAPACITY];
             loop {
@@ -3362,6 +4101,7 @@ pub(crate) fn init_command(
     let cwd = std::env::current_dir()?;
     let env_git_dir = env_path("GIT_DIR", &cwd);
     let env_work_tree = env_path("GIT_WORK_TREE", &cwd);
+    let env_object_directory = std::env::var_os("GIT_OBJECT_DIRECTORY");
     if separate_git_dir.is_some() && bare {
         return Err(CliError::Fatal {
             code: 128,
@@ -3385,6 +4125,7 @@ pub(crate) fn init_command(
     let initial_branch = resolve_initial_branch(initial_branch)?;
     let object_format = resolve_init_object_format(object_format)?;
     let ref_format = resolve_init_ref_format(ref_format)?;
+    let write_log_all_ref_updates = global_config_value("core", "logallrefupdates")?.is_none();
 
     if directory.is_none()
         && let Some(git_dir) = env_git_dir
@@ -3403,10 +4144,22 @@ pub(crate) fn init_command(
                 &work_tree,
                 InitRepositoryOptions {
                     bare: false,
-                    initial_branch,
+                    initial_branch: initial_branch.clone(),
+                    objects_directory: init_objects_directory(
+                        env_object_directory.as_deref(),
+                        &work_tree,
+                    ),
+                    populate_template_files: true,
+                    write_log_all_ref_updates,
                 },
             )?;
-            apply_init_repository_format(&result.git_dir, &object_format, &ref_format, reinit)?;
+            apply_init_repository_format(
+                &result.git_dir,
+                &object_format,
+                &ref_format,
+                &initial_branch,
+                reinit,
+            )?;
             apply_init_template(&result.git_dir, template.as_ref())?;
             apply_shared_repository(&result.git_dir, shared.as_deref())?;
             restore_reinit_head(
@@ -3427,10 +4180,19 @@ pub(crate) fn init_command(
             &git_dir,
             InitRepositoryOptions {
                 bare: true,
-                initial_branch,
+                initial_branch: initial_branch.clone(),
+                objects_directory: init_objects_directory(env_object_directory.as_deref(), &cwd),
+                populate_template_files: true,
+                write_log_all_ref_updates,
             },
         )?;
-        apply_init_repository_format(&result.git_dir, &object_format, &ref_format, reinit)?;
+        apply_init_repository_format(
+            &result.git_dir,
+            &object_format,
+            &ref_format,
+            &initial_branch,
+            reinit,
+        )?;
         apply_init_template(&result.git_dir, template.as_ref())?;
         apply_shared_repository(&result.git_dir, shared.as_deref())?;
         if let Some(work_tree) = env_work_tree {
@@ -3454,7 +4216,14 @@ pub(crate) fn init_command(
     if let Some(separate_git_dir) = separate_git_dir {
         let git_dir = absolute_path_from_arg(&separate_git_dir)?;
         if reinit_separate_git_dir_if_needed(&directory, &git_dir)? {
-            apply_init_repository_format(&git_dir, &object_format, &ref_format, true)?;
+            ensure_init_objects_directory(env_object_directory.as_deref(), &directory, &git_dir)?;
+            apply_init_repository_format(
+                &git_dir,
+                &object_format,
+                &ref_format,
+                &initial_branch,
+                true,
+            )?;
             apply_init_template(&git_dir, template.as_ref())?;
             apply_shared_repository(&git_dir, shared.as_deref())?;
             print_init_message_if_needed(quiet, true, &git_dir, shared.as_deref());
@@ -3468,10 +4237,22 @@ pub(crate) fn init_command(
             &git_dir,
             InitRepositoryOptions {
                 bare: true,
-                initial_branch,
+                initial_branch: initial_branch.clone(),
+                objects_directory: init_objects_directory(
+                    env_object_directory.as_deref(),
+                    &directory,
+                ),
+                populate_template_files: true,
+                write_log_all_ref_updates,
             },
         )?;
-        apply_init_repository_format(&result.git_dir, &object_format, &ref_format, reinit)?;
+        apply_init_repository_format(
+            &result.git_dir,
+            &object_format,
+            &ref_format,
+            &initial_branch,
+            reinit,
+        )?;
         write_non_bare_git_dir_config(&result.git_dir, &directory)?;
         apply_init_template(&result.git_dir, template.as_ref())?;
         apply_shared_repository(&result.git_dir, shared.as_deref())?;
@@ -3502,6 +4283,11 @@ pub(crate) fn init_command(
             reject_reinit_ref_format_change(&reinit_git_dir, &ref_format)?;
         }
         validate_reinit_config(&directory, &git_dir)?;
+        ensure_init_objects_directory(
+            env_object_directory.as_deref(),
+            &directory,
+            &reinit_git_dir,
+        )?;
         if template.is_some() {
             apply_init_template(&reinit_git_dir, template.as_ref())?;
         } else {
@@ -3519,7 +4305,18 @@ pub(crate) fn init_command(
     }
     if reinit {
         validate_reinit_config(&directory, &expected_git_dir)?;
-        apply_init_repository_format(&expected_git_dir, &object_format, &ref_format, true)?;
+        ensure_init_objects_directory(
+            env_object_directory.as_deref(),
+            &directory,
+            &expected_git_dir,
+        )?;
+        apply_init_repository_format(
+            &expected_git_dir,
+            &object_format,
+            &ref_format,
+            &initial_branch,
+            true,
+        )?;
         apply_init_template(&expected_git_dir, template.as_ref())?;
         apply_shared_repository(&expected_git_dir, shared.as_deref())?;
         restore_reinit_head(
@@ -3531,13 +4328,22 @@ pub(crate) fn init_command(
         return Ok(());
     }
     let result = init_repository(
-        directory,
+        &directory,
         InitRepositoryOptions {
             bare,
-            initial_branch,
+            initial_branch: initial_branch.clone(),
+            objects_directory: init_objects_directory(env_object_directory.as_deref(), &directory),
+            populate_template_files: true,
+            write_log_all_ref_updates,
         },
     )?;
-    apply_init_repository_format(&result.git_dir, &object_format, &ref_format, reinit)?;
+    apply_init_repository_format(
+        &result.git_dir,
+        &object_format,
+        &ref_format,
+        &initial_branch,
+        reinit,
+    )?;
     apply_init_template(&result.git_dir, template.as_ref())?;
     apply_shared_repository(&result.git_dir, shared.as_deref())?;
     apply_msys_shared_parent_permissions(&shared_parent_dirs)?;
@@ -3548,6 +4354,33 @@ pub(crate) fn init_command(
         explicit_initial_branch.as_deref(),
     )?;
     print_init_message_if_needed(quiet, reinit, &result.git_dir, shared.as_deref());
+    Ok(())
+}
+
+fn init_objects_directory(value: Option<&std::ffi::OsStr>, base: &Path) -> Option<PathBuf> {
+    value.map(|value| {
+        if value.is_empty() {
+            return PathBuf::new();
+        }
+        let path = normalize_windows_input_path(PathBuf::from(value));
+        if path.is_absolute() {
+            path
+        } else {
+            base.join(path)
+        }
+    })
+}
+
+fn ensure_init_objects_directory(
+    value: Option<&std::ffi::OsStr>,
+    base: &Path,
+    git_dir: &Path,
+) -> Result<()> {
+    let objects_directory =
+        init_objects_directory(value, base).unwrap_or_else(|| git_dir.join("objects"));
+    std::fs::create_dir_all(&objects_directory)?;
+    std::fs::create_dir_all(objects_directory.join("info"))?;
+    std::fs::create_dir_all(objects_directory.join("pack"))?;
     Ok(())
 }
 
@@ -3701,35 +4534,35 @@ fn validate_init_object_format(value: &str) -> Result<()> {
     }
 }
 
-fn resolve_init_ref_format(explicit: Option<String>) -> Result<String> {
+pub(crate) fn resolve_init_ref_format(explicit: Option<String>) -> Result<String> {
     if let Some(value) = explicit {
         return validate_init_ref_format(&value).map(|_| value);
     }
+    if let Some(backend) = init_reference_backend()? {
+        return Ok(backend.format);
+    }
     let feature_experimental =
         global_config_value("feature", "experimental")?.as_deref() == Some("true");
+    let configured = global_config_value("init", "defaultrefformat")?;
+    if let Some(value) = configured.as_deref()
+        && validate_init_ref_format(value).is_err()
+    {
+        eprintln!("warning: unknown ref storage format '{value}'");
+    }
     if let Ok(value) = std::env::var("GIT_DEFAULT_REF_FORMAT")
         && !value.is_empty()
-        && (!is_inherited_default_ref_format(&value) || feature_experimental)
     {
         return validate_init_ref_format(&value).map(|_| value);
     }
-    if let Some(value) = global_config_value("init", "defaultrefformat")? {
-        if validate_init_ref_format(&value).is_ok() {
-            return Ok(value);
-        }
-        eprintln!("warning: unknown ref storage format '{value}'");
+    if let Some(value) = configured
+        && validate_init_ref_format(&value).is_ok()
+    {
+        return Ok(value);
     }
     if feature_experimental {
         return Ok("reftable".to_owned());
     }
     Ok("files".to_owned())
-}
-
-fn is_inherited_default_ref_format(value: &str) -> bool {
-    match std::env::var("GIT_TEST_DEFAULT_REF_FORMAT") {
-        Ok(default) => value == default,
-        Err(_) => value == "files",
-    }
 }
 
 fn validate_init_ref_format(value: &str) -> Result<()> {
@@ -3746,20 +4579,113 @@ fn apply_init_repository_format(
     git_dir: &Path,
     object_format: &str,
     ref_format: &str,
+    initial_branch: &str,
     reinit: bool,
 ) -> Result<()> {
     if reinit {
         return Ok(());
     }
-    if object_format == "sha256" || ref_format == "reftable" {
+    let reference_backend = init_reference_backend()?;
+    if object_format == "sha256" || ref_format == "reftable" || reference_backend.is_some() {
         set_config_value_in_file(&git_dir.join("config"), "core.repositoryformatversion", "1")?;
     }
     if object_format == "sha256" {
         set_config_value_in_file(&git_dir.join("config"), "extensions.objectFormat", "sha256")?;
     }
-    if ref_format == "reftable" {
-        set_config_value_in_file(&git_dir.join("config"), "extensions.refStorage", "reftable")?;
+    if ref_format == "reftable" || reference_backend.is_some() {
+        let storage_value = reference_backend
+            .as_ref()
+            .map(|backend| backend.value.as_str())
+            .unwrap_or("reftable");
+        set_config_value_in_file(
+            &git_dir.join("config"),
+            "extensions.refStorage",
+            storage_value,
+        )?;
+        let algorithm = match object_format {
+            "sha1" => GitHashAlgorithm::Sha1,
+            "sha256" => GitHashAlgorithm::Sha256,
+            other => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("unknown object format '{other}'"),
+                });
+            }
+        };
+        if let Some(backend) = reference_backend {
+            initialize_alternate_ref_backend(git_dir, &backend, algorithm, initial_branch)?;
+        } else {
+            zmin_git_core::initialize_reftable_ref_store(
+                git_dir,
+                algorithm,
+                &format!("refs/heads/{initial_branch}"),
+            )?;
+        }
     }
+    Ok(())
+}
+
+struct InitReferenceBackend {
+    format: String,
+    path: PathBuf,
+    value: String,
+}
+
+fn init_reference_backend() -> Result<Option<InitReferenceBackend>> {
+    let Some(value) = std::env::var_os("GIT_REFERENCE_BACKEND") else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let value = value.to_string_lossy().into_owned();
+    let Some((format, path)) = value.split_once("://") else {
+        return Err(invalid_reference_backend(&value));
+    };
+    if !matches!(format, "files" | "reftable") || path.is_empty() {
+        return Err(invalid_reference_backend(&value));
+    }
+    let path = PathBuf::from(path);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    Ok(Some(InitReferenceBackend {
+        format: format.to_owned(),
+        path,
+        value,
+    }))
+}
+
+fn invalid_reference_backend(value: &str) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "error: invalid value for 'extensions.refstorage': '{value}'\n\
+             fatal: invalid reference backend\n"
+        ),
+    }
+}
+
+fn initialize_alternate_ref_backend(
+    git_dir: &Path,
+    backend: &InitReferenceBackend,
+    algorithm: GitHashAlgorithm,
+    initial_branch: &str,
+) -> Result<()> {
+    let kind = match backend.format.as_str() {
+        "files" => zmin_git_core::refs::RefStorageKind::Files,
+        "reftable" => zmin_git_core::refs::RefStorageKind::Reftable,
+        _ => unreachable!("reference backend format was validated"),
+    };
+    zmin_git_core::initialize_alternate_ref_store(
+        git_dir,
+        &backend.path,
+        algorithm,
+        kind,
+        &format!("refs/heads/{initial_branch}"),
+    )?;
     Ok(())
 }
 
@@ -3873,7 +4799,7 @@ fn write_non_bare_git_dir_config(git_dir: &Path, work_tree: &Path) -> Result<()>
 fn apply_init_template(git_dir: &Path, explicit_template: Option<&PathBuf>) -> Result<()> {
     if let Some(template) = explicit_template {
         remove_default_template_files(git_dir)?;
-        if template.as_os_str().is_empty() || template.as_os_str() == EMPTY_INIT_TEMPLATE_SENTINEL {
+        if template.as_os_str().is_empty() || template.as_os_str() == EMPTY_TEMPLATE_SENTINEL {
             return Ok(());
         }
         copy_template_dir(template, git_dir)?;
@@ -3964,12 +4890,86 @@ fn copy_template_dir(source: &Path, destination: &Path) -> Result<()> {
 fn apply_shared_repository(git_dir: &Path, explicit_shared: Option<&str>) -> Result<()> {
     let value = explicit_shared
         .map(str::to_owned)
+        .or_else(|| {
+            read_config_file(&git_dir.join("config"))
+                .ok()?
+                .into_iter()
+                .rev()
+                .find(|entry| {
+                    entry.section == "core"
+                        && entry.subsection.is_empty()
+                        && entry.key == "sharedrepository"
+                })
+                .map(|entry| entry.value)
+        })
         .or(global_config_value("core", "sharedrepository")?);
     if let Some(value) = value {
-        set_config_value_in_file(&git_dir.join("config"), "core.sharedRepository", &value)?;
-        apply_shared_repository_permissions(git_dir, &value)?;
+        let mode = parse_shared_repository_mode(&value)?;
+        set_config_value_in_file(
+            &git_dir.join("config"),
+            "core.sharedRepository",
+            &mode.config_value(),
+        )?;
+        apply_shared_repository_permissions(git_dir, mode)?;
     }
     Ok(())
+}
+
+pub(crate) fn refresh_shared_repository_permissions(git_dir: &Path) -> Result<()> {
+    let value = read_config_file(&git_dir.join("config"))?
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core"
+                && entry.subsection.is_empty()
+                && entry.key == "sharedrepository"
+        })
+        .map(|entry| entry.value);
+    if let Some(value) = value {
+        apply_shared_repository_permissions(git_dir, parse_shared_repository_mode(&value)?)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum SharedRepositoryMode {
+    Umask,
+    Group,
+    All,
+    Forced(u32),
+}
+
+impl SharedRepositoryMode {
+    fn config_value(self) -> String {
+        match self {
+            Self::Umask => "0".to_owned(),
+            Self::Group => "1".to_owned(),
+            Self::All => "2".to_owned(),
+            Self::Forced(mode) => format!("0{mode:03o}"),
+        }
+    }
+}
+
+fn parse_shared_repository_mode(value: &str) -> Result<SharedRepositoryMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "0" | "umask" => Ok(SharedRepositoryMode::Umask),
+        "1" | "true" | "yes" | "on" | "group" => Ok(SharedRepositoryMode::Group),
+        "2" | "all" | "world" | "everybody" => Ok(SharedRepositoryMode::All),
+        raw => {
+            let raw = raw.strip_prefix('0').unwrap_or(raw);
+            let mode = u32::from_str_radix(raw, 8).map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid shared repository mode: {value}"),
+            })?;
+            if mode & 0o200 == 0 {
+                return Err(CliError::Fatal {
+                    code: 1,
+                    message: "shared repository mode must allow owner write access".into(),
+                });
+            }
+            Ok(SharedRepositoryMode::Forced(mode))
+        }
+    }
 }
 
 fn hide_dotgit_if_needed(git_path: &Path, bare: bool) -> Result<()> {
@@ -3979,33 +4979,86 @@ fn hide_dotgit_if_needed(git_path: &Path, bare: bool) -> Result<()> {
     if global_config_value("core", "hidedotfiles")?.as_deref() == Some("false") {
         return Ok(());
     }
-    let status = std::process::Command::new("attrib")
-        .arg("+h")
-        .arg(git_path)
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Fatal {
-            code: status.code().unwrap_or(1),
-            message: format!("failed to hide {}", git_path.display()),
-        })
+    hide_windows_hidden_path(git_path)
+}
+
+#[cfg(windows)]
+fn hide_windows_hidden_path(path: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_HIDDEN, GetFileAttributesW, INVALID_FILE_ATTRIBUTES, SetFileAttributesW,
+    };
+
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let attributes = unsafe { GetFileAttributesW(wide_path.as_ptr()) };
+    if attributes == INVALID_FILE_ATTRIBUTES {
+        return Err(CliError::Io(std::io::Error::last_os_error()));
     }
+    if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        return Ok(());
+    }
+    let ok = unsafe { SetFileAttributesW(wide_path.as_ptr(), attributes | FILE_ATTRIBUTE_HIDDEN) };
+    if ok == 0 {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: format!("failed to hide {}", path.display()),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn hide_windows_hidden_path(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
-fn apply_shared_repository_permissions(git_dir: &Path, value: &str) -> Result<()> {
+fn apply_shared_repository_permissions(git_dir: &Path, shared: SharedRepositoryMode) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
-    if value == "0660" || value == "660" {
-        std::fs::set_permissions(git_dir, std::fs::Permissions::from_mode(0o2770))?;
+    let mut pending = vec![git_dir.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let current = metadata.permissions().mode();
+        let mode = if metadata.is_dir() {
+            for entry in fs::read_dir(&path)? {
+                pending.push(entry?.path());
+            }
+            match shared {
+                SharedRepositoryMode::Umask => current,
+                SharedRepositoryMode::Group => current | 0o2770,
+                SharedRepositoryMode::All => current | 0o2775,
+                SharedRepositoryMode::Forced(mode) => 0o2000 | mode | ((mode & 0o444) >> 2),
+            }
+        } else {
+            match shared {
+                SharedRepositoryMode::Umask => current,
+                SharedRepositoryMode::Group => current | 0o060,
+                SharedRepositoryMode::All => current | 0o064,
+                SharedRepositoryMode::Forced(mode) => {
+                    let executable = current & 0o111 != 0;
+                    mode | if executable { (mode & 0o444) >> 2 } else { 0 }
+                }
+            }
+        };
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
     }
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn apply_shared_repository_permissions(_git_dir: &Path, _value: &str) -> Result<()> {
-    if cfg!(windows) && (_value == "0660" || _value == "660") {
+fn apply_shared_repository_permissions(
+    _git_dir: &Path,
+    _shared: SharedRepositoryMode,
+) -> Result<()> {
+    if cfg!(windows) && matches!(_shared, SharedRepositoryMode::Forced(0o660)) {
         run_msys_chmod("2770", _git_dir)?;
     }
     Ok(())

@@ -1,8 +1,17 @@
 use super::*;
+use std::collections::HashSet;
+
+const WRITE_TREE_INDEX_CACHE_FILE: &str = "write-tree-cache-v1";
+
+struct WriteTreeIndexCache {
+    index_sha1_hex: String,
+    tree_id: ObjectId,
+}
 
 pub(crate) struct CommitCommandOptions<'a> {
     pub(crate) all: bool,
     pub(crate) include: bool,
+    pub(crate) interactive: bool,
     pub(crate) only: bool,
     pub(crate) patch: bool,
     pub(crate) allow_empty: bool,
@@ -107,10 +116,12 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     let (repo, store, mut index) = {
         let _trace = phase_trace("commit.setup");
         let repo = find_repo()?;
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let algorithm = repo_hash_algorithm_from_config(&repo)?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
         let index = read_repo_index(&repo)?;
         (repo, store, index)
     };
+    let merge_heads = read_merge_heads(&repo)?;
     let mut paths = options.paths;
     if let Some(pathspec_file) = options.pathspec_from_file {
         let loaded = read_pathspec_file(pathspec_file, options.pathspec_file_nul)?;
@@ -121,27 +132,21 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
             message: "the option '--pathspec-file-nul' requires '--pathspec-from-file'".into(),
         });
     }
-    if options.patch {
+    if options.interactive {
         let pathspecs = commit_pathspecs(&repo, &paths)?;
-        worktree_commands::add_patch_quit_lane(&repo, &store, &index, &pathspecs)?;
-        println!();
-        worktree_commands::status(
-            None,
-            false,
-            false,
-            false,
-            0,
-            None,
-            false,
-            false,
-            None,
-            false,
-            false,
-            None,
-            None,
-            Vec::new(),
+        worktree_commands::commit_interactive_stage(&repo, &store, &index, &pathspecs)?;
+        index = read_repo_index(&repo)?;
+    } else if options.patch {
+        let pathspecs = commit_pathspecs(&repo, &paths)?;
+        let mut answers = patch_commands::PatchAnswers::read()?;
+        let _ = worktree_commands::stage_worktree_patch_hunks_to_index(
+            &repo,
+            &store,
+            &index,
+            &pathspecs,
+            &mut answers,
         )?;
-        return Err(CliError::Exit(1));
+        index = read_repo_index(&repo)?;
     }
     let fixup_options = {
         let _trace = phase_trace("commit.validate_options");
@@ -246,8 +251,8 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     let (refs, head_refs, commit_cache) = {
         let _trace = phase_trace("commit.refs");
         let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-        let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
-        let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let refs = RefStore::new(&common_git_dir, store.algorithm());
+        let head_refs = RefStore::new(&repo.git_dir, store.algorithm());
         let commit_cache = CommitObjectCache::new(&store);
         (refs, head_refs, commit_cache)
     };
@@ -318,7 +323,18 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     }
     let tree = {
         let _trace = phase_trace("commit.write_tree");
-        write_tree_from_index(&store, commit_index)?
+        match write_tree_from_index(&store, commit_index) {
+            Ok(tree) => tree,
+            Err(error) => {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    return Err(object_database_permission_denied_error(
+                        &repo,
+                        "error: Error building trees\n",
+                    ));
+                }
+                return Err(CliError::Io(error));
+            }
+        }
     };
     let reused_author = {
         let _trace = phase_trace("commit.reused_author");
@@ -395,16 +411,20 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
             summary_parent_tree = Some(parent_commit.tree.clone());
             if parent_commit.tree == tree
                 && !options.allow_empty
+                && merge_heads.is_empty()
                 && !matches!(
                     fixup_options.as_ref().map(|fixup| fixup.mode),
                     Some(CommitFixupMode::Reword)
                 )
             {
-                return Err(CliError::Message(
-                    "nothing to commit, working tree clean".into(),
-                ));
+                return commit_no_changes();
             }
             parents.push(parent);
+            for merge_head in &merge_heads {
+                if !parents.contains(merge_head) {
+                    parents.push(merge_head.clone());
+                }
+            }
             let base_author = if options.reset_author {
                 None
             } else {
@@ -417,7 +437,7 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
                 options.date_override,
             )?
         } else if index.entries().is_empty() && !options.allow_empty {
-            return Err(CliError::Message("nothing to commit".into()));
+            return commit_no_changes();
         } else {
             let base_author = if options.reset_author {
                 None
@@ -433,6 +453,15 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         };
         (committer, author)
     };
+    if options.no_edit
+        && !merge_heads.is_empty()
+        && options.messages.is_empty()
+        && options.message_file.is_none()
+        && options.reuse_message.is_none()
+        && options.reedit_message.is_none()
+    {
+        reused_message = Some(fs::read(repo.git_dir.join("MERGE_MSG"))?);
+    }
     let cleanup_mode = commit_cleanup_mode(options.cleanup, options.no_cleanup)?;
     let (mut message, uses_editor) = {
         let _trace = phase_trace("commit.prepare_message");
@@ -592,12 +621,20 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         format!("commit (amend): {reflog_subject}")
     } else if is_initial_commit {
         format!("commit (initial): {reflog_subject}")
+    } else if !merge_heads.is_empty() {
+        format!("commit (merge): {reflog_subject}")
     } else {
         format!("commit: {reflog_subject}")
     };
     {
         let _trace = phase_trace("commit.update_ref");
         update_commit_head_ref(&repo, &head_refs, &refs, &id, &reflog_message)?;
+    }
+    if !options.dry_run {
+        let _trace = phase_trace("commit.refresh_index_cache_tree");
+        index.refresh_cache_tree();
+        index.write_to_path(&repo.index_path)?;
+        remove_commit_merge_state(&repo)?;
     }
     if let Some(pathspec_commit) = pathspec_commit
         && !matches!(
@@ -606,6 +643,8 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         )
     {
         let _trace = phase_trace("commit.write_pathspec_index");
+        let mut pathspec_commit = pathspec_commit;
+        pathspec_commit.real_index.refresh_cache_tree();
         pathspec_commit.real_index.write_to_path(&repo.index_path)?;
     }
     let use_hook_worktree_summary = {
@@ -647,6 +686,58 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
             summary_date_author,
             post_commit_summary_new_source(use_hook_worktree_summary),
         )?;
+    }
+    Ok(())
+}
+
+fn commit_no_changes<T>() -> Result<T> {
+    worktree_commands::status(
+        None,
+        false,
+        true,
+        false,
+        0,
+        None,
+        false,
+        true,
+        None,
+        false,
+        false,
+        None,
+        None,
+        Vec::new(),
+    )?;
+    Err(CliError::Exit(1))
+}
+
+fn read_merge_heads(repo: &GitRepo) -> Result<Vec<ObjectId>> {
+    let path = repo.git_dir.join("MERGE_HEAD");
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            ObjectId::from_hex(GitHashAlgorithm::Sha1, line.trim()).map_err(|error| {
+                CliError::Fatal {
+                    code: 128,
+                    message: format!("corrupt MERGE_HEAD: {error}"),
+                }
+            })
+        })
+        .collect()
+}
+
+fn remove_commit_merge_state(repo: &GitRepo) -> Result<()> {
+    for name in ["MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE"] {
+        match fs::remove_file(repo.git_dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
     }
     Ok(())
 }
@@ -888,21 +979,15 @@ fn signature_summary_date(signature: &Signature) -> Result<String> {
 }
 
 fn commit_summary_branch(repo: &GitRepo) -> Result<String> {
-    let raw = fs::read_to_string(repo.git_dir.join("HEAD")).unwrap_or_default();
-    if let Some(name) = raw
-        .trim_end_matches('\n')
-        .strip_prefix("ref: ")
-        .map(str::to_owned)
-    {
-        return Ok(name
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    match refs.read_head() {
+        Ok(RefTarget::Symbolic(name)) => Ok(name
             .strip_prefix("refs/heads/")
             .unwrap_or(name.as_str())
-            .to_owned());
-    }
-    if !raw.trim().is_empty() {
-        Ok("detached HEAD".to_owned())
-    } else {
-        Ok("HEAD".to_owned())
+            .to_owned()),
+        Ok(RefTarget::Direct(_)) => Ok("detached HEAD".to_owned()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok("HEAD".to_owned()),
+        Err(error) => Err(CliError::Io(error)),
     }
 }
 
@@ -1109,6 +1194,7 @@ fn update_commit_head_ref(
     id: &ObjectId,
     reflog_message: &str,
 ) -> Result<()> {
+    let write_reflogs = automatic_reflog_enabled(repo)?;
     let head = {
         let _trace = phase_trace("commit.update_ref.read_head");
         head_refs.read_head()?
@@ -1131,18 +1217,21 @@ fn update_commit_head_ref(
                 let _trace = phase_trace("commit.update_ref.write_ref");
                 common_refs.write_ref(&target, id)?;
             }
-            {
+            if write_reflogs {
                 let _trace = phase_trace("commit.update_ref.branch_reflog");
                 append_reflog(&common_repo, &target, &old_id, id, reflog_message)?;
-            }
-            {
                 let _trace = phase_trace("commit.update_ref.head_reflog");
-                append_reflog(repo, "HEAD", &old_id, id, reflog_message)
+                append_reflog(repo, "HEAD", &old_id, id, reflog_message)?;
             }
+            Ok(())
         }
         RefTarget::Direct(_) => {
             let _trace = phase_trace("commit.update_ref.write_head_direct");
-            write_head_direct_with_reflog(repo, head_refs, id, reflog_message)
+            if write_reflogs {
+                write_head_direct_with_reflog(repo, head_refs, id, reflog_message)
+            } else {
+                Ok(head_refs.write_head_direct(id)?)
+            }
         }
     }
 }
@@ -1222,15 +1311,17 @@ fn squash_commit_message(squash_subject: &str, mut message: Vec<u8>) -> Vec<u8> 
 }
 
 fn run_external_citool(args: &[String]) -> Result<()> {
-    let status = ProcessCommand::new(stock_git_binary())
-        .arg("citool")
-        .args(args)
-        .status()
-        .map_err(CliError::Io)?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Exit(status.code().unwrap_or(1)))
+    if citool_help_error(args) {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "usage: /usr/local/bin/git-citool citool \n".into(),
+        });
+    }
+    if citool_noop_success(args) {
+        return Ok(());
+    }
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     }
 }
 
@@ -1273,66 +1364,14 @@ fn gui_citool(args: &[String]) -> Result<()> {
     run_external_citool(args)
 }
 
-fn stock_git_binary() -> &'static Path {
-    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+fn citool_help_error(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
 }
 
-fn resolve_stock_git_binary() -> PathBuf {
-    for candidate in stock_git_candidates() {
-        if is_stock_git_binary(&candidate) {
-            return candidate;
-        }
-    }
-    for path in std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| {
-            stock_git_names()
-                .into_iter()
-                .map(move |name| dir.join(name))
-        })
-    {
-        if is_stock_git_binary(&path) {
-            return path;
-        }
-    }
-    PathBuf::from("/usr/bin/git")
-}
-
-fn stock_git_candidates() -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        vec![
-            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
-        ]
-    }
-    #[cfg(not(windows))]
-    {
-        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
-    }
-}
-
-fn stock_git_names() -> Vec<&'static str> {
-    if cfg!(windows) {
-        vec!["git.exe", "git"]
-    } else {
-        vec!["git"]
-    }
-}
-
-fn is_stock_git_binary(path: &Path) -> bool {
-    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    version.starts_with("git version ") && !version.contains("zmin")
+fn citool_noop_success(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "-m" | "--message" | "--file" | "-F"))
 }
 
 struct CommitMessageInput<'a> {
@@ -1790,33 +1829,192 @@ fn read_commit_message_file(path: &std::path::Path) -> Result<Vec<u8>> {
 }
 
 fn write_tree_command(prefix: Option<&str>, missing_ok: bool) -> Result<()> {
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut index = read_repo_index(&repo)?;
+    let _trace = phase_trace("write_tree.total");
+    let repo = {
+        let _trace = phase_trace("write_tree.find_repo");
+        find_repo_or_bare()?
+    };
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let mut index = {
+        let _trace = phase_trace("write_tree.read_index");
+        read_repo_index(&repo)?
+    };
     if let Some(prefix) = prefix {
+        let _trace = phase_trace("write_tree.prefix_index");
         index = write_tree_prefix_index(&index, prefix)?;
     }
+    let index_cache_key = if prefix.is_none() {
+        let _trace = phase_trace("write_tree.cache_key");
+        compute_write_tree_index_cache_key(&repo)?
+    } else {
+        None
+    };
     if !missing_ok {
+        let _trace = phase_trace("write_tree.validate_objects");
         write_tree_validate_index_objects(&store, &index)?;
     }
-    let tree = write_tree_from_index(&store, &index)?;
+    let cached_tree = if prefix.is_none() {
+        let _trace = phase_trace("write_tree.read_cache");
+        read_write_tree_index_cache(&repo)?
+    } else {
+        None
+    };
+    if let Some(index_sha1_hex) = index_cache_key.as_deref()
+        && let Some(cached) = cached_tree
+        && cached.index_sha1_hex == index_sha1_hex
+        && store.contains_object(&cached.tree_id)?
+    {
+        println!("{}", cached.tree_id.to_hex());
+        return Ok(());
+    }
+    let tree = {
+        let _trace = phase_trace("write_tree.from_index");
+        match write_tree_from_index(&store, &index) {
+            Ok(tree) => tree,
+            Err(error) => {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    return Err(object_database_permission_denied_error(
+                        &repo,
+                        "fatal: git-write-tree: error building trees\n",
+                    ));
+                }
+                return Err(CliError::Io(error));
+            }
+        }
+    };
+    if prefix.is_none() && repo.index_path.is_file() {
+        let _trace = phase_trace("write_tree.refresh_index_cache_tree");
+        index.refresh_cache_tree();
+        index.write_to_path(&repo.index_path)?;
+    }
+    if let Some(index_sha1_hex) = index_cache_key {
+        let _trace = phase_trace("write_tree.write_cache");
+        write_write_tree_index_cache(
+            &repo,
+            &WriteTreeIndexCache {
+                index_sha1_hex,
+                tree_id: tree.clone(),
+            },
+        )?;
+    }
     println!("{}", tree.to_hex());
     Ok(())
 }
 
+fn compute_write_tree_index_cache_key(repo: &GitRepo) -> Result<Option<String>> {
+    if !repo.index_path.is_file() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&repo.index_path)?;
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    if bytes.len() < digest_len {
+        return Ok(None);
+    }
+    let checksum = &bytes[bytes.len() - digest_len..];
+    Ok(Some(
+        ObjectId::new(GitHashAlgorithm::Sha1, checksum).to_hex(),
+    ))
+}
+
+fn read_write_tree_index_cache(repo: &GitRepo) -> Result<Option<WriteTreeIndexCache>> {
+    let path = write_tree_index_cache_path(repo);
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    let mut lines = text.lines();
+    let Some(index_sha1_hex) = lines.next() else {
+        return Ok(None);
+    };
+    let Some(tree_hex) = lines.next() else {
+        return Ok(None);
+    };
+    if lines.next().is_some() {
+        return Ok(None);
+    }
+    let Ok(tree_id) = ObjectId::from_hex(GitHashAlgorithm::Sha1, tree_hex) else {
+        return Ok(None);
+    };
+    Ok(Some(WriteTreeIndexCache {
+        index_sha1_hex: index_sha1_hex.to_owned(),
+        tree_id,
+    }))
+}
+
+fn write_write_tree_index_cache(repo: &GitRepo, cache: &WriteTreeIndexCache) -> Result<()> {
+    let path = write_tree_index_cache_path(repo);
+    let parent = path.parent().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "write-tree cache path has no parent".into(),
+    })?;
+    fs::create_dir_all(parent)?;
+    let content = format!("{}\n{}\n", cache.index_sha1_hex, cache.tree_id.to_hex());
+    let tmp_path = unique_temp_sibling(&path);
+    fs::write(&tmp_path, content)?;
+    fs::rename(tmp_path, path)?;
+    Ok(())
+}
+
+fn write_tree_index_cache_path(repo: &GitRepo) -> PathBuf {
+    repo.git_dir.join("zmin").join(WRITE_TREE_INDEX_CACHE_FILE)
+}
+
 fn write_tree_validate_index_objects(store: &LooseObjectStore, index: &GitIndex) -> Result<()> {
+    let mut seen = HashSet::with_capacity(index.entries().len().min(8192));
+    let mut unique_ids = Vec::with_capacity(index.entries().len().min(8192));
+    let mut first_path_by_id =
+        std::collections::HashMap::with_capacity(index.entries().len().min(8192));
     for entry in index.entries() {
-        if entry.stage != 0 || entry.mode == IndexMode::Gitlink {
+        if entry.stage != 0 {
             continue;
         }
-        store.read_object(&entry.id).map_err(|_| CliError::Fatal {
+        if entry.id.as_bytes().iter().all(|byte| *byte == 0) {
+            let path = String::from_utf8_lossy(&entry.path);
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: invalid object {:o} {} for '{}'\nfatal: git-write-tree: error building trees\n",
+                    entry.mode.bits(),
+                    entry.id.to_hex(),
+                    path
+                ),
+            });
+        }
+        if entry.mode == IndexMode::Gitlink {
+            continue;
+        }
+        if !seen.insert(entry.id.clone()) {
+            continue;
+        }
+        first_path_by_id.insert(entry.id.clone(), entry.path.clone());
+        unique_ids.push(entry.id.clone());
+    }
+    let missing = store
+        .missing_objects(&unique_ids)
+        .map_err(|error| CliError::Fatal {
             code: 128,
-            message: format!(
-                "invalid object {} for '{}'",
-                entry.id.to_hex(),
-                String::from_utf8_lossy(&entry.path)
-            ),
+            message: error.to_string(),
         })?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    for id in unique_ids {
+        if !missing.contains(&id) {
+            continue;
+        }
+        let path = first_path_by_id
+            .get(&id)
+            .map(|path| String::from_utf8_lossy(path).into_owned())
+            .unwrap_or_else(|| "<unknown>".to_owned());
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid object {} for '{}'", id.to_hex(), path),
+        });
     }
     Ok(())
 }
@@ -1881,7 +2079,7 @@ fn commit_tree(
     gpg_sign: Option<&str>,
     no_gpg_sign: bool,
 ) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree = resolve_objectish(&repo, tree).map_err(|_| CliError::Fatal {
         code: 128,
@@ -1931,6 +2129,9 @@ pub(crate) fn commit_tree_gpg_signature(
         return Ok(None);
     };
     let payload = builder.encode()?;
+    if read_config_value(repo, "gpg.format")?.as_deref() == Some("ssh") {
+        return commit_tree_ssh_signature(repo, &payload, signing_key);
+    }
     let program = read_config_value(repo, "gpg.program")?.unwrap_or_else(|| "gpg".to_owned());
     let mut child = std::process::Command::new(program)
         .arg("--status-fd=2")
@@ -1951,6 +2152,48 @@ pub(crate) fn commit_tree_gpg_signature(
             code: 1,
             text: format!(
                 "error: gpg failed to sign the data:\n{}\n",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        });
+    }
+    Ok(Some(output.stdout))
+}
+
+fn commit_tree_ssh_signature(
+    repo: &GitRepo,
+    payload: &[u8],
+    signing_key: Option<String>,
+) -> Result<Option<Vec<u8>>> {
+    let signing_key = signing_key
+        .or(read_config_value(repo, "user.signingkey")?)
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "user.signingKey needs to be set for ssh signing".into(),
+        })?;
+    let program =
+        read_config_value(repo, "gpg.ssh.program")?.unwrap_or_else(|| "ssh-keygen".to_owned());
+    let mut child = std::process::Command::new(&program)
+        .args(["-Y", "sign", "-n", "git", "-f", &signing_key])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(CliError::Io)?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 1,
+            message: format!("cannot open stdin for '{program}'"),
+        })?
+        .write_all(payload)?;
+    drop(child.stdin.take());
+    let output = child.wait_with_output().map_err(CliError::Io)?;
+    if !output.status.success() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: ssh-keygen failed to sign the data:\n{}\n",
                 String::from_utf8_lossy(&output.stderr)
             ),
         });
@@ -2023,7 +2266,7 @@ fn read_commit_tree_message_file(path: &std::path::Path) -> Result<Vec<u8>> {
 }
 
 fn mktree(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;

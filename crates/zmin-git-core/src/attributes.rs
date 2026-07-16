@@ -8,6 +8,9 @@ use crate::object::ObjectId;
 #[derive(Debug, Clone, Default)]
 pub struct GitAttributes {
     rules: Vec<AttributeRule>,
+    macros: BTreeMap<String, Vec<AttributeAssignment>>,
+    warnings: Vec<String>,
+    ignore_case: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +34,7 @@ impl AttributeValue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AttributeRule {
+    base: String,
     pattern: String,
     assignments: Vec<AttributeAssignment>,
 }
@@ -56,25 +60,96 @@ impl GitAttributes {
     }
 
     pub fn parse(content: &str) -> Self {
+        Self::parse_with_source(content, ".gitattributes")
+    }
+
+    pub fn parse_with_source(content: &str, source: &str) -> Self {
+        Self::parse_with_base_and_source_and_case(content, "", source, false)
+    }
+
+    pub fn parse_with_base_and_source(content: &str, base: &str, source: &str) -> Self {
+        Self::parse_with_base_and_source_and_case(content, base, source, false)
+    }
+
+    pub fn parse_with_base_and_source_and_case(
+        content: &str,
+        base: &str,
+        source: &str,
+        ignore_case: bool,
+    ) -> Self {
         let mut rules = Vec::new();
-        for line in content.lines() {
-            let line = line.split('#').next().unwrap_or("").trim();
+        let mut macros = BTreeMap::new();
+        let mut warnings = Vec::new();
+        let base = base.trim_matches('/').replace('\\', "/");
+        for (line_number, raw_line) in content.lines().enumerate() {
+            if raw_line.len() >= 2048 {
+                warnings.push(format!(
+                    "warning: ignoring overly long attributes line {}",
+                    line_number + 1
+                ));
+                continue;
+            }
+            let line = raw_line.split('#').next().unwrap_or("").trim();
             if line.is_empty() {
                 continue;
             }
-            let mut parts = line.split_whitespace();
-            let Some(pattern) = parts.next() else {
+            let parts = split_attribute_tokens(line);
+            let Some(pattern) = parts.first() else {
                 continue;
             };
-            let assignments = parts.filter_map(parse_assignment).collect::<Vec<_>>();
+            if !pattern.starts_with("\\!") && pattern.starts_with('!') {
+                warnings.push(
+                    "Negative patterns are ignored in git attributes\nUse '\\!' for literal leading exclamation."
+                        .to_owned(),
+                );
+                continue;
+            }
+            let pattern = unescape_attribute_pattern(pattern);
+            let assignments = parts
+                .iter()
+                .skip(1)
+                .filter_map(|value| parse_assignment(value, source, line_number + 1, &mut warnings))
+                .collect::<Vec<_>>();
             if !assignments.is_empty() {
-                rules.push(AttributeRule {
-                    pattern: pattern.trim_start_matches('/').to_owned(),
-                    assignments,
-                });
+                if let Some(name) = pattern.strip_prefix("[attr]") {
+                    if valid_attr_name(name) && !builtin_attr_name(name) {
+                        macros.insert(name.to_owned(), assignments);
+                    } else if !name.is_empty() {
+                        warnings.push(format!(
+                            "{name} is not a valid attribute name: {source}:{}",
+                            line_number + 1
+                        ));
+                    }
+                } else {
+                    rules.push(AttributeRule {
+                        base: base.clone(),
+                        pattern: pattern.trim_start_matches('/').to_owned(),
+                        assignments,
+                    });
+                }
             }
         }
-        Self { rules }
+        Self {
+            rules,
+            macros,
+            warnings,
+            ignore_case,
+        }
+    }
+
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+
+    pub fn set_ignore_case(&mut self, ignore_case: bool) {
+        self.ignore_case = ignore_case;
+    }
+
+    pub fn append(&mut self, mut other: Self) {
+        self.rules.append(&mut other.rules);
+        self.warnings.append(&mut other.warnings);
+        self.macros.append(&mut other.macros);
+        self.ignore_case |= other.ignore_case;
     }
 
     pub fn check(&self, path: &[u8], attrs: &[String]) -> Vec<(String, AttributeValue)> {
@@ -110,15 +185,27 @@ impl GitAttributes {
 
     fn values_for_path_ordered(&self, path: &[u8]) -> Vec<(String, AttributeValue)> {
         let relative = String::from_utf8_lossy(path).replace('\\', "/");
-        let basename = relative.rsplit('/').next().unwrap_or(&relative);
         let mut values = BTreeMap::new();
         let mut order = Vec::new();
         for rule in &self.rules {
-            if !attribute_pattern_matches(&rule.pattern, &relative, basename) {
+            let candidate = if rule.base.is_empty() {
+                relative.as_str()
+            } else if path_matches_rule_base(&rule.base, &relative, self.ignore_case) {
+                path_strip_rule_base(&rule.base, &relative, self.ignore_case).unwrap_or_default()
+            } else {
+                continue;
+            };
+            let candidate_basename = candidate.rsplit('/').next().unwrap_or(candidate);
+            if !attribute_pattern_matches(
+                &rule.pattern,
+                candidate,
+                candidate_basename,
+                self.ignore_case,
+            ) {
                 continue;
             }
             for assignment in &rule.assignments {
-                apply_assignment(&mut values, &mut order, assignment);
+                apply_assignment(&mut values, &mut order, assignment, &self.macros);
             }
         }
         let mut rows = order
@@ -263,24 +350,33 @@ fn apply_assignment(
     values: &mut BTreeMap<String, AttributeValue>,
     order: &mut Vec<String>,
     assignment: &AttributeAssignment,
+    macros: &BTreeMap<String, Vec<AttributeAssignment>>,
 ) {
-    if assignment.name == "binary" && assignment.value == AttributeValue::Set {
-        for (name, value) in [
-            ("binary", AttributeValue::Set),
-            ("diff", AttributeValue::Unset),
-            ("merge", AttributeValue::Unset),
-            ("text", AttributeValue::Unset),
-        ] {
-            insert_attribute_value(values, order, name.to_owned(), value);
+    let mut pending = vec![assignment.clone()];
+    while let Some(current) = pending.pop() {
+        if current.name == "binary" && current.value == AttributeValue::Set {
+            for (name, value) in [
+                ("binary", AttributeValue::Set),
+                ("diff", AttributeValue::Unset),
+                ("merge", AttributeValue::Unset),
+                ("text", AttributeValue::Unset),
+            ] {
+                insert_attribute_value(values, order, name.to_owned(), value);
+            }
+            continue;
         }
-        return;
+        let macro_body = if current.value == AttributeValue::Set {
+            macros.get(&current.name)
+        } else {
+            None
+        };
+        insert_attribute_value(values, order, current.name.clone(), current.value.clone());
+        if let Some(body) = macro_body {
+            for nested in body.iter().rev() {
+                pending.push(nested.clone());
+            }
+        }
     }
-    insert_attribute_value(
-        values,
-        order,
-        assignment.name.clone(),
-        assignment.value.clone(),
-    );
 }
 
 fn insert_attribute_value(
@@ -305,26 +401,37 @@ fn check_attr_all_order_key(name: &str) -> usize {
     }
 }
 
-fn parse_assignment(value: &str) -> Option<AttributeAssignment> {
+fn parse_assignment(
+    value: &str,
+    source: &str,
+    line_number: usize,
+    warnings: &mut Vec<String>,
+) -> Option<AttributeAssignment> {
     if let Some(name) = value.strip_prefix('-') {
-        return valid_attr_name(name).then(|| AttributeAssignment {
-            name: name.to_owned(),
-            value: AttributeValue::Unset,
+        return validate_assignment_name(name, source, line_number, warnings).then(|| {
+            AttributeAssignment {
+                name: name.to_owned(),
+                value: AttributeValue::Unset,
+            }
         });
     }
     if let Some(name) = value.strip_prefix('!') {
-        return valid_attr_name(name).then(|| AttributeAssignment {
-            name: name.to_owned(),
-            value: AttributeValue::Unspecified,
+        return validate_assignment_name(name, source, line_number, warnings).then(|| {
+            AttributeAssignment {
+                name: name.to_owned(),
+                value: AttributeValue::Unspecified,
+            }
         });
     }
     if let Some((name, attr_value)) = value.split_once('=') {
-        return valid_attr_name(name).then(|| AttributeAssignment {
-            name: name.to_owned(),
-            value: AttributeValue::Value(attr_value.to_owned()),
+        return validate_assignment_name(name, source, line_number, warnings).then(|| {
+            AttributeAssignment {
+                name: name.to_owned(),
+                value: AttributeValue::Value(attr_value.to_owned()),
+            }
         });
     }
-    valid_attr_name(value).then(|| AttributeAssignment {
+    validate_assignment_name(value, source, line_number, warnings).then(|| AttributeAssignment {
         name: value.to_owned(),
         value: AttributeValue::Set,
     })
@@ -337,17 +444,53 @@ fn valid_attr_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-fn attribute_pattern_matches(pattern: &str, relative: &str, basename: &str) -> bool {
+fn builtin_attr_name(name: &str) -> bool {
+    name.starts_with("builtin_")
+}
+
+fn validate_assignment_name(
+    name: &str,
+    source: &str,
+    line_number: usize,
+    warnings: &mut Vec<String>,
+) -> bool {
+    let valid = valid_attr_name(name) && !builtin_attr_name(name);
+    if !valid && !name.is_empty() {
+        warnings.push(format!(
+            "{name} is not a valid attribute name: {source}:{line_number}"
+        ));
+    }
+    valid
+}
+
+fn attribute_pattern_matches(
+    pattern: &str,
+    relative: &str,
+    basename: &str,
+    ignore_case: bool,
+) -> bool {
     if pattern.contains('/') {
-        wildcard_match(pattern, relative)
+        wildcard_match(pattern, relative, ignore_case)
     } else {
-        wildcard_match(pattern, basename)
+        wildcard_match(pattern, basename, ignore_case)
     }
 }
 
-fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let text = text.as_bytes();
+fn wildcard_match(pattern: &str, text: &str, ignore_case: bool) -> bool {
+    if let Some(rest) = pattern.strip_prefix("**/")
+        && wildcard_match(rest, text, ignore_case)
+    {
+        return true;
+    }
+    let owned_pattern;
+    let owned_text;
+    let (pattern, text) = if ignore_case {
+        owned_pattern = pattern.to_ascii_lowercase();
+        owned_text = text.to_ascii_lowercase();
+        (owned_pattern.as_bytes(), owned_text.as_bytes())
+    } else {
+        (pattern.as_bytes(), text.as_bytes())
+    };
     let (mut pattern_idx, mut text_idx) = (0, 0);
     let mut star_idx = None;
     let mut star_text_idx = 0;
@@ -375,6 +518,94 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
         pattern_idx += 1;
     }
     pattern_idx == pattern.len()
+}
+
+fn unescape_attribute_pattern(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn path_matches_rule_base(base: &str, relative: &str, ignore_case: bool) -> bool {
+    if ignore_case {
+        base.eq_ignore_ascii_case(relative)
+            || relative.len() > base.len()
+                && relative
+                    .get(..base.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(base))
+                && relative.as_bytes().get(base.len()) == Some(&b'/')
+    } else {
+        base == relative || relative.strip_prefix(&format!("{base}/")).is_some()
+    }
+}
+
+fn path_strip_rule_base<'a>(base: &str, relative: &'a str, ignore_case: bool) -> Option<&'a str> {
+    if ignore_case {
+        if base.eq_ignore_ascii_case(relative) {
+            return Some("");
+        }
+        if relative.len() > base.len()
+            && relative
+                .get(..base.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(base))
+            && relative.as_bytes().get(base.len()) == Some(&b'/')
+        {
+            return relative.get(base.len() + 1..);
+        }
+        None
+    } else if base == relative {
+        Some("")
+    } else {
+        relative.strip_prefix(&format!("{base}/"))
+    }
+}
+
+fn split_attribute_tokens(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quoted = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                if quoted || current.is_empty() {
+                    quoted = !quoted;
+                } else {
+                    current.push(ch);
+                }
+            }
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    current.push('\\');
+                    current.push(next);
+                } else {
+                    current.push(ch);
+                }
+            }
+            ch if ch.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                while chars.next_if(|next| next.is_whitespace()).is_some() {}
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 #[cfg(test)]
@@ -437,5 +668,71 @@ mod tests {
                 ("text".to_owned(), AttributeValue::Unset),
             ]
         );
+    }
+
+    #[test]
+    fn expands_attribute_macros_iteratively() {
+        let attrs = GitAttributes::parse("[attr]a0 a1\n[attr]a1 a2\n[attr]a2 -text\nfile a0\n");
+
+        assert_eq!(
+            attrs.check_all(b"file"),
+            vec![
+                ("text".to_owned(), AttributeValue::Unset),
+                ("a0".to_owned(), AttributeValue::Set),
+                ("a1".to_owned(), AttributeValue::Set),
+                ("a2".to_owned(), AttributeValue::Set),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_builtin_attribute_name_warnings() {
+        let attrs = GitAttributes::parse("foo* builtin_foo builtin_objectmode=100644\n");
+
+        assert_eq!(
+            attrs.warnings(),
+            &[
+                "builtin_foo is not a valid attribute name: .gitattributes:1".to_owned(),
+                "builtin_objectmode is not a valid attribute name: .gitattributes:1".to_owned(),
+            ]
+        );
+        assert!(attrs.check_all(b"foo.txt").is_empty());
+    }
+
+    #[test]
+    fn ignores_overly_long_attribute_lines_with_warning() {
+        let attrs = GitAttributes::parse(&format!("path {:02043}\n", 1));
+
+        assert_eq!(
+            attrs.warnings(),
+            &["warning: ignoring overly long attributes line 1".to_owned()]
+        );
+        assert!(attrs.check_all(b"path").is_empty());
+    }
+
+    #[test]
+    fn parses_quoted_patterns_and_escaped_quotes() {
+        let attrs = GitAttributes::parse("\" d \" test=d\n e\\\" test=e\n");
+
+        assert_eq!(
+            attrs.check(b" d ", &["test".to_owned()]),
+            vec![("test".to_owned(), AttributeValue::Value("d".to_owned()))]
+        );
+        assert_eq!(
+            attrs.check(b"e\"", &["test".to_owned()]),
+            vec![("test".to_owned(), AttributeValue::Value("e".to_owned()))]
+        );
+        assert!(attrs.warnings().is_empty());
+    }
+
+    #[test]
+    fn keeps_literal_quote_inside_unquoted_pattern() {
+        let attrs = GitAttributes::parse(" e\" test=e\n");
+
+        assert_eq!(
+            attrs.check(b"e\"", &["test".to_owned()]),
+            vec![("test".to_owned(), AttributeValue::Value("e".to_owned()))]
+        );
+        assert!(attrs.warnings().is_empty());
     }
 }

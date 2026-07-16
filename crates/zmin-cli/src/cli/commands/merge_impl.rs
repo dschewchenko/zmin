@@ -56,7 +56,12 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         commit_label,
         commit_source,
     } = options;
-    if [abort, continue_, quit].into_iter().filter(|flag| *flag).count() > 1 {
+    if [abort, continue_, quit]
+        .into_iter()
+        .filter(|flag| *flag)
+        .count()
+        > 1
+    {
         return Err(CliError::Fatal {
             code: 129,
             message: "cannot combine --abort, --continue, or --quit".into(),
@@ -71,20 +76,34 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
     if quit {
         return merge_quit();
     }
-    if commits.len() != 1 {
+    let repo = find_repo()?;
+    validate_branch_merge_options(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head_id = refs.resolve("HEAD")?;
+    let mut resolved_commits = Vec::new();
+    for commit in commits {
+        let id = resolve_commitish_io(&repo, &store, &commit).map_err(|_| CliError::Stderr {
+            code: 1,
+            text: format!("merge: {commit} - not something we can merge\n"),
+        })?;
+        if !resolved_commits
+            .iter()
+            .any(|(_commit, existing_id)| existing_id == &id)
+        {
+            resolved_commits.push((commit, id));
+        }
+    }
+    if resolved_commits.len() > 1 {
+        resolved_commits.retain(|(_commit, id)| id != &head_id);
+    }
+    if resolved_commits.len() != 1 {
         return Err(CliError::Fatal {
             code: 129,
             message: "`merge --ff-only` requires exactly one commit".into(),
         });
     }
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    if resolve_commitish_io(&repo, &store, &commits[0]).is_err() {
-        return Err(CliError::Stderr {
-            code: 1,
-            text: format!("merge: {} - not something we can merge\n", commits[0]),
-        });
-    }
+    let target = resolved_commits.pop().expect("exactly one merge target").0;
     if !worktree_clean(&repo, &store)? {
         return Err(CliError::Fatal {
             code: 1,
@@ -94,10 +113,10 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
 
     let commit_cache = CommitObjectCache::new(&store);
     if ff_only && !no_ff {
-        return merge_ff_only(&repo, &store, &commit_cache, &commits[0]);
+        return merge_ff_only(&repo, &store, &commit_cache, &target);
     }
     if verify_signatures {
-        verify_merge_target_signature(&repo, &store, &commits[0])?;
+        verify_merge_target_signature(&repo, &store, &target)?;
     }
     let message_override = resolve_merge_message_override(message, message_file.as_deref())?;
     let mode = MergeCommitMode { no_commit, squash };
@@ -106,7 +125,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             &repo,
             &store,
             &commit_cache,
-            &commits[0],
+            &target,
             commit_label.as_deref(),
             into_name.as_deref(),
             &strategies,
@@ -128,7 +147,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         &repo,
         &store,
         &commit_cache,
-        &commits[0],
+        &target,
         commit_label.as_deref(),
         into_name.as_deref(),
         "ort",
@@ -145,6 +164,224 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         message_override.as_deref(),
         commit_source.as_deref(),
     )
+}
+
+fn validate_branch_merge_options(repo: &GitRepo) -> Result<()> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let RefTarget::Symbolic(head) = refs.read_head()? else {
+        return Ok(());
+    };
+    let Some(branch) = head.strip_prefix("refs/heads/") else {
+        return Ok(());
+    };
+    let Some(options) = read_config_section_value(repo, "branch", branch, "mergeoptions")? else {
+        return Ok(());
+    };
+    transport_commands::split_shell_words(&options)?;
+    Ok(())
+}
+
+pub(crate) fn legacy_merge_recursive_command(command_name: &str, args: &[String]) -> Result<()> {
+    let Some(separator) = args.iter().position(|arg| arg == "--") else {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: format!("usage: git {command_name} <base>... -- <head> <remote> ..."),
+        });
+    };
+    let bases = &args[..separator];
+    let tail = &args[separator + 1..];
+    if bases.is_empty() || tail.len() != 2 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: format!("usage: git {command_name} <base>... -- <head> <remote> ..."),
+        });
+    }
+
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let tree_cache = TreeObjectCache::new(&store);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+
+    let base_id = resolve_commitish(&repo, &store, &bases[0])?;
+    let head_id = resolve_commitish(&repo, &store, &tail[0])?;
+    let remote_id = resolve_commitish(&repo, &store, &tail[1])?;
+    let base_commit = commit_cache.read_commit(&base_id)?;
+    let ours_commit = commit_cache.read_commit(&head_id)?;
+    let theirs_commit = commit_cache.read_commit(&remote_id)?;
+    let base = read_commit_tree_index_cached(&tree_cache, &base_commit)?;
+    let ours = read_commit_tree_index_cached(&tree_cache, &ours_commit)?;
+    let theirs = read_commit_tree_index_cached(&tree_cache, &theirs_commit)?;
+    let needs_automatic_merge = legacy_merge_has_directory_file_conflict(&base, &ours, &theirs);
+    let emit_resolve_progress = command_name == "merge-resolve";
+    if emit_resolve_progress {
+        println!("Trying simple merge.");
+    }
+
+    let (mut merged, merge_reported_conflict) =
+        match merge_indexes(&store, &base, &ours, &theirs, &tail[1])? {
+            MergeIndexResult::Clean(merged) => (merged, false),
+            MergeIndexResult::Conflicted { index, files } => {
+                if files.is_empty() {
+                    let merged =
+                        resolve_legacy_directory_file_merge_conflicts(&index).ok_or_else(|| {
+                            CliError::Fatal {
+                                code: 1,
+                                message: "merge resulted in unresolved conflicts".into(),
+                            }
+                        })?;
+                    (merged, true)
+                } else {
+                    return Err(CliError::Fatal {
+                        code: 1,
+                        message: "merge resulted in unresolved conflicts".into(),
+                    });
+                }
+            }
+        };
+    let used_automatic_merge = needs_automatic_merge || merge_reported_conflict;
+    if emit_resolve_progress && used_automatic_merge {
+        println!("Simple merge failed, trying Automatic merge.");
+        print_legacy_merge_recursive_summary(&ours, &merged);
+    }
+
+    remove_tracked_paths_missing_from_target(&repo, &ours, &merged)?;
+    let checkout_metadata = WorktreeCheckoutMetadata {
+        ref_name: current_branch_ref(&refs)?,
+        treeish: Some(head_id),
+    };
+    checkout_worktree_updates_to_index_with_metadata(&repo, &store, &merged, &checkout_metadata)?;
+    refresh_tracked_index_metadata_matching(&repo, &mut merged, &[])?;
+    merged.refresh_cache_tree();
+    merged.write_to_path(&repo.index_path)?;
+    if command_name == "merge-recursive" {
+        write_auto_merge(&repo, &store, &merged)?;
+    }
+    Ok(())
+}
+
+fn legacy_merge_has_directory_file_conflict(
+    base: &GitIndex,
+    ours: &GitIndex,
+    theirs: &GitIndex,
+) -> bool {
+    let path_sets = [base, ours, theirs]
+        .into_iter()
+        .map(legacy_merge_stage_zero_paths)
+        .collect::<Vec<_>>();
+    for left in &path_sets {
+        for right in &path_sets {
+            if legacy_merge_path_sets_have_directory_file_conflict(left, right) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn legacy_merge_stage_zero_paths(index: &GitIndex) -> BTreeSet<Vec<u8>> {
+    index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
+fn legacy_merge_path_sets_have_directory_file_conflict(
+    left: &BTreeSet<Vec<u8>>,
+    right: &BTreeSet<Vec<u8>>,
+) -> bool {
+    left.iter().any(|path| {
+        let mut prefix = path.clone();
+        prefix.push(b'/');
+        right
+            .iter()
+            .any(|candidate| candidate.starts_with(prefix.as_slice()))
+    })
+}
+
+fn print_legacy_merge_recursive_summary(ours: &GitIndex, merged: &GitIndex) {
+    let ours_paths = ours
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    let merged_paths = merged
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+
+    for path in merged_paths.difference(&ours_paths) {
+        println!("Adding {}", String::from_utf8_lossy(path));
+    }
+}
+
+fn resolve_legacy_directory_file_merge_conflicts(index: &GitIndex) -> Option<GitIndex> {
+    let mut entries = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut consumed = BTreeSet::new();
+    let mut resolved_any = false;
+    let conflict_paths = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage != 0)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+
+    for path in conflict_paths {
+        if consumed.contains(&path) {
+            continue;
+        }
+        let mut prefix = path.clone();
+        prefix.push(b'/');
+        let nested_paths = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage != 0 && entry.path.starts_with(prefix.as_slice()))
+            .map(|entry| entry.path.clone())
+            .collect::<BTreeSet<_>>();
+        if nested_paths.is_empty() {
+            continue;
+        }
+        let exact_stage = match (index.entry(&path, 2), index.entry(&path, 3)) {
+            (Some(_), None) => 2,
+            (None, Some(_)) => 3,
+            _ => return None,
+        };
+        let nested_stage = if exact_stage == 2 { 3 } else { 2 };
+        let mut resolved_exact = index.entry(&path, exact_stage)?.clone();
+        resolved_exact.stage = 0;
+        entries.push(resolved_exact);
+        consumed.insert(path.clone());
+
+        for nested_path in nested_paths {
+            let mut resolved_nested = index.entry(&nested_path, nested_stage)?.clone();
+            resolved_nested.stage = 0;
+            entries.push(resolved_nested);
+            consumed.insert(nested_path);
+        }
+        resolved_any = true;
+    }
+
+    if !resolved_any {
+        return None;
+    }
+    if index
+        .entries()
+        .iter()
+        .any(|entry| entry.stage != 0 && !consumed.contains(&entry.path))
+    {
+        return None;
+    }
+    GitIndex::from_entries(entries).ok()
 }
 
 fn merge_ff_only(
@@ -187,21 +424,7 @@ fn merge_abort() -> Result<()> {
         });
     }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let commit_cache = CommitObjectCache::new(&store);
-    let tree_cache = TreeObjectCache::new(&store);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let head_id = refs.resolve("HEAD")?;
-    let head_commit = commit_cache.read_commit(&head_id)?;
-    let current_index = read_repo_index(&repo)?;
-    let head_index = tree_cache.read_tree_to_index(&head_commit.tree)?;
-    remove_tracked_paths_missing_from_target(&repo, &current_index, &head_index)?;
-    head_index.write_to_path(&repo.index_path)?;
-    checkout_index(
-        &store,
-        &head_index,
-        &repo.root,
-        CheckoutIndexOptions { force: true },
-    )?;
+    crate::cli::commands::worktree_commands::reset_worktree_to_head(&repo, &store)?;
     remove_file_if_exists(&merge_head_path)?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MODE"))?;
@@ -325,10 +548,7 @@ fn verify_merge_target_signature(
         println!(
             "Commit {} has a good GPG signature by {}",
             short_object_id(&id),
-            verification
-                .signer
-                .as_deref()
-                .unwrap_or("unknown signer")
+            verification.signer.as_deref().unwrap_or("unknown signer")
         );
         return Ok(());
     }
@@ -720,6 +940,7 @@ fn merge_commit(
     };
     checkout_worktree_updates_to_index_with_metadata(repo, store, &merged, &checkout_metadata)?;
     refresh_tracked_index_metadata_matching(repo, &mut merged, &[])?;
+    merged.refresh_cache_tree();
     merged.write_to_path(&repo.index_path)?;
     if mode.squash {
         write_auto_merge(repo, store, &merged)?;
@@ -743,14 +964,14 @@ fn merge_commit(
         commit_cache,
         &head_id,
         &target_id,
-            base_id.as_ref(),
-            target,
-            target_label,
-            into_name,
-            commit_source,
-            log_limit,
-            message_override,
-        )?;
+        base_id.as_ref(),
+        target,
+        target_label,
+        into_name,
+        commit_source,
+        log_limit,
+        message_override,
+    )?;
     let mut message = message.into_bytes();
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
@@ -779,7 +1000,25 @@ fn merge_commit(
 }
 
 fn merge_display_name(repo: &GitRepo, target: &str) -> String {
+    if let Some(base) = merge_display_name_parent_shorthand_base(target)
+        && let Ok(base_display) = abbrev_ref_name(repo, base)
+    {
+        return base_display;
+    }
     abbrev_ref_name(repo, target).unwrap_or_else(|_| target.to_owned())
+}
+
+fn merge_display_name_parent_shorthand_base(target: &str) -> Option<&str> {
+    if let Some((base, _)) = target.rsplit_once('~')
+        && !base.is_empty()
+    {
+        return Some(base);
+    }
+    target.rsplit_once('^').and_then(|(base, suffix)| {
+        (!base.is_empty()
+            && (suffix.is_empty() || suffix.bytes().all(|byte| byte.is_ascii_digit())))
+        .then_some(base)
+    })
 }
 
 fn merge_display_name_or_label(repo: &GitRepo, target: &str, target_label: Option<&str>) -> String {
@@ -805,8 +1044,7 @@ fn build_merge_commit_message(
         return clean_merge_message(message_override);
     }
     let label = merge_display_name_or_label(repo, target, target_label);
-    let mut message =
-        build_merge_commit_subject(repo, target, &label, commit_source, into_name)?;
+    let mut message = build_merge_commit_subject(repo, target, &label, commit_source, into_name)?;
     let Some(log_limit) = log_limit else {
         return Ok(message);
     };
@@ -844,21 +1082,44 @@ fn build_merge_commit_subject(
     commit_source: Option<&str>,
     into_name: Option<&str>,
 ) -> Result<String> {
+    let qualifier = if merge_display_name_parent_shorthand_base(target).is_some() {
+        " (early part)"
+    } else {
+        ""
+    };
     if let Some(source) = commit_source
         && source != "."
     {
-        return Ok(format!("Merge branch '{label}' of {source}\n"));
+        return Ok(format!("Merge branch '{label}'{qualifier} of {source}\n"));
     }
     if symbolic_full_ref_name(repo, target)?
         .as_deref()
         .is_some_and(|name| name.starts_with("refs/remotes/"))
     {
-        return Ok(format!("Merge remote-tracking branch '{label}'\n"));
+        return Ok(format!(
+            "Merge remote-tracking branch '{label}'{qualifier}\n"
+        ));
     }
-    if let Some(into_name) = into_name {
-        return Ok(format!("Merge branch '{label}' into {into_name}\n"));
+    let inferred_into_name = if into_name.is_none() {
+        merge_inferred_into_name(repo)?
+    } else {
+        None
+    };
+    if let Some(into_name) = into_name.or(inferred_into_name.as_deref()) {
+        return Ok(format!(
+            "Merge branch '{label}'{qualifier} into {into_name}\n"
+        ));
     }
-    Ok(format!("Merge branch '{label}'\n"))
+    Ok(format!("Merge branch '{label}'{qualifier}\n"))
+}
+
+fn merge_inferred_into_name(repo: &GitRepo) -> Result<Option<String>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let Some(current) = current_branch_ref(&refs)? else {
+        return Ok(None);
+    };
+    let current = branch_display_name(&current);
+    Ok((current != "main" && current != "master").then_some(current))
 }
 
 struct ResolvedStrategyOptionConflicts {
@@ -943,10 +1204,16 @@ fn write_merge_state(
         repo.git_dir.join("MERGE_HEAD"),
         format!("{}\n", target_id.to_hex()),
     )?;
-    let message = if conflicted {
-        format!("Merge branch '{}'\n\n# Conflicts:\n", target_label)
+    let into_name = merge_inferred_into_name(repo)?;
+    let subject = if let Some(into_name) = into_name {
+        format!("Merge branch '{target_label}' into {into_name}")
     } else {
-        format!("Merge branch '{}'\n", target_label)
+        format!("Merge branch '{target_label}'")
+    };
+    let message = if conflicted {
+        format!("{subject}\n\n# Conflicts:\n")
+    } else {
+        format!("{subject}\n")
     };
     fs::write(repo.git_dir.join("MERGE_MSG"), message)?;
     fs::write(repo.git_dir.join("MERGE_MODE"), "")?;
@@ -1019,7 +1286,7 @@ fn write_squash_message(
     Ok(())
 }
 
-fn write_worktree_file(repo: &GitRepo, path: &[u8], content: &[u8]) -> Result<()> {
+pub(crate) fn write_worktree_file(repo: &GitRepo, path: &[u8], content: &[u8]) -> Result<()> {
     let absolute = repo.root.join(String::from_utf8_lossy(path).as_ref());
     if let Some(parent) = absolute.parent() {
         fs::create_dir_all(parent)?;
@@ -1678,83 +1945,246 @@ fn apply_mergetool_order_file(paths: Vec<Vec<u8>>, orderfile: &Path) -> Result<V
 }
 
 fn show_mergetool_tool_help() -> Result<()> {
-    let output = ProcessCommand::new(stock_git_binary())
-        .args(["mergetool", "--tool-help"])
-        .output()
-        .map_err(CliError::Io)?;
-    io::stdout()
-        .write_all(&output.stdout)
-        .map_err(CliError::Io)?;
-    io::stderr()
-        .write_all(&output.stderr)
-        .map_err(CliError::Io)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Exit(output.status.code().unwrap_or(1)))
-    }
+    let repo = find_repo()?;
+    print!("{}", render_mergetool_tool_help(&repo)?);
+    Ok(())
 }
 
-fn stock_git_binary() -> &'static Path {
-    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
-}
+fn render_mergetool_tool_help(repo: &GitRepo) -> Result<String> {
+    const BUILTINS: &[(&str, &str, &[&str])] = &[
+        (
+            "opendiff",
+            "Use FileMerge (requires a graphical session)",
+            &["opendiff"],
+        ),
+        (
+            "vimdiff",
+            "Use Vim with a custom layout (see `git help mergetool`'s `BACKEND SPECIFIC HINTS` section)",
+            &["vimdiff", "vim"],
+        ),
+        (
+            "vimdiff1",
+            "Use Vim with a 2 panes layout (LOCAL and REMOTE)",
+            &["vimdiff", "vim"],
+        ),
+        (
+            "vimdiff2",
+            "Use Vim with a 3 panes layout (LOCAL, MERGED and REMOTE)",
+            &["vimdiff", "vim"],
+        ),
+        (
+            "vimdiff3",
+            "Use Vim where only the MERGED file is shown",
+            &["vimdiff", "vim"],
+        ),
+        (
+            "vscode",
+            "Use Visual Studio Code (requires a graphical session)",
+            &["code"],
+        ),
+        (
+            "araxis",
+            "Use Araxis Merge (requires a graphical session)",
+            &["compare", "araxis"],
+        ),
+        (
+            "bc",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "bc3",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "bc4",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "codecompare",
+            "Use Code Compare (requires a graphical session)",
+            &["codecompare"],
+        ),
+        (
+            "deltawalker",
+            "Use DeltaWalker (requires a graphical session)",
+            &["deltawalker"],
+        ),
+        (
+            "diffmerge",
+            "Use DiffMerge (requires a graphical session)",
+            &["diffmerge"],
+        ),
+        (
+            "diffuse",
+            "Use Diffuse (requires a graphical session)",
+            &["diffuse"],
+        ),
+        (
+            "ecmerge",
+            "Use ECMerge (requires a graphical session)",
+            &["ecmerge"],
+        ),
+        ("emerge", "Use Emacs' Emerge", &["emacs"]),
+        (
+            "examdiff",
+            "Use ExamDiff Pro (requires a graphical session)",
+            &["examdiff"],
+        ),
+        (
+            "guiffy",
+            "Use Guiffy's Diff Tool (requires a graphical session)",
+            &["guiffy"],
+        ),
+        (
+            "gvimdiff",
+            "Use gVim (requires a graphical session) with a custom layout (see `git help mergetool`'s `BACKEND SPECIFIC HINTS` section)",
+            &["gvim"],
+        ),
+        (
+            "gvimdiff1",
+            "Use gVim (requires a graphical session) with a 2 panes layout (LOCAL and REMOTE)",
+            &["gvim"],
+        ),
+        (
+            "gvimdiff2",
+            "Use gVim (requires a graphical session) with a 3 panes layout (LOCAL, MERGED and REMOTE)",
+            &["gvim"],
+        ),
+        (
+            "gvimdiff3",
+            "Use gVim (requires a graphical session) where only the MERGED file is shown",
+            &["gvim"],
+        ),
+        (
+            "kdiff3",
+            "Use KDiff3 (requires a graphical session)",
+            &["kdiff3"],
+        ),
+        (
+            "meld",
+            "Use Meld (requires a graphical session) with optional `auto merge` (see `git help mergetool`'s `CONFIGURATION` section)",
+            &["meld"],
+        ),
+        (
+            "nvimdiff",
+            "Use Neovim with a custom layout (see `git help mergetool`'s `BACKEND SPECIFIC HINTS` section)",
+            &["nvim"],
+        ),
+        (
+            "nvimdiff1",
+            "Use Neovim with a 2 panes layout (LOCAL and REMOTE)",
+            &["nvim"],
+        ),
+        (
+            "nvimdiff2",
+            "Use Neovim with a 3 panes layout (LOCAL, MERGED and REMOTE)",
+            &["nvim"],
+        ),
+        (
+            "nvimdiff3",
+            "Use Neovim where only the MERGED file is shown",
+            &["nvim"],
+        ),
+        (
+            "p4merge",
+            "Use HelixCore P4Merge (requires a graphical session)",
+            &["p4merge"],
+        ),
+        (
+            "smerge",
+            "Use Sublime Merge (requires a graphical session)",
+            &["smerge"],
+        ),
+        (
+            "tkdiff",
+            "Use TkDiff (requires a graphical session)",
+            &["tkdiff"],
+        ),
+        (
+            "tortoisemerge",
+            "Use TortoiseMerge (requires a graphical session)",
+            &["tortoisemerge"],
+        ),
+        (
+            "winmerge",
+            "Use WinMerge (requires a graphical session)",
+            &["winmergeu", "winmerge"],
+        ),
+        (
+            "xxdiff",
+            "Use xxdiff (requires a graphical session)",
+            &["xxdiff"],
+        ),
+    ];
 
-fn resolve_stock_git_binary() -> PathBuf {
-    for candidate in stock_git_candidates() {
-        if is_stock_git_binary(&candidate) {
-            return candidate;
+    let user_defined = configured_mergetool_commands(repo)?;
+    let mut text =
+        String::from("'git mergetool --tool=<tool>' may be set to one of the following:\n");
+    for (name, description, commands) in BUILTINS {
+        if mergetool_command_available(commands) {
+            text.push_str(&format!("\t\t{name:<16} {description}\n"));
         }
     }
-    for path in std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| {
-            stock_git_names()
-                .into_iter()
-                .map(move |name| dir.join(name))
-        })
-    {
-        if is_stock_git_binary(&path) {
-            return path;
+    if !user_defined.is_empty() {
+        text.push_str("\n\tuser-defined:\n");
+        for (name, command) in user_defined {
+            text.push_str(&format!("\t\t{name}.cmd {command}\n"));
         }
     }
-    PathBuf::from("/usr/bin/git")
+    text.push_str("\nThe following tools are valid, but not currently available:\n");
+    for (name, description, commands) in BUILTINS {
+        if !mergetool_command_available(commands) {
+            text.push_str(&format!("\t\t{name:<16} {description}\n"));
+        }
+    }
+    text.push_str(
+        "\nSome of the tools listed above only work in a windowed\nenvironment. If run in a terminal-only session, they will fail.\n",
+    );
+    Ok(text)
 }
 
-fn stock_git_candidates() -> Vec<PathBuf> {
+fn configured_mergetool_commands(repo: &GitRepo) -> Result<Vec<(String, String)>> {
+    let mut commands = std::collections::BTreeMap::new();
+    for entry in read_config_entries(repo)? {
+        if entry.section != "mergetool" {
+            continue;
+        }
+        if entry.key != "cmd" || entry.subsection.is_empty() {
+            continue;
+        }
+        commands.insert(entry.subsection, entry.value);
+    }
+    Ok(commands.into_iter().collect())
+}
+
+fn mergetool_command_available(commands: &[&str]) -> bool {
+    commands
+        .iter()
+        .any(|command| mergetool_command_on_path(command))
+}
+
+fn mergetool_command_on_path(command: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|value| {
+        std::env::split_paths(&value).any(|dir| mergetool_executable_exists(&dir.join(command)))
+    })
+}
+
+fn mergetool_executable_exists(path: &Path) -> bool {
     #[cfg(windows)]
     {
-        vec![
-            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
-        ]
+        path.is_file()
     }
     #[cfg(not(windows))]
     {
-        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
-    }
-}
+        use std::os::unix::fs::PermissionsExt;
 
-fn stock_git_names() -> Vec<&'static str> {
-    if cfg!(windows) {
-        vec!["git.exe", "git"]
-    } else {
-        vec!["git"]
+        fs::metadata(path)
+            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
     }
-}
-
-fn is_stock_git_binary(path: &Path) -> bool {
-    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 fn run_mergetool_path(

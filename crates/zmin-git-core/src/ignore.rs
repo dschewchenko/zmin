@@ -29,7 +29,11 @@ struct IgnorePatternEntry {
 enum IgnorePattern {
     Component(String),
     Directory(String),
+    DirectoryGlob(String),
+    DirectoryPath(String),
+    DirectoryPathGlob(String),
     Glob(String),
+    PathGlob(String),
     Path(String),
 }
 
@@ -119,15 +123,30 @@ impl GitIgnore {
             let (is_negation, line_pattern) = line
                 .strip_prefix('!')
                 .map_or((false, line.as_str()), |pattern| (true, pattern));
+            let anchored = line_pattern.starts_with('/');
             let pattern = line_pattern.trim_start_matches('/').to_owned();
             if pattern.is_empty() {
                 continue;
             }
             let kind = if let Some(directory) = pattern.strip_suffix('/') {
-                IgnorePattern::Directory(directory.to_owned())
-            } else if pattern.contains('*') || pattern.contains('?') {
-                IgnorePattern::Glob(pattern.clone())
-            } else if pattern.contains('/') {
+                let has_wildcard =
+                    directory.contains('*') || directory.contains('?') || directory.contains('[');
+                if has_wildcard && (anchored || directory.contains('/')) {
+                    IgnorePattern::DirectoryPathGlob(directory.to_owned())
+                } else if has_wildcard {
+                    IgnorePattern::DirectoryGlob(directory.to_owned())
+                } else if anchored || directory.contains('/') {
+                    IgnorePattern::DirectoryPath(directory.to_owned())
+                } else {
+                    IgnorePattern::Directory(directory.to_owned())
+                }
+            } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+                if anchored || pattern.contains('/') {
+                    IgnorePattern::PathGlob(pattern.clone())
+                } else {
+                    IgnorePattern::Glob(pattern.clone())
+                }
+            } else if anchored || pattern.contains('/') {
                 IgnorePattern::Path(pattern.clone())
             } else {
                 IgnorePattern::Component(pattern.clone())
@@ -168,20 +187,62 @@ impl GitIgnore {
                 }
             };
             let basename = candidate.rsplit('/').next().unwrap_or(candidate);
+            let negated_directory_pattern_on_file = entry.is_negation
+                && !is_dir
+                && matches!(
+                    &entry.kind,
+                    IgnorePattern::Directory(_)
+                        | IgnorePattern::DirectoryGlob(_)
+                        | IgnorePattern::DirectoryPath(_)
+                        | IgnorePattern::DirectoryPathGlob(_)
+                );
             let matches = match &entry.kind {
                 IgnorePattern::Component(component) => candidate
                     .split('/')
                     .any(|path_component| path_component == component),
                 IgnorePattern::Directory(directory) => {
-                    (is_dir && candidate == *directory)
+                    let directory_candidate = if is_dir {
+                        candidate
+                    } else {
+                        candidate
+                            .rsplit_once('/')
+                            .map_or("", |(parent, _basename)| parent)
+                    };
+                    directory_candidate
+                        .split('/')
+                        .any(|component| component == directory)
+                }
+                IgnorePattern::DirectoryGlob(pattern) => {
+                    let directory_candidate = if is_dir {
+                        candidate
+                    } else {
+                        candidate
+                            .rsplit_once('/')
+                            .map_or("", |(parent, _basename)| parent)
+                    };
+                    !directory_candidate.is_empty()
+                        && directory_candidate
+                            .split('/')
+                            .any(|component| wildcard_match(pattern, component))
+                }
+                IgnorePattern::DirectoryPath(directory) => {
+                    (is_dir && candidate == directory)
                         || candidate.starts_with(&format!("{directory}/"))
                 }
-                IgnorePattern::Glob(pattern) if pattern.contains('/') => {
-                    wildcard_match(pattern, candidate)
+                IgnorePattern::DirectoryPathGlob(pattern) => {
+                    let directory_candidate = if is_dir {
+                        candidate
+                    } else {
+                        candidate
+                            .rsplit_once('/')
+                            .map_or("", |(parent, _basename)| parent)
+                    };
+                    !directory_candidate.is_empty() && wildcard_match(pattern, directory_candidate)
                 }
                 IgnorePattern::Glob(pattern) => wildcard_match(pattern, basename),
+                IgnorePattern::PathGlob(pattern) => wildcard_match(pattern, candidate),
                 IgnorePattern::Path(pattern) => candidate == pattern,
-            };
+            } && !negated_directory_pattern_on_file;
             if matches {
                 matched = Some(GitIgnoreMatch {
                     source: entry.source.clone(),
@@ -252,33 +313,102 @@ fn unescape_ignore_pattern(line: &str) -> String {
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pattern = pattern.as_bytes();
     let text = text.as_bytes();
-    let (mut pattern_idx, mut text_idx) = (0, 0);
-    let mut star_idx = None;
-    let mut star_text_idx = 0;
+    let mut memo = vec![None; (pattern.len() + 1) * (text.len() + 1)];
+    wildcard_match_memo(pattern, text, 0, 0, &mut memo)
+}
 
-    while text_idx < text.len() {
-        if pattern_idx < pattern.len()
-            && (pattern[pattern_idx] == b'?' || pattern[pattern_idx] == text[text_idx])
-        {
-            pattern_idx += 1;
-            text_idx += 1;
-        } else if pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
-            star_idx = Some(pattern_idx);
-            star_text_idx = text_idx;
-            pattern_idx += 1;
-        } else if let Some(star) = star_idx {
-            pattern_idx = star + 1;
-            star_text_idx += 1;
-            text_idx = star_text_idx;
+fn wildcard_match_memo(
+    pattern: &[u8],
+    text: &[u8],
+    pattern_index: usize,
+    text_index: usize,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let width = text.len() + 1;
+    let memo_index = pattern_index * width + text_index;
+    if let Some(result) = memo[memo_index] {
+        return result;
+    }
+    let double_star_left_boundary = pattern_index == 0 || pattern[pattern_index - 1] == b'/';
+    let double_star_right_boundary =
+        pattern_index + 2 == pattern.len() || pattern.get(pattern_index + 2) == Some(&b'/');
+    let result = if pattern_index == pattern.len() {
+        text_index == text.len()
+    } else if pattern[pattern_index] == b'\\'
+        && let Some(literal) = pattern.get(pattern_index + 1)
+    {
+        text.get(text_index) == Some(literal)
+            && wildcard_match_memo(pattern, text, pattern_index + 2, text_index + 1, memo)
+    } else if double_star_left_boundary && pattern[pattern_index..].starts_with(b"**/") {
+        wildcard_match_memo(pattern, text, pattern_index + 3, text_index, memo)
+            || (text_index < text.len()
+                && wildcard_match_memo(pattern, text, pattern_index, text_index + 1, memo))
+    } else if double_star_left_boundary
+        && double_star_right_boundary
+        && pattern[pattern_index..].starts_with(b"**")
+    {
+        wildcard_match_memo(pattern, text, pattern_index + 2, text_index, memo)
+            || (text_index < text.len()
+                && wildcard_match_memo(pattern, text, pattern_index, text_index + 1, memo))
+    } else {
+        match pattern[pattern_index] {
+            b'*' => {
+                wildcard_match_memo(pattern, text, pattern_index + 1, text_index, memo)
+                    || (text.get(text_index).is_some_and(|byte| *byte != b'/')
+                        && wildcard_match_memo(pattern, text, pattern_index, text_index + 1, memo))
+            }
+            b'?' => {
+                text.get(text_index).is_some_and(|byte| *byte != b'/')
+                    && wildcard_match_memo(pattern, text, pattern_index + 1, text_index + 1, memo)
+            }
+            b'[' => wildcard_class_match(pattern, text, pattern_index, text_index, memo),
+            literal => {
+                text.get(text_index) == Some(&literal)
+                    && wildcard_match_memo(pattern, text, pattern_index + 1, text_index + 1, memo)
+            }
+        }
+    };
+    memo[memo_index] = Some(result);
+    result
+}
+
+fn wildcard_class_match(
+    pattern: &[u8],
+    text: &[u8],
+    pattern_index: usize,
+    text_index: usize,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let Some(&value) = text.get(text_index).filter(|byte| **byte != b'/') else {
+        return false;
+    };
+    let Some(relative_end) = pattern[pattern_index + 1..]
+        .iter()
+        .position(|byte| *byte == b']')
+    else {
+        return value == b'['
+            && wildcard_match_memo(pattern, text, pattern_index + 1, text_index + 1, memo);
+    };
+    let class_end = pattern_index + 1 + relative_end;
+    let mut class = &pattern[pattern_index + 1..class_end];
+    let negated = class
+        .first()
+        .is_some_and(|byte| matches!(*byte, b'!' | b'^'));
+    if negated {
+        class = &class[1..];
+    }
+    let mut matched = false;
+    let mut index = 0;
+    while index < class.len() {
+        if index + 2 < class.len() && class[index + 1] == b'-' {
+            matched |= class[index] <= value && value <= class[index + 2];
+            index += 3;
         } else {
-            return false;
+            matched |= class[index] == value;
+            index += 1;
         }
     }
-
-    while pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
-        pattern_idx += 1;
-    }
-    pattern_idx == pattern.len()
+    (matched != negated) && wildcard_match_memo(pattern, text, class_end + 1, text_index + 1, memo)
 }
 
 #[cfg(test)]
@@ -296,6 +426,52 @@ mod tests {
         assert!(ignore.is_ignored(b"dist", false));
         assert!(!ignore.is_ignored(b"build/cache.txt", false));
         assert!(!ignore.is_ignored(b"keep.txt", false));
+    }
+
+    #[test]
+    fn double_star_matches_zero_or_multiple_directories() {
+        let ignore = GitIgnore::parse("**/a.1\n");
+
+        assert!(ignore.is_ignored(b"a.1", false));
+        assert!(ignore.is_ignored(b"one/a.1", false));
+        assert!(ignore.is_ignored(b"one/two/a.1", false));
+        assert!(!ignore.is_ignored(b"one/a.2", false));
+    }
+
+    #[test]
+    fn negated_directory_glob_does_not_unignore_files() {
+        let ignore = GitIgnore::parse("data/**\n!data/**/\n!data/**/*.txt\n");
+
+        assert!(ignore.is_ignored(b"data/file", false));
+        assert!(ignore.is_ignored(b"data/data1/file1", false));
+        assert!(!ignore.is_ignored(b"data/data1/file1.txt", false));
+        assert!(!ignore.is_ignored(b"data/data1", true));
+    }
+
+    #[test]
+    fn anchored_glob_only_matches_from_ignore_base() {
+        let ignore = GitIgnore::parse("/*.3\n");
+
+        assert!(ignore.is_ignored(b"a.3", false));
+        assert!(!ignore.is_ignored(b"one/a.3", false));
+    }
+
+    #[test]
+    fn unanchored_directory_matches_at_any_depth_but_not_same_named_file() {
+        let ignore = GitIgnore::parse("cache/\n");
+
+        assert!(ignore.is_ignored(b"cache", true));
+        assert!(ignore.is_ignored(b"src/cache", true));
+        assert!(ignore.is_ignored(b"src/cache/file", false));
+        assert!(!ignore.is_ignored(b"cache", false));
+    }
+
+    #[test]
+    fn embedded_double_star_does_not_consume_its_following_slash() {
+        let ignore = GitIgnore::parse("foo**/bar\n");
+
+        assert!(ignore.is_ignored(b"foo/bar", false));
+        assert!(!ignore.is_ignored(b"foobar", false));
     }
 
     #[test]

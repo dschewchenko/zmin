@@ -7,8 +7,40 @@ use std::process::Command;
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin,
     command_failure_output_with_env, command_output_with_env, configure_identity, git, git_init,
-    git_with_env, run_zmin, run_zmin_with_env, stock_git_bin, zmin_bin,
+    git_with_env, run_zmin, run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
 };
+
+#[test]
+fn commit_respects_user_use_config_only_without_explicit_identity() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "base", "base\n");
+    git(repo.path(), ["add", "base"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["config", "user.useconfigonly", "true"]);
+    git(repo.path(), ["config", "--unset", "user.name"]);
+    git(repo.path(), ["config", "--unset", "user.email"]);
+    write_file(repo.path(), "next", "next\n");
+    git(repo.path(), ["add", "next"]);
+
+    let output = Command::new(zmin_bin())
+        .args(["commit", "-m", "must fail"])
+        .current_dir(repo.path())
+        .env_remove("GIT_AUTHOR_NAME")
+        .env_remove("GIT_AUTHOR_EMAIL")
+        .env_remove("GIT_COMMITTER_NAME")
+        .env_remove("GIT_COMMITTER_EMAIL")
+        .env_remove("EMAIL")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .expect("run zmin commit");
+    assert!(!output.status.success());
+    assert_eq!(git(repo.path(), ["rev-list", "--count", "HEAD"]), "1");
+}
 
 const COMMIT_ENV: [(&str, &str); 6] = [
     ("GIT_AUTHOR_NAME", "Bench"),

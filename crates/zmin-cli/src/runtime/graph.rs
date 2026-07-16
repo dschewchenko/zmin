@@ -3,29 +3,210 @@ use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::sync::Arc;
 
 use zmin_git_core::{
-    CommitObject, CommitObjectCache, GitHashAlgorithm, GitObjectKind, GitObjectStore,
-    LooseObjectStore, ObjectId, TreeMode, TreeObjectCache, TreeObjectRef,
+    CommitObject, CommitObjectCache, GitHashAlgorithm, GitObjectKind, GitObjectStore, LooseObject,
+    LooseObjectStore, ObjectId, PackedObjectOrdinalLookup, TreeMode, TreeObjectCache,
+    TreeObjectRef, decode_pack_index_object_ids_from_path, decode_tag, decode_tree,
+    decode_tree_entry_ref,
 };
 
 use super::{
-    CliError, CommitGraphIndex, GitRepo, RefStore, Result, resolve_objectish, resolve_treeish,
-    short_ref_name, signature_timestamp, wildcard_match,
+    CliError, CommitGraphIndex, GitRepo, RefStore, Result, current_branch_ref, phase_trace,
+    read_common_config_entries, resolve_objectish, resolve_treeish, short_ref_name,
+    signature_timestamp, wildcard_match,
 };
 
 const REV_LIST_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const TREE_OBJECT_REF_CACHE_ENTRY_LIMIT: usize = 8192;
+
+trait RevListSeenObjectIds {
+    fn insert(&mut self, id: ObjectId) -> bool;
+}
+
+impl RevListSeenObjectIds for HashSet<ObjectId> {
+    fn insert(&mut self, id: ObjectId) -> bool {
+        HashSet::insert(self, id)
+    }
+}
+
+enum CompactUnpackedRevListSeenObjectIds {
+    Sha1(HashSet<[u8; 20]>),
+    Sha256(HashSet<[u8; 32]>),
+}
+
+impl CompactUnpackedRevListSeenObjectIds {
+    fn with_capacity(algorithm: GitHashAlgorithm, capacity: usize) -> Self {
+        match algorithm {
+            GitHashAlgorithm::Sha1 => Self::Sha1(HashSet::with_capacity(capacity)),
+            GitHashAlgorithm::Sha256 => Self::Sha256(HashSet::with_capacity(capacity)),
+        }
+    }
+
+    fn insert(&mut self, id: ObjectId) -> bool {
+        match self {
+            Self::Sha1(seen) => seen.insert(
+                id.as_bytes()
+                    .try_into()
+                    .expect("SHA-1 object id has a 20-byte digest"),
+            ),
+            Self::Sha256(seen) => seen.insert(
+                id.as_bytes()
+                    .try_into()
+                    .expect("SHA-256 object id has a 32-byte digest"),
+            ),
+        }
+    }
+}
+
+struct PackedRevListSeenObjectIds {
+    ordinals: PackedObjectOrdinalLookup,
+    bits: Vec<u8>,
+}
+
+impl PackedRevListSeenObjectIds {
+    fn insert(&mut self, id: &ObjectId) -> Option<bool> {
+        let position = self.ordinals.position(id)?;
+        let byte = self.bits.get_mut(position / 8)?;
+        let mask = 1_u8 << (position % 8);
+        let inserted = *byte & mask == 0;
+        *byte |= mask;
+        Some(inserted)
+    }
+}
+
+struct CompactRevListSeenObjectIds {
+    packed: Option<PackedRevListSeenObjectIds>,
+    unpacked: CompactUnpackedRevListSeenObjectIds,
+}
+
+impl CompactRevListSeenObjectIds {
+    fn with_capacity(store: &LooseObjectStore, capacity: usize) -> io::Result<Self> {
+        let ordinals = store.single_pack_object_ordinals()?;
+        let unpacked_capacity = if ordinals.is_some() { 0 } else { capacity };
+        let packed = ordinals.map(|ordinals| PackedRevListSeenObjectIds {
+            bits: vec![0; ordinals.object_count().div_ceil(8)],
+            ordinals,
+        });
+        Ok(Self {
+            packed,
+            unpacked: CompactUnpackedRevListSeenObjectIds::with_capacity(
+                store.algorithm(),
+                unpacked_capacity,
+            ),
+        })
+    }
+}
+
+impl RevListSeenObjectIds for CompactRevListSeenObjectIds {
+    fn insert(&mut self, id: ObjectId) -> bool {
+        if let Some(inserted) = self.packed.as_mut().and_then(|packed| packed.insert(&id)) {
+            return inserted;
+        }
+        self.unpacked.insert(id)
+    }
+}
 
 pub(crate) struct CollectedCommit {
     pub(crate) id: ObjectId,
     pub(crate) commit: Arc<CommitObject>,
 }
 
+pub(crate) struct CollectedCommitMetadata {
+    pub(crate) id: ObjectId,
+    pub(crate) parents: Vec<ObjectId>,
+    pub(crate) author: Vec<u8>,
+    pub(crate) committer: Vec<u8>,
+}
+
+pub(crate) struct CollectedCommitOneline {
+    pub(crate) id: ObjectId,
+    pub(crate) parents: Vec<ObjectId>,
+    pub(crate) subject: String,
+}
+
+pub(crate) struct CommitGraphRenderHint {
+    pub(crate) id: ObjectId,
+    pub(crate) parents: Arc<[ObjectId]>,
+    pub(crate) committer_timestamp: i64,
+}
+
+struct CommitGraphPendingPosition {
+    position: u32,
+    timestamp: u64,
+    sequence: u64,
+}
+
+impl PartialEq for CommitGraphPendingPosition {
+    fn eq(&self, other: &Self) -> bool {
+        self.position == other.position
+            && self.timestamp == other.timestamp
+            && self.sequence == other.sequence
+    }
+}
+
+impl Eq for CommitGraphPendingPosition {}
+
+impl PartialOrd for CommitGraphPendingPosition {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CommitGraphPendingPosition {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.timestamp
+            .cmp(&other.timestamp)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| other.position.cmp(&self.position))
+    }
+}
+
 pub(crate) struct CollectedCommitTree {
     pub(crate) id: ObjectId,
     pub(crate) tree: ObjectId,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RevListTreeMissingPolicy<'a> {
+    pub(crate) allow_any: bool,
+    pub(crate) exclude_promisor_objects: bool,
+    pub(crate) emit_missing_objects: bool,
+    pub(crate) promised_objects: Option<&'a HashSet<ObjectId>>,
+}
+
+impl RevListTreeMissingPolicy<'_> {
+    fn excludes_promisor_object(self, id: &ObjectId) -> bool {
+        self.exclude_promisor_objects
+            && self
+                .promised_objects
+                .is_some_and(|promised_objects| promised_objects.contains(id))
+    }
+
+    fn allows_missing_object(self, id: &ObjectId) -> bool {
+        self.allow_any
+            || self
+                .promised_objects
+                .is_some_and(|promised_objects| promised_objects.contains(id))
+    }
+
+    fn emits_missing_object(self, id: &ObjectId) -> bool {
+        self.emit_missing_objects && self.allows_missing_object(id)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RevListResolvedRef {
+    pub(crate) ref_name: String,
+    pub(crate) id: ObjectId,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RevListRefSnapshot {
+    pub(crate) head_id: Option<ObjectId>,
+    pub(crate) refs: Vec<RevListResolvedRef>,
 }
 
 #[derive(Debug, Default)]
@@ -49,26 +230,64 @@ pub(crate) fn collect_rev_list_revs(
     all: bool,
     revs: Vec<String>,
 ) -> Result<RevListRevs> {
+    collect_rev_list_revs_with_snapshot(repo, store, all, revs, None)
+}
+
+pub(crate) fn collect_rev_list_ref_snapshot(repo: &GitRepo) -> Result<RevListRefSnapshot> {
+    let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(repo_common_dir(repo), GitHashAlgorithm::Sha1);
+    let current_branch = current_branch_ref(&head_refs).map_err(|error| match error {
+        CliError::Io(inner)
+            if matches!(
+                inner.kind(),
+                io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData
+            ) =>
+        {
+            broken_current_branch_error()
+        }
+        other => other,
+    })?;
+    let mut snapshot = RevListRefSnapshot {
+        head_id: current_branch
+            .as_deref()
+            .and_then(|branch| refs.resolve(branch).ok())
+            .or_else(|| head_refs.resolve("HEAD").ok()),
+        refs: Vec::new(),
+    };
+    refs.for_each_resolved_ref("refs/", |ref_name, id| {
+        snapshot.refs.push(RevListResolvedRef {
+            ref_name: ref_name.to_owned(),
+            id: id.clone(),
+        });
+        Ok::<(), CliError>(())
+    })?;
+    Ok(snapshot)
+}
+
+fn repo_common_dir(repo: &GitRepo) -> &Path {
+    repo.objects_dir.parent().unwrap_or(&repo.git_dir)
+}
+
+pub(crate) fn collect_rev_list_revs_with_snapshot(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    all: bool,
+    revs: Vec<String>,
+    ref_snapshot: Option<&RevListRefSnapshot>,
+) -> Result<RevListRevs> {
     let mut parsed = RevListRevs::default();
     let mut not_mode = false;
     let commit_cache = CommitObjectCache::new(store);
     if all {
-        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-        refs.for_each_resolved_ref("refs/", |ref_name, id| {
-            if let Ok(kind) = object_kind_hint_or_read(store, id) {
-                if kind == GitObjectKind::Commit {
-                    parsed.include.push(ref_name.to_owned());
-                } else {
-                    let name = if kind == GitObjectKind::Tag {
-                        short_ref_name(ref_name)
-                    } else {
-                        String::new()
-                    };
-                    parsed.extra_objects.push((id.clone(), name));
-                }
-            }
-            Ok::<(), CliError>(())
-        })?;
+        collect_rev_list_ref_selection_from_rows(
+            store,
+            &mut parsed,
+            ref_snapshot.map(|snapshot| snapshot.refs.as_slice()),
+            "refs/",
+            None,
+            false,
+            repo,
+        )?;
     }
     for rev in revs {
         if rev == "--not" {
@@ -81,6 +300,7 @@ pub(crate) fn collect_rev_list_revs(
                 "refs/heads/",
                 None,
                 not_mode,
+                ref_snapshot,
             )?;
         } else if let Some(pattern) = rev
             .strip_prefix("--branches=")
@@ -93,6 +313,7 @@ pub(crate) fn collect_rev_list_revs(
                 "refs/heads/",
                 Some(pattern),
                 not_mode,
+                ref_snapshot,
             )?;
         } else if rev == "--remotes" {
             collect_rev_list_ref_selection(
@@ -102,6 +323,7 @@ pub(crate) fn collect_rev_list_revs(
                 "refs/remotes/",
                 None,
                 not_mode,
+                ref_snapshot,
             )?;
         } else if let Some(pattern) = rev.strip_prefix("--remotes=") {
             collect_rev_list_ref_selection(
@@ -111,9 +333,18 @@ pub(crate) fn collect_rev_list_revs(
                 "refs/remotes/",
                 Some(pattern),
                 not_mode,
+                ref_snapshot,
             )?;
         } else if rev == "--tags" {
-            collect_rev_list_ref_selection(repo, store, &mut parsed, "refs/tags/", None, not_mode)?;
+            collect_rev_list_ref_selection(
+                repo,
+                store,
+                &mut parsed,
+                "refs/tags/",
+                None,
+                not_mode,
+                ref_snapshot,
+            )?;
         } else if let Some(pattern) = rev.strip_prefix("--tags=") {
             collect_rev_list_ref_selection(
                 repo,
@@ -122,6 +353,7 @@ pub(crate) fn collect_rev_list_revs(
                 "refs/tags/",
                 Some(pattern),
                 not_mode,
+                ref_snapshot,
             )?;
         } else if let Some(stripped) = rev.strip_prefix('^') {
             if stripped.is_empty() {
@@ -138,10 +370,14 @@ pub(crate) fn collect_rev_list_revs(
             }
             let left = if left.is_empty() { "HEAD" } else { left };
             let right = if right.is_empty() { "HEAD" } else { right };
-            let left_id = resolve_commitish_io(repo, store, left)
-                .map_err(|_| ambiguous_revision_error(left))?;
-            let right_id = resolve_commitish_io(repo, store, right)
-                .map_err(|_| ambiguous_revision_error(right))?;
+            let left_id = resolve_commitish_io(repo, store, left).map_err(|error| {
+                map_head_resolution_error(left, &error)
+                    .unwrap_or_else(|| ambiguous_revision_error(left))
+            })?;
+            let right_id = resolve_commitish_io(repo, store, right).map_err(|error| {
+                map_head_resolution_error(right, &error)
+                    .unwrap_or_else(|| ambiguous_revision_error(right))
+            })?;
             let bases = merge_bases_all_cached(&commit_cache, &left_id, &right_id)?;
             if not_mode {
                 parsed.exclude.push(left.to_owned());
@@ -179,13 +415,39 @@ pub(crate) fn collect_rev_list_revs(
             parsed.include.push(rev);
         }
     }
-    if parsed.include.is_empty() {
+    let mut normalized_include = Vec::with_capacity(parsed.include.len());
+    for rev in std::mem::take(&mut parsed.include) {
+        match resolve_commitish_io(repo, store, &rev) {
+            Ok(_) => normalized_include.push(rev),
+            Err(error) => {
+                if let Some(cli_error) = map_head_resolution_error(&rev, &error) {
+                    return Err(cli_error);
+                }
+                let id = resolve_objectish(repo, &rev).map_err(|resolve_error| {
+                    map_head_resolution_error(&rev, &resolve_error)
+                        .unwrap_or_else(|| ambiguous_revision_error(&rev))
+                })?;
+                match object_kind_hint_or_read(store, &id) {
+                    Ok(GitObjectKind::Commit) => normalized_include.push(rev),
+                    Ok(_) => parsed.extra_objects.push((id, String::new())),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        parsed.extra_objects.push((id, String::new()));
+                    }
+                    Err(error) => return Err(CliError::Io(error)),
+                }
+            }
+        }
+    }
+    parsed.include = normalized_include;
+    if parsed.include.is_empty() && parsed.extra_objects.is_empty() {
         return Err(CliError::Message(
             "`rev-list` requires at least one positive revision".into(),
         ));
     }
-    for rev in parsed.include.iter().chain(parsed.exclude.iter()) {
-        resolve_commitish_io(repo, store, rev).map_err(|_| ambiguous_revision_error(rev))?;
+    for rev in &parsed.exclude {
+        resolve_commitish_io(repo, store, rev).map_err(|error| {
+            map_head_resolution_error(rev, &error).unwrap_or_else(|| ambiguous_revision_error(rev))
+        })?;
     }
     Ok(parsed)
 }
@@ -197,7 +459,79 @@ fn collect_rev_list_ref_selection(
     prefix: &str,
     pattern: Option<&str>,
     not_mode: bool,
+    ref_snapshot: Option<&RevListRefSnapshot>,
 ) -> Result<()> {
+    if let Some(snapshot) = ref_snapshot {
+        return collect_rev_list_ref_selection_from_rows(
+            store,
+            parsed,
+            Some(snapshot.refs.as_slice()),
+            prefix,
+            pattern,
+            not_mode,
+            repo,
+        );
+    }
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    refs.for_each_resolved_ref(prefix, |ref_name, id| {
+        if !rev_list_ref_selection_matches(ref_name, pattern) {
+            return Ok(());
+        }
+        if let Ok(kind) = object_kind_hint_or_read(store, id) {
+            if kind == GitObjectKind::Commit {
+                if not_mode {
+                    parsed.exclude.push(ref_name.to_owned());
+                } else {
+                    parsed.include.push(ref_name.to_owned());
+                }
+            } else if !not_mode {
+                let name = if kind == GitObjectKind::Tag {
+                    short_ref_name(ref_name)
+                } else {
+                    String::new()
+                };
+                parsed.extra_objects.push((id.clone(), name));
+            }
+        }
+        Ok::<(), CliError>(())
+    })
+}
+
+fn collect_rev_list_ref_selection_from_rows(
+    store: &LooseObjectStore,
+    parsed: &mut RevListRevs,
+    rows: Option<&[RevListResolvedRef]>,
+    prefix: &str,
+    pattern: Option<&str>,
+    not_mode: bool,
+    repo: &GitRepo,
+) -> Result<()> {
+    if let Some(rows) = rows {
+        for row in rows {
+            if !row.ref_name.starts_with(prefix)
+                || !rev_list_ref_selection_matches(&row.ref_name, pattern)
+            {
+                continue;
+            }
+            if let Ok(kind) = object_kind_hint_or_read(store, &row.id) {
+                if kind == GitObjectKind::Commit {
+                    if not_mode {
+                        parsed.exclude.push(row.ref_name.clone());
+                    } else {
+                        parsed.include.push(row.ref_name.clone());
+                    }
+                } else if !not_mode {
+                    let name = if kind == GitObjectKind::Tag {
+                        short_ref_name(&row.ref_name)
+                    } else {
+                        String::new()
+                    };
+                    parsed.extra_objects.push((row.id.clone(), name));
+                }
+            }
+        }
+        return Ok(());
+    }
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     refs.for_each_resolved_ref(prefix, |ref_name, id| {
         if !rev_list_ref_selection_matches(ref_name, pattern) {
@@ -384,6 +718,9 @@ where
         }
         reserve_commit_parent_traversal(&mut pending, &mut scheduled, commit.parents.len());
         for parent in &commit.parents {
+            if excluded.is_some_and(|excluded| excluded.contains(parent)) {
+                continue;
+            }
             if scheduled.insert(parent.clone()) {
                 pending.push(HeapPendingCommit::new(
                     read_pending_commit(commit_cache, parent.clone())?,
@@ -426,6 +763,9 @@ where
         }
         reserve_commit_parent_traversal(&mut pending, &mut scheduled, commit.parents.len());
         for parent in &commit.parents {
+            if excluded.contains(parent) {
+                continue;
+            }
             if scheduled.insert(parent.clone()) {
                 pending.push(HeapPendingCommit::new(
                     read_pending_commit(commit_cache, parent.clone())?,
@@ -480,13 +820,45 @@ struct PendingCommit {
     timestamp: i64,
 }
 
+struct PendingCommitMetadata {
+    metadata: CollectedCommitMetadata,
+    timestamp: i64,
+}
+
+struct PendingCommitOneline {
+    commit: CollectedCommitOneline,
+    timestamp: i64,
+}
+
 struct HeapPendingCommit {
     pending: PendingCommit,
     sequence: u64,
 }
 
+struct HeapPendingCommitMetadata {
+    pending: PendingCommitMetadata,
+    sequence: u64,
+}
+
+struct HeapPendingCommitOneline {
+    pending: PendingCommitOneline,
+    sequence: u64,
+}
+
 impl HeapPendingCommit {
     fn new(pending: PendingCommit, sequence: u64) -> Self {
+        Self { pending, sequence }
+    }
+}
+
+impl HeapPendingCommitMetadata {
+    fn new(pending: PendingCommitMetadata, sequence: u64) -> Self {
+        Self { pending, sequence }
+    }
+}
+
+impl HeapPendingCommitOneline {
+    fn new(pending: PendingCommitOneline, sequence: u64) -> Self {
         Self { pending, sequence }
     }
 }
@@ -514,6 +886,52 @@ impl Ord for HeapPendingCommit {
     }
 }
 
+impl PartialEq for HeapPendingCommitMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.pending.timestamp == other.pending.timestamp && self.sequence == other.sequence
+    }
+}
+
+impl Eq for HeapPendingCommitMetadata {}
+
+impl PartialOrd for HeapPendingCommitMetadata {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeapPendingCommitMetadata {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.pending
+            .timestamp
+            .cmp(&other.pending.timestamp)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl PartialEq for HeapPendingCommitOneline {
+    fn eq(&self, other: &Self) -> bool {
+        self.pending.timestamp == other.pending.timestamp && self.sequence == other.sequence
+    }
+}
+
+impl Eq for HeapPendingCommitOneline {}
+
+impl PartialOrd for HeapPendingCommitOneline {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeapPendingCommitOneline {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.pending
+            .timestamp
+            .cmp(&other.pending.timestamp)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
 fn read_pending_commit<S>(
     commit_cache: &CommitObjectCache<'_, S>,
     id: ObjectId,
@@ -531,6 +949,87 @@ where
         commit,
         timestamp,
     })
+}
+
+fn read_pending_commit_metadata(
+    store: &LooseObjectStore,
+    id: ObjectId,
+) -> Result<PendingCommitMetadata> {
+    let object = store.read_object(&id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let (parents, author, committer, timestamp) =
+        parse_commit_parents_author_committer_and_timestamp(id.algorithm(), &object.content)
+            .map_err(CliError::Io)?;
+    Ok(PendingCommitMetadata {
+        metadata: CollectedCommitMetadata {
+            id,
+            parents,
+            author,
+            committer,
+        },
+        timestamp,
+    })
+}
+
+fn read_pending_commit_oneline(
+    store: &LooseObjectStore,
+    id: ObjectId,
+) -> Result<PendingCommitOneline> {
+    let object = store.read_object(&id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let (parents, subject, timestamp) =
+        parse_commit_parents_subject_and_timestamp(id.algorithm(), &object.content)
+            .map_err(CliError::Io)?;
+    Ok(PendingCommitOneline {
+        commit: CollectedCommitOneline {
+            id,
+            parents,
+            subject,
+        },
+        timestamp,
+    })
+}
+
+pub(crate) fn read_commit_metadata_from_store<S>(
+    store: &S,
+    id: &ObjectId,
+) -> Result<CollectedCommitMetadata>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let (parents, author, committer, _) =
+        parse_commit_parents_author_committer_and_timestamp(id.algorithm(), &object.content)
+            .map_err(CliError::Io)?;
+    Ok(CollectedCommitMetadata {
+        id: id.clone(),
+        parents,
+        author,
+        committer,
+    })
+}
+
+pub(crate) fn read_commit_metadata(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+) -> Result<CollectedCommitMetadata> {
+    read_commit_metadata_from_store(store, id)
 }
 
 pub(crate) fn read_shallow_commits(repo: &GitRepo) -> Result<HashSet<ObjectId>> {
@@ -555,6 +1054,135 @@ pub(crate) fn read_shallow_commits(repo: &GitRepo) -> Result<HashSet<ObjectId>> 
         commits.insert(ObjectId::from_hex(GitHashAlgorithm::Sha1, line).map_err(CliError::Io)?);
     }
     Ok(commits)
+}
+
+pub(crate) fn partial_clone_enabled(repo: &GitRepo) -> Result<bool> {
+    let mut has_partial_clone = false;
+    let mut has_promisor_remote = false;
+    let mut version = None::<String>;
+    for entry in read_common_config_entries(repo).map_err(CliError::Io)? {
+        if entry.section == "core"
+            && entry.subsection.is_empty()
+            && entry.key.eq_ignore_ascii_case("repositoryformatversion")
+        {
+            version = Some(entry.value.clone());
+        }
+        if entry.section == "extensions"
+            && entry.subsection.is_empty()
+            && entry.key.eq_ignore_ascii_case("partialclone")
+        {
+            has_partial_clone = true;
+        }
+        if entry.section == "remote"
+            && !entry.subsection.is_empty()
+            && entry.key.eq_ignore_ascii_case("promisor")
+            && matches!(entry.value.to_ascii_lowercase().as_str(), "true" | "1")
+        {
+            has_promisor_remote = true;
+        }
+    }
+    let has_promisor_pack = repo
+        .objects_dir
+        .join("pack")
+        .read_dir()
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(std::result::Result::ok))
+        .any(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("promisor"));
+    Ok(version.as_deref() == Some("1")
+        && (has_partial_clone || has_promisor_remote || has_promisor_pack))
+}
+
+pub(crate) fn collect_promisor_object_ids(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+) -> Result<HashSet<ObjectId>> {
+    collect_promisor_object_ids_with_mode(repo, store, true)
+}
+
+pub(crate) fn collect_promised_missing_object_ids(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+) -> Result<HashSet<ObjectId>> {
+    collect_promisor_object_ids_with_mode(repo, store, false)
+}
+
+fn collect_promisor_object_ids_with_mode(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    include_present_promisor_objects: bool,
+) -> Result<HashSet<ObjectId>> {
+    if !partial_clone_enabled(repo)? {
+        return Ok(HashSet::new());
+    }
+    let pack_dir = repo.objects_dir.join("pack");
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let mut promised = HashSet::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("promisor") {
+            continue;
+        }
+        let pack_path = path.with_extension("pack");
+        if !pack_path.is_file() {
+            continue;
+        }
+        let ids = decode_pack_index_object_ids_from_path(GitHashAlgorithm::Sha1, &pack_path)
+            .map_err(CliError::Io)?;
+        for id in ids {
+            let present = store.contains_object(&id).map_err(CliError::Io)?;
+            if include_present_promisor_objects || !present {
+                promised.insert(id.clone());
+            }
+            if !present {
+                continue;
+            }
+            let object = store.read_object(&id).map_err(CliError::Io)?;
+            collect_promised_missing_links(store, &object, &mut promised).map_err(CliError::Io)?;
+        }
+    }
+    Ok(promised)
+}
+
+fn collect_promised_missing_links(
+    store: &LooseObjectStore,
+    object: &LooseObject,
+    promised: &mut HashSet<ObjectId>,
+) -> io::Result<()> {
+    match object.kind {
+        GitObjectKind::Blob => {}
+        GitObjectKind::Tree => {
+            let entries = decode_tree(object.id.algorithm(), &object.content)?;
+            for entry in entries {
+                if entry.mode != TreeMode::Gitlink && !store.contains_object(&entry.id)? {
+                    promised.insert(entry.id);
+                }
+            }
+        }
+        GitObjectKind::Commit => {
+            let (tree, parents, _) =
+                parse_commit_tree_parents_and_timestamp(object.id.algorithm(), &object.content)?;
+            if !store.contains_object(&tree)? {
+                promised.insert(tree);
+            }
+            for parent in parents {
+                if !store.contains_object(&parent)? {
+                    promised.insert(parent);
+                }
+            }
+        }
+        GitObjectKind::Tag => {
+            let target = decode_tag(object.id.algorithm(), &object.content)?.target;
+            if !store.contains_object(&target)? {
+                promised.insert(target);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn collect_commits_with_exclusions(
@@ -730,6 +1358,54 @@ where
     )
 }
 
+pub(crate) fn count_commits_from_ids_uncached_with_excluded(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    roots: &[ObjectId],
+    excluded: &HashSet<ObjectId>,
+) -> Result<usize> {
+    let root_capacity = root_traversal_capacity_hint(roots.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = HashSet::with_capacity(root_capacity);
+    let mut sequence = 0_u64;
+    for id in roots {
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommitLite::new(
+                read_pending_commit_uncached(store, id.clone())?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut count = 0usize;
+    while let Some(heap_entry) = pending.pop() {
+        let pending_commit = heap_entry.pending;
+        let id = pending_commit.id;
+        if excluded.contains(&id) {
+            continue;
+        }
+        count += 1;
+        if shallow_commits.contains(&id) {
+            continue;
+        }
+        reserve_commit_parent_traversal(&mut pending, &mut scheduled, pending_commit.parents.len());
+        for parent in pending_commit.parents {
+            if excluded.contains(&parent) {
+                continue;
+            }
+            if scheduled.insert(parent.clone()) {
+                pending.push(HeapPendingCommitLite::new(
+                    read_pending_commit_uncached(store, parent)?,
+                    sequence,
+                ));
+                sequence += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
 pub(crate) fn read_commit_parents_uncached(
     store: &LooseObjectStore,
     id: &ObjectId,
@@ -800,6 +1476,38 @@ pub(crate) fn collect_commit_trees_with_exclusions_uncached(
 ) -> Result<Vec<CollectedCommitTree>> {
     let excluded = collect_excluded_commits_uncached(repo, store, &revs.exclude)?;
     collect_commit_trees_uncached_with_excluded(repo, store, &revs.include, max_count, &excluded)
+}
+
+pub(crate) fn collect_commit_trees_from_ids_uncached_with_excluded(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    roots: &[ObjectId],
+    max_count: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+) -> Result<Vec<CollectedCommitTree>> {
+    let root_capacity = root_traversal_capacity_hint(roots.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = HashSet::with_capacity(root_capacity);
+    let mut sequence = 0_u64;
+    for id in roots {
+        if excluded.contains(id) {
+            continue;
+        }
+        if scheduled.insert(id.clone()) {
+            let pending_commit = read_pending_commit_uncached(store, id.clone())?;
+            pending.push(HeapPendingCommitLite::new(pending_commit, sequence));
+            sequence += 1;
+        }
+    }
+    collect_pending_commit_trees_uncached(
+        repo,
+        store,
+        pending,
+        scheduled,
+        sequence,
+        max_count,
+        Some(excluded),
+    )
 }
 
 fn collect_excluded_commits_uncached(
@@ -989,6 +1697,9 @@ fn collect_pending_commit_trees_uncached(
         }
         reserve_commit_parent_traversal(&mut pending, &mut scheduled, pending_commit.parents.len());
         for parent in pending_commit.parents {
+            if excluded.is_some_and(|excluded| excluded.contains(&parent)) {
+                continue;
+            }
             if scheduled.insert(parent.clone()) {
                 pending.push(HeapPendingCommitLite::new(
                     read_pending_commit_uncached(store, parent)?,
@@ -1098,6 +1809,47 @@ fn parse_commit_tree_parents_and_timestamp(
     Ok((tree, parents, timestamp))
 }
 
+fn parse_commit_parents_author_committer_and_timestamp(
+    algorithm: GitHashAlgorithm,
+    bytes: &[u8],
+) -> io::Result<(Vec<ObjectId>, Vec<u8>, Vec<u8>, i64)> {
+    let header_end = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .unwrap_or(bytes.len());
+    let mut parents = Vec::with_capacity(1);
+    let mut author = None;
+    let mut committer = None;
+    for line in bytes[..header_end].split(|byte| *byte == b'\n') {
+        if line.starts_with(b" ") {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(b"parent ") {
+            parents.push(parse_commit_header_id(algorithm, value, "parent")?);
+        } else if let Some(value) = line.strip_prefix(b"author ") {
+            author = Some(value.to_vec());
+        } else if let Some(value) = line.strip_prefix(b"committer ") {
+            committer = Some(value.to_vec());
+        }
+    }
+    let author = author.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "commit missing author header")
+    })?;
+    let committer = committer.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit missing committer header",
+        )
+    })?;
+    let timestamp = parse_committer_timestamp(&committer).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid committer timestamp",
+        )
+    })?;
+    Ok((parents, author, committer, timestamp))
+}
+
 fn parse_commit_tree_id(algorithm: GitHashAlgorithm, bytes: &[u8]) -> io::Result<ObjectId> {
     let header_end = bytes
         .windows(2)
@@ -1122,29 +1874,41 @@ pub(crate) fn write_rev_list_object_ids_uncached<W: Write>(
     commits: &[CollectedCommitTree],
     extra_objects: &[ObjectId],
     excluded_commits: &[ObjectId],
+    missing_policy: RevListTreeMissingPolicy<'_>,
     out: &mut W,
 ) -> Result<()> {
-    let mut seen = HashSet::with_capacity(rev_list_seen_capacity_hint(
-        commits.len(),
-        extra_objects.len(),
-        excluded_commits.len(),
-    ));
-    let mut tree_cache = TreeObjectRefCache::with_capacity(
+    let mut seen = CompactRevListSeenObjectIds::with_capacity(
         store,
-        tree_cache_capacity_hint(commits.len(), excluded_commits.len()),
-    );
+        rev_list_seen_capacity_hint(commits.len(), extra_objects.len(), excluded_commits.len()),
+    )
+    .map_err(CliError::Io)?;
+    let mut tree_cache = TreeObjectRefCache::transient(store);
     for commit_id in excluded_commits {
-        let tree = read_commit_tree_uncached(store, commit_id)?;
-        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &tree, &mut seen)?;
+        let tree = match read_commit_tree_uncached(store, commit_id) {
+            Ok(tree) => tree,
+            Err(CliError::Io(error)) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &tree, &mut seen, missing_policy)?;
     }
     for id in extra_objects {
-        if seen.insert(id.clone()) {
-            id.write_hex_io(out)?;
-            out.write_all(b"\n")?;
-        }
+        write_rev_list_extra_object_ids_ordered(
+            store,
+            &mut tree_cache,
+            id,
+            &mut seen,
+            missing_policy,
+            out,
+        )?;
     }
     for commit in commits {
-        write_rev_list_tree_object_ref_ids_ordered(&mut tree_cache, &commit.tree, &mut seen, out)?;
+        write_rev_list_tree_object_ref_ids_ordered(
+            &mut tree_cache,
+            &commit.tree,
+            &mut seen,
+            missing_policy,
+            out,
+        )?;
     }
     Ok(())
 }
@@ -1164,6 +1928,14 @@ impl<'a> TreeObjectRefCache<'a> {
         }
     }
 
+    fn transient(store: &'a LooseObjectStore) -> Self {
+        Self {
+            store,
+            trees: HashMap::new(),
+            entry_limit: 0,
+        }
+    }
+
     #[cfg(test)]
     fn with_entry_limit(store: &'a LooseObjectStore, capacity: usize, entry_limit: usize) -> Self {
         Self {
@@ -1178,6 +1950,9 @@ impl<'a> TreeObjectRefCache<'a> {
             return Ok(Arc::clone(entries));
         }
         let entries = Arc::new(self.store.read_tree_refs(tree_id)?);
+        if self.entry_limit == 0 {
+            return Ok(entries);
+        }
         if self.trees.len() >= self.entry_limit {
             self.trees.clear();
         }
@@ -1201,6 +1976,44 @@ fn parse_commit_parents(algorithm: GitHashAlgorithm, bytes: &[u8]) -> io::Result
         }
     }
     Ok(parents)
+}
+
+fn parse_commit_parents_subject_and_timestamp(
+    algorithm: GitHashAlgorithm,
+    bytes: &[u8],
+) -> io::Result<(Vec<ObjectId>, String, i64)> {
+    let header_end = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .unwrap_or(bytes.len());
+    let mut parents = Vec::with_capacity(1);
+    let mut committer_timestamp = None;
+    for line in bytes[..header_end].split(|byte| *byte == b'\n') {
+        if line.starts_with(b" ") {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(b"parent ") {
+            parents.push(parse_commit_header_id(algorithm, value, "parent")?);
+        } else if let Some(value) = line.strip_prefix(b"committer ") {
+            committer_timestamp = parse_committer_timestamp(value);
+        }
+    }
+    let message = bytes
+        .get(header_end.saturating_add(2)..)
+        .unwrap_or_default();
+    let first_line = message
+        .split(|byte| *byte == b'\n')
+        .next()
+        .unwrap_or_default();
+    let first_line = first_line.strip_suffix(b"\r").unwrap_or(first_line);
+    let subject = String::from_utf8_lossy(first_line).into_owned();
+    let timestamp = committer_timestamp.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid committer timestamp",
+        )
+    })?;
+    Ok((parents, subject, timestamp))
 }
 
 fn parse_commit_header_id(
@@ -1333,6 +2146,336 @@ where
     )
 }
 
+pub(crate) fn collect_commit_metadata_with_exclusions(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<Vec<CollectedCommitMetadata>> {
+    let excluded = if revs.exclude.is_empty() {
+        HashSet::new()
+    } else {
+        collect_rev_list_excluded_commits_uncached(repo, store, revs)?
+            .into_iter()
+            .collect::<HashSet<_>>()
+    };
+    let root_capacity = root_traversal_capacity_hint(revs.include.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = HashSet::with_capacity(root_capacity);
+    let mut sequence = 0_u64;
+    for rev in &revs.include {
+        let id = resolve_commitish(repo, store, rev)?;
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommitMetadata::new(
+                read_pending_commit_metadata(store, id)?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    collect_pending_commit_metadata(
+        repo, store, pending, scheduled, sequence, max_count, &excluded,
+    )
+}
+
+pub(crate) fn collect_commit_oneline_with_exclusions(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<Vec<CollectedCommitOneline>> {
+    let excluded = if revs.exclude.is_empty() {
+        HashSet::new()
+    } else {
+        collect_rev_list_excluded_commits_uncached(repo, store, revs)?
+            .into_iter()
+            .collect::<HashSet<_>>()
+    };
+    let root_capacity = root_traversal_capacity_hint(revs.include.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = HashSet::with_capacity(root_capacity);
+    let mut sequence = 0_u64;
+    for rev in &revs.include {
+        let id = resolve_commitish(repo, store, rev)?;
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommitOneline::new(
+                read_pending_commit_oneline(store, id)?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    collect_pending_commit_oneline(
+        repo, store, pending, scheduled, sequence, max_count, &excluded,
+    )
+}
+
+pub(crate) fn collect_commits_with_exclusions_commit_graph(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<Option<Vec<ObjectId>>> {
+    if max_count == Some(0) || !read_shallow_commits(repo)?.is_empty() {
+        return Ok(None);
+    }
+    let Some(commit_graph) = CommitGraphIndex::open(repo)? else {
+        return Ok(None);
+    };
+    let excluded = if revs.exclude.is_empty() {
+        HashSet::new()
+    } else {
+        collect_rev_list_excluded_commits_uncached(repo, store, revs)?
+            .into_iter()
+            .collect::<HashSet<_>>()
+    };
+    let root_capacity = root_traversal_capacity_hint(revs.include.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = vec![false; commit_graph.commit_count()];
+    let mut scheduled_count = 0usize;
+    let mut parents = Vec::with_capacity(2);
+    let mut sequence = 0_u64;
+    for rev in &revs.include {
+        let id = resolve_commitish(repo, store, rev)?;
+        let Some(position) = commit_graph.position(&id) else {
+            return Ok(None);
+        };
+        let Some(timestamp) = commit_graph.committer_timestamp(position) else {
+            return Ok(None);
+        };
+        if mark_commit_graph_position_seen(&mut scheduled, position) {
+            scheduled_count += 1;
+            pending.push(CommitGraphPendingPosition {
+                position,
+                timestamp,
+                sequence,
+            });
+            sequence += 1;
+        }
+    }
+
+    let mut out = Vec::with_capacity(commit_output_capacity_hint(max_count, scheduled_count));
+    while let Some(entry) = pending.pop() {
+        let Some(id) = commit_graph.id_at(entry.position) else {
+            return Ok(None);
+        };
+        if excluded.contains(&id) {
+            continue;
+        }
+        out.push(id);
+        if max_count.is_some_and(|limit| out.len() >= limit) {
+            break;
+        }
+        commit_graph.parent_positions(entry.position, &mut parents)?;
+        let desired_spare = parents.len().min(REV_LIST_INITIAL_CAPACITY_LIMIT);
+        let pending_spare = pending.capacity().saturating_sub(pending.len());
+        if pending_spare < desired_spare {
+            pending.reserve(desired_spare);
+        }
+        for parent_position in &parents {
+            if mark_commit_graph_position_seen(&mut scheduled, *parent_position) {
+                let Some(timestamp) = commit_graph.committer_timestamp(*parent_position) else {
+                    return Ok(None);
+                };
+                pending.push(CommitGraphPendingPosition {
+                    position: *parent_position,
+                    timestamp,
+                    sequence,
+                });
+                sequence += 1;
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
+pub(crate) fn collect_commit_render_hints_with_exclusions_commit_graph(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<Option<Vec<CommitGraphRenderHint>>> {
+    let _trace = phase_trace("log.collect_commits.commit_graph_hints");
+    if max_count == Some(0) || !read_shallow_commits(repo)?.is_empty() {
+        return Ok(None);
+    }
+    let Some(commit_graph) = CommitGraphIndex::open(repo)? else {
+        return Ok(None);
+    };
+    let excluded = {
+        let _trace = phase_trace("log.collect_commits.commit_graph_hints.excluded");
+        if revs.exclude.is_empty() {
+            HashSet::new()
+        } else {
+            collect_rev_list_excluded_commits_uncached(repo, store, revs)?
+                .into_iter()
+                .collect::<HashSet<_>>()
+        }
+    };
+    let root_capacity = root_traversal_capacity_hint(revs.include.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = vec![false; commit_graph.commit_count()];
+    let mut scheduled_count = 0usize;
+    let mut parent_positions = Vec::with_capacity(2);
+    let mut sequence = 0_u64;
+    {
+        let _trace = phase_trace("log.collect_commits.commit_graph_hints.roots");
+        for rev in &revs.include {
+            let id = resolve_commitish(repo, store, rev)?;
+            let Some(position) = commit_graph.position(&id) else {
+                return Ok(None);
+            };
+            let Some(timestamp) = commit_graph.committer_timestamp(position) else {
+                return Ok(None);
+            };
+            if mark_commit_graph_position_seen(&mut scheduled, position) {
+                scheduled_count += 1;
+                pending.push(CommitGraphPendingPosition {
+                    position,
+                    timestamp,
+                    sequence,
+                });
+                sequence += 1;
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(commit_output_capacity_hint(max_count, scheduled_count));
+    {
+        let _trace = phase_trace("log.collect_commits.commit_graph_hints.walk");
+        while let Some(entry) = pending.pop() {
+            let Some(id) = commit_graph.id_at(entry.position) else {
+                return Ok(None);
+            };
+            if excluded.contains(&id) {
+                continue;
+            }
+            commit_graph.parent_positions(entry.position, &mut parent_positions)?;
+            let mut parents = Vec::with_capacity(parent_positions.len());
+            let desired_spare = parent_positions.len().min(REV_LIST_INITIAL_CAPACITY_LIMIT);
+            let pending_spare = pending.capacity().saturating_sub(pending.len());
+            if pending_spare < desired_spare {
+                pending.reserve(desired_spare);
+            }
+            for parent_position in &parent_positions {
+                let Some(parent_id) = commit_graph.id_at(*parent_position) else {
+                    return Ok(None);
+                };
+                parents.push(parent_id);
+                if mark_commit_graph_position_seen(&mut scheduled, *parent_position) {
+                    let Some(timestamp) = commit_graph.committer_timestamp(*parent_position) else {
+                        return Ok(None);
+                    };
+                    pending.push(CommitGraphPendingPosition {
+                        position: *parent_position,
+                        timestamp,
+                        sequence,
+                    });
+                    sequence += 1;
+                }
+            }
+            let Ok(committer_timestamp) = i64::try_from(entry.timestamp) else {
+                return Ok(None);
+            };
+            out.push(CommitGraphRenderHint {
+                id,
+                parents: Arc::from(parents),
+                committer_timestamp,
+            });
+            if max_count.is_some_and(|limit| out.len() >= limit) {
+                break;
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
+pub(crate) fn collect_commit_render_hints_from_ids_with_exclusions_commit_graph(
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    max_count: Option<usize>,
+) -> Result<Option<Vec<CommitGraphRenderHint>>> {
+    let _trace = phase_trace("log.collect_commits.commit_graph_hints_exact_roots");
+    if max_count == Some(0) || !read_shallow_commits(repo)?.is_empty() {
+        return Ok(None);
+    }
+    let Some(commit_graph) = CommitGraphIndex::open(repo)? else {
+        return Ok(None);
+    };
+    let root_capacity = root_traversal_capacity_hint(roots.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = vec![false; commit_graph.commit_count()];
+    let mut scheduled_count = 0usize;
+    let mut parent_positions = Vec::with_capacity(2);
+    let mut sequence = 0_u64;
+    {
+        let _trace = phase_trace("log.collect_commits.commit_graph_hints_exact_roots.roots");
+        for id in roots {
+            let Some(position) = commit_graph.position(id) else {
+                return Ok(None);
+            };
+            let Some(timestamp) = commit_graph.committer_timestamp(position) else {
+                return Ok(None);
+            };
+            if mark_commit_graph_position_seen(&mut scheduled, position) {
+                scheduled_count += 1;
+                pending.push(CommitGraphPendingPosition {
+                    position,
+                    timestamp,
+                    sequence,
+                });
+                sequence += 1;
+            }
+        }
+    }
+
+    let mut out = Vec::with_capacity(commit_output_capacity_hint(max_count, scheduled_count));
+    {
+        let _trace = phase_trace("log.collect_commits.commit_graph_hints_exact_roots.walk");
+        while let Some(entry) = pending.pop() {
+            let Some(id) = commit_graph.id_at(entry.position) else {
+                return Ok(None);
+            };
+            commit_graph.parent_positions(entry.position, &mut parent_positions)?;
+            let mut parents = Vec::with_capacity(parent_positions.len());
+            let desired_spare = parent_positions.len().min(REV_LIST_INITIAL_CAPACITY_LIMIT);
+            let pending_spare = pending.capacity().saturating_sub(pending.len());
+            if pending_spare < desired_spare {
+                pending.reserve(desired_spare);
+            }
+            for parent_position in &parent_positions {
+                let Some(parent_id) = commit_graph.id_at(*parent_position) else {
+                    return Ok(None);
+                };
+                parents.push(parent_id);
+                if mark_commit_graph_position_seen(&mut scheduled, *parent_position) {
+                    let Some(timestamp) = commit_graph.committer_timestamp(*parent_position) else {
+                        return Ok(None);
+                    };
+                    pending.push(CommitGraphPendingPosition {
+                        position: *parent_position,
+                        timestamp,
+                        sequence,
+                    });
+                    sequence += 1;
+                }
+            }
+            let Ok(committer_timestamp) = i64::try_from(entry.timestamp) else {
+                return Ok(None);
+            };
+            out.push(CommitGraphRenderHint {
+                id,
+                parents: Arc::from(parents),
+                committer_timestamp,
+            });
+            if max_count.is_some_and(|limit| out.len() >= limit) {
+                break;
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
 fn collect_pending_commit_objects<S>(
     repo: &GitRepo,
     commit_cache: &CommitObjectCache<'_, S>,
@@ -1358,6 +2501,9 @@ where
         if !is_shallow {
             reserve_commit_parent_traversal(&mut pending, &mut scheduled, commit.parents.len());
             for parent in &commit.parents {
+                if excluded.contains(parent) {
+                    continue;
+                }
                 if scheduled.insert(parent.clone()) {
                     let parent_pending = read_pending_commit(commit_cache, parent.clone())?;
                     pending.push(HeapPendingCommit::new(parent_pending, sequence));
@@ -1374,6 +2520,87 @@ where
         }
         if is_shallow {
             continue;
+        }
+    }
+    Ok(out)
+}
+
+fn collect_pending_commit_metadata(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    mut pending: BinaryHeap<HeapPendingCommitMetadata>,
+    mut scheduled: HashSet<ObjectId>,
+    mut sequence: u64,
+    max_count: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+) -> Result<Vec<CollectedCommitMetadata>> {
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut out = Vec::with_capacity(commit_output_capacity_hint(max_count, scheduled.len()));
+    while let Some(heap_entry) = pending.pop() {
+        let pending_commit = heap_entry.pending;
+        let metadata = pending_commit.metadata;
+        if excluded.contains(&metadata.id) {
+            continue;
+        }
+        let is_shallow = shallow_commits.contains(&metadata.id);
+        if !is_shallow {
+            reserve_commit_parent_traversal(&mut pending, &mut scheduled, metadata.parents.len());
+            for parent in &metadata.parents {
+                if excluded.contains(parent) {
+                    continue;
+                }
+                if scheduled.insert(parent.clone()) {
+                    pending.push(HeapPendingCommitMetadata::new(
+                        read_pending_commit_metadata(store, parent.clone())?,
+                        sequence,
+                    ));
+                    sequence += 1;
+                }
+            }
+        }
+        out.push(metadata);
+        if max_count.is_some_and(|max| out.len() >= max) {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn collect_pending_commit_oneline(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    mut pending: BinaryHeap<HeapPendingCommitOneline>,
+    mut scheduled: HashSet<ObjectId>,
+    mut sequence: u64,
+    max_count: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+) -> Result<Vec<CollectedCommitOneline>> {
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut out = Vec::with_capacity(commit_output_capacity_hint(max_count, scheduled.len()));
+    while let Some(heap_entry) = pending.pop() {
+        let commit = heap_entry.pending.commit;
+        if excluded.contains(&commit.id) {
+            continue;
+        }
+        let is_shallow = shallow_commits.contains(&commit.id);
+        if !is_shallow {
+            reserve_commit_parent_traversal(&mut pending, &mut scheduled, commit.parents.len());
+            for parent in &commit.parents {
+                if excluded.contains(parent) {
+                    continue;
+                }
+                if scheduled.insert(parent.clone()) {
+                    pending.push(HeapPendingCommitOneline::new(
+                        read_pending_commit_oneline(store, parent.clone())?,
+                        sequence,
+                    ));
+                    sequence += 1;
+                }
+            }
+        }
+        out.push(commit);
+        if max_count.is_some_and(|max| out.len() >= max) {
+            break;
         }
     }
     Ok(out)
@@ -1451,9 +2678,14 @@ pub(crate) fn count_rev_list_objects(
     extra_objects: &[(ObjectId, String)],
     excluded_commits: &[ObjectId],
 ) -> Result<usize> {
-    for_each_rev_list_object_line_with(store, commits, extra_objects, excluded_commits, |_, _| {
-        Ok(())
-    })
+    for_each_rev_list_object_line_with(
+        store,
+        commits,
+        extra_objects,
+        excluded_commits,
+        RevListTreeMissingPolicy::default(),
+        |_, _, _| Ok(()),
+    )
 }
 
 fn rev_list_seen_capacity_hint(
@@ -1489,11 +2721,24 @@ fn commit_output_capacity_hint(max_count: Option<usize>, scheduled_len: usize) -
         .max(1)
 }
 
-fn reserve_commit_parent_traversal<T>(
+fn mark_commit_graph_position_seen(seen: &mut [bool], position: u32) -> bool {
+    let Some(slot) = seen.get_mut(position as usize) else {
+        return false;
+    };
+    if *slot {
+        return false;
+    }
+    *slot = true;
+    true
+}
+
+fn reserve_commit_parent_traversal<T, S>(
     pending: &mut BinaryHeap<T>,
-    scheduled: &mut HashSet<ObjectId>,
+    scheduled: &mut HashSet<S>,
     parents_len: usize,
-) {
+) where
+    S: std::hash::Hash + Eq,
+{
     let desired_spare = parents_len.min(REV_LIST_INITIAL_CAPACITY_LIMIT);
     let pending_spare = pending.capacity().saturating_sub(pending.len());
     if pending_spare < desired_spare {
@@ -1596,41 +2841,56 @@ pub(crate) fn for_each_rev_list_object_line_with<F>(
     commits: &[ObjectId],
     extra_objects: &[(ObjectId, String)],
     excluded_commits: &[ObjectId],
+    missing_policy: RevListTreeMissingPolicy<'_>,
     mut visit: F,
 ) -> Result<usize>
 where
-    F: FnMut(&ObjectId, Option<&[u8]>) -> Result<()>,
+    F: FnMut(&ObjectId, Option<GitObjectKind>, Option<&[u8]>) -> Result<()>,
 {
-    let mut seen = HashSet::with_capacity(rev_list_seen_capacity_hint(
-        commits.len(),
-        extra_objects.len(),
-        excluded_commits.len(),
-    ));
+    let mut seen = CompactRevListSeenObjectIds::with_capacity(
+        store,
+        rev_list_seen_capacity_hint(commits.len(), extra_objects.len(), excluded_commits.len()),
+    )
+    .map_err(CliError::Io)?;
     let mut count = 0usize;
     let commit_cache = CommitObjectCache::new(store);
     let mut ref_tree_cache = TreeObjectRefCache::with_capacity(
         store,
         tree_cache_capacity_hint(commits.len(), excluded_commits.len()),
     );
-    let tree_cache = TreeObjectCache::new(store);
     for commit_id in excluded_commits {
-        let commit = commit_cache.read_commit(commit_id)?;
-        collect_rev_list_tree_object_ref_ids(&mut ref_tree_cache, &commit.tree, &mut seen)?;
+        let commit = match commit_cache.read_commit(commit_id) {
+            Ok(commit) => commit,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        collect_rev_list_tree_object_ref_ids(
+            &mut ref_tree_cache,
+            &commit.tree,
+            &mut seen,
+            missing_policy,
+        )?;
     }
     for (id, name) in extra_objects {
-        if seen.insert(id.clone()) {
-            visit(id, Some(name.as_bytes()))?;
-            count += 1;
-        }
+        for_each_rev_list_extra_object_line(
+            store,
+            id,
+            name.as_bytes(),
+            &mut seen,
+            missing_policy,
+            &mut visit,
+            &mut count,
+        )?;
     }
     let mut path = Vec::new();
     for commit_id in commits {
         let commit = commit_cache.read_commit(commit_id)?;
         for_each_rev_list_tree_object_line(
-            &tree_cache,
+            store,
             &commit.tree,
             &mut path,
             &mut seen,
+            missing_policy,
             &mut visit,
             &mut count,
         )?;
@@ -1643,44 +2903,107 @@ pub(crate) fn for_each_rev_list_object_line_with_trees<F>(
     commits: &[CollectedCommitTree],
     extra_objects: &[(ObjectId, String)],
     excluded_commits: &[ObjectId],
+    missing_policy: RevListTreeMissingPolicy<'_>,
     mut visit: F,
 ) -> Result<usize>
 where
-    F: FnMut(&ObjectId, Option<&[u8]>) -> Result<()>,
+    F: FnMut(&ObjectId, Option<GitObjectKind>, Option<&[u8]>) -> Result<()>,
 {
-    let mut seen = HashSet::with_capacity(rev_list_seen_capacity_hint(
-        commits.len(),
-        extra_objects.len(),
-        excluded_commits.len(),
-    ));
+    let mut seen = CompactRevListSeenObjectIds::with_capacity(
+        store,
+        rev_list_seen_capacity_hint(commits.len(), extra_objects.len(), excluded_commits.len()),
+    )
+    .map_err(CliError::Io)?;
     let mut count = 0usize;
     let mut ref_tree_cache = TreeObjectRefCache::with_capacity(
         store,
         tree_cache_capacity_hint(commits.len(), excluded_commits.len()),
     );
-    let tree_cache = TreeObjectCache::new(store);
     for commit_id in excluded_commits {
-        let tree = read_commit_tree_uncached(store, commit_id)?;
-        collect_rev_list_tree_object_ref_ids(&mut ref_tree_cache, &tree, &mut seen)?;
+        let tree = match read_commit_tree_uncached(store, commit_id) {
+            Ok(tree) => tree,
+            Err(CliError::Io(error)) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        collect_rev_list_tree_object_ref_ids(
+            &mut ref_tree_cache,
+            &tree,
+            &mut seen,
+            missing_policy,
+        )?;
     }
     for (id, name) in extra_objects {
-        if seen.insert(id.clone()) {
-            visit(id, Some(name.as_bytes()))?;
-            count += 1;
-        }
+        for_each_rev_list_extra_object_line(
+            store,
+            id,
+            name.as_bytes(),
+            &mut seen,
+            missing_policy,
+            &mut visit,
+            &mut count,
+        )?;
     }
     let mut path = Vec::new();
     for commit in commits {
         for_each_rev_list_tree_object_line(
-            &tree_cache,
+            store,
             &commit.tree,
             &mut path,
             &mut seen,
+            missing_policy,
             &mut visit,
             &mut count,
         )?;
     }
     Ok(count)
+}
+
+fn for_each_rev_list_extra_object_line<F>(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    name: &[u8],
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+    visit: &mut F,
+    count: &mut usize,
+) -> Result<()>
+where
+    F: FnMut(&ObjectId, Option<GitObjectKind>, Option<&[u8]>) -> Result<()>,
+{
+    let kind = match object_kind_hint_or_read(store, id) {
+        Ok(kind) => kind,
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound && missing_policy.emit_missing_objects =>
+        {
+            if seen.insert(id.clone()) {
+                visit(id, None, Some(name))?;
+                *count += 1;
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    match kind {
+        GitObjectKind::Tree => {
+            let mut path = name.to_vec();
+            for_each_rev_list_tree_object_line(
+                store,
+                id,
+                &mut path,
+                seen,
+                missing_policy,
+                visit,
+                count,
+            )
+        }
+        _ => {
+            if seen.insert(id.clone()) {
+                visit(id, Some(kind), Some(name))?;
+                *count += 1;
+            }
+            Ok(())
+        }
+    }
 }
 
 pub(crate) fn collect_rev_list_object_ids_into_cached(
@@ -1724,18 +3047,29 @@ where
         extra_objects.len(),
         excluded_commits.len(),
     );
-    let mut tree_cache = TreeObjectRefCache::with_capacity(
-        store,
-        tree_cache_capacity_hint(commits.len(), excluded_commits.len()),
-    );
+    let mut tree_cache = TreeObjectRefCache::transient(store);
     for commit_id in excluded_commits {
-        let commit = commit_cache.read_commit(commit_id)?;
-        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &commit.tree, seen)?;
+        let commit = match commit_cache.read_commit(commit_id) {
+            Ok(commit) => commit,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        collect_rev_list_tree_object_ref_ids(
+            &mut tree_cache,
+            &commit.tree,
+            seen,
+            RevListTreeMissingPolicy::default(),
+        )?;
     }
     for id in extra_objects {
-        if seen.insert(id.clone()) {
-            visit(id)?;
-        }
+        for_each_rev_list_extra_object_id_into_cached(
+            store,
+            commit_cache,
+            &mut tree_cache,
+            id,
+            seen,
+            &mut visit,
+        )?;
     }
     for commit_id in commits {
         let commit = commit_cache.read_commit(commit_id)?;
@@ -1751,6 +3085,34 @@ where
         )?;
     }
     Ok(())
+}
+
+fn for_each_rev_list_extra_object_id_into_cached<F>(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    tree_cache: &mut TreeObjectRefCache<'_>,
+    id: &ObjectId,
+    seen: &mut HashSet<ObjectId>,
+    visit: &mut F,
+) -> Result<()>
+where
+    F: FnMut(&ObjectId) -> Result<()>,
+{
+    match object_kind_hint_or_read(store, id)? {
+        GitObjectKind::Tree => {
+            for_each_rev_list_tree_id_ordered_into(tree_cache, id, seen, visit)?;
+            for_each_rev_list_non_tree_object_id_ordered_into(tree_cache, id, seen, visit)
+        }
+        GitObjectKind::Commit => {
+            let commit = commit_cache.read_commit(id)?;
+            for_each_rev_list_tree_id_ordered_into(tree_cache, &commit.tree, seen, visit)?;
+            for_each_rev_list_non_tree_object_id_ordered_into(tree_cache, &commit.tree, seen, visit)
+        }
+        _ => {
+            let _ = visit_rev_list_object_id(id, seen, visit)?;
+            Ok(())
+        }
+    }
 }
 
 fn for_each_rev_list_tree_id_ordered_into<F>(
@@ -1853,28 +3215,37 @@ pub(crate) fn count_rev_list_objects_uncached(
     commits: &[CollectedCommitTree],
     extra_objects: &[(ObjectId, String)],
     excluded_commits: &[ObjectId],
+    missing_policy: RevListTreeMissingPolicy<'_>,
 ) -> Result<usize> {
-    let mut seen = HashSet::with_capacity(rev_list_seen_capacity_hint(
-        commits.len(),
-        extra_objects.len(),
-        excluded_commits.len(),
-    ));
+    let mut seen = CompactRevListSeenObjectIds::with_capacity(
+        store,
+        rev_list_seen_capacity_hint(commits.len(), extra_objects.len(), excluded_commits.len()),
+    )
+    .map_err(CliError::Io)?;
     let mut count = 0usize;
     let mut tree_cache = TreeObjectRefCache::with_capacity(
         store,
         tree_cache_capacity_hint(commits.len(), excluded_commits.len()),
     );
     for commit_id in excluded_commits {
-        let tree = read_commit_tree_uncached(store, commit_id)?;
-        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &tree, &mut seen)?;
+        let tree = match read_commit_tree_uncached(store, commit_id) {
+            Ok(tree) => tree,
+            Err(CliError::Io(error)) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &tree, &mut seen, missing_policy)?;
     }
     for (id, _) in extra_objects {
-        if seen.insert(id.clone()) {
-            count += 1;
-        }
+        count +=
+            count_rev_list_extra_object_ids(store, &mut tree_cache, id, &mut seen, missing_policy)?;
     }
     for commit in commits {
-        count += count_rev_list_tree_ref_objects(&mut tree_cache, &commit.tree, &mut seen)?;
+        count += count_rev_list_tree_ref_objects(
+            &mut tree_cache,
+            &commit.tree,
+            &mut seen,
+            missing_policy,
+        )?;
     }
     Ok(count)
 }
@@ -1882,7 +3253,8 @@ pub(crate) fn count_rev_list_objects_uncached(
 fn write_rev_list_tree_object_ref_ids_ordered<W: Write>(
     tree_cache: &mut TreeObjectRefCache<'_>,
     tree_id: &ObjectId,
-    seen: &mut HashSet<ObjectId>,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
     out: &mut W,
 ) -> Result<()> {
     enum PendingTreeObject {
@@ -1898,9 +3270,13 @@ fn write_rev_list_tree_object_ref_ids_ordered<W: Write>(
                 if !seen.insert(id.clone()) {
                     continue;
                 }
+                let Some(entries) =
+                    read_rev_list_tree_ref_entries(tree_cache, &id, missing_policy)?
+                else {
+                    continue;
+                };
                 id.write_hex_io(out)?;
                 out.write_all(b"\n")?;
-                let entries = tree_cache.read_tree(&id)?;
                 reserve_tree_walk_children(&mut pending, entries.len());
                 for entry in entries.iter().rev() {
                     if matches!(
@@ -1909,7 +3285,8 @@ fn write_rev_list_tree_object_ref_ids_ordered<W: Write>(
                             | TreeMode::Executable
                             | TreeMode::Symlink
                             | TreeMode::Gitlink
-                    ) {
+                    ) && rev_list_object_is_visible(tree_cache.store, &entry.id, missing_policy)?
+                    {
                         pending.push(PendingTreeObject::Object(entry.id.clone()));
                     }
                 }
@@ -1930,10 +3307,33 @@ fn write_rev_list_tree_object_ref_ids_ordered<W: Write>(
     Ok(())
 }
 
+fn write_rev_list_extra_object_ids_ordered<W: Write>(
+    store: &LooseObjectStore,
+    tree_cache: &mut TreeObjectRefCache<'_>,
+    id: &ObjectId,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+    out: &mut W,
+) -> Result<()> {
+    match object_kind_hint_or_read(store, id)? {
+        GitObjectKind::Tree => {
+            write_rev_list_tree_object_ref_ids_ordered(tree_cache, id, seen, missing_policy, out)
+        }
+        _ => {
+            if seen.insert(id.clone()) {
+                id.write_hex_io(out)?;
+                out.write_all(b"\n")?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn collect_rev_list_tree_object_ref_ids(
     tree_cache: &mut TreeObjectRefCache<'_>,
     tree_id: &ObjectId,
-    seen: &mut HashSet<ObjectId>,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
 ) -> Result<()> {
     let mut pending = Vec::with_capacity(tree_walk_stack_capacity_hint());
     pending.push(tree_id.clone());
@@ -1941,13 +3341,17 @@ fn collect_rev_list_tree_object_ref_ids(
         if !seen.insert(id.clone()) {
             continue;
         }
-        let entries = tree_cache.read_tree(&id)?;
+        let Some(entries) = read_rev_list_tree_ref_entries(tree_cache, &id, missing_policy)? else {
+            continue;
+        };
         reserve_tree_walk_children(&mut pending, entries.len());
         for entry in entries.iter() {
             match entry.mode {
                 TreeMode::Tree => pending.push(entry.id.clone()),
                 TreeMode::File | TreeMode::Executable | TreeMode::Symlink | TreeMode::Gitlink => {
-                    seen.insert(entry.id.clone());
+                    if rev_list_object_is_visible(tree_cache.store, &entry.id, missing_policy)? {
+                        seen.insert(entry.id.clone());
+                    }
                 }
             }
         }
@@ -1958,7 +3362,8 @@ fn collect_rev_list_tree_object_ref_ids(
 fn count_rev_list_tree_ref_objects(
     tree_cache: &mut TreeObjectRefCache<'_>,
     tree_id: &ObjectId,
-    seen: &mut HashSet<ObjectId>,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
 ) -> Result<usize> {
     let mut count = 0usize;
     let mut pending = Vec::with_capacity(tree_walk_stack_capacity_hint());
@@ -1967,19 +3372,38 @@ fn count_rev_list_tree_ref_objects(
         if !seen.insert(id.clone()) {
             continue;
         }
+        let Some(entries) = read_rev_list_tree_ref_entries(tree_cache, &id, missing_policy)? else {
+            continue;
+        };
         count += 1;
-        let entries = tree_cache.read_tree(&id)?;
         reserve_tree_walk_children(&mut pending, entries.len());
         for entry in entries.iter() {
             match entry.mode {
                 TreeMode::Tree => pending.push(entry.id.clone()),
                 TreeMode::File | TreeMode::Executable | TreeMode::Symlink | TreeMode::Gitlink => {
-                    count += usize::from(seen.insert(entry.id.clone()));
+                    if rev_list_object_is_visible(tree_cache.store, &entry.id, missing_policy)? {
+                        count += usize::from(seen.insert(entry.id.clone()));
+                    }
                 }
             }
         }
     }
     Ok(count)
+}
+
+fn count_rev_list_extra_object_ids(
+    store: &LooseObjectStore,
+    tree_cache: &mut TreeObjectRefCache<'_>,
+    id: &ObjectId,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+) -> Result<usize> {
+    match object_kind_hint_or_read(store, id)? {
+        GitObjectKind::Tree => {
+            count_rev_list_tree_ref_objects(tree_cache, id, seen, missing_policy)
+        }
+        _ => Ok(usize::from(seen.insert(id.clone()))),
+    }
 }
 
 #[cfg(test)]
@@ -2073,18 +3497,19 @@ fn collect_rev_list_tree_object_ids(
 }
 
 fn for_each_rev_list_tree_object_line(
-    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    store: &LooseObjectStore,
     tree_id: &ObjectId,
     path: &mut Vec<u8>,
-    seen: &mut HashSet<ObjectId>,
-    visit: &mut dyn FnMut(&ObjectId, Option<&[u8]>) -> Result<()>,
+    seen: &mut impl RevListSeenObjectIds,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+    visit: &mut dyn FnMut(&ObjectId, Option<GitObjectKind>, Option<&[u8]>) -> Result<()>,
     count: &mut usize,
 ) -> Result<()> {
     struct PendingTreeLine {
         id: ObjectId,
         path_len: usize,
-        entries: Option<Arc<[zmin_git_core::TreeEntry]>>,
-        next: usize,
+        content: Option<Vec<u8>>,
+        cursor: usize,
     }
 
     let initial_path_len = path.len();
@@ -2092,43 +3517,52 @@ fn for_each_rev_list_tree_object_line(
     pending.push(PendingTreeLine {
         id: tree_id.clone(),
         path_len: initial_path_len,
-        entries: None,
-        next: 0,
+        content: None,
+        cursor: 0,
     });
     while !pending.is_empty() {
         let Some(frame) = pending.last_mut() else {
             break;
         };
-        if frame.entries.is_none() {
+        if frame.content.is_none() {
             if !seen.insert(frame.id.clone()) {
                 path.truncate(frame.path_len);
                 pending.pop();
                 continue;
             }
-            visit(&frame.id, Some(path))?;
+            let Some(content) = read_rev_list_tree_content(store, &frame.id, missing_policy)?
+            else {
+                path.truncate(frame.path_len);
+                pending.pop();
+                continue;
+            };
+            visit(&frame.id, Some(GitObjectKind::Tree), Some(path))?;
             *count += 1;
-            frame.entries = Some(tree_cache.read_tree(&frame.id)?);
+            frame.content = Some(content);
             continue;
         }
 
-        let Some((entry_id, entry_mode, child_path_len)) = (|| {
-            let frame = pending.last_mut()?;
-            let entries = frame
-                .entries
+        let next_entry = (|| -> Result<Option<(ObjectId, TreeMode, usize)>> {
+            let Some(frame) = pending.last_mut() else {
+                return Ok(None);
+            };
+            let content = frame
+                .content
                 .as_ref()
-                .expect("tree frame entries loaded before iteration");
-            if frame.next == entries.len() {
-                return None;
-            }
-            let entry = &entries[frame.next];
-            frame.next += 1;
+                .expect("tree frame content loaded before iteration");
+            let Some(entry) =
+                decode_tree_entry_ref(frame.id.algorithm(), content, &mut frame.cursor)?
+            else {
+                return Ok(None);
+            };
             path.truncate(frame.path_len);
             if !path.is_empty() {
                 path.push(b'/');
             }
-            path.extend_from_slice(&entry.name);
-            Some((entry.id.clone(), entry.mode, path.len()))
-        })() else {
+            path.extend_from_slice(entry.name);
+            Ok(Some((entry.id, entry.mode, path.len())))
+        })()?;
+        let Some((entry_id, entry_mode, child_path_len)) = next_entry else {
             let frame = pending.last().expect("pending frame");
             path.truncate(frame.path_len);
             pending.pop();
@@ -2138,12 +3572,21 @@ fn for_each_rev_list_tree_object_line(
             TreeMode::Tree => pending.push(PendingTreeLine {
                 id: entry_id,
                 path_len: child_path_len,
-                entries: None,
-                next: 0,
+                content: None,
+                cursor: 0,
             }),
             TreeMode::File | TreeMode::Executable | TreeMode::Symlink | TreeMode::Gitlink => {
-                if seen.insert(entry_id.clone()) {
-                    visit(&entry_id, Some(path))?;
+                if rev_list_object_is_visible(store, &entry_id, missing_policy)?
+                    && seen.insert(entry_id.clone())
+                {
+                    let kind = match entry_mode {
+                        TreeMode::Gitlink => GitObjectKind::Commit,
+                        TreeMode::File | TreeMode::Executable | TreeMode::Symlink => {
+                            GitObjectKind::Blob
+                        }
+                        TreeMode::Tree => unreachable!("tree entries are handled above"),
+                    };
+                    visit(&entry_id, Some(kind), Some(path))?;
                     *count += 1;
                 }
             }
@@ -2151,6 +3594,65 @@ fn for_each_rev_list_tree_object_line(
     }
     path.truncate(initial_path_len);
     Ok(())
+}
+
+fn read_rev_list_tree_ref_entries(
+    tree_cache: &mut TreeObjectRefCache<'_>,
+    id: &ObjectId,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+) -> Result<Option<Arc<Vec<TreeObjectRef>>>> {
+    if missing_policy.excludes_promisor_object(id) {
+        return Ok(None);
+    }
+    match tree_cache.read_tree(id) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(CliError::Io(error))
+            if error.kind() == io::ErrorKind::NotFound
+                && missing_policy.allows_missing_object(id) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_rev_list_tree_content(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+) -> Result<Option<Vec<u8>>> {
+    if missing_policy.excludes_promisor_object(id) {
+        return Ok(None);
+    }
+    match store.read_object(id) {
+        Ok(object) if object.kind == GitObjectKind::Tree => Ok(Some(object.content)),
+        Ok(_) => Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a tree",
+        ))),
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                && missing_policy.allows_missing_object(id) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn rev_list_object_is_visible(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    missing_policy: RevListTreeMissingPolicy<'_>,
+) -> Result<bool> {
+    if missing_policy.excludes_promisor_object(id) {
+        return Ok(false);
+    }
+    if !missing_policy.allows_missing_object(id) {
+        return Ok(true);
+    }
+    let present = store.contains_object(id).map_err(CliError::Io)?;
+    Ok(present || missing_policy.emits_missing_object(id))
 }
 
 fn collect_rev_list_tree_object_paths(
@@ -2903,6 +4405,26 @@ pub(crate) fn ambiguous_revision_error(rev: &str) -> CliError {
     }
 }
 
+fn broken_current_branch_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "your current branch appears to be broken".into(),
+    }
+}
+
+fn map_head_resolution_error(rev: &str, error: &io::Error) -> Option<CliError> {
+    if matches!(rev, "HEAD" | "@")
+        && (matches!(
+            error.kind(),
+            io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData
+        ) || error.to_string().contains("reference broken"))
+    {
+        Some(broken_current_branch_error())
+    } else {
+        None
+    }
+}
+
 pub(crate) fn resolve_commitish_io(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -3003,14 +4525,13 @@ pub(crate) fn resolve_commitish_io_cached(
         return Ok(id);
     }
     let id = resolve_objectish(repo, commitish)?;
-    if object_kind_hint_or_read(store, &id)? == GitObjectKind::Commit {
-        Ok(id)
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("revision `{commitish}` is not a commit"),
-        ))
+    if let Some(commit_id) = parse_commit_full_object_id_if_commit(store, commitish, id.clone())? {
+        return Ok(commit_id);
     }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("revision `{commitish}` is not a commit"),
+    ))
 }
 
 fn object_kind_hint_or_read(store: &LooseObjectStore, id: &ObjectId) -> io::Result<GitObjectKind> {
@@ -3526,8 +5047,13 @@ mod tests {
             TreeObjectRefCache::with_capacity(&store, tree_cache_capacity_hint(1, 0));
         let mut seen = HashSet::new();
 
-        collect_rev_list_tree_object_ref_ids(&mut tree_cache, &root_tree, &mut seen)
-            .expect("collect tree refs");
+        collect_rev_list_tree_object_ref_ids(
+            &mut tree_cache,
+            &root_tree,
+            &mut seen,
+            RevListTreeMissingPolicy::default(),
+        )
+        .expect("collect tree refs");
 
         assert!(seen.contains(&root_tree));
         assert!(seen.contains(&leaf_tree));
@@ -3535,8 +5061,13 @@ mod tests {
         assert_eq!(seen.len(), 3);
 
         let mut counted = HashSet::new();
-        let count = count_rev_list_tree_ref_objects(&mut tree_cache, &root_tree, &mut counted)
-            .expect("count tree refs");
+        let count = count_rev_list_tree_ref_objects(
+            &mut tree_cache,
+            &root_tree,
+            &mut counted,
+            RevListTreeMissingPolicy::default(),
+        )
+        .expect("count tree refs");
         assert_eq!(count, 3);
         assert_eq!(counted, seen);
     }
@@ -3612,8 +5143,13 @@ mod tests {
             TreeObjectRefCache::with_capacity(&store, tree_cache_capacity_hint(1, 0));
         let mut seen = HashSet::new();
 
-        let count = count_rev_list_tree_ref_objects(&mut tree_cache, &root_tree, &mut seen)
-            .expect("count tree refs");
+        let count = count_rev_list_tree_ref_objects(
+            &mut tree_cache,
+            &root_tree,
+            &mut seen,
+            RevListTreeMissingPolicy::default(),
+        )
+        .expect("count tree refs");
 
         assert_eq!(count, 3);
         assert_eq!(seen, HashSet::from([root_tree, leaf_tree, blob]));
@@ -3712,18 +5248,18 @@ mod tests {
                 .expect("encode root tree"),
             )
             .expect("write root tree");
-        let tree_cache = TreeObjectCache::new(&store);
         let mut path = Vec::new();
         let mut seen = HashSet::new();
         let mut lines = Vec::new();
 
         let mut count = 0usize;
         for_each_rev_list_tree_object_line(
-            &tree_cache,
+            &store,
             &root_tree,
             &mut path,
             &mut seen,
-            &mut |id, path| {
+            RevListTreeMissingPolicy::default(),
+            &mut |id, _, path| {
                 lines.push(format!(
                     "{} {}",
                     id.to_hex(),
@@ -3787,7 +5323,8 @@ mod tests {
             &[first_commit, second_commit],
             &[],
             &[],
-            |_, path| {
+            RevListTreeMissingPolicy::default(),
+            |_, _, path| {
                 paths.push(path.map(|path| String::from_utf8_lossy(path).into_owned()));
                 Ok(())
             },
@@ -3849,10 +5386,17 @@ mod tests {
         ];
         let mut paths = Vec::new();
 
-        for_each_rev_list_object_line_with_trees(&store, &commits, &[], &[], |_, path| {
-            paths.push(path.map(|path| String::from_utf8_lossy(path).into_owned()));
-            Ok(())
-        })
+        for_each_rev_list_object_line_with_trees(
+            &store,
+            &commits,
+            &[],
+            &[],
+            RevListTreeMissingPolicy::default(),
+            |_, _, path| {
+                paths.push(path.map(|path| String::from_utf8_lossy(path).into_owned()));
+                Ok(())
+            },
+        )
         .expect("collect object lines from commit trees");
 
         assert_eq!(
@@ -3958,6 +5502,7 @@ mod tests {
             &mut tree_cache,
             &root_tree,
             &mut seen,
+            RevListTreeMissingPolicy::default(),
             &mut out,
         )
         .expect("write ordered tree ids");

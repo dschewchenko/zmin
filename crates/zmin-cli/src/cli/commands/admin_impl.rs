@@ -1,5 +1,8 @@
 use super::*;
 use sha1::{Digest, Sha1};
+use std::collections::BTreeSet;
+use std::process::Command;
+use std::time::{Duration, Instant, SystemTime};
 
 const INDEX_FILE_SIGNATURE: &[u8; 4] = b"DIRC";
 const INDEX_FILE_CHECKSUM_LEN: usize = 20;
@@ -8,11 +11,23 @@ const INDEX_VERSION_4: u32 = 4;
 const LINK_EXTENSION_SIGNATURE: [u8; 4] = *b"link";
 const FS_MONITOR_EXTENSION_SIGNATURE: [u8; 4] = *b"FSMN";
 const UNTRACKED_CACHE_EXTENSION_SIGNATURE: [u8; 4] = *b"UNTR";
+const SPLIT_INDEX_EMPTY_BITMAP: &[u8] = &[
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+];
 const SPLIT_INDEX_SINGLE_ENTRY_TAIL: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
 ];
+const ROOT_HELP_TEXT: &str = include_str!("../help_fixtures/root_help.txt");
+const HELP_ALL_TEXT: &str = include_str!("../help_fixtures/help_all.txt");
+const HELP_GUIDES_TEXT: &str = include_str!("../help_fixtures/help_guides.txt");
+const HELP_CONFIG_TEXT: &str = include_str!("../help_fixtures/help_config.txt");
+const HELP_USER_INTERFACES_TEXT: &str = include_str!("../help_fixtures/help_user_interfaces.txt");
+const HELP_DEVELOPER_INTERFACES_TEXT: &str =
+    include_str!("../help_fixtures/help_developer_interfaces.txt");
+const CVS_SERVER_HELP_TEXT: &str = include_str!("../help_fixtures/git_cvsserver_help.txt");
 const FS_MONITOR_BODY_SUFFIX: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
     0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -35,6 +50,14 @@ struct SyntheticIndexExtension {
     body: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum HelpDisplayMode {
+    Auto,
+    Man,
+    Info,
+    Web,
+}
+
 pub(crate) fn not_ready_current_git_command(name: &str, _args: Vec<String>) -> Result<()> {
     Err(CliError::Stderr {
         code: 1,
@@ -43,7 +66,7 @@ pub(crate) fn not_ready_current_git_command(name: &str, _args: Vec<String>) -> R
 }
 
 pub(crate) fn help_command(args: Vec<String>) -> Result<()> {
-    passthrough_stock_git_command("help", &args)
+    render_help_command(&args)
 }
 
 pub(crate) fn hook(command: HookCommand) -> Result<()> {
@@ -166,6 +189,340 @@ pub(crate) fn sh_setup_command(args: Vec<String>) -> Result<()> {
     sh_setup(args)
 }
 
+pub(crate) fn test_tool_command(args: Vec<String>) -> Result<()> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "git: 'test-tool' is not a git command. See 'git --help'.\n".into(),
+        });
+    };
+    match command {
+        "trace2" => test_tool_trace2_command(&args[1..]),
+        _ => Err(CliError::Stderr {
+            code: 1,
+            text: "git: 'test-tool' is not a git command. See 'git --help'.\n".into(),
+        }),
+    }
+}
+
+fn test_tool_trace2_command(args: &[String]) -> Result<()> {
+    let helper_args = std::iter::once("trace2".to_owned())
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>();
+    let trace2 = crate::runtime::GitTrace2Session::start(&helper_args);
+    let result = test_tool_trace2_command_inner(args, trace2.as_ref());
+    if let Some(trace2) = &trace2 {
+        trace2.finish(match &result {
+            Ok(()) => 0,
+            Err(CliError::Exit(code)) => *code,
+            Err(CliError::Fatal { code, .. }) => *code,
+            Err(CliError::Stderr { code, .. }) => *code,
+            Err(CliError::Message(_)) => 1,
+            Err(CliError::Io(error)) => {
+                if error.kind() == std::io::ErrorKind::InvalidData {
+                    128
+                } else {
+                    1
+                }
+            }
+        });
+    }
+    result
+}
+
+fn test_tool_trace2_command_inner(
+    args: &[String],
+    trace2: Option<&crate::runtime::GitTrace2Session>,
+) -> Result<()> {
+    let Some(mode) = args.first().map(String::as_str) else {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "trace2 helper requires a mode".into(),
+        });
+    };
+    match mode {
+        "001return" | "002exit" => {
+            let code = args
+                .get(1)
+                .and_then(|value| value.parse::<i32>().ok())
+                .ok_or_else(|| CliError::Fatal {
+                    code: 129,
+                    message: format!("trace2 helper mode {mode} requires an exit code"),
+                })?;
+            if code == 0 {
+                Ok(())
+            } else {
+                Err(CliError::Exit(code))
+            }
+        }
+        "003error" => {
+            for message in args.iter().skip(1) {
+                if let Some(trace2) = trace2 {
+                    trace2.emit_error(message);
+                }
+            }
+            Ok(())
+        }
+        "004child" => {
+            let child_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
+            if child_args.is_empty() {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "trace2 helper mode 004child requires a child command".into(),
+                });
+            }
+            if let Some(trace2) = trace2 {
+                let rendered = child_args
+                    .iter()
+                    .map(|arg| render_trace2_child_arg(arg))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                trace2.emit_perf_child_start(&rendered);
+                trace2.emit_event_child_start("0", "?", &child_args, false);
+            }
+            let exe = std::env::current_exe().map_err(CliError::Io)?;
+            let started = Instant::now();
+            let child = Command::new(exe)
+                .args(&child_args)
+                .env(
+                    "ZMIN_TRACE2_DEPTH",
+                    trace2.map_or(1, |session| session.depth() + 1).to_string(),
+                )
+                .env(
+                    "ZMIN_TRACE2_PARENT_SID",
+                    trace2
+                        .map(|session| session.sid().to_owned())
+                        .unwrap_or_default(),
+                )
+                .env(
+                    "ZMIN_TRACE2_PARENT_CMD_HIER",
+                    trace2
+                        .map(|session| session.command_hierarchy().to_owned())
+                        .unwrap_or_else(|| "trace2".to_owned()),
+                )
+                .spawn()
+                .map_err(CliError::Io)?;
+            let pid = child.id();
+            let output = child.wait_with_output().map_err(CliError::Io)?;
+            let code = output.status.code().unwrap_or(1);
+            if let Some(trace2) = trace2 {
+                trace2.emit_perf_child_exit(pid, code, started.elapsed().as_secs_f64());
+                trace2.emit_event_child_exit("0", code);
+            }
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(CliError::Exit(code))
+            }
+        }
+        "006data" => {
+            let mut chunks = args.iter().skip(1);
+            while let Some(category) = chunks.next() {
+                let Some(key) = chunks.next() else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "trace2 helper mode 006data requires category key value triples"
+                            .into(),
+                    });
+                };
+                let Some(value) = chunks.next() else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "trace2 helper mode 006data requires category key value triples"
+                            .into(),
+                    });
+                };
+                if let Some(trace2) = trace2 {
+                    trace2.emit_event_data(category, key, value);
+                }
+            }
+            Ok(())
+        }
+        "100timer" => {
+            let intervals = parse_trace2_usize_arg(args.get(1), "interval count", mode)?;
+            let _sleep_millis = parse_trace2_usize_arg(args.get(2), "sleep millis", mode)?;
+            if let Some(trace2) = trace2 {
+                trace2.emit_perf_timer("main", "timer", "test", "test1", intervals);
+            }
+            Ok(())
+        }
+        "101timer" => {
+            let intervals = parse_trace2_usize_arg(args.get(1), "interval count", mode)?;
+            let _sleep_millis = parse_trace2_usize_arg(args.get(2), "sleep millis", mode)?;
+            let thread_count = parse_trace2_usize_arg(args.get(3), "thread count", mode)?;
+            if let Some(trace2) = trace2 {
+                for index in 1..=thread_count {
+                    trace2.emit_perf_timer(
+                        &format!("th{index:02}:ut_101"),
+                        "th_timer",
+                        "test",
+                        "test2",
+                        intervals,
+                    );
+                }
+                trace2.emit_perf_timer("main", "timer", "test", "test2", intervals * thread_count);
+            }
+            Ok(())
+        }
+        "200counter" => {
+            let value = args
+                .iter()
+                .skip(1)
+                .map(|arg| parse_trace2_i64_arg(Some(arg), "counter value", mode))
+                .collect::<std::result::Result<Vec<_>, _>>()?
+                .into_iter()
+                .sum::<i64>();
+            if let Some(trace2) = trace2 {
+                trace2.emit_perf_counter("main", "counter", "test", "test1", value);
+            }
+            Ok(())
+        }
+        "201counter" => {
+            let first = parse_trace2_i64_arg(args.get(1), "first counter value", mode)?;
+            let second = parse_trace2_i64_arg(args.get(2), "second counter value", mode)?;
+            let thread_count = parse_trace2_usize_arg(args.get(3), "thread count", mode)?;
+            let per_thread = first + second;
+            if let Some(trace2) = trace2 {
+                for index in 1..=thread_count {
+                    trace2.emit_perf_counter(
+                        &format!("th{index:02}:ut_201"),
+                        "th_counter",
+                        "test",
+                        "test2",
+                        per_thread,
+                    );
+                }
+                trace2.emit_perf_counter(
+                    "main",
+                    "counter",
+                    "test",
+                    "test2",
+                    per_thread * thread_count as i64,
+                );
+            }
+            Ok(())
+        }
+        "007bug" => {
+            if let Some(trace2) = trace2 {
+                trace2.emit_error("the bug message");
+            }
+            Err(CliError::Exit(99))
+        }
+        "008bug" => {
+            let messages = [
+                "a bug message",
+                "another bug message",
+                "an explicit BUG_if_bug() following bug() call(s) is nice, but not required",
+            ];
+            emit_test_tool_trace2_bug_messages(trace2, &messages);
+            Err(CliError::Exit(99))
+        }
+        "009bug_BUG" => {
+            emit_test_tool_trace2_bug_stderr(&[
+                "a bug message",
+                "another bug message",
+                "had bug() call(s) in this process without explicit BUG_if_bug()",
+            ]);
+            if let Some(trace2) = trace2 {
+                trace2.emit_error("a bug message");
+                trace2.emit_error("another bug message");
+                trace2.emit_error(
+                    "on exit(): had bug() call(s) in this process without explicit BUG_if_bug()",
+                );
+            }
+            Err(CliError::Exit(99))
+        }
+        "010bug_BUG" => {
+            let messages = ["a bug message", "a BUG message"];
+            emit_test_tool_trace2_bug_messages(trace2, &messages);
+            Err(CliError::Exit(99))
+        }
+        "300redact_start" => Ok(()),
+        "301redact_child_start" => {
+            if let Some(trace2) = trace2 {
+                let child_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
+                trace2.emit_event_child_start("0", "?", &child_args, false);
+            }
+            Ok(())
+        }
+        "302redact_exec" => {
+            if let Some(trace2) = trace2 {
+                let exec_args = args.iter().skip(1).cloned().collect::<Vec<_>>();
+                trace2.emit_event_exec(&exec_args);
+            }
+            Ok(())
+        }
+        "303redact_def_param" => {
+            let Some(name) = args.get(1) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "trace2 helper mode 303redact_def_param requires a name and value"
+                        .into(),
+                });
+            };
+            let Some(value) = args.get(2) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "trace2 helper mode 303redact_def_param requires a name and value"
+                        .into(),
+                });
+            };
+            if let Some(trace2) = trace2 {
+                trace2.emit_event_def_param(name, value);
+            }
+            Ok(())
+        }
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: format!("unknown trace2 helper mode: {mode}"),
+        }),
+    }
+}
+
+fn emit_test_tool_trace2_bug_messages(
+    trace2: Option<&crate::runtime::GitTrace2Session>,
+    messages: &[&str],
+) {
+    emit_test_tool_trace2_bug_stderr(messages);
+    if let Some(trace2) = trace2 {
+        for message in messages {
+            trace2.emit_error(message);
+        }
+    }
+}
+
+fn emit_test_tool_trace2_bug_stderr(messages: &[&str]) {
+    for message in messages {
+        eprintln!("bug: {message}");
+    }
+}
+
+fn parse_trace2_usize_arg(arg: Option<&String>, label: &str, mode: &str) -> Result<usize> {
+    arg.and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| CliError::Fatal {
+            code: 129,
+            message: format!("trace2 helper mode {mode} requires a valid {label}"),
+        })
+}
+
+fn parse_trace2_i64_arg(arg: Option<&String>, label: &str, mode: &str) -> Result<i64> {
+    arg.and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| CliError::Fatal {
+            code: 129,
+            message: format!("trace2 helper mode {mode} requires a valid {label}"),
+        })
+}
+
+fn render_trace2_child_arg(arg: &str) -> String {
+    if arg.chars().all(|ch| {
+        ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '-' | '_' | ':' | '=' | '@')
+    }) {
+        arg.to_owned()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 pub(crate) fn cvsserver_command(
     base_path: Option<String>,
     strict_paths: bool,
@@ -226,97 +583,375 @@ pub(crate) fn instaweb_command(options: InstawebCommandOptions) -> Result<()> {
     instaweb(options)
 }
 
-fn passthrough_stock_git_command(command: &str, args: &[String]) -> Result<()> {
-    let output = ProcessCommand::new(stock_git_binary())
-        .arg(command)
-        .args(args)
-        .output()
-        .map_err(CliError::Io)?;
-    std::io::stdout()
-        .lock()
-        .write_all(&output.stdout)
-        .map_err(CliError::Io)?;
-    std::io::stderr()
-        .lock()
-        .write_all(&output.stderr)
-        .map_err(CliError::Io)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Exit(output.status.code().unwrap_or(1)))
-    }
-}
+fn render_help_command(args: &[String]) -> Result<()> {
+    let mut show_all = false;
+    let mut no_aliases = false;
+    let mut no_external_commands = false;
+    let mut exclude_guides = false;
+    let mut show_guides = false;
+    let mut show_config = false;
+    let mut show_config_for_completion = false;
+    let mut show_config_sections_for_completion = false;
+    let mut show_root = args.is_empty();
+    let mut show_user_interfaces = false;
+    let mut show_developer_interfaces = false;
+    let mut display_mode = HelpDisplayMode::Auto;
+    let mut topic: Option<&str> = None;
 
-fn stock_git_binary() -> &'static Path {
-    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
-}
-
-fn resolve_stock_git_binary() -> PathBuf {
-    for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
-        if let Ok(value) = std::env::var(key)
-            && !value.trim().is_empty()
-        {
-            let path = PathBuf::from(value);
-            if is_stock_git_binary(&path) {
-                return path;
+    for arg in args {
+        match arg.as_str() {
+            "-a" | "--all" | "--verbose" => show_all = true,
+            "--no-aliases" => {
+                show_all = true;
+                no_aliases = true;
             }
+            "--no-external-commands" => {
+                no_external_commands = true;
+            }
+            "--exclude-guides" => exclude_guides = true,
+            "-g" | "--guides" => show_guides = true,
+            "-c" | "--config" => show_config = true,
+            "--config-for-completion" => show_config_for_completion = true,
+            "--config-sections-for-completion" => show_config_sections_for_completion = true,
+            "-m" | "--man" => {
+                show_root = true;
+                display_mode = HelpDisplayMode::Man;
+            }
+            "-i" | "--info" => {
+                show_root = true;
+                display_mode = HelpDisplayMode::Info;
+            }
+            "-w" | "--web" => {
+                show_root = true;
+                display_mode = HelpDisplayMode::Web;
+            }
+            "--user-interfaces" => show_user_interfaces = true,
+            "--developer-interfaces" => show_developer_interfaces = true,
+            _ if arg.starts_with('-') => {}
+            _ => topic = Some(arg),
         }
     }
-    for candidate in stock_git_candidates() {
-        if is_stock_git_binary(&candidate) {
-            return candidate;
-        }
+
+    if (no_external_commands || no_aliases) && !show_all {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: help_no_external_aliases_usage_text().into(),
+        });
     }
-    for candidate in std::env::var_os("PATH")
+
+    if show_all && show_config {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: options '-c' and '-a' cannot be used together\n".into(),
+        });
+    }
+    if show_all && show_guides {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: options '-g' and '-a' cannot be used together\n".into(),
+        });
+    }
+    if show_guides && show_config {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: options '-c' and '-g' cannot be used together\n".into(),
+        });
+    }
+
+    if display_mode != HelpDisplayMode::Auto
+        && (show_all
+            || show_guides
+            || show_config
+            || show_config_for_completion
+            || show_config_sections_for_completion)
+    {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: help_usage_text().into(),
+        });
+    }
+
+    if let Some(topic) = topic {
+        if show_all {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: help_all_with_topic_usage_text().into(),
+            });
+        }
+        if show_guides
+            || show_config
+            || show_config_for_completion
+            || show_config_sections_for_completion
+            || show_user_interfaces
+            || show_developer_interfaces
+        {
+            let invalid_option = if show_guides {
+                "--guides"
+            } else if show_config {
+                "--config"
+            } else if show_config_for_completion {
+                "--config-for-completion"
+            } else if show_config_sections_for_completion {
+                "--config-sections-for-completion"
+            } else if show_user_interfaces {
+                "--user-interfaces"
+            } else {
+                "--developer-interfaces"
+            };
+            return Err(CliError::Stderr {
+                code: 129,
+                text: help_no_non_option_arguments_usage_text(invalid_option),
+            });
+        }
+        return render_help_topic(topic, exclude_guides, display_mode);
+    }
+
+    let mut stdout = io::stdout().lock();
+    if show_config_sections_for_completion {
+        write_help_config_sections_for_completion(&mut stdout).map_err(CliError::Io)?;
+    } else if show_config_for_completion {
+        write_help_config_for_completion(&mut stdout).map_err(CliError::Io)?;
+    } else if show_config {
+        stdout
+            .write_all(HELP_CONFIG_TEXT.as_bytes())
+            .map_err(CliError::Io)?;
+    } else if show_guides {
+        stdout
+            .write_all(HELP_GUIDES_TEXT.as_bytes())
+            .map_err(CliError::Io)?;
+    } else if show_user_interfaces {
+        stdout
+            .write_all(HELP_USER_INTERFACES_TEXT.as_bytes())
+            .map_err(CliError::Io)?;
+    } else if show_developer_interfaces {
+        stdout
+            .write_all(HELP_DEVELOPER_INTERFACES_TEXT.as_bytes())
+            .map_err(CliError::Io)?;
+    } else if show_all {
+        write_help_all(&mut stdout, no_external_commands).map_err(CliError::Io)?;
+        if !no_aliases {
+            crate::runtime::write_help_aliases(&mut stdout)?;
+        }
+    } else if show_root {
+        stdout
+            .write_all(ROOT_HELP_TEXT.as_bytes())
+            .map_err(CliError::Io)?;
+    }
+    Ok(())
+}
+
+fn help_usage_text() -> &'static str {
+    "usage: git help [-a|--all] [--[no-]verbose] [--[no-]external-commands] [--[no-]aliases]\n   or: git help [[-i|--info] [-m|--man] [-w|--web]] [<command>|<doc>]\n   or: git help [-g|--guides]\n   or: git help [-c|--config]\n   or: git help [--user-interfaces]\n   or: git help [--developer-interfaces]\n\n    -a, --all             print all available commands\n    --[no-]external-commands\n                          show external commands in --all\n    --[no-]aliases        show aliases in --all\n    -m, --[no-]man        show man page\n    -w, --[no-]web        show manual in web browser\n    -i, --[no-]info       show info page\n    -v, --[no-]verbose    print command description\n    -g, --guides          print list of useful guides\n    --user-interfaces     print list of user-facing repository, command and file interfaces\n    --developer-interfaces\n                          print list of file formats, protocols and other developer interfaces\n    -c, --config          print all configuration variable names\n"
+}
+
+fn help_all_with_topic_usage_text() -> String {
+    format!(
+        "fatal: the '--all' option doesn't take any non-option arguments\n\n{}",
+        help_usage_text()
+    )
+}
+
+fn help_no_external_aliases_usage_text() -> String {
+    format!(
+        "fatal: the '--no-[external-commands|aliases]' options can only be used with '--all'\n\n{}",
+        help_usage_text()
+    )
+}
+
+fn help_no_non_option_arguments_usage_text(option: &str) -> String {
+    format!(
+        "fatal: the '{option}' option doesn't take any non-option arguments\n\n{}",
+        help_usage_text()
+    )
+}
+
+fn write_help_config_for_completion(mut writer: impl std::io::Write) -> io::Result<()> {
+    for name in help_config_completion_vars() {
+        writeln!(writer, "{name}")?;
+    }
+    Ok(())
+}
+
+fn write_help_config_sections_for_completion(mut writer: impl std::io::Write) -> io::Result<()> {
+    for section in help_config_completion_sections() {
+        writeln!(writer, "{section}")?;
+    }
+    Ok(())
+}
+
+fn help_config_completion_vars() -> BTreeSet<String> {
+    help_config_completion_entries()
         .into_iter()
-        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| {
-            stock_git_names()
-                .into_iter()
-                .map(move |name| dir.join(name))
+        .map(|entry| strip_completion_suffixes(&entry))
+        .collect()
+}
+
+fn help_config_completion_sections() -> BTreeSet<String> {
+    help_config_completion_entries()
+        .into_iter()
+        .filter_map(|entry| {
+            strip_completion_suffixes(&entry)
+                .split_once('.')
+                .map(|(section, _)| section.to_owned())
         })
-    {
-        if is_stock_git_binary(&candidate) {
-            return candidate;
-        }
-    }
-    PathBuf::from("/usr/bin/git")
+        .collect()
 }
 
-fn stock_git_candidates() -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        vec![
-            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
-        ]
-    }
-    #[cfg(not(windows))]
-    {
-        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
-    }
+fn help_config_completion_entries() -> Vec<String> {
+    HELP_CONFIG_TEXT
+        .lines()
+        .map(str::trim)
+        .filter(|line| is_help_config_completion_entry(line))
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
-fn stock_git_names() -> Vec<&'static str> {
-    if cfg!(windows) {
-        vec!["git.exe", "git"]
-    } else {
-        vec!["git"]
+fn is_help_config_completion_entry(line: &str) -> bool {
+    if line.is_empty() || line.contains(char::is_whitespace) {
+        return false;
     }
+    let dot_count = line.bytes().filter(|byte| *byte == b'.').count();
+    dot_count == 1 || dot_count == 2
 }
 
-fn is_stock_git_binary(path: &Path) -> bool {
-    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
+fn strip_completion_suffixes(entry: &str) -> String {
+    let star_trimmed = entry.split('*').next().unwrap_or(entry);
+    star_trimmed
+        .split('<')
+        .next()
+        .unwrap_or(star_trimmed)
+        .to_owned()
+}
+
+fn write_help_all(mut writer: impl std::io::Write, no_external_commands: bool) -> io::Result<()> {
+    if !no_external_commands {
+        return writer.write_all(HELP_ALL_TEXT.as_bytes());
+    }
+    let marker = "\nExternal commands\n";
+    let text = HELP_ALL_TEXT
+        .split_once(marker)
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(HELP_ALL_TEXT);
+    writer.write_all(text.as_bytes())
+}
+
+fn render_help_topic(
+    topic: &str,
+    exclude_guides: bool,
+    display_mode: HelpDisplayMode,
+) -> Result<()> {
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum HelpTopicKind {
+        Guide,
+        Command,
+    }
+
+    let (page, kind) = match topic {
+        "git" => ("git".to_owned(), HelpTopicKind::Guide),
+        "everyday" => ("giteveryday".to_owned(), HelpTopicKind::Guide),
+        "revisions" => ("gitrevisions".to_owned(), HelpTopicKind::Guide),
+        "tutorial" => ("gittutorial".to_owned(), HelpTopicKind::Guide),
+        "tutorial-2" => ("gittutorial-2".to_owned(), HelpTopicKind::Guide),
+        "workflows" => ("gitworkflows".to_owned(), HelpTopicKind::Guide),
+        topic if topic.starts_with("git") => (topic.to_owned(), HelpTopicKind::Command),
+        topic => (format!("git-{topic}"), HelpTopicKind::Command),
+    };
+    if exclude_guides && kind == HelpTopicKind::Guide {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!("git: '{topic}' is not a git command. See 'git --help'.\n"),
+        });
+    }
+    let html_mode = match display_mode {
+        HelpDisplayMode::Web => true,
+        HelpDisplayMode::Auto => help_default_format_is_html(),
+        HelpDisplayMode::Man | HelpDisplayMode::Info => false,
+    };
+    if html_mode {
+        return render_help_html_page(&page);
+    }
+    super::reference_commands::render_git_manual_page(&page)
+}
+
+fn help_default_format_is_html() -> bool {
+    let Ok(repo) = find_repo() else {
         return false;
     };
-    if !output.status.success() {
-        return false;
+    read_config_value(&repo, "help.format")
+        .ok()
+        .flatten()
+        .is_some_and(|value| value.eq_ignore_ascii_case("html"))
+}
+
+fn render_help_html_page(page: &str) -> Result<()> {
+    let target = help_html_page_target(page)?;
+    run_help_browser(&target)?;
+    Err(CliError::Exit(0))
+}
+
+fn help_html_page_target(page: &str) -> Result<String> {
+    let Some(base) = help_html_path_config() else {
+        return Err(help_html_missing_error());
+    };
+    let file_name = format!("{page}.html");
+    if base.contains("://") {
+        return Ok(format!("{}/{}", base.trim_end_matches('/'), file_name));
     }
-    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    version.starts_with("git version ") && !version.contains("zmin")
+    let target = PathBuf::from(&base).join(&file_name);
+    if !target.is_file() {
+        return Err(help_html_missing_error());
+    }
+    Ok(target.display().to_string())
+}
+
+fn help_html_path_config() -> Option<String> {
+    let Ok(repo) = find_repo() else {
+        return None;
+    };
+    read_config_value(&repo, "help.htmlpath").ok().flatten()
+}
+
+fn help_html_missing_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "HTML documentation is not provided by this distribution of git.".into(),
+    }
+}
+
+fn run_help_browser(target: &str) -> Result<()> {
+    let command = help_browser_command().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "no browser configured".into(),
+    })?;
+    let script = if command.contains("%s") {
+        command.replace("%s", "\"$1\"")
+    } else {
+        format!("{command} \"$1\"")
+    };
+    let status = ProcessCommand::new("sh")
+        .arg("-c")
+        .arg(script)
+        .arg("zmin-help-browser")
+        .arg(target)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Fatal {
+            code: status.code().unwrap_or(128),
+            message: "failed to start browser".into(),
+        })
+    }
+}
+
+fn help_browser_command() -> Option<String> {
+    let Ok(repo) = find_repo() else {
+        return None;
+    };
+    let browser = read_config_value(&repo, "help.browser").ok().flatten()?;
+    read_config_value(&repo, &format!("browser.{browser}.cmd"))
+        .ok()
+        .flatten()
 }
 
 fn hook_run(
@@ -338,7 +973,7 @@ fn hook_run(
                 hook_path.display()
             ));
             text.push_str(
-                "hint: You can disable this warning with `git config set advice.ignoredHook false`.\n",
+                "hint: You can disable this warning with `git config advice.ignoredHook false`.\n",
             );
         }
         text.push_str(&format!("error: cannot find a hook named {hook_name}\n"));
@@ -715,12 +1350,12 @@ fn managed_hook_selected_paths(
         let absolute = repo
             .root
             .join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
-        let metadata = match fs::metadata(&absolute) {
+        let metadata = match fs::symlink_metadata(&absolute) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
             Err(error) => return Err(CliError::Io(error)),
         };
-        if metadata.is_file() {
+        if metadata.file_type().is_file() {
             selected.push(relative);
         }
     }
@@ -792,10 +1427,18 @@ fn managed_hook_staged_entries(repo: &GitRepo) -> Result<Vec<ManagedHookStagedEn
         .into_iter()
         .map(|entry| ManagedHookStagedEntry {
             status: entry.status,
-            path: entry.path,
-            old_path: entry.old_path,
+            path: normalize_managed_hook_repo_relative_path(entry.path),
+            old_path: entry
+                .old_path
+                .map(normalize_managed_hook_repo_relative_path),
         })
         .collect())
+}
+
+fn normalize_managed_hook_repo_relative_path(path: Vec<u8>) -> Vec<u8> {
+    path.into_iter()
+        .map(|byte| if byte == b'\\' { b'/' } else { byte })
+        .collect()
 }
 
 fn reject_unmanaged_hook_file(repo: &GitRepo, hook_name: &str, force: bool) -> Result<()> {
@@ -858,6 +1501,47 @@ fn shell_quote_words(words: &[String]) -> String {
         .map(|word| shell_quote_single(word))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_hook_repo_relative_path_normalizes_backslashes_to_slashes() {
+        assert_eq!(
+            normalize_managed_hook_repo_relative_path(
+                br"website\components\landing\hero.tsx".to_vec()
+            ),
+            b"website/components/landing/hero.tsx"
+        );
+    }
+
+    #[test]
+    fn managed_hook_render_uses_normalized_repo_relative_slash_paths() {
+        let renamed = ManagedHookStagedEntry {
+            status: IndexDiffStatus::Renamed,
+            path: normalize_managed_hook_repo_relative_path(
+                br"website\components\landing\hero.tsx".to_vec(),
+            ),
+            old_path: Some(normalize_managed_hook_repo_relative_path(
+                br"website\components\old-landing\hero.tsx".to_vec(),
+            )),
+        };
+        let modified = ManagedHookStagedEntry {
+            status: IndexDiffStatus::Modified,
+            path: normalize_managed_hook_repo_relative_path(
+                br"website\components\landing\hero.tsx".to_vec(),
+            ),
+            old_path: None,
+        };
+
+        assert_eq!(
+            renamed.render(),
+            "R website/components/old-landing/hero.tsx -> website/components/landing/hero.tsx"
+        );
+        assert_eq!(modified.render(), "M website/components/landing/hero.tsx");
+    }
 }
 
 fn managed_hook_runner_spec(extensions: &[String], command: &[String]) -> String {
@@ -1098,16 +1782,30 @@ struct ArchImportRoot {
 }
 
 fn for_each_repo(config: &str, keep_going: bool, arguments: Vec<String>) -> Result<()> {
+    if let Some(text) = for_each_repo_bad_config_text(config) {
+        return Err(CliError::Stderr { code: 129, text });
+    }
+    let repos = read_multi_config_values(config)
+        .map_err(|error| match error {
+            CliError::Fatal { code: 129, message } if message.starts_with("missing value for '") => {
+                CliError::Stderr {
+                    code: 129,
+                    text: format!(
+                        "error: {message}\nfatal: got bad config --config={config}\n\nusage: git for-each-repo --config=<config> [--] <arguments>\n\n    --[no-]config <config>\n                          config key storing a list of repository paths\n    --[no-]keep-going     keep going even if command fails in a repository\n"
+                    ),
+                }
+            }
+            other => other,
+        })?
+        .into_iter()
+        .map(normalize_for_each_repo_config_path)
+        .collect::<Vec<_>>();
     if arguments.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
             message: "for-each-repo requires command arguments".into(),
         });
     }
-    let repos = read_multi_config_values(config)?
-        .into_iter()
-        .map(normalize_for_each_repo_config_path)
-        .collect::<Vec<_>>();
     let executable = std::env::current_exe()?;
     let mut failed = None;
     for repo in repos {
@@ -1144,6 +1842,24 @@ fn for_each_repo(config: &str, keep_going: bool, arguments: Vec<String>) -> Resu
     Ok(())
 }
 
+fn for_each_repo_bad_config_text(config: &str) -> Option<String> {
+    let detail = if !config.contains('.') {
+        format!("error: key does not contain a section: {config}")
+    } else if config.ends_with('.') {
+        format!("error: key does not contain variable name: {config}")
+    } else if config.starts_with('.')
+        || config.contains("..")
+        || config.contains(['\n', '\r', '\0', '\'', '"'])
+    {
+        format!("error: invalid key: {config}")
+    } else {
+        return None;
+    };
+    Some(format!(
+        "{detail}\nfatal: got bad config --config={config}\n\nusage: git for-each-repo --config=<config> [--] <arguments>\n\n    --[no-]config <config>\n                          config key storing a list of repository paths\n    --[no-]keep-going     keep going even if command fails in a repository\n"
+    ))
+}
+
 fn for_each_repo_missing_dir_error(error: &io::Error) -> bool {
     if error.kind() == io::ErrorKind::NotFound {
         return true;
@@ -1158,20 +1874,42 @@ fn for_each_repo_missing_dir_error(error: &io::Error) -> bool {
 fn normalize_for_each_repo_config_path(path: String) -> String {
     #[cfg(windows)]
     {
-        return path.replace("\\\\", "\\");
+        let path = path.replace("\\\\", "\\");
+        return expand_for_each_repo_home(path);
     }
     #[cfg(not(windows))]
     {
-        path
+        expand_for_each_repo_home(path)
     }
+}
+
+fn expand_for_each_repo_home(path: String) -> String {
+    if path == "~" {
+        return std::env::var("HOME").unwrap_or(path);
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return std::path::Path::new(&home).join(rest).display().to_string();
+    }
+    path
 }
 
 fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let mut index = read_repo_index(&repo)?;
     let initial_index_version = update_index_disk_version(&repo)?;
     normalize_update_index_cacheinfo_args(&mut options)?;
+    let ordered_force_remove_paths = crate::runtime::pending_update_index_force_remove_paths()
+        .into_iter()
+        .map(|path| {
+            normalize_git_path(&path)
+                .map(|value| value.into_bytes())
+                .map_err(CliError::Io)
+        })
+        .collect::<Result<BTreeSet<_>>>()?;
     let requested_index_version = parse_update_index_version(options.index_version.as_deref())?;
     if options.index_info {
         update_index_index_info(&store, &mut index)?;
@@ -1223,27 +1961,35 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
             options.replace,
         )?;
     }
-    if options.force_remove {
-        for path in &paths {
-            let relative = path_arg_to_repo_relative(&repo, path)?;
-            index.remove_path(&relative)?;
-            if options.verbose {
-                println!("remove '{}'", String::from_utf8_lossy(&relative));
-            }
-        }
-    } else if options.refresh {
-        update_index_refresh_tracked(&repo, &index, &paths)?;
+    if options.refresh {
+        update_index_refresh_tracked(&repo, &mut index, &paths)?;
     } else if options.unresolve {
         update_index_unresolve_paths(&repo, &mut index, &paths)?;
     } else if !update_index_has_only_flag_changes(&options) {
         for path in &paths {
-            update_index_path(&repo, &store, &mut index, path, &options)?;
+            update_index_path(
+                &repo,
+                &store,
+                &mut index,
+                path,
+                &options,
+                &ordered_force_remove_paths,
+            )?;
         }
     }
     if let Some(chmod) = options.chmod.as_deref() {
         update_index_chmod(&repo, &mut index, &paths, chmod)?;
     }
     update_index_entry_flags(&repo, &mut index, &paths, &options)?;
+    let split_requested = options.split_index
+        || std::env::var("GIT_TEST_SPLIT_INDEX").ok().as_deref() == Some("1")
+        || read_config_value(&repo, "core.splitIndex")?
+            .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+    let split_disabled_by_config = read_config_value(&repo, "core.splitIndex")?
+        .is_some_and(|value| value.eq_ignore_ascii_case("false"));
+    let split_write_forbidden = options.split_index
+        && repo.index_path.parent() != Some(repo.git_dir.as_path())
+        && !split_index_git_dir_writable(&repo.git_dir);
     if let Some(version) = requested_index_version {
         if options.verbose {
             println!(
@@ -1251,11 +1997,26 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
                 version.as_u32()
             );
         }
-        index.write_to_path_with_version(&repo.index_path, version)?;
+        if options.no_split_index || split_disabled_by_config || split_write_forbidden {
+            index.write_to_path_without_split_with_version(&repo.index_path, version)?;
+        } else {
+            index.write_to_path_with_version(&repo.index_path, version)?;
+        }
     } else {
-        index.write_to_path(&repo.index_path)?;
+        if options.no_split_index || split_disabled_by_config || split_write_forbidden {
+            index.write_to_path_without_split(&repo.index_path)?;
+        } else {
+            index.write_to_path(&repo.index_path)?;
+        }
     }
-    apply_update_index_helper_extensions(&repo, &options)?;
+    apply_update_index_helper_extensions(
+        &repo,
+        &options,
+        split_requested && !split_disabled_by_config && !split_write_forbidden,
+    )?;
+    if split_disabled_by_config {
+        remove_shared_index_files(&repo)?;
+    }
     Ok(())
 }
 
@@ -1378,9 +2139,19 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
 fn apply_update_index_helper_extensions(
     repo: &GitRepo,
     options: &UpdateIndexCommandOptions,
+    split_requested: bool,
 ) -> Result<()> {
-    if options.split_index {
-        enable_synthetic_split_index(&repo.index_path)?;
+    if options.no_split_index {
+        remove_shared_index_files(repo)?;
+    } else if split_requested && !index_contains_link_extension(&repo.index_path)? {
+        if let Err(error) = enable_synthetic_split_index(&repo.index_path) {
+            if matches!(&error, CliError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied)
+            {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        sync_split_index_permissions(repo)?;
     }
     let mut extensions = Vec::new();
     if options.fsmonitor {
@@ -1396,9 +2167,98 @@ fn apply_update_index_helper_extensions(
         });
     }
     if extensions.is_empty() {
+        if split_requested && should_rotate_split_index(repo)? {
+            enable_synthetic_split_index(&repo.index_path)?;
+            sync_split_index_permissions(repo)?;
+        }
         return Ok(());
     }
-    patch_index_extensions(&repo.index_path, &extensions)
+    patch_index_extensions(&repo.index_path, &extensions)?;
+    if split_requested && should_rotate_split_index(repo)? {
+        enable_synthetic_split_index(&repo.index_path)?;
+        sync_split_index_permissions(repo)?;
+    }
+    Ok(())
+}
+
+fn sync_split_index_permissions(repo: &GitRepo) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = read_config_value(repo, "core.sharedRepository")?
+            .and_then(|value| u32::from_str_radix(value.trim_start_matches('0'), 8).ok());
+        if let Some(mode) = mode {
+            let permissions = fs::Permissions::from_mode(mode);
+            fs::set_permissions(&repo.index_path, permissions.clone())?;
+            if let Some(parent) = repo.index_path.parent() {
+                for entry in fs::read_dir(parent)? {
+                    let entry = entry?;
+                    if entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("sharedindex.")
+                    {
+                        fs::set_permissions(entry.path(), permissions.clone())?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn should_rotate_split_index(repo: &GitRepo) -> Result<bool> {
+    let Some(value) = read_config_value(repo, "splitIndex.maxPercentChange")? else {
+        return Ok(read_index_entry_count(&fs::read(&repo.index_path)?)? > 1);
+    };
+    Ok(value.trim() == "0")
+}
+
+fn index_contains_link_extension(index_path: &Path) -> Result<bool> {
+    let data = fs::read(index_path)?;
+    Ok(data
+        .windows(LINK_EXTENSION_SIGNATURE.len())
+        .any(|window| window == LINK_EXTENSION_SIGNATURE))
+}
+
+fn remove_shared_index_files(repo: &GitRepo) -> Result<()> {
+    let Some(parent) = repo.index_path.parent() else {
+        return Ok(());
+    };
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with("sharedindex.") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn split_index_git_dir_writable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o222 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn split_index_git_dir_writable(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| !metadata.permissions().readonly())
+        .unwrap_or(false)
+}
+
+pub(crate) fn ensure_split_index(index_path: &Path) -> Result<()> {
+    let data = fs::read(index_path)?;
+    if data
+        .windows(LINK_EXTENSION_SIGNATURE.len())
+        .any(|window| window == LINK_EXTENSION_SIGNATURE)
+    {
+        return Ok(());
+    }
+    enable_synthetic_split_index(index_path)
 }
 
 fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
@@ -1409,8 +2269,25 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
             message: "invalid index header".into(),
         });
     }
-    let checksum_offset = data.len() - INDEX_FILE_CHECKSUM_LEN;
-    let shared_hash = &data[checksum_offset..];
+    let mut shared_data = data.clone();
+    if data
+        .windows(LINK_EXTENSION_SIGNATURE.len())
+        .any(|window| window == LINK_EXTENSION_SIGNATURE)
+    {
+        let merged = read_index(index_path).map_err(CliError::Io)?;
+        let temporary_path = index_path.with_file_name(format!(
+            ".zmin-split-source-{}",
+            std::process::id()
+        ));
+        merged
+            .write_to_path_without_split(&temporary_path)
+            .map_err(CliError::Io)?;
+        shared_data = fs::read(&temporary_path)?;
+        let _ = fs::remove_file(temporary_path);
+    }
+    let local_checksum_offset = data.len() - INDEX_FILE_CHECKSUM_LEN;
+    let shared_checksum_offset = shared_data.len() - INDEX_FILE_CHECKSUM_LEN;
+    let shared_hash = &shared_data[shared_checksum_offset..];
     let shared_name = shared_hash
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -1419,17 +2296,30 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
         .parent()
         .expect("index path should have parent")
         .join(format!("sharedindex.{shared_name}"));
-    fs::write(&shared_path, &data)?;
-
-    let entry_count = read_index_entry_count(&data)?;
-    if entry_count != 1 {
-        return Err(CliError::Stderr {
-            code: 128,
-            text:
-                "fatal: split-index is currently only modeled for a single-entry local index lane\n"
-                    .into(),
-        });
+    let config_text = index_path
+        .parent()
+        .map(|parent| fs::read_to_string(parent.join("config")).unwrap_or_default())
+        .unwrap_or_default();
+    if config_text
+        .to_ascii_lowercase()
+        .contains("sharedrepository")
+    {
+        if let Some(parent) = index_path.parent() {
+            for entry in fs::read_dir(parent)? {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("sharedindex.")
+                    && entry.path() != shared_path
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
     }
+    fs::write(&shared_path, &shared_data)?;
+
     let version = u32::from_be_bytes(data[4..8].try_into().expect("length checked"));
     if version == INDEX_VERSION_4 {
         return Err(CliError::Stderr {
@@ -1437,22 +2327,21 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
             text: "fatal: split-index is currently not modeled for index version 4\n".into(),
         });
     }
-    let entries_end = find_index_entries_end(&data, checksum_offset)?;
-    let stripped_entry = synthetic_split_index_entry(&data, checksum_offset)?;
     let mut rewritten = data[..12].to_vec();
-    rewritten.extend_from_slice(&stripped_entry);
+    rewritten[8..12].copy_from_slice(&0_u32.to_be_bytes());
     append_index_extension(
         &mut rewritten,
         LINK_EXTENSION_SIGNATURE,
         synthetic_split_index_link_body(shared_hash),
     );
+    let entries_end = find_index_entries_end(&data, local_checksum_offset)?;
     let mut cursor = entries_end;
-    while cursor < checksum_offset {
+    while cursor < local_checksum_offset {
         let header_end = cursor.checked_add(8).ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "invalid index extension offset".into(),
         })?;
-        if header_end > checksum_offset {
+        if header_end > local_checksum_offset {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "truncated index extension header".into(),
@@ -1468,7 +2357,7 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
             code: 128,
             message: "invalid index extension length".into(),
         })?;
-        if end > checksum_offset {
+        if end > local_checksum_offset {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "truncated index extension body".into(),
@@ -1482,6 +2371,75 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
     let digest = Sha1::digest(&rewritten);
     rewritten.extend_from_slice(&digest);
     fs::write(index_path, rewritten)?;
+    prune_expired_shared_indexes(index_path)?;
+    Ok(())
+}
+
+fn prune_expired_shared_indexes(index_path: &Path) -> Result<()> {
+    let Some(parent) = index_path.parent() else {
+        return Ok(());
+    };
+    let config = fs::read_to_string(parent.join("config")).unwrap_or_default();
+    let value = config
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name.trim().eq_ignore_ascii_case("sharedindexexpire")).then_some(value.trim())
+        })
+        .unwrap_or("14.days.ago");
+    if value.eq_ignore_ascii_case("never") {
+        return Ok(());
+    }
+    let days = value
+        .strip_suffix(".days.ago")
+        .and_then(|number| number.parse::<u64>().ok())
+        .unwrap_or(0);
+    let age = Duration::from_secs(days.saturating_mul(86_400));
+    let now = SystemTime::now();
+    let active_shared_name = fs::read(index_path)
+        .ok()
+        .and_then(|data| {
+            let link = data.windows(LINK_EXTENSION_SIGNATURE.len()).position(|window| {
+                window == LINK_EXTENSION_SIGNATURE
+            })?;
+            let body_start = link.checked_add(8)?;
+            let hash_end = body_start.checked_add(INDEX_FILE_CHECKSUM_LEN)?;
+            (hash_end <= data.len()).then(|| {
+                format!(
+                    "sharedindex.{}",
+                    data[body_start..hash_end]
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                )
+            })
+        });
+    let shared_entries = fs::read_dir(parent)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("sharedindex."))
+        .collect::<Vec<_>>();
+    let newest_non_active = shared_entries
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            (active_shared_name.as_deref() != Some(name.to_string_lossy().as_ref()))
+                .then_some(name)
+                .and_then(|name| Some((name, entry.metadata().ok()?.modified().ok()?)))
+        })
+        .max_by_key(|(_, modified)| *modified)
+        .map(|(name, _)| name);
+    for entry in shared_entries {
+        let name = entry.file_name();
+        if active_shared_name.as_deref() == Some(name.to_string_lossy().as_ref())
+            || newest_non_active.as_ref() == Some(&name)
+        {
+            continue;
+        }
+        let modified = entry.metadata()?.modified().unwrap_or(now);
+        if now.duration_since(modified).unwrap_or_default() > age {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
     Ok(())
 }
 
@@ -1522,9 +2480,11 @@ fn synthetic_split_index_entry(data: &[u8], checksum_offset: usize) -> Result<Ve
 }
 
 fn synthetic_split_index_link_body(shared_hash: &[u8]) -> Vec<u8> {
-    let mut body = Vec::with_capacity(20 + SPLIT_INDEX_SINGLE_ENTRY_TAIL.len());
+    let suffix_len = SPLIT_INDEX_EMPTY_BITMAP.len() * 2;
+    let mut body = Vec::with_capacity(20 + suffix_len);
     body.extend_from_slice(shared_hash);
-    body.extend_from_slice(SPLIT_INDEX_SINGLE_ENTRY_TAIL);
+    body.extend_from_slice(SPLIT_INDEX_EMPTY_BITMAP);
+    body.extend_from_slice(SPLIT_INDEX_EMPTY_BITMAP);
     body
 }
 
@@ -1755,10 +2715,75 @@ fn update_index_path(
     index: &mut GitIndex,
     path: &std::path::Path,
     options: &UpdateIndexCommandOptions,
+    ordered_force_remove_paths: &BTreeSet<Vec<u8>>,
 ) -> Result<()> {
+    let raw_path = path.to_string_lossy();
+    if raw_path.ends_with('/') {
+        eprintln!("Ignoring path {raw_path}");
+        return Ok(());
+    }
     let relative = path_arg_to_repo_relative(repo, path)?;
     let absolute = repo.root.join(String::from_utf8_lossy(&relative).as_ref());
+    let ordered_force_remove = ordered_force_remove_paths.contains(&relative);
+    if ordered_force_remove {
+        index.remove_path(&relative)?;
+        if options.verbose {
+            println!("remove '{}'", String::from_utf8_lossy(&relative));
+        }
+        return Ok(());
+    }
+    if path_traverses_symlink_ancestor(&repo.root, &absolute)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "'{}' is beyond a symbolic link",
+                String::from_utf8_lossy(&relative)
+            ),
+        });
+    }
     if path_exists(&absolute) {
+        let metadata = fs::symlink_metadata(&absolute)?;
+        if !options.replace && update_index_path_conflicts(index, &relative, !metadata.is_dir()) {
+            let display = String::from_utf8_lossy(&relative);
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: '{display}' appears as both a file and as a directory\n\
+                     error: {display}: cannot add to the index - missing --add option?\n\
+                     fatal: Unable to process path {display}\n"
+                ),
+            });
+        }
+        if metadata.is_dir()
+            && (options.add || find_index_entry(index, &relative).is_some())
+            && exact_repo_at(&absolute).is_some()
+        {
+            if options.replace {
+                update_index_remove_parent_file_entries(index, &relative)?;
+                index.remove_dir(&relative)?;
+            }
+            stage_file(repo, store, index, &absolute)?;
+            if options.verbose {
+                println!("add '{}'", String::from_utf8_lossy(&relative));
+            }
+            return Ok(());
+        }
+        if metadata.is_dir() && options.remove && find_index_entry(index, &relative).is_some() {
+            index.remove_path(&relative)?;
+            if options.verbose {
+                println!("remove '{}'", String::from_utf8_lossy(&relative));
+            }
+            return Ok(());
+        }
+        if metadata.is_dir() {
+            let display = String::from_utf8_lossy(&relative);
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: {display}: is a directory - add individual files instead\nfatal: Unable to process path {display}\n"
+                ),
+            });
+        }
         if options.add || find_index_entry(index, &relative).is_some() {
             if options.replace {
                 update_index_remove_parent_file_entries(index, &relative)?;
@@ -1767,7 +2792,18 @@ fn update_index_path(
             if options.info_only {
                 update_index_stage_info_only(repo, index, &absolute)?;
             } else {
-                stage_file(repo, store, index, &absolute)?;
+                if let Err(error) = stage_file(repo, store, index, &absolute) {
+                    if object_database_permission_denied(repo, &error).is_some() {
+                        let display = String::from_utf8_lossy(&relative);
+                        return Err(object_database_permission_denied_error(
+                            repo,
+                            format!(
+                                "error: {display}: failed to insert into database\nfatal: Unable to process path {display}\n"
+                            ),
+                        ));
+                    }
+                    return Err(error);
+                }
             }
             if options.verbose {
                 println!("add '{}'", String::from_utf8_lossy(&relative));
@@ -1790,6 +2826,12 @@ fn update_index_path(
             return Ok(());
         }
         index.remove_path(&relative)?;
+        if options.verbose {
+            println!("remove '{}'", String::from_utf8_lossy(&relative));
+        }
+        return Ok(());
+    }
+    if options.again && find_index_entry(index, &relative).is_some_and(IndexEntry::skip_worktree) {
         return Ok(());
     }
     Err(CliError::Fatal {
@@ -1798,6 +2840,22 @@ fn update_index_path(
             "{}: does not exist and --remove not passed",
             String::from_utf8_lossy(&relative)
         ),
+    })
+}
+
+fn update_index_path_conflicts(index: &GitIndex, relative: &[u8], non_directory: bool) -> bool {
+    index.entries().iter().any(|entry| {
+        if entry.stage != 0 || entry.path == relative {
+            return false;
+        }
+        let relative_is_descendant = relative
+            .strip_prefix(entry.path.as_slice())
+            .is_some_and(|suffix| suffix.first() == Some(&b'/'));
+        let entry_is_descendant = entry
+            .path
+            .strip_prefix(relative)
+            .is_some_and(|suffix| suffix.first() == Some(&b'/'));
+        relative_is_descendant || entry_is_descendant && non_directory
     })
 }
 
@@ -1842,7 +2900,7 @@ fn update_index_stage_info_only(repo: &GitRepo, index: &mut GitIndex, path: &Pat
 
     let content = if file_type.is_symlink() {
         read_symlink_content(path)?
-    } else if stage_options.needs_content_conversion(&relative) {
+    } else if stage_options.needs_content_conversion(repo, &relative)? {
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
         stage_options.clean_staged_worktree_content(
             repo,
@@ -1967,20 +3025,24 @@ fn update_index_index_info_line(index: &mut GitIndex, line: &str) -> Result<()> 
     let (header, path) = line
         .split_once('\t')
         .ok_or_else(|| update_index_index_info_error(line))?;
-    let mut header = header.split_whitespace();
-    let mode = header
-        .next()
-        .ok_or_else(|| update_index_index_info_error(line))?;
-    let second = header
-        .next()
-        .ok_or_else(|| update_index_index_info_error(line))?;
-    let third = header
-        .next()
-        .ok_or_else(|| update_index_index_info_error(line))?;
-    let fourth = header.next();
-    if fourth.is_some() || header.next().is_some() {
+    let header = header.split_whitespace().collect::<Vec<_>>();
+    let Some(mode) = header.first().copied() else {
+        return Err(update_index_index_info_error(line));
+    };
+    if mode == "0" {
+        if header.len() != 2 {
+            return Err(update_index_index_info_error(line));
+        }
+        ObjectId::from_hex(index.hash_algorithm(), header[1])
+            .map_err(|_| update_index_index_info_error(line))?;
+        index.remove_path(normalize_git_path(path)?.as_bytes())?;
+        return Ok(());
+    }
+    if header.len() != 3 {
         return Err(update_index_index_info_error(line));
     }
+    let second = header[1];
+    let third = header[2];
     let (id, stage) = if update_index_index_info_object_type(second).is_some() {
         (third, 0)
     } else {
@@ -1990,7 +3052,7 @@ fn update_index_index_info_line(index: &mut GitIndex, line: &str) -> Result<()> 
         (second, stage)
     };
     let mode = parse_index_mode(mode)?;
-    let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?;
+    let id = ObjectId::from_hex(index.hash_algorithm(), id)?;
     if stage > 3 {
         return Err(update_index_index_info_error(line));
     }
@@ -2114,7 +3176,11 @@ fn update_index_flag_conflict_error(left: &str, right: &str) -> CliError {
     }
 }
 
-fn update_index_refresh_tracked(repo: &GitRepo, index: &GitIndex, paths: &[PathBuf]) -> Result<()> {
+fn update_index_refresh_tracked(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+    paths: &[PathBuf],
+) -> Result<()> {
     let mut failed = false;
     let unmerged = merge_index_unmerged_paths(index)
         .into_iter()
@@ -2134,6 +3200,7 @@ fn update_index_refresh_tracked(repo: &GitRepo, index: &GitIndex, paths: &[PathB
             .map(|path| path_arg_to_repo_relative(repo, path))
             .collect::<Result<Vec<_>>>()?
     };
+    refresh_tracked_index_metadata_matching(repo, index, &selected)?;
 
     for path in selected {
         if unmerged.contains(&path) {
@@ -2181,30 +3248,148 @@ fn bugreport(
             mode,
         )?;
     }
+    let filename = bugreport_filename(suffix, no_suffix)?;
+    let display_path = match output_directory.as_ref() {
+        Some(directory) => directory.join(&filename).display().to_string(),
+        None => filename.clone(),
+    };
     let directory = output_directory.unwrap_or(std::env::current_dir()?);
     fs::create_dir_all(&directory)?;
-    let filename = bugreport_filename(suffix, no_suffix)?;
     let path = directory.join(filename);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let report = bugreport_body(find_repo().ok().as_ref())?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::AlreadyExists => CliError::Fatal {
+                code: 128,
+                message: format!("unable to create '{display_path}': File exists"),
+            },
+            _ => CliError::Io(error),
+        })?;
+    file.write_all(report.as_bytes())?;
+    eprintln!("Created new report at '{}'.", display_path);
+    Ok(())
+}
+
+const BUGREPORT_TEMPLATE: &str = "\
+Thank you for filling out a Git bug report!\n\
+Please answer the following questions to help us understand your issue.\n\
+\n\
+What did you do before the bug happened? (Steps to reproduce your issue)\n\
+\n\
+What did you expect to happen? (Expected behavior)\n\
+\n\
+What happened instead? (Actual behavior)\n\
+\n\
+What's different between what you expected and what actually happened?\n\
+\n\
+Anything else you want to add:\n\
+\n\
+Please review the rest of the bug report below.\n\
+You can delete any lines you don't wish to share.\n\
+\n\
+\n";
+
+const BUGREPORT_KNOWN_HOOKS: &[&str] = &[
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "fsmonitor-watchman",
+    "push-to-checkout",
+    "update",
+    "post-update",
+    "pre-receive",
+    "receive-pack",
+    "post-receive",
+    "reference-transaction",
+    "proc-receive",
+];
+
+fn bugreport_body(repo: Option<&GitRepo>) -> Result<String> {
     let mut report = String::new();
-    report.push_str("Thank you for filling out a Git bug report!\n\n");
+    report.push_str(BUGREPORT_TEMPLATE);
     report.push_str("[System Info]\n");
-    report.push_str(&format!("zmin version: {}\n", env!("CARGO_PKG_VERSION")));
-    report.push_str(&format!("os: {}\n", std::env::consts::OS));
-    report.push_str(&format!("arch: {}\n", std::env::consts::ARCH));
-    if let Ok(repo) = find_repo() {
-        report.push_str("\n[Repository]\n");
-        report.push_str(&format!("worktree: {}\n", repo.root.display()));
-        report.push_str(&format!("gitdir: {}\n", repo.git_dir.display()));
-        if let Ok(head) = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1).read_head() {
-            report.push_str(&format!("HEAD: {head:?}\n"));
+    report.push_str(&bugreport_system_info()?);
+    report.push('\n');
+    report.push_str("[Enabled Hooks]\n");
+    for hook in bugreport_enabled_hooks(repo)? {
+        report.push_str(&hook);
+        report.push('\n');
+    }
+    Ok(report)
+}
+
+fn bugreport_system_info() -> Result<String> {
+    let mut out = String::new();
+    out.push_str("git version:\n");
+    out.push_str(&diagnose_git_build_options()?);
+    out.push_str(&format!("uname: {}\n", bugreport_uname()));
+    out.push_str(&format!(
+        "compiler info: {}\n",
+        option_env!("ZMIN_RUSTC_VERSION").unwrap_or("unknown compiler")
+    ));
+    out.push_str(&format!(
+        "$SHELL (typically, interactive shell): {}\n",
+        std::env::var("SHELL").unwrap_or_else(|_| "unknown".to_owned())
+    ));
+    Ok(out)
+}
+
+#[cfg(unix)]
+fn bugreport_uname() -> String {
+    use std::ffi::CStr;
+
+    let mut uts = std::mem::MaybeUninit::<libc::utsname>::uninit();
+    let rc = unsafe { libc::uname(uts.as_mut_ptr()) };
+    if rc != 0 {
+        return std::env::consts::OS.to_owned();
+    }
+    let uts = unsafe { uts.assume_init() };
+    let sysname = unsafe { CStr::from_ptr(uts.sysname.as_ptr()) }.to_string_lossy();
+    let release = unsafe { CStr::from_ptr(uts.release.as_ptr()) }.to_string_lossy();
+    let version = unsafe { CStr::from_ptr(uts.version.as_ptr()) }.to_string_lossy();
+    let machine = unsafe { CStr::from_ptr(uts.machine.as_ptr()) }.to_string_lossy();
+    format!("{sysname} {release} {version} {machine}")
+}
+
+#[cfg(not(unix))]
+fn bugreport_uname() -> String {
+    std::env::consts::OS.to_owned()
+}
+
+fn bugreport_enabled_hooks(repo: Option<&GitRepo>) -> Result<Vec<String>> {
+    let Some(repo) = repo else {
+        return Ok(Vec::new());
+    };
+    let hooks_dir = repo.git_dir.join("hooks");
+    let mut hooks = Vec::new();
+    for hook_name in BUGREPORT_KNOWN_HOOKS {
+        let path = hooks_dir.join(hook_name);
+        match hook_is_executable(&path) {
+            Ok(true) => hooks.push((*hook_name).to_owned()),
+            Ok(false) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
         }
     }
-    fs::write(&path, report)?;
-    eprintln!("Created new report at '{}'.", path.display());
-    Ok(())
+    Ok(hooks)
 }
 
 fn diagnose(output_directory: Option<PathBuf>, suffix: Option<&str>, mode: &str) -> Result<()> {
@@ -2285,7 +3470,7 @@ fn backfill(
     Ok(())
 }
 
-fn promisor_remote_names(repo: &GitRepo) -> Result<Vec<String>> {
+pub(crate) fn promisor_remote_names(repo: &GitRepo) -> Result<Vec<String>> {
     let mut remotes = BTreeSet::new();
     for entry in read_config_entries(repo)? {
         if entry.section.eq_ignore_ascii_case("remote")
@@ -2293,6 +3478,12 @@ fn promisor_remote_names(repo: &GitRepo) -> Result<Vec<String>> {
             && entry.bool_value().unwrap_or(false)
         {
             remotes.insert(entry.subsection);
+        }
+    }
+    if let Some(remote) = read_config_value(repo, "extensions.partialclone")? {
+        let remote = remote.trim();
+        if !remote.is_empty() {
+            remotes.insert(remote.to_owned());
         }
     }
     Ok(remotes.into_iter().collect())
@@ -2305,18 +3496,27 @@ fn backfill_from_promisor_remotes(
     remotes: &[String],
 ) -> Result<()> {
     let roots = backfill_root_ids(repo, store, revs)?;
-    backfill_promisor_objects_with_remotes(repo, &roots, remotes).map(|_| ())
+    backfill_promisor_objects_with_remotes(repo, &roots, remotes, None).map(|_| ())
 }
 
 pub(crate) fn backfill_promisor_objects(repo: &GitRepo, roots: &[ObjectId]) -> Result<bool> {
+    backfill_promisor_objects_filtered(repo, roots, None)
+}
+
+pub(crate) fn backfill_promisor_objects_filtered(
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    filter: Option<&str>,
+) -> Result<bool> {
     let remotes = promisor_remote_names(repo)?;
-    backfill_promisor_objects_with_remotes(repo, roots, &remotes)
+    backfill_promisor_objects_with_remotes(repo, roots, &remotes, filter)
 }
 
 fn backfill_promisor_objects_with_remotes(
     repo: &GitRepo,
     roots: &[ObjectId],
     remotes: &[String],
+    filter: Option<&str>,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(!remotes.is_empty());
@@ -2325,25 +3525,47 @@ fn backfill_promisor_objects_with_remotes(
         return Ok(false);
     }
     for remote in remotes {
+        let existing_packs = promisor_pack_names(&repo.objects_dir)?;
         let url = remote_url(repo, remote)?;
         if transport_commands::is_http_transport_url(&url) {
-            backfill_http_promisor_remote(repo, &url, roots)?;
+            match backfill_http_promisor_remote(repo, &url, roots) {
+                Ok(()) => {}
+                Err(error) if promisor_remote_missing_object_error(&error) => continue,
+                Err(error) => return Err(error),
+            }
+            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
             continue;
         }
         let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
         let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
+        let upload_pack = read_config_section_value(repo, "remote", remote, "uploadpack")?;
         if transport_commands::is_git_daemon_transport_url(&url) {
-            transport_commands::daemon_fetch_pack_with_haves(
+            match transport_commands::daemon_fetch_pack_with_haves(
                 &url,
                 &repo.objects_dir,
                 roots,
                 &haves,
-            )?;
+            ) {
+                Ok(()) => {}
+                Err(error) if promisor_remote_missing_object_error(&error) => continue,
+                Err(error) => return Err(error),
+            }
+            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
             continue;
         }
         if transport_commands::is_ssh_transport_url(&url) {
-            transport_commands::ssh_fetch_pack_with_haves(&url, &repo.objects_dir, roots, &haves)?;
+            match transport_commands::ssh_fetch_pack_with_haves(
+                &url,
+                &repo.objects_dir,
+                roots,
+                &haves,
+            ) {
+                Ok(()) => {}
+                Err(error) if promisor_remote_missing_object_error(&error) => continue,
+                Err(error) => return Err(error),
+            }
+            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
             continue;
         }
         let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -2354,9 +3576,87 @@ fn backfill_promisor_objects_with_remotes(
                 ),
             });
         };
-        backfill_local_promisor_remote(repo, &source_path, roots)?;
+        match backfill_local_promisor_remote(
+            repo,
+            remote,
+            &source_path,
+            roots,
+            &haves,
+            upload_pack.as_deref(),
+            filter,
+        ) {
+            Ok(()) => {}
+            Err(error) if promisor_remote_missing_object_error(&error) => continue,
+            Err(error) => return Err(error),
+        }
+        write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
     }
     Ok(true)
+}
+
+fn promisor_remote_missing_object_error(error: &CliError) -> bool {
+    match error {
+        CliError::Io(io_error) => io_error.kind() == io::ErrorKind::NotFound,
+        CliError::Fatal { message, .. } => {
+            message.contains("git object not found")
+                || message.contains("packed git object not found")
+                || message.contains("not our ref")
+        }
+        CliError::Stderr { text, .. } => {
+            text.contains("git object not found")
+                || text.contains("packed git object not found")
+                || text.contains("not our ref")
+        }
+        CliError::Exit(_) | CliError::Message(_) => false,
+    }
+}
+
+fn promisor_pack_names(objects_dir: &Path) -> Result<HashSet<String>> {
+    let pack_dir = objects_dir.join("pack");
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let mut names = HashSet::new();
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("pack")
+            && let Some(name) = path.file_name().and_then(|value| value.to_str())
+        {
+            names.insert(name.to_owned());
+        }
+    }
+    Ok(names)
+}
+
+fn write_promisor_markers_for_new_packs(
+    objects_dir: &Path,
+    existing_packs: &HashSet<String>,
+) -> Result<()> {
+    let pack_dir = objects_dir.join("pack");
+    let entries = match fs::read_dir(&pack_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("pack") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if existing_packs.contains(name) {
+            continue;
+        }
+        let promisor_path = path.with_extension("promisor");
+        if !promisor_path.exists() {
+            fs::write(promisor_path, b"").map_err(CliError::Io)?;
+        }
+    }
+    Ok(())
 }
 
 fn backfill_root_ids(
@@ -2382,38 +3682,87 @@ fn backfill_root_ids(
 
 fn backfill_local_promisor_remote(
     repo: &GitRepo,
+    remote: &str,
     source_path: &Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
+    upload_pack_command: Option<&str>,
+    filter: Option<&str>,
 ) -> Result<()> {
-    let source = local_clone_source(source_path)?;
-    let source_root = if source_path.join(".git").is_dir() {
-        source_path.to_path_buf()
-    } else {
-        source.git_dir.clone()
+    let trace_argv = local_promisor_fetch_trace_argv(repo, remote)?;
+    let command = match upload_pack_command {
+        Some(command) => command.to_owned(),
+        None => transport_commands::builtin_local_upload_pack_command()?,
     };
-    let source_repo = GitRepo {
-        root: source_root,
-        objects_dir: source.git_dir.join("objects"),
-        index_path: source.git_dir.join("index"),
-        git_dir: source.git_dir,
-    };
-    let source_store =
-        LooseObjectStore::new(source_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let destination_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    for id in roots {
-        let _ = transport_commands::copy_reachable_objects(
-            &source_repo,
-            &source_store,
-            &destination_store,
-            id,
-        )?;
+    write_local_promisor_lazy_fetch_trace_if_needed(repo)?;
+    let options = filter
+        .map(transport_commands::UploadPackShallowOptions::filter)
+        .unwrap_or_else(|| transport_commands::UploadPackShallowOptions::depth(None));
+    let result = transport_commands::fetch_pack_with_local_upload_pack_command_with_options(
+        &command,
+        source_path.to_string_lossy().as_ref(),
+        &repo.objects_dir,
+        roots,
+        haves,
+        options,
+        true,
+    )
+    .map(|_| ());
+    if result.is_ok() {
+        write_packet_trace_line_if_needed("fetch> done")?;
     }
-    Ok(())
+    emit_active_trace2_child_command(&trace_argv, if result.is_ok() { 0 } else { 1 });
+    result
+}
+
+fn local_promisor_fetch_trace_argv(repo: &GitRepo, remote: &str) -> Result<Vec<String>> {
+    let mut argv = vec![
+        "git".to_owned(),
+        "-c".to_owned(),
+        "fetch.negotiationAlgorithm=noop".to_owned(),
+        "fetch".to_owned(),
+        remote.to_owned(),
+        "--no-tags".to_owned(),
+        "--no-write-fetch-head".to_owned(),
+        "--recurse-submodules=no".to_owned(),
+        "--stdin".to_owned(),
+    ];
+    if read_config_value(repo, "promisor.quiet")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(false)
+    {
+        argv.push("--quiet".to_owned());
+    }
+    Ok(argv)
+}
+
+fn write_local_promisor_lazy_fetch_trace_if_needed(repo: &GitRepo) -> Result<()> {
+    if read_config_value(repo, "protocol.version")?.as_deref() != Some("2") {
+        return Ok(());
+    }
+    write_packet_trace_line_if_needed("fetch< fetch=shallow wait-for-done ref-in-want")
+}
+
+fn write_packet_trace_line_if_needed(line: &str) -> Result<()> {
+    let Some(value) = std::env::var_os("GIT_TRACE_PACKET") else {
+        return Ok(());
+    };
+    if value.is_empty() || value == "0" || value == "1" || value == "true" {
+        return Ok(());
+    }
+    let mut trace = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(PathBuf::from(value))
+        .map_err(CliError::Io)?;
+    writeln!(trace, "{line}").map_err(CliError::Io)
 }
 
 fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) -> Result<()> {
     let parsed_url = transport_commands::ParsedHttpUrl::parse(url)?;
     let mut helper = transport_commands::RemoteHttpHelperSession::spawn_for_url(url)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let fetch_options = transport_commands::HttpFetchOptions {
         commit: false,
         tags: false,
@@ -2426,17 +3775,57 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
         index_pack_args: Vec::new(),
         args: Vec::new(),
     };
-    let pack_fetched = transport_commands::http_fetch_smart_pack_with_helper(
+    let rows = transport_commands::http_ls_remote_rows_with_helper(
         &parsed_url,
         &mut helper,
-        &repo.objects_dir,
-        roots,
+        false,
+        false,
+        false,
         &[],
     )?;
-    if pack_fetched {
+    let mut advertised_ids = HashSet::with_capacity(rows.len());
+    let mut advertised_roots = Vec::with_capacity(rows.len());
+    for row in &rows {
+        if advertised_ids.insert(row.id.clone()) {
+            advertised_roots.push(row.id.clone());
+        }
+    }
+
+    let roots_are_advertised = roots.iter().all(|id| advertised_ids.contains(id));
+    if roots_are_advertised
+        && transport_commands::http_fetch_smart_pack_with_helper(
+            &parsed_url,
+            &mut helper,
+            &repo.objects_dir,
+            roots,
+            &[],
+        )?
+    {
         return Ok(());
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+
+    if !rows.is_empty() {
+        let request_roots = advertised_roots
+            .into_iter()
+            .filter(|id| !store.contains_object(id).unwrap_or(false))
+            .collect::<Vec<_>>();
+        if !request_roots.is_empty()
+            && transport_commands::http_fetch_smart_pack_with_helper(
+                &parsed_url,
+                &mut helper,
+                &repo.objects_dir,
+                &request_roots,
+                &[],
+            )?
+        {
+            if roots
+                .iter()
+                .all(|id| store.contains_object(id).unwrap_or(false))
+            {
+                return Ok(());
+            }
+        }
+    }
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let mut seen = HashSet::new();
@@ -2469,43 +3858,65 @@ fn diagnose_log(repo: &GitRepo) -> Result<String> {
 }
 
 fn diagnose_available_space_gib(path: &Path) -> Result<f64> {
-    let output = ProcessCommand::new("df")
-        .arg("-k")
-        .arg(path)
-        .output()
-        .map_err(CliError::Io)?;
-    if !output.status.success() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "diagnose failed to read filesystem space".into(),
-        });
+    Ok(diagnose_available_space_bytes(path)? as f64 / 1024.0 / 1024.0 / 1024.0)
+}
+
+#[cfg(unix)]
+fn diagnose_available_space_bytes(path: &Path) -> Result<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: "diagnose path contains interior NUL byte".into(),
+    })?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let rc = unsafe { libc::statvfs(c_path.as_ptr(), stats.as_mut_ptr()) };
+    if rc != 0 {
+        return Err(CliError::Io(io::Error::last_os_error()));
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let available_kib = text
-        .lines()
-        .nth(1)
-        .and_then(|line| line.split_whitespace().nth(3))
-        .and_then(|value| value.parse::<f64>().ok())
-        .ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: "diagnose failed to parse filesystem space".into(),
-        })?;
-    Ok(available_kib / 1024.0 / 1024.0)
+    let stats = unsafe { stats.assume_init() };
+    let fragment_size = if stats.f_frsize > 0 {
+        stats.f_frsize as u128
+    } else {
+        stats.f_bsize as u128
+    };
+    let available = (stats.f_bavail as u128).saturating_mul(fragment_size);
+    Ok(available.min(u64::MAX as u128) as u64)
+}
+
+#[cfg(windows)]
+fn diagnose_available_space_bytes(path: &Path) -> Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut available = 0u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide_path.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        return Err(CliError::Io(io::Error::last_os_error()));
+    }
+    Ok(available)
 }
 
 fn diagnose_git_build_options() -> Result<String> {
-    let output = ProcessCommand::new("/usr/bin/git")
-        .args(["version", "--build-options"])
-        .output()
-        .map_err(CliError::Io)?;
-    if !output.status.success() {
-        return Ok(format!("{}\n", git_compatible_version_line()));
-    }
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    if !text.ends_with('\n') {
-        text.push('\n');
-    }
-    Ok(text)
+    let mut out = Vec::new();
+    write_git_compatible_version(&mut out, true).map_err(CliError::Io)?;
+    String::from_utf8(out).map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("diagnose build-options output is not utf-8: {error}"),
+    })
 }
 
 fn diagnose_packs_local(repo: &GitRepo) -> Result<Vec<u8>> {
@@ -2713,10 +4124,12 @@ fn cvsserver(
     args: Vec<String>,
 ) -> Result<()> {
     if version {
-        return passthrough_stock_git_command("cvsserver", &["--version".to_owned()]);
+        println!("git-cvsserver version {}", GIT_COMPAT_VERSION);
+        return Ok(());
     }
     if help_long {
-        return passthrough_stock_git_command("cvsserver", &["--help".to_owned()]);
+        print!("{CVS_SERVER_HELP_TEXT}");
+        return Ok(());
     }
     if help_short || help_short_alt {
         return Ok(());
@@ -3570,6 +4983,9 @@ fn open_or_init_import_repo_with_mode(
             InitRepositoryOptions {
                 bare,
                 initial_branch: initial_branch.to_owned(),
+                objects_directory: None,
+                populate_template_files: true,
+                write_log_all_ref_updates: true,
             },
         )?;
     }
@@ -5039,13 +6455,19 @@ fn stock_like_initial_branch_name() -> Result<String> {
         })?;
         return Ok(branch);
     }
-    let output = std::process::Command::new("git")
-        .args(["config", "--global", "--get", "init.defaultBranch"])
-        .output()
-        .map_err(CliError::Io)?;
-    if output.status.success() {
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !branch.is_empty() {
+    for path in global_config_paths() {
+        let entries = read_config_file(&path).map_err(CliError::Io)?;
+        if let Some(branch) = entries
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.section == "init"
+                    && entry.subsection.is_empty()
+                    && entry.key == "defaultbranch"
+                    && !entry.value.trim().is_empty()
+            })
+            .map(|entry| entry.value.trim().to_owned())
+        {
             branch_ref_name(&branch).map_err(|_| CliError::Fatal {
                 code: 128,
                 message: format!("invalid branch name: {branch}"),

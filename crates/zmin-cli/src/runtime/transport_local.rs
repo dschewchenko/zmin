@@ -407,6 +407,9 @@ pub(crate) fn apply_clone_configs(repo: &GitRepo, configs: &[String]) -> Result<
 }
 
 pub(crate) fn apply_clone_template(repo: &GitRepo, template: &std::path::Path) -> Result<()> {
+    if template.as_os_str().is_empty() {
+        return Ok(());
+    }
     let template = absolute_path_from_arg(template)?;
     if !template.is_dir() {
         eprintln!("warning: templates not found in {}", template.display());
@@ -515,6 +518,10 @@ pub(crate) fn is_shallow_git_dir(git_dir: &std::path::Path) -> bool {
             Err(_) => return false,
         }
     }
+}
+
+pub(crate) fn has_shallow_marker(git_dir: &std::path::Path) -> bool {
+    git_dir.join("shallow").is_file()
 }
 
 pub(crate) fn write_alternates_file(
@@ -775,6 +782,19 @@ pub(crate) fn validate_local_clone_ownership(
     source_git_dir: &std::path::Path,
     destination_git_dir: &std::path::Path,
 ) -> Result<()> {
+    let repo = GitRepo {
+        root: source_git_dir
+            .parent()
+            .filter(|parent| parent.join(".git") == source_git_dir)
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| source_git_dir.to_path_buf()),
+        git_dir: source_git_dir.to_path_buf(),
+        objects_dir: source_git_dir.join("objects"),
+        index_path: source_git_dir.join("index"),
+    };
+    if super::protected_safe_directory_allows(&repo, source_git_dir)? {
+        return Ok(());
+    }
     let objects_dir = source_git_dir.join("objects");
     reject_cross_owner_local_clone(source_git_dir, &objects_dir, destination_git_dir)
 }
@@ -884,6 +904,15 @@ fn reject_cross_owner_local_clone(
 ) -> Result<()> {
     use std::os::unix::fs::MetadataExt;
 
+    if std::env::var_os("GIT_TEST_ASSUME_DIFFERENT_OWNER").is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "repository '{}' is owned by someone else, refusing to clone with --local",
+                source_git_dir.display()
+            ),
+        });
+    }
     let destination_uid = fs::symlink_metadata(destination_git_dir)?.uid();
     let source_uid = fs::symlink_metadata(source_git_dir)?.uid();
     let objects_uid = fs::symlink_metadata(objects_dir)?.uid();
@@ -1204,7 +1233,7 @@ pub(crate) fn parse_push_refspec(
                 message: "cannot infer remote branch for detached HEAD".into(),
             })?
         }
-        Some(_) | None => push_destination_ref(source)?,
+        Some(_) | None => inferred_push_destination_ref(refs, source)?,
     };
     Ok(PushRef {
         id: Some(id),
@@ -1212,6 +1241,21 @@ pub(crate) fn parse_push_refspec(
         source_display: Some(source.to_owned()),
         force,
     })
+}
+
+fn inferred_push_destination_ref(refs: &RefStore, source: &str) -> Result<String> {
+    if source.starts_with("refs/") {
+        return Ok(source.to_owned());
+    }
+    for candidate in [
+        format!("refs/heads/{source}"),
+        format!("refs/tags/{source}"),
+    ] {
+        if refs.resolve(&candidate).is_ok() {
+            return Ok(candidate);
+        }
+    }
+    push_destination_ref(source)
 }
 
 pub(crate) fn validate_push_update(

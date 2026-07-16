@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/zmin-cli-runtime",
     "crates/zmin-cli-schema",
+    "crates/zmin-cli-schema-attrs",
     "crates/zmin-primitives",
     "crates/zmin-git-core",
     "crates/zmin-git-remote-http",
@@ -42,6 +43,10 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+[profile.release.package.zmin-cli-schema]
+opt-level = 2
+codegen-units = 16
 
 [profile.compat]
 inherits = "dev"

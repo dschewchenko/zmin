@@ -5,11 +5,17 @@ use std::io;
 use regex::bytes::Regex;
 use zmin_git_core::{
     CommitObjectCache, GitHashAlgorithm, GitObjectKind, GitObjectStore, LooseObjectStore, ObjectId,
-    RefStore, RefTarget, decode_tag, find_tree_entry, read_index,
+    RefStore, RefTarget, decode_pack_index_object_ids_from_path, decode_tag, find_tree_entry,
+    read_index_with_algorithm,
 };
 
 use super::{
-    CliError, GitRepo, Result, read_common_git_dir, resolve_commitish_io, signature_timestamp,
+    CliError, ConfigScope, GitRepo, Result, current_branch_ref, current_unix_timestamp,
+    expand_repo_sparse_index, is_per_worktree_ref, parse_git_date, partial_clone_enabled,
+    previous_checkout_syntax_index, previous_checkout_target_from_repo, read_branch_upstream,
+    read_common_git_dir, read_config_entry, read_config_value, repo_hash_algorithm_from_config,
+    resolve_commitish_io, resolve_previous_checkout_expression, resolve_previous_checkout_name,
+    signature_timestamp, sparse_index_path_requires_expansion, trace2_region,
 };
 
 const DEFAULT_ABBREV_OBJECT_ID_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -35,7 +41,7 @@ pub(crate) fn print_rev_parse_object(
     verify: bool,
     quiet: bool,
 ) -> Result<()> {
-    let id = resolve_objectish(repo, rev).map_err(|_| {
+    let id = resolve_objectish_with_reflog_warnings(repo, rev, !quiet).map_err(|_| {
         if verify && quiet {
             return CliError::Exit(1);
         }
@@ -66,11 +72,29 @@ pub(crate) fn resolve_objectish(repo: &GitRepo, objectish: &str) -> io::Result<O
     resolve_objectish_with_mode(repo, objectish).map(|resolved| resolved.id)
 }
 
+fn resolve_objectish_with_reflog_warnings(
+    repo: &GitRepo,
+    objectish: &str,
+    reflog_warnings: bool,
+) -> io::Result<ObjectId> {
+    resolve_objectish_with_mode_and_reflog_warnings(repo, objectish, reflog_warnings)
+        .map(|resolved| resolved.id)
+}
+
 pub(crate) fn resolve_objectish_with_mode(
     repo: &GitRepo,
     objectish: &str,
 ) -> io::Result<ResolvedObjectish> {
-    let store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1);
+    resolve_objectish_with_mode_and_reflog_warnings(repo, objectish, true)
+}
+
+fn resolve_objectish_with_mode_and_reflog_warnings(
+    repo: &GitRepo,
+    objectish: &str,
+    reflog_warnings: bool,
+) -> io::Result<ResolvedObjectish> {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let store = LooseObjectStore::new(&repo.objects_dir, algorithm);
     if let Some(pattern) = objectish.strip_prefix(":/") {
         return resolve_message_search_from_refs(repo, &store, pattern).map(resolved_without_mode);
     }
@@ -100,7 +124,8 @@ pub(crate) fn resolve_objectish_with_mode(
     if objectish.contains('~') || contains_parent_shorthand(objectish) {
         return resolve_commitish_io(repo, &store, objectish).map(resolved_without_mode);
     }
-    resolve_plain_objectish(repo, &store, objectish).map(resolved_without_mode)
+    resolve_plain_objectish_with_reflog_warnings(repo, &store, objectish, reflog_warnings)
+        .map(resolved_without_mode)
 }
 
 fn resolved_without_mode(id: ObjectId) -> ResolvedObjectish {
@@ -184,7 +209,16 @@ fn resolve_message_search(
     starts: Vec<ObjectId>,
     pattern: &str,
 ) -> io::Result<ObjectId> {
-    let matcher = Regex::new(pattern)
+    let (exclude, match_pattern) = if let Some(pattern) = pattern.strip_prefix("!-") {
+        (true, pattern.to_owned())
+    } else if let Some(pattern) = pattern.strip_prefix("!!") {
+        (false, format!("!{pattern}"))
+    } else if pattern.starts_with('!') {
+        (false, r"\b\B".to_owned())
+    } else {
+        (false, pattern.to_owned())
+    };
+    let matcher = Regex::new(&match_pattern)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
     let commit_cache = CommitObjectCache::new(store);
     let mut stack = starts;
@@ -200,7 +234,7 @@ fn resolve_message_search(
             continue;
         }
         let commit = commit_cache.read_loaded_commit(object)?;
-        if matcher.is_match(&commit.message) {
+        if exclude != matcher.is_match(&commit.message) {
             let timestamp = signature_timestamp(&commit.committer).unwrap_or(i64::MIN);
             let replace = best
                 .as_ref()
@@ -234,11 +268,34 @@ fn resolve_index_object_path_with_mode(
         _ => (0, raw_path),
     };
     let path = normalize_git_path(path)?;
-    let index = read_index(&repo.index_path)?;
-    index
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let raw_index = read_index_with_algorithm(&repo.index_path, algorithm)?;
+    if let Some(resolved) = raw_index
         .entries()
         .iter()
         .find(|entry| entry.stage == stage && entry.path.as_slice() == path.as_bytes())
+        .map(|entry| ResolvedObjectish {
+            id: entry.id.clone(),
+            mode: Some(format!("{:o}", entry.mode_bits())),
+        })
+    {
+        return Ok(resolved);
+    }
+    let path = path.as_bytes();
+    let inside_sparse_directory =
+        stage == 0 && sparse_index_path_requires_expansion(&raw_index, path);
+    if !inside_sparse_directory {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "path not found in index",
+        ));
+    }
+    let _region = trace2_region("index", "ensure_full_index");
+    let expanded_index = expand_repo_sparse_index(repo, &raw_index)?;
+    expanded_index
+        .entries()
+        .iter()
+        .find(|entry| entry.stage == stage && entry.path.as_slice() == path)
         .map(|entry| ResolvedObjectish {
             id: entry.id.clone(),
             mode: Some(format!("{:o}", entry.mode_bits())),
@@ -251,10 +308,42 @@ pub(crate) fn resolve_plain_objectish(
     store: &LooseObjectStore,
     objectish: &str,
 ) -> io::Result<ObjectId> {
+    resolve_plain_objectish_with_reflog_warnings(repo, store, objectish, true)
+}
+
+fn resolve_plain_objectish_with_reflog_warnings(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    objectish: &str,
+    reflog_warnings: bool,
+) -> io::Result<ObjectId> {
+    if let Some(expanded) = resolve_previous_checkout_expression(repo, objectish)? {
+        return resolve_plain_objectish_with_reflog_warnings(
+            repo,
+            store,
+            &expanded,
+            reflog_warnings,
+        );
+    }
+    if let Some(index) = previous_checkout_syntax_index(objectish) {
+        let previous = previous_checkout_target_from_repo(repo, index)?;
+        return resolve_plain_objectish_with_reflog_warnings(
+            repo,
+            store,
+            &previous,
+            reflog_warnings,
+        );
+    }
     match objectish.len() {
         40 => {
             if let Ok(id) = ObjectId::from_hex(GitHashAlgorithm::Sha1, objectish) {
                 if store.contains_object(&id)? {
+                    return Ok(id);
+                }
+                if promisor_pack_contains_object(repo, &id)? {
+                    return Ok(id);
+                }
+                if partial_clone_enabled(repo).map_err(cli_error_to_io)? {
                     return Ok(id);
                 }
             }
@@ -269,8 +358,15 @@ pub(crate) fn resolve_plain_objectish(
         _ => {}
     }
 
-    if let Some((base, index)) = split_reflog_index_suffix(objectish) {
-        return resolve_reflog_index(repo, store, base, index);
+    if let Some(base) = split_upstream_suffix(objectish) {
+        return resolve_upstream_suffix(repo, base);
+    }
+    if let Some(base) = split_push_suffix(objectish) {
+        let ref_name = push_ref_name(repo, base)?;
+        return resolve_repo_ref(repo, &ref_name);
+    }
+    if let Some((base, selector)) = split_reflog_selector_suffix(objectish) {
+        return resolve_reflog_selector(repo, store, base, selector, reflog_warnings);
     }
     if objectish == "FETCH_HEAD" {
         return resolve_fetch_head(repo, store);
@@ -282,6 +378,9 @@ pub(crate) fn resolve_plain_objectish(
     }
     if objectish == "@" {
         return resolve_repo_ref(repo, "HEAD");
+    }
+    if let Some(result) = resolve_worktree_ref_expression(repo, objectish) {
+        return result;
     }
     if objectish == "HEAD" || objectish.starts_with("refs/") {
         return resolve_repo_ref(repo, objectish);
@@ -298,6 +397,209 @@ pub(crate) fn resolve_plain_objectish(
     store.resolve_prefix(objectish)
 }
 
+fn resolve_worktree_ref_expression(
+    repo: &GitRepo,
+    objectish: &str,
+) -> Option<io::Result<ObjectId>> {
+    if let Some(name) = objectish.strip_prefix("worktree/") {
+        return Some(resolve_repo_ref(repo, &format!("refs/worktree/{name}")));
+    }
+    let common_dir = match read_common_git_dir(&repo.git_dir).map_err(cli_error_to_io) {
+        Ok(common_dir) => common_dir,
+        Err(error) => return Some(Err(error)),
+    };
+    let (git_dir, name) = if let Some(name) = objectish.strip_prefix("main-worktree/") {
+        (common_dir.clone(), name)
+    } else if let Some(rest) = objectish.strip_prefix("worktrees/") {
+        let (worktree, name) = rest.split_once('/')?;
+        (common_dir.join("worktrees").join(worktree), name)
+    } else {
+        return None;
+    };
+    if common_ref_store(repo)
+        .and_then(|refs| refs.resolve(&format!("refs/heads/{objectish}")))
+        .is_ok()
+    {
+        eprintln!("warning: refname '{objectish}' is ambiguous.");
+    }
+    let algorithm = match repo_hash_algorithm_from_config(repo) {
+        Ok(algorithm) => algorithm,
+        Err(error) => return Some(Err(error)),
+    };
+    let local_refs = RefStore::new(git_dir, algorithm);
+    Some(if name == "HEAD" {
+        match local_refs.read_head() {
+            Ok(RefTarget::Direct(id)) => Ok(id),
+            Ok(RefTarget::Symbolic(target)) => match common_ref_store(repo) {
+                Ok(refs) => refs.resolve(&target),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    } else if name.starts_with("refs/") {
+        local_refs.resolve(name)
+    } else {
+        local_refs.resolve(&format!("refs/worktree/{name}"))
+    })
+}
+
+fn promisor_pack_contains_object(repo: &GitRepo, id: &ObjectId) -> io::Result<bool> {
+    let entries = match fs::read_dir(repo.objects_dir.join("pack")) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("promisor") {
+            continue;
+        }
+        let pack_path = path.with_extension("pack");
+        if !pack_path.is_file() {
+            continue;
+        }
+        let object_ids = decode_pack_index_object_ids_from_path(id.algorithm(), &pack_path)?;
+        if object_ids.iter().any(|candidate| candidate == id) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn split_upstream_suffix(objectish: &str) -> Option<&str> {
+    let base = objectish.strip_suffix('}')?;
+    let (base, selector) = base.rsplit_once("@{")?;
+    matches!(selector, "u" | "upstream").then_some(base)
+}
+
+fn split_push_suffix(objectish: &str) -> Option<&str> {
+    let base = objectish.strip_suffix('}')?;
+    let (base, selector) = base.rsplit_once("@{")?;
+    selector.eq_ignore_ascii_case("push").then_some(base)
+}
+
+pub(crate) fn push_ref_name(repo: &GitRepo, base: &str) -> io::Result<String> {
+    let refs = common_ref_store(repo)?;
+    let resolved_previous = resolve_previous_checkout_name(repo, base)?;
+    let base = resolved_previous.as_deref().unwrap_or(base);
+    let branch = match base {
+        "" | "@" | "HEAD" => current_branch_ref(&refs)
+            .map_err(|error| io::Error::other(format!("read current branch failed: {error:?}")))?
+            .and_then(|ref_name| ref_name.strip_prefix("refs/heads/").map(str::to_owned))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HEAD is not a branch"))?,
+        branch if branch.starts_with("refs/heads/") || branch.starts_with("heads/") => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no such branch: '{branch}'"),
+            ));
+        }
+        branch => {
+            let ref_name = format!("refs/heads/{branch}");
+            refs.read_ref(&ref_name)?;
+            branch.to_owned()
+        }
+    };
+    let remote = read_config_value(repo, &format!("branch.{branch}.pushRemote"))?
+        .or(read_config_value(repo, "remote.pushDefault")?)
+        .or(read_config_value(repo, &format!("branch.{branch}.remote"))?);
+    let Some(remote) = remote.filter(|remote| !remote.is_empty() && remote != ".") else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no push destination configured for branch '{branch}'"),
+        ));
+    };
+    let source = format!("refs/heads/{branch}");
+    let configured_push = read_config_value(repo, &format!("remote.{remote}.push"))?;
+    let push_default = read_config_value(repo, "push.default")?
+        .unwrap_or_else(|| "simple".to_owned())
+        .to_ascii_lowercase();
+    let upstream_remote = read_config_value(repo, &format!("branch.{branch}.remote"))?;
+    let upstream_merge = read_config_value(repo, &format!("branch.{branch}.merge"))?;
+    if configured_push.is_none() {
+        match push_default.as_str() {
+            "nothing" => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("push.default is nothing for branch '{branch}'"),
+                ));
+            }
+            "simple"
+                if upstream_remote.as_deref() != Some(remote.as_str())
+                    || upstream_merge.as_deref() != Some(source.as_str()) =>
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("cannot resolve simple push for branch '{branch}'"),
+                ));
+            }
+            _ => {}
+        }
+    }
+    let remote_ref = configured_push
+        .as_deref()
+        .and_then(|refspec| map_push_refspec(refspec, &source))
+        .unwrap_or(source);
+    let tracking_suffix = remote_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&remote_ref);
+    Ok(format!("refs/remotes/{remote}/{tracking_suffix}"))
+}
+
+fn map_push_refspec(refspec: &str, source: &str) -> Option<String> {
+    let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
+    let (from, to) = refspec.split_once(':')?;
+    match (from.split_once('*'), to.split_once('*')) {
+        (Some((from_prefix, from_suffix)), Some((to_prefix, to_suffix))) => {
+            let wildcard = source
+                .strip_prefix(from_prefix)?
+                .strip_suffix(from_suffix)?;
+            Some(format!("{to_prefix}{wildcard}{to_suffix}"))
+        }
+        _ if from == source => Some(to.to_owned()),
+        _ => None,
+    }
+}
+
+fn resolve_upstream_suffix(repo: &GitRepo, base: &str) -> io::Result<ObjectId> {
+    let refs = common_ref_store(repo)?;
+    let resolved_previous = resolve_previous_checkout_name(repo, base)?;
+    let base = resolved_previous.as_deref().unwrap_or(base);
+    let branch = match base {
+        "" | "@" | "HEAD" => current_branch_ref(&refs)
+            .map_err(|error| io::Error::other(format!("read current branch failed: {error:?}")))?
+            .and_then(|ref_name| ref_name.strip_prefix("refs/heads/").map(str::to_owned))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HEAD is not a branch"))?,
+        branch if branch.starts_with("refs/heads/") || branch.starts_with("heads/") => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no such branch: '{branch}'"),
+            ));
+        }
+        branch => {
+            let ref_name = format!("refs/heads/{branch}");
+            match refs.read_ref(&ref_name) {
+                Ok(_) => branch.to_owned(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("no such branch: '{branch}'"),
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    let upstream = read_branch_upstream(repo, &branch)
+        .map_err(|error| io::Error::other(format!("read branch upstream failed: {error:?}")))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no upstream configured for branch '{branch}'"),
+            )
+        })?;
+    resolve_repo_ref(repo, &upstream.ref_name)
+}
+
 pub(crate) fn is_valid_pseudoref_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains('/')
@@ -309,6 +611,9 @@ pub(crate) fn is_valid_pseudoref_name(name: &str) -> bool {
 
 fn resolve_pseudoref(repo: &GitRepo, store: &LooseObjectStore, name: &str) -> io::Result<ObjectId> {
     let raw = fs::read_to_string(repo.git_dir.join(name))?;
+    if let Some(target) = raw.trim_end().strip_prefix("ref: ") {
+        return resolve_repo_ref(repo, target);
+    }
     let hex = raw.split_whitespace().next().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -349,25 +654,75 @@ fn resolve_fetch_head(repo: &GitRepo, store: &LooseObjectStore) -> io::Result<Ob
     ))
 }
 
-fn split_reflog_index_suffix(objectish: &str) -> Option<(&str, usize)> {
-    let base = objectish.strip_suffix('}')?;
-    let (base, index) = base.rsplit_once("@{")?;
-    index.parse::<usize>().ok().map(|index| (base, index))
+enum ReflogSelector<'a> {
+    Index(usize),
+    Date(&'a str),
 }
 
-fn resolve_reflog_index(
+fn split_reflog_selector_suffix(objectish: &str) -> Option<(&str, ReflogSelector<'_>)> {
+    let base = objectish.strip_suffix('}')?;
+    let (base, selector) = base.rsplit_once("@{")?;
+    if let Ok(index) = selector.parse::<usize>() {
+        return Some((base, ReflogSelector::Index(index)));
+    }
+    Some((base, ReflogSelector::Date(selector)))
+}
+
+fn resolve_reflog_selector(
     repo: &GitRepo,
     store: &LooseObjectStore,
     base: &str,
-    index: usize,
+    selector: ReflogSelector<'_>,
+    warnings: bool,
 ) -> io::Result<ObjectId> {
     let reflog_name = reflog_ref_name(repo, base)?;
+    let common_dir = read_common_git_dir(&repo.git_dir).map_err(cli_error_to_io)?;
+    let algorithm = super::repo_hash_algorithm_from_config(repo)?;
+    let common_refs = RefStore::new(&common_dir, algorithm);
+    if common_refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let git_dir = if is_per_worktree_ref(&reflog_name) {
+            &repo.git_dir
+        } else {
+            &common_dir
+        };
+        let refs = RefStore::new_with_storage_root(
+            git_dir,
+            git_dir,
+            algorithm,
+            zmin_git_core::refs::RefStorageKind::Reftable,
+        );
+        let mut records = refs
+            .reftable_logs()?
+            .into_iter()
+            .filter(|record| record.ref_name == reflog_name)
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| record.update_index);
+        return match selector {
+            ReflogSelector::Index(index) => records
+                .into_iter()
+                .rev()
+                .nth(index)
+                .map(|record| record.new_id)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")),
+            ReflogSelector::Date(raw) => {
+                let timestamp = parse_reflog_selector_timestamp(raw)?;
+                records
+                    .into_iter()
+                    .rev()
+                    .find(|record| i64::try_from(record.timestamp).unwrap_or(i64::MAX) <= timestamp)
+                    .map(|record| record.new_id)
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")
+                    })
+            }
+        };
+    }
     let path = repo.git_dir.join("logs").join(&reflog_name);
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error)
             if error.kind() == io::ErrorKind::NotFound
-                && index == 0
+                && matches!(selector, ReflogSelector::Index(0))
                 && (base.is_empty() || base == "HEAD" || base.ends_with('@')) =>
         {
             let fallback = if base.is_empty() { "HEAD" } else { base };
@@ -375,15 +730,157 @@ fn resolve_reflog_index(
         }
         Err(error) => return Err(error),
     };
-    contents
+    match selector {
+        ReflogSelector::Index(index) => contents
+            .lines()
+            .rev()
+            .filter_map(reflog_line_new_id)
+            .nth(index)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")),
+        ReflogSelector::Date(raw) => {
+            resolve_reflog_date_selector(repo, store, base, &reflog_name, &contents, raw, warnings)
+        }
+    }
+}
+
+fn resolve_reflog_date_selector(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    base: &str,
+    reflog_name: &str,
+    contents: &str,
+    raw: &str,
+    warnings: bool,
+) -> io::Result<ObjectId> {
+    let timestamp = parse_reflog_selector_timestamp(raw)?;
+    let entries = contents
         .lines()
-        .rev()
-        .filter_map(reflog_line_new_id)
-        .nth(index)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "reflog entry not found"))
+        .filter_map(parse_reflog_line)
+        .collect::<Vec<_>>();
+    let Some(first) = entries.first() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "reflog entry not found",
+        ));
+    };
+    if timestamp < first.timestamp {
+        let display_name = if base.is_empty() { "HEAD" } else { base };
+        if warnings {
+            eprintln!(
+                "warning: log for '{display_name}' only goes back to {}",
+                format_reflog_timestamp(first)
+            );
+        }
+        return Ok(first.new_id.clone());
+    }
+
+    let selected_index = entries
+        .iter()
+        .rposition(|entry| entry.timestamp <= timestamp)
+        .unwrap_or(0);
+    let selected = &entries[selected_index];
+    if let Some(next) = entries.get(selected_index + 1) {
+        if warnings && next.old_id != selected.new_id {
+            eprintln!(
+                "warning: log for ref {reflog_name} has gap after {}",
+                format_reflog_timestamp(selected)
+            );
+        }
+        return Ok(selected.new_id.clone());
+    }
+    if timestamp == selected.timestamp {
+        return Ok(selected.new_id.clone());
+    }
+
+    let current_name = if base.is_empty() { "HEAD" } else { base };
+    let current = resolve_plain_objectish(repo, store, current_name)?;
+    if warnings && current != selected.new_id {
+        eprintln!(
+            "warning: log for ref {reflog_name} unexpectedly ended on {}",
+            format_reflog_timestamp(selected)
+        );
+    }
+    Ok(current)
+}
+
+pub(crate) fn parse_reflog_selector_timestamp(raw: &str) -> io::Result<i64> {
+    let normalized = raw.trim();
+    if normalized.eq_ignore_ascii_case("now") {
+        return current_unix_timestamp().map_err(cli_error_to_io);
+    }
+    if let Ok((timestamp, _)) = parse_git_date(normalized) {
+        return Ok(timestamp);
+    }
+    let dotted = normalized.replace('.', " ");
+    if let Ok((timestamp, _)) = parse_git_date(&dotted) {
+        return Ok(timestamp);
+    }
+    for token in dotted.split_whitespace().rev() {
+        if let Ok((timestamp, _)) = parse_git_date(token) {
+            return Ok(timestamp);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("invalid reflog date selector: {raw}"),
+    ))
+}
+
+fn parse_reflog_line(line: &str) -> Option<ParsedReflogLine> {
+    let header = line
+        .split_once('\t')
+        .map(|(header, _)| header)
+        .unwrap_or(line);
+    let mut fields = header.split_whitespace();
+    let old_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
+    let new_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
+    let timezone = fields.next_back()?.to_owned();
+    let timestamp = fields.next_back()?.parse().ok()?;
+    Some(ParsedReflogLine {
+        old_id,
+        new_id,
+        timestamp,
+        timezone,
+    })
+}
+
+struct ParsedReflogLine {
+    old_id: ObjectId,
+    new_id: ObjectId,
+    timestamp: i64,
+    timezone: String,
+}
+
+fn format_reflog_timestamp(entry: &ParsedReflogLine) -> String {
+    use chrono::{FixedOffset, TimeZone};
+
+    let offset = parse_reflog_timezone_offset(&entry.timezone)
+        .and_then(FixedOffset::east_opt)
+        .unwrap_or_else(|| FixedOffset::east_opt(0).expect("UTC offset is valid"));
+    offset
+        .timestamp_opt(entry.timestamp, 0)
+        .single()
+        .map(|date| date.format("%a, %-d %b %Y %H:%M:%S %z").to_string())
+        .unwrap_or_else(|| entry.timestamp.to_string())
+}
+
+fn parse_reflog_timezone_offset(value: &str) -> Option<i32> {
+    if value.len() != 5 {
+        return None;
+    }
+    let sign = match value.as_bytes().first()? {
+        b'+' => 1,
+        b'-' => -1,
+        _ => return None,
+    };
+    let hours = value[1..3].parse::<i32>().ok()?;
+    let minutes = value[3..5].parse::<i32>().ok()?;
+    Some(sign * (hours * 60 + minutes) * 60)
 }
 
 fn reflog_ref_name(repo: &GitRepo, base: &str) -> io::Result<String> {
+    let resolved_previous = resolve_previous_checkout_name(repo, base)?;
+    let base = resolved_previous.as_deref().unwrap_or(base);
     if base.is_empty() || base == "HEAD" {
         return Ok("HEAD".to_owned());
     }
@@ -512,10 +1009,8 @@ pub(crate) fn resolve_treeish(
         resolve_message_search_from_refs(repo, store, pattern)?
     } else if let Some((base, pattern)) = split_message_search_suffix(treeish) {
         resolve_message_search_from_base(repo, store, base, pattern)?
-    } else if treeish.contains('~') || contains_parent_shorthand(treeish) {
-        resolve_commitish_io(repo, store, treeish)?
     } else {
-        resolve_plain_objectish(repo, store, treeish)?
+        resolve_objectish(repo, treeish)?
     };
     for _ in 0..8 {
         let object = store.read_object(&id)?;
@@ -570,30 +1065,85 @@ pub(crate) fn resolve_named_ref(repo: &GitRepo, name: &str) -> io::Result<Option
         candidates.push(format!("refs/remotes/{remote_name}/HEAD"));
     }
     candidates.push(format!("refs/remotes/{remote_name}"));
+    let mut resolved = None;
     for candidate in candidates {
         match refs.resolve(&candidate) {
-            Ok(id) => return Ok(Some(id)),
+            Ok(id) => {
+                if resolved.is_none() {
+                    resolved = Some(id);
+                }
+            }
             Err(error)
                 if matches!(
                     error.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::IsADirectory
                 ) => {}
+            Err(error)
+                if error.kind() == io::ErrorKind::InvalidData
+                    && fs::read_to_string(refs.git_dir().join(&candidate))
+                        .ok()
+                        .is_some_and(|raw| raw.trim_start().starts_with("ref:")) =>
+            {
+                eprintln!("warning: ignoring dangling symref {candidate}");
+            }
             Err(error) => return Err(error),
         }
+    }
+    if resolved.is_some() {
+        return Ok(resolved);
+    }
+    if !name.contains('/')
+        && let Some(id) = resolve_unique_remote_tracking_ref(&refs, name)?
+    {
+        return Ok(Some(id));
     }
     Ok(None)
 }
 
+fn resolve_unique_remote_tracking_ref(
+    refs: &RefStore,
+    short_name: &str,
+) -> io::Result<Option<ObjectId>> {
+    let mut resolved = None::<ObjectId>;
+    let mut ambiguous = false;
+    refs.for_each_resolved_ref("refs/remotes/", |ref_name, id| {
+        if ref_name.ends_with("/HEAD") || !ref_name.ends_with(&format!("/{short_name}")) {
+            return Ok(());
+        }
+        match &resolved {
+            None => resolved = Some(id.clone()),
+            Some(existing) if existing == id => {}
+            Some(_) => ambiguous = true,
+        }
+        Ok::<(), io::Error>(())
+    })?;
+    if ambiguous {
+        return Ok(None);
+    }
+    Ok(resolved)
+}
+
 fn common_ref_store(repo: &GitRepo) -> io::Result<RefStore> {
     let common_dir = read_common_git_dir(&repo.git_dir).map_err(cli_error_to_io)?;
-    Ok(RefStore::new(common_dir, GitHashAlgorithm::Sha1))
+    Ok(RefStore::new(
+        common_dir,
+        repo_hash_algorithm_from_config(repo)?,
+    ))
 }
 
 fn resolve_repo_ref(repo: &GitRepo, name: &str) -> io::Result<ObjectId> {
     if name != "HEAD" {
-        return common_ref_store(repo)?.resolve(name);
+        let algorithm = repo_hash_algorithm_from_config(repo)?;
+        let refs = if is_per_worktree_ref(name) {
+            RefStore::new(&repo.git_dir, algorithm)
+        } else {
+            common_ref_store(repo)?
+        };
+        return refs.resolve(name);
     }
-    let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head_refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     match head_refs.read_head()? {
         RefTarget::Direct(id) => Ok(id),
         RefTarget::Symbolic(target) => common_ref_store(repo)?.resolve(&target),
@@ -619,10 +1169,110 @@ pub(crate) fn default_abbrev_len(store: &LooseObjectStore) -> Result<usize> {
     default_abbrev_len_for_store(store)
 }
 
-fn default_abbrev_len_for_store(store: &impl GitObjectStore) -> Result<usize> {
-    const MIN_ABBREV: usize = 7;
+pub(crate) fn configured_default_abbrev_len(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+) -> Result<usize> {
+    let Some(minimum) = configured_abbrev_minimum(repo, store)? else {
+        return Ok(GitHashAlgorithm::Sha1.digest_len() * 2);
+    };
+    default_abbrev_len_for_store_with_minimum(store, minimum)
+}
 
+pub(crate) fn configured_default_abbrev_len_for_ids(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+) -> Result<usize> {
+    let Some(minimum) = configured_abbrev_minimum(repo, store)? else {
+        return Ok(GitHashAlgorithm::Sha1.digest_len() * 2);
+    };
+    default_abbrev_len_for_ids_with_minimum(store, ids, minimum)
+}
+
+fn configured_abbrev_minimum(repo: &GitRepo, store: &LooseObjectStore) -> Result<Option<usize>> {
+    const MINIMUM_ABBREV: usize = 4;
+
+    let Some(entry) = read_config_entry(repo, "core.abbrev")? else {
+        return Ok(Some(default_auto_abbrev_len(store)?));
+    };
+    let value = &entry.value;
+    if value.eq_ignore_ascii_case("auto") {
+        return Ok(Some(default_auto_abbrev_len(store)?));
+    }
+    if value.is_empty()
+        || value.eq_ignore_ascii_case("no")
+        || value.eq_ignore_ascii_case("false")
+        || value.eq_ignore_ascii_case("off")
+    {
+        return Ok(None);
+    }
+    let minimum = value.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!(
+            "bad numeric config value '{}' for 'core.abbrev': invalid unit",
+            value
+        ),
+    })?;
+    if minimum < MINIMUM_ABBREV {
+        let command_line_suffix = if entry.scope == ConfigScope::Command {
+            "fatal: unable to parse 'core.abbrev' from command-line config\n"
+        } else {
+            ""
+        };
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!("error: abbrev length out of range: {minimum}\n{command_line_suffix}"),
+        });
+    }
+    Ok(Some(minimum))
+}
+
+pub(crate) fn auto_abbrev_len_from_object_count(object_count: usize) -> usize {
+    const MIN_ABBREV: usize = 7;
+    if object_count == 0 {
+        return MIN_ABBREV;
+    }
+    let squared = (object_count as u128).saturating_mul(object_count as u128);
+    let hex_digits = ((u128::BITS as usize) - squared.leading_zeros() as usize).div_ceil(4);
+    MIN_ABBREV.max(hex_digits)
+}
+
+pub(crate) fn default_auto_abbrev_len(store: &impl GitObjectStore) -> Result<usize> {
+    Ok(auto_abbrev_len_from_object_count(
+        store.object_id_capacity_hint()?,
+    ))
+}
+
+pub(crate) fn default_abbrev_len_for_ids(
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+) -> Result<usize> {
+    default_abbrev_len_for_ids_with_minimum(store, ids, default_auto_abbrev_len(store)?)
+}
+
+fn default_abbrev_len_for_ids_with_minimum(
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+    minimum: usize,
+) -> Result<usize> {
+    store
+        .minimum_unique_abbrev_len_for_ids(ids, minimum)
+        .map_err(CliError::Io)
+}
+
+fn default_abbrev_len_for_store(store: &impl GitObjectStore) -> Result<usize> {
+    default_abbrev_len_for_store_with_minimum(store, default_auto_abbrev_len(store)?)
+}
+
+fn default_abbrev_len_for_store_with_minimum(
+    store: &impl GitObjectStore,
+    minimum: usize,
+) -> Result<usize> {
     let full_len = GitHashAlgorithm::Sha1.digest_len() * 2;
+    if minimum >= full_len {
+        return Ok(full_len);
+    }
     let mut ids = Vec::with_capacity(default_abbrev_object_id_initial_capacity(
         store.object_id_capacity_hint()?,
     ));
@@ -632,7 +1282,7 @@ fn default_abbrev_len_for_store(store: &impl GitObjectStore) -> Result<usize> {
     })?;
     ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
 
-    let mut required = MIN_ABBREV;
+    let mut required = minimum;
     for pair in ids.windows(2) {
         let [left, right] = pair else {
             continue;
@@ -695,6 +1345,20 @@ mod tests {
             object_hex_common_prefix_len(&left, &different_first_nibble),
             0
         );
+    }
+
+    #[test]
+    fn auto_abbrev_len_stays_at_minimum_for_small_object_counts() {
+        assert_eq!(auto_abbrev_len_from_object_count(0), 7);
+        assert_eq!(auto_abbrev_len_from_object_count(3), 7);
+        assert_eq!(auto_abbrev_len_from_object_count(10_000), 7);
+    }
+
+    #[test]
+    fn auto_abbrev_len_grows_with_repo_object_count() {
+        assert_eq!(auto_abbrev_len_from_object_count(16_384), 8);
+        assert_eq!(auto_abbrev_len_from_object_count(27_688), 8);
+        assert_eq!(auto_abbrev_len_from_object_count(1_000_000), 10);
     }
 
     struct CountingObjectStore {

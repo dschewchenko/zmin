@@ -1647,12 +1647,12 @@ fn checkout_target_path(root: &Path, path: &[u8]) -> io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
     use crate::{
         GitHashAlgorithm, GitIndex, GitObjectKind, GitObjectSink, InMemoryObjectStore, IndexEntry,
         LooseObject, LooseObjectStore, ObjectId,
@@ -1940,18 +1940,6 @@ mod tests {
     }
 
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
-            .arg("init")
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        repo
+        stock_git_support::git_init()
     }
 }

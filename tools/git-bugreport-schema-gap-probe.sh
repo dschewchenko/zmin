@@ -26,6 +26,7 @@ normalize_out() {
   local file="$2"
   local real_repo
   real_repo="$(cd "$repo" && pwd -P)"
+  perl -0pi -e "s#^git version .*\n##mg; s#^cpu: .*\n##mg; s#^no commit associated with this build\n##mg; s#^sizeof-long: .*\n##mg; s#^sizeof-size_t: .*\n##mg; s#^shell-path: .*\n##mg; s#^feature: .*\n##mg; s#^libcurl: .*\n##mg; s#^default-ref-format: .*\n##mg; s#^zmin-version: .*\n##mg; s#^zlib: .*\n##mg; s#^SHA-1: .*\n##mg; s#^SHA-256: .*\n##mg" "$file"
   perl -0pi -e "s#\\Q$repo\\E#<WORKTREE>#g; s#\\Q$real_repo\\E#<WORKTREE>#g; s#Available space on '<WORKTREE>': [0-9]+\\.[0-9]{2} GiB \\(mount flags 0x[0-9a-fA-F]+\\)#Available space on '<WORKTREE>': <SPACE> GiB (mount flags <FLAGS>)#g" "$file"
 }
 

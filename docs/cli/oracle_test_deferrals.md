@@ -13,6 +13,13 @@ it is not a closed Git `2.47.1` row.
 
 ## Source Guard Deferrals
 
+- `"error: migrating repositories with worktrees is not supported yet\n"` in
+  `crates/zmin-cli/src/cli/commands/reference_impl.rs` is a stock-compatible
+  `git refs migrate --ref-format=reftable --dry-run` linked-worktree rejection,
+  verified for exact stdout, stderr and exit 255 by
+  `git_refs_compat::refs_migrate_rejects_linked_worktrees_like_stock_git` and
+  classified as `invalid-input` in `refs_v2_47.tsv`.
+
 - `"unsupported reftable version"` in `crates/zmin-git-core/src/refs.rs` is a
   corrupt/internal reftable parse guard. It is documented and intentionally
   kept outside the Git `2.47.1` exact behavior denominator until a dedicated
@@ -22,3 +29,13 @@ it is not a closed Git `2.47.1` row.
   guard. It is documented and intentionally kept outside the Git `2.47.1`
   exact behavior denominator until a dedicated invalid-repository parity row
   exists.
+- `"unsupported built-in zmin lfs pull remote: {url}"` in
+  `crates/zmin-cli/src/cli/commands/lfs_impl.rs` is a deliberate local-scope
+  guard on the current built-in Git LFS foundation. The covered LFS replace-git
+  surface currently includes discovery commands, hook takeover, pointer
+  checkout, and local/file-based pull lanes, but not general network,
+  authenticated, or custom-transfer Git LFS transport parity. Keep this guard
+  outside the Git `2.47.1` denominator and classify the broader non-local LFS
+  work under the deferred `git lfs` surface in
+  `docs/cli/zmin_extensions_inventory.md` until that transport scope is
+  implemented and verified.

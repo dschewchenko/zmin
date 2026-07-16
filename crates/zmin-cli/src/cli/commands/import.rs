@@ -40,31 +40,29 @@ pub(crate) fn dispatch(
             detect_copies,
             detect_renames,
             refs,
-        } => {
-            super::import_commands::fast_export(super::import_commands::FastExportOptions {
-                all: all > 0,
-                anonymize,
-                anonymize_map,
-                progress,
-                signed_tags,
-                tag_of_filtered_object,
-                reencode,
-                export_marks,
-                import_marks,
-                import_marks_if_exists,
-                fake_missing_tagger,
-                full_tree,
-                use_done_feature,
-                no_data,
-                refspec,
-                reference_excluded_parents,
-                show_original_ids,
-                mark_tags,
-                detect_copies,
-                detect_renames,
-                refs,
-            })
-        }
+        } => super::import_commands::fast_export(super::import_commands::FastExportOptions {
+            all: all > 0,
+            anonymize,
+            anonymize_map,
+            progress,
+            signed_tags,
+            tag_of_filtered_object,
+            reencode,
+            export_marks,
+            import_marks,
+            import_marks_if_exists,
+            fake_missing_tagger,
+            full_tree,
+            use_done_feature,
+            no_data,
+            refspec,
+            reference_excluded_parents,
+            show_original_ids,
+            mark_tags,
+            detect_copies,
+            detect_renames,
+            refs,
+        }),
         runtime::Command::FastImport {
             date_format,
             quiet,
@@ -89,8 +87,11 @@ pub(crate) fn dispatch(
             let marks_resolution =
                 super::import_commands::resolve_fast_import_marks_resolution(raw_args);
             let date_format = super::import_commands::resolve_fast_import_last_value(&date_format);
-            let (quiet, stats) =
-                super::import_commands::resolve_fast_import_stats_mode(raw_args, quiet > 0, stats > 0);
+            let (quiet, stats) = super::import_commands::resolve_fast_import_stats_mode(
+                raw_args,
+                quiet > 0,
+                stats > 0,
+            );
             let max_pack_size =
                 super::import_commands::resolve_fast_import_last_value(&max_pack_size);
             super::import_commands::fast_import(super::import_commands::FastImportOptions {

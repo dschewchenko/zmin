@@ -11,6 +11,33 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+## 2026-07-16 `t1050` large-object closure
+
+The pinned upstream failure selected five behavior shapes: direct streamed
+large-blob packing during `add`, `core.bigFileThreshold` binary diff behavior,
+negative threshold rejection, ZIP store level, and retained/verifiable clone
+packs. The actual movement was `+5` behavior rows, `+4` closed rows, `+1`
+invalid-input row, `+4` oracle functions, and `+4` represented oracle
+functions, with no movement in documented option pairs, complete command
+matrices, open rows, or the missing-or-unclassified oracle count. The refreshed
+census is `7758` rows, `6827` verified, `907` invalid-input, and `0` open; the
+oracle inventory is `1466/1248/218` total/represented/missing. Focused local
+differentials and all `29/29` tests in pinned `t1050-large.sh` are green.
+
+## 2026-07-16 `t1060` corruption closure
+
+The pinned upstream failure selected three independently observed behavior
+shapes: corrupt loose-object size inspection, the implicit canonical empty
+tree used by `commit-tree` and `rev-list --objects`, and pack-mode local fetch
+against a corrupt existing loose object. The declared and actual movement was
+`+3` behavior rows, `+1` closed row, `+2` invalid-input rows, `+3` oracle
+functions, `+3` represented oracle functions, and no movement in documented
+option pairs, complete command matrices, open rows, or the
+missing-or-unclassified oracle count. The refreshed census is `7753` rows,
+`6823` verified, `906` invalid-input, and `0` open; the oracle inventory is
+`1462/1244/218` total/represented/missing. Focused differential tests and the
+complete pinned `t1060-object-corruption.sh` file are green.
+
 As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` invalid/reject-and-no-op expansion across the existing bounded
 linear advance lane. The selected change added `+24` matrix rows and promoted

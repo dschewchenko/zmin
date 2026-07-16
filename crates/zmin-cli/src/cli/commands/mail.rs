@@ -1,5 +1,64 @@
 use crate::runtime;
 
+fn format_patch_relative(raw_args: &[String]) -> Option<String> {
+    let mut relative = crate::runtime::pending_format_patch_relative_arg();
+    for arg in raw_args {
+        if arg == "--no-relative" {
+            relative = None;
+        } else if arg == "--relative" && relative.is_none() {
+            relative = Some(String::new());
+        }
+    }
+    relative
+}
+
+fn format_patch_attach_boundary(raw_args: &[String]) -> Option<String> {
+    let mut boundary = crate::runtime::pending_format_patch_attach_arg();
+    for arg in raw_args {
+        if arg == "--no-attach" {
+            boundary = None;
+        } else if arg == "--attach" && boundary.is_none() {
+            boundary = Some(String::new());
+        }
+    }
+    boundary
+}
+
+fn format_patch_inline_boundary(raw_args: &[String]) -> Option<String> {
+    let mut boundary = crate::runtime::pending_format_patch_inline_arg();
+    for arg in raw_args {
+        if arg == "--inline" && boundary.is_none() {
+            boundary = Some(String::new());
+        }
+    }
+    boundary
+}
+
+fn format_patch_similarity_option(
+    raw_args: &[String],
+    long_name: &str,
+    short_name: &str,
+) -> Option<String> {
+    let long_prefix = format!("--{long_name}=");
+    let short_prefix = format!("-{short_name}");
+    let mut iter = raw_args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == &format!("--{long_name}") {
+            return Some(String::new());
+        }
+        if let Some(value) = arg.strip_prefix(&long_prefix) {
+            return Some(value.to_owned());
+        }
+        if let Some(value) = arg.strip_prefix(&short_prefix) {
+            if value.is_empty() {
+                return Some(String::new());
+            }
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
 pub(crate) fn dispatch(
     command: runtime::Command,
     raw_args: &[String],
@@ -196,14 +255,14 @@ pub(crate) fn dispatch(
             color_moved_ws: _,
             compact_summary: _,
             check,
-            default_prefix: _,
+            default_prefix,
             diff_algorithm: _,
             diff_filter: _,
             dst_prefix: _,
             exit_code: _,
             ext_diff: _,
             find_copies: _,
-            find_copies_harder: _,
+            find_copies_harder,
             find_renames: _,
             function_context: _,
             histogram: _,
@@ -235,9 +294,9 @@ pub(crate) fn dispatch(
             word_diff_regex,
             line_prefix: _,
             minimal: _,
-            no_attach: _,
+            no_attach,
             no_binary: _,
-            no_cover_letter: _,
+            no_cover_letter,
             cover_from_description,
             description_file,
             no_ext_diff: _,
@@ -248,19 +307,23 @@ pub(crate) fn dispatch(
             no_indent_heuristic: _,
             name_only,
             name_status,
-            no_notes: _,
+            no_notes,
             no_prefix,
             no_relative: _,
             no_rename_empty: _,
-            no_renames: _,
-            no_thread: _,
+            no_renames,
+            no_thread,
             thread,
-            notes: _,
+            notes,
             to,
+            no_to,
             cc,
+            no_cc,
             add_header,
+            no_add_header,
             in_reply_to,
             from,
+            no_from,
             force_in_body_from,
             no_force_in_body_from,
             output_indicator_context: _,
@@ -305,7 +368,7 @@ pub(crate) fn dispatch(
             root: _,
             src_prefix: _,
             full_index,
-            unified: _,
+            unified,
             ws_error_highlight: _,
             break_rewrites_short: _,
             find_copies_short: _,
@@ -322,6 +385,7 @@ pub(crate) fn dispatch(
             numbered,
             numbered_files,
             start_number,
+            commit_list_format,
             cover_letter,
             signoff,
             signature,
@@ -330,87 +394,125 @@ pub(crate) fn dispatch(
             encode_email_headers,
             no_encode_email_headers,
             reroll_count,
+            max_count,
             rfc,
+            no_rfc,
             zero_commit,
             one,
             revs,
-        } => super::mail_commands::format_patch(
-            output_directory,
-            output,
-            stdout,
-            check,
-            name_only,
-            name_status,
-            format_patch_uses_short_patch_alias(raw_args),
-            patch_with_raw,
-            no_stat,
-            no_patch,
-            numstat,
-            dirstat.as_deref(),
-            dirstat_short.as_deref(),
-            cumulative,
-            dirstat_by_file.as_deref(),
-            shortstat,
-            raw,
-            summary,
-            separate_merges,
-            combined_merges,
-            tree_in_diff,
-            first_parent_diff,
-            diff_merges.as_deref(),
-            no_diff_merges,
-            combined_all_paths,
-            remerge_diff,
-            full_index,
-            nul_terminated,
-            no_prefix,
-            reverse,
-            submodule.as_deref(),
-            order_file.as_deref(),
-            skip_to.as_deref(),
-            rotate_to.as_deref(),
-            word_diff.as_deref(),
-            color_words.as_deref(),
-            word_diff_regex.as_deref(),
-            attach,
-            inline,
-            suffix.as_deref(),
-            subject_prefix.as_deref(),
-            keep_subject,
-            no_numbered,
-            numbered,
-            numbered_files,
-            start_number.as_deref(),
-            cover_letter,
-            thread,
-            to,
-            cc,
-            add_header,
-            in_reply_to.as_deref(),
-            from.as_deref(),
-            force_in_body_from,
-            no_force_in_body_from,
-            cover_from_description.as_deref(),
-            description_file.as_deref(),
-            signoff,
-            signature.as_deref(),
-            signature_file.as_deref(),
-            no_signature,
-            encode_email_headers,
-            no_encode_email_headers,
-            reroll_count.as_deref(),
-            rfc.as_deref(),
-            base.as_deref(),
-            no_base,
-            filename_max_length.as_deref(),
-            ignore_if_in_upstream,
-            interdiff.as_deref(),
-            range_diff.as_deref(),
-            creation_factor.as_deref(),
-            zero_commit,
-            one,
-            revs,
-        ),
+        } => {
+            let (effective_rfc, effective_no_rfc) =
+                resolve_format_patch_rfc(raw_args, &rfc, no_rfc);
+            let reroll_count = resolve_format_patch_reroll_count(raw_args, reroll_count.as_deref());
+            let pathspecs = format_patch_pathspecs(raw_args);
+            let relative = format_patch_relative(raw_args);
+            let attach_boundary = format_patch_attach_boundary(raw_args);
+            let inline_boundary = format_patch_inline_boundary(raw_args);
+            let no_relative = raw_args.iter().any(|arg| arg == "--no-relative");
+            let find_renames = format_patch_similarity_option(raw_args, "find-renames", "M");
+            let find_copies = format_patch_similarity_option(raw_args, "find-copies", "C");
+            let revs = format_patch_revs_without_pathspecs(revs, &pathspecs);
+            super::mail_commands::format_patch(
+                output_directory,
+                output,
+                stdout,
+                check,
+                name_only,
+                name_status,
+                format_patch_uses_short_patch_alias(raw_args),
+                patch_with_raw,
+                no_stat,
+                no_patch,
+                numstat,
+                dirstat.as_deref(),
+                dirstat_short.as_deref(),
+                cumulative,
+                dirstat_by_file.as_deref(),
+                shortstat,
+                raw,
+                summary,
+                separate_merges,
+                combined_merges,
+                tree_in_diff,
+                first_parent_diff,
+                diff_merges.as_deref(),
+                no_diff_merges,
+                combined_all_paths,
+                remerge_diff,
+                full_index,
+                unified.as_deref(),
+                nul_terminated,
+                no_prefix,
+                default_prefix,
+                relative.as_deref(),
+                no_relative,
+                find_renames.as_deref(),
+                find_copies.as_deref(),
+                find_copies_harder,
+                no_renames,
+                reverse,
+                submodule.as_deref(),
+                order_file.as_deref(),
+                skip_to.as_deref(),
+                rotate_to.as_deref(),
+                word_diff.as_deref(),
+                color_words.as_deref(),
+                word_diff_regex.as_deref(),
+                attach,
+                attach_boundary.as_deref(),
+                inline,
+                inline_boundary.as_deref(),
+                no_attach,
+                suffix.as_deref(),
+                subject_prefix.as_deref(),
+                keep_subject,
+                no_numbered,
+                numbered,
+                numbered_files,
+                start_number.as_deref(),
+                commit_list_format.as_deref(),
+                cover_letter,
+                no_cover_letter,
+                no_thread,
+                thread.as_deref(),
+                resolve_format_patch_notes(raw_args, &notes, no_notes),
+                no_notes,
+                to,
+                no_to,
+                cc,
+                no_cc,
+                add_header,
+                no_add_header,
+                in_reply_to.as_deref(),
+                from.as_deref(),
+                no_from,
+                force_in_body_from,
+                no_force_in_body_from,
+                cover_from_description.as_deref(),
+                description_file.as_deref(),
+                signoff,
+                signature.as_deref(),
+                signature_file.as_deref(),
+                no_signature,
+                encode_email_headers,
+                no_encode_email_headers,
+                reroll_count.as_deref(),
+                max_count.as_deref(),
+                effective_rfc.as_deref(),
+                effective_no_rfc,
+                base.as_deref(),
+                no_base,
+                filename_max_length.as_deref(),
+                ignore_if_in_upstream,
+                interdiff.as_deref(),
+                range_diff.as_deref(),
+                creation_factor.as_deref(),
+                zero_commit,
+                one,
+                pathspecs,
+                revs,
+            )
+        }
         runtime::Command::SendEmail {
             eight_bit_encoding,
             annotate,
@@ -563,6 +665,146 @@ pub(crate) fn dispatch(
     }
 }
 
+fn resolve_format_patch_rfc(
+    raw_args: &[String],
+    parsed_rfc: &[String],
+    parsed_no_rfc: bool,
+) -> (Option<String>, bool) {
+    let mut effective_rfc = parsed_rfc.last().cloned();
+    let mut effective_no_rfc = false;
+    let mut in_format_patch = false;
+    for arg in raw_args {
+        if !in_format_patch {
+            if arg == "format-patch" {
+                in_format_patch = true;
+            }
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg == "--no-rfc" {
+            effective_rfc = None;
+            effective_no_rfc = true;
+            continue;
+        }
+        if arg == "--rfc" {
+            effective_rfc = Some("RFC".to_owned());
+            effective_no_rfc = false;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--rfc=") {
+            if value.is_empty() {
+                effective_rfc = None;
+                effective_no_rfc = true;
+            } else {
+                effective_rfc = Some(value.to_owned());
+                effective_no_rfc = false;
+            }
+        }
+    }
+    if !effective_no_rfc && parsed_no_rfc && effective_rfc.is_none() {
+        effective_no_rfc = true;
+    }
+    (effective_rfc, effective_no_rfc)
+}
+
+fn resolve_format_patch_reroll_count(
+    raw_args: &[String],
+    parsed_reroll_count: Option<&str>,
+) -> Option<String> {
+    let mut effective = parsed_reroll_count.map(str::to_owned);
+    let mut in_format_patch = false;
+    let mut index = 0usize;
+    while index < raw_args.len() {
+        let arg = &raw_args[index];
+        if !in_format_patch {
+            if arg == "format-patch" {
+                in_format_patch = true;
+            }
+            index += 1;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg == "--reroll-count" || arg == "-v" {
+            let next = raw_args.get(index + 1);
+            if let Some(value) =
+                next.filter(|value| !value.starts_with('-') && value.as_str() != "--")
+            {
+                effective = Some(value.clone());
+                index += 2;
+                continue;
+            }
+            effective = Some(String::new());
+            index += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--reroll-count=") {
+            effective = Some(value.to_owned());
+        } else if let Some(value) = arg.strip_prefix("-v")
+            && !value.is_empty()
+        {
+            effective = Some(value.to_owned());
+        }
+        index += 1;
+    }
+    effective
+}
+
+fn resolve_format_patch_notes(
+    raw_args: &[String],
+    parsed_notes: &[String],
+    parsed_no_notes: bool,
+) -> Vec<String> {
+    let mut resolved = Vec::new();
+    let mut in_format_patch = false;
+    let mut index = 0usize;
+    while index < raw_args.len() {
+        let arg = &raw_args[index];
+        if !in_format_patch {
+            if arg == "format-patch" {
+                in_format_patch = true;
+            }
+            index += 1;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg == "--no-notes" {
+            resolved.clear();
+            index += 1;
+            continue;
+        }
+        if arg == "--notes" {
+            let next = raw_args.get(index + 1);
+            if let Some(value) =
+                next.filter(|value| !value.starts_with('-') && value.as_str() != "--")
+            {
+                resolved.push(value.clone());
+                index += 2;
+                continue;
+            }
+            resolved.push(String::new());
+            index += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--notes=") {
+            resolved.push(value.to_owned());
+        }
+        index += 1;
+    }
+    if resolved.is_empty() {
+        if parsed_no_notes {
+            return Vec::new();
+        }
+        return parsed_notes.to_vec();
+    }
+    resolved
+}
+
 fn resolve_fmt_merge_msg_summary_aliases(
     raw_args: &[String],
     log: Option<usize>,
@@ -607,4 +849,29 @@ fn resolve_fmt_merge_msg_summary_aliases(
 
 fn format_patch_uses_short_patch_alias(raw_args: &[String]) -> bool {
     raw_args.iter().any(|arg| arg == "-p")
+}
+
+fn format_patch_pathspecs(raw_args: &[String]) -> Vec<String> {
+    let mut pathspecs = Vec::new();
+    let mut after_dashdash = false;
+    for arg in raw_args {
+        if !after_dashdash {
+            if arg == "--" {
+                after_dashdash = true;
+            }
+            continue;
+        }
+        pathspecs.push(arg.clone());
+    }
+    pathspecs
+}
+
+fn format_patch_revs_without_pathspecs(mut revs: Vec<String>, pathspecs: &[String]) -> Vec<String> {
+    if pathspecs.is_empty() || revs.len() < pathspecs.len() {
+        return revs;
+    }
+    if revs[revs.len() - pathspecs.len()..] == *pathspecs {
+        revs.truncate(revs.len() - pathspecs.len());
+    }
+    revs
 }

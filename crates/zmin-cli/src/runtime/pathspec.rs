@@ -136,18 +136,14 @@ fn pathspec_glob_matches(path: &[u8], pathspec: &[u8], options: PathspecOptions)
     }
     let path = String::from_utf8_lossy(path).replace('\\', "/");
     let pattern = String::from_utf8_lossy(pathspec).replace('\\', "/");
-    if pattern.contains('/') {
+    if !options.glob_explicit {
+        wildcard_match_pathspec(&pattern, &path, options.icase, true)
+    } else if pattern.contains('/') {
         wildcard_match_pathspec(&pattern, &path, options.icase, !options.glob_explicit)
     } else if options.glob_explicit {
         !path.contains('/') && wildcard_match_pathspec(&pattern, &path, options.icase, false)
-    } else if pathspec
-        .first()
-        .is_some_and(|byte| matches!(*byte, b'*' | b'?' | b'['))
-    {
-        let basename = path.rsplit('/').next().unwrap_or(&path);
-        wildcard_match_pathspec(&pattern, basename, options.icase, true)
     } else {
-        !path.contains('/') && wildcard_match_pathspec(&pattern, &path, options.icase, true)
+        false
     }
 }
 
@@ -384,4 +380,17 @@ pub(crate) fn ensure_add_pathspecs_match(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_glob_matches_directory_and_its_descendants() {
+        let rule = parse_pathspec_rule(b"untracked_*");
+
+        assert!(pathspec_rule_matches(b"untracked_dir", rule));
+        assert!(pathspec_rule_matches(b"untracked_dir/file", rule));
+    }
 }

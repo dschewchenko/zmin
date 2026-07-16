@@ -1,6 +1,6 @@
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -11,8 +11,11 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 
 use crate::loose::{LooseObject, record_prefix_candidate, validate_hex_prefix};
-use crate::object::{GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object};
-use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint};
+use crate::object::{
+    GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object,
+    update_unique_abbrev_len_for_candidate,
+};
+use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint, PrefixOrFullObject};
 
 const IDX_MAGIC: &[u8; 4] = b"\xfftOc";
 const RIDX_MAGIC: &[u8; 4] = b"RIDX";
@@ -36,6 +39,8 @@ const PACK_INDEX_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_INDEX_OBJECT_ID_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_INDEX_LIST_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_INDEX_PATHS_INITIAL_CAPACITY_HINT: usize = 4;
+const STABLE_PACK_FILE_CACHE_LIMIT: usize = 64;
+const PACK_FILE_READER_BUFFER_CAPACITY: usize = 16 * 1024;
 const PACK_OBJECT_READ_CACHE_ENTRY_LIMIT: usize = 4096;
 const PACK_OBJECT_READ_CACHE_BYTE_LIMIT: usize = 8 * 1024 * 1024;
 const PACK_BLOB_OUTPUT_BUFFER_CAPACITY: usize = 64 * 1024;
@@ -60,9 +65,19 @@ pub struct PackedObjectStore {
     objects_dir: PathBuf,
     algorithm: GitHashAlgorithm,
     max_object_bytes: usize,
+    stable_pack_snapshot: bool,
+    retain_requested_objects: bool,
+    verify_requested_objects: bool,
+    buffered_pack_reads: bool,
+    pack_file_reader_buffer_capacity: usize,
+    stable_pack_indexes: Arc<OnceLock<Arc<Vec<StablePackIndex>>>>,
+    stable_pack_objects: Arc<OnceLock<Arc<Vec<StablePackObjectLookup>>>>,
+    stable_pack_files: Arc<Mutex<Vec<CachedStablePackFile>>>,
+    stable_pack_readers: Arc<Mutex<Vec<CachedStablePackReader>>>,
     idx_paths_cache: Arc<Mutex<Option<CachedPackIndexPaths>>>,
     last_index_lookup: Arc<Mutex<Option<CachedLastPackIndexLookup>>>,
     last_pack_file: Arc<Mutex<Option<CachedLastPackFile>>>,
+    object_read_cache_byte_limit: usize,
     object_read_cache: Arc<Mutex<PackObjectReadCache>>,
 }
 
@@ -166,6 +181,12 @@ pub struct PackObjectData {
     pub content: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackBlobSource {
+    pub id: ObjectId,
+    pub size: u64,
+}
+
 #[derive(Clone)]
 struct CachedPackIndex {
     modified: Option<SystemTime>,
@@ -187,12 +208,97 @@ struct CachedLastPackFile {
     pack_path: PathBuf,
     modified: Option<SystemTime>,
     len: u64,
-    file: fs::File,
+    bytes: MappedPack,
+}
+
+#[derive(Clone)]
+struct StablePackIndex {
+    idx_path: PathBuf,
+    pack_path: Arc<PathBuf>,
+    index: Arc<PackIndex>,
+}
+
+impl std::fmt::Debug for StablePackIndex {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("StablePackIndex")
+            .field("idx_path", &self.idx_path)
+            .field("pack_path", &self.pack_path)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
+struct CachedStablePackFile {
+    pack_path: PathBuf,
+    len: u64,
+    bytes: MappedPack,
+}
+
+#[derive(Debug)]
+struct CachedStablePackReader {
+    pack_path: PathBuf,
+    len: u64,
+    reader: BufReader<fs::File>,
+}
+
+#[derive(Clone, Debug)]
+struct MappedPack(Arc<memmap2::Mmap>);
+
+impl AsRef<[u8]> for MappedPack {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+enum PackReader {
+    Mapped(Cursor<MappedPack>),
+    Buffered(BufReader<fs::File>),
+}
+
+impl Read for PackReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Mapped(reader) => reader.read(buffer),
+            Self::Buffered(reader) => reader.read(buffer),
+        }
+    }
+}
+
+impl Seek for PackReader {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        match self {
+            Self::Mapped(reader) => reader.seek(position),
+            Self::Buffered(reader) => reader.seek(position),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct StablePackObjectLookup {
+    id: ObjectId,
+    pack_index: u32,
+    offset: u64,
+}
+
+#[derive(Clone)]
+pub struct PackedObjectOrdinalLookup {
+    index: Arc<PackIndex>,
+}
+
+impl PackedObjectOrdinalLookup {
+    pub fn object_count(&self) -> usize {
+        self.index.count
+    }
+
+    pub fn position(&self, id: &ObjectId) -> Option<usize> {
+        self.index.position_for(id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PackObjectReadCacheKey {
-    pack_path: PathBuf,
+    pack_path: Arc<PathBuf>,
     offset: u64,
 }
 
@@ -202,16 +308,29 @@ struct CachedPackObjectRead {
     content: Vec<u8>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PackObjectReadCache {
     entries: HashMap<PackObjectReadCacheKey, CachedPackObjectRead>,
     order: VecDeque<PackObjectReadCacheKey>,
     bytes: usize,
+    byte_limit: usize,
 }
 
 impl PackObjectReadCache {
+    fn with_byte_limit(byte_limit: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            byte_limit,
+        }
+    }
+
     fn insert(&mut self, key: PackObjectReadCacheKey, kind: GitObjectKind, content: &[u8]) {
         if content.len() > PACK_OBJECT_READ_CACHE_BYTE_LIMIT {
+            return;
+        }
+        if content.len() > self.byte_limit {
             return;
         }
         if let Some(existing) = self.entries.get_mut(&key) {
@@ -235,7 +354,7 @@ impl PackObjectReadCache {
     }
 
     fn evict_over_budget(&mut self) {
-        while self.bytes > PACK_OBJECT_READ_CACHE_BYTE_LIMIT
+        while self.bytes > self.byte_limit
             || self.entries.len() > PACK_OBJECT_READ_CACHE_ENTRY_LIMIT
         {
             let Some(key) = self.order.pop_front() else {
@@ -246,6 +365,12 @@ impl PackObjectReadCache {
             };
             self.bytes = self.bytes.saturating_sub(entry.content.len());
         }
+    }
+}
+
+impl Default for PackObjectReadCache {
+    fn default() -> Self {
+        Self::with_byte_limit(PACK_OBJECT_READ_CACHE_BYTE_LIMIT)
     }
 }
 
@@ -449,7 +574,7 @@ const fn pack_index_fanout_start(version: PackIndexVersion) -> usize {
 }
 
 pub fn validate_pack_index_bytes(algorithm: GitHashAlgorithm, bytes: &[u8]) -> io::Result<()> {
-    validate_pack_index_layout(algorithm, bytes)?;
+    validate_pack_index_layout(algorithm, bytes, true)?;
     Ok(())
 }
 
@@ -1556,6 +1681,206 @@ pub fn write_undeltified_pack_from_store<S: GitObjectStore + GitObjectSink>(
     )
 }
 
+pub fn write_undeltified_blob_pack_with_options<F>(
+    algorithm: GitHashAlgorithm,
+    sources: &[PackBlobSource],
+    compression_level: u32,
+    mut write_source: F,
+    out: &mut dyn Write,
+) -> io::Result<IndexedPack>
+where
+    F: FnMut(&PackBlobSource, &mut dyn Write) -> io::Result<()>,
+{
+    let mut writer = PackHashWriter::new(out, algorithm);
+    writer.write_all(PACK_MAGIC)?;
+    writer.write_all(&PACK_VERSION_2.to_be_bytes())?;
+    writer.write_all(&pack_object_count_u32(sources.len())?.to_be_bytes())?;
+    let mut entries = Vec::with_capacity(sources.len());
+    for source in sources {
+        if source.id.algorithm() != algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match pack algorithm",
+            ));
+        }
+        let offset = writer.position();
+        let mut crc_writer = PackCrcWriter::new(&mut writer);
+        let mut header = [0_u8; 10];
+        let header_len = pack_object_header_bytes(&mut header, GitObjectKind::Blob, source.size);
+        crc_writer.write_all(&header[..header_len])?;
+        let encoder = ZlibEncoder::new(&mut crc_writer, Compression::new(compression_level));
+        let mut sized = PackBlobSizeWriter::new(encoder, algorithm, source.size)?;
+        write_source(source, &mut sized)?;
+        let (encoder, written, actual_id) = sized.finish();
+        if written != source.size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "blob source size changed while writing pack: expected {}, wrote {written}",
+                    source.size
+                ),
+            ));
+        }
+        if actual_id != source.id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "blob source changed while writing pack",
+            ));
+        }
+        let _ = encoder.finish()?;
+        entries.push(PackIndexEntry {
+            offset,
+            object_id: source.id.clone(),
+            crc32: crc_writer.finish(),
+        });
+    }
+    let pack_id = writer.finalize();
+    out.write_all(pack_id.as_bytes())?;
+    let sorted_positions = sorted_pack_index_positions(&entries)?;
+    let index = encode_pack_index_with_positions_version(
+        algorithm,
+        &pack_id,
+        &entries,
+        &sorted_positions,
+        PackIndexVersion::V2,
+    )?;
+    let reverse_index =
+        encode_pack_reverse_index_from_positions(algorithm, &pack_id, &entries, &sorted_positions)?;
+    Ok(IndexedPack {
+        pack_id,
+        index,
+        reverse_index,
+        objects: entries.len(),
+    })
+}
+
+pub fn write_single_undeltified_blob_pack_with_options<F>(
+    algorithm: GitHashAlgorithm,
+    size: u64,
+    compression_level: u32,
+    mut write_source: F,
+    out: &mut dyn Write,
+) -> io::Result<(IndexedPack, ObjectId)>
+where
+    F: FnMut(&mut dyn Write) -> io::Result<()>,
+{
+    let mut writer = PackHashWriter::new(out, algorithm);
+    writer.write_all(PACK_MAGIC)?;
+    writer.write_all(&PACK_VERSION_2.to_be_bytes())?;
+    writer.write_all(&1_u32.to_be_bytes())?;
+    let offset = writer.position();
+    let mut crc_writer = PackCrcWriter::new(&mut writer);
+    let mut header = [0_u8; 10];
+    let header_len = pack_object_header_bytes(&mut header, GitObjectKind::Blob, size);
+    crc_writer.write_all(&header[..header_len])?;
+    let encoder = ZlibEncoder::new(&mut crc_writer, Compression::new(compression_level));
+    let mut sized = PackBlobSizeWriter::new(encoder, algorithm, size)?;
+    write_source(&mut sized)?;
+    let (encoder, written, object_id) = sized.finish();
+    if written != size {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "blob source size changed while writing pack: expected {size}, wrote {written}"
+            ),
+        ));
+    }
+    let _ = encoder.finish()?;
+    let entries = [PackIndexEntry {
+        offset,
+        object_id: object_id.clone(),
+        crc32: crc_writer.finish(),
+    }];
+    let pack_id = writer.finalize();
+    out.write_all(pack_id.as_bytes())?;
+    let sorted_positions = sorted_pack_index_positions(&entries)?;
+    let index = encode_pack_index_with_positions_version(
+        algorithm,
+        &pack_id,
+        &entries,
+        &sorted_positions,
+        PackIndexVersion::V2,
+    )?;
+    let reverse_index =
+        encode_pack_reverse_index_from_positions(algorithm, &pack_id, &entries, &sorted_positions)?;
+    Ok((
+        IndexedPack {
+            pack_id,
+            index,
+            reverse_index,
+            objects: 1,
+        },
+        object_id,
+    ))
+}
+
+struct PackCrcWriter<W> {
+    inner: W,
+    crc32: crc32fast::Hasher,
+}
+
+impl<W> PackCrcWriter<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            crc32: crc32fast::Hasher::new(),
+        }
+    }
+
+    fn finish(self) -> u32 {
+        self.crc32.finalize()
+    }
+}
+
+impl<W: Write> Write for PackCrcWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(bytes)?;
+        self.crc32.update(&bytes[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+struct PackBlobSizeWriter<W> {
+    inner: W,
+    written: u64,
+    hasher: GitObjectHash,
+}
+
+impl<W> PackBlobSizeWriter<W> {
+    fn new(inner: W, algorithm: GitHashAlgorithm, size: u64) -> io::Result<Self> {
+        let content_len = usize::try_from(size)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "blob source is too large"))?;
+        let mut hasher = GitObjectHash::new(algorithm);
+        hasher.update_object_header(GitObjectKind::Blob, content_len);
+        Ok(Self {
+            inner,
+            written: 0,
+            hasher,
+        })
+    }
+
+    fn finish(self) -> (W, u64, ObjectId) {
+        (self.inner, self.written, self.hasher.finalize())
+    }
+}
+
+impl<W: Write> Write for PackBlobSizeWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(bytes)?;
+        self.written = self.written.saturating_add(written as u64);
+        self.hasher.update(&bytes[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 fn write_undeltified_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
     store: &S,
     algorithm: GitHashAlgorithm,
@@ -1586,6 +1911,22 @@ fn write_undeltified_pack_from_store_with_options<S: GitObjectStore + GitObjectS
             &mut writer,
             &mut reusable_entry_buffer,
         )? {
+            continue;
+        }
+        if let Some(size) = store.streamable_blob_size_hint(id)? {
+            let mut header = [0_u8; 10];
+            let header_len =
+                pack_object_header_bytes(&mut header, GitObjectKind::Blob, size as u64);
+            writer.write_all(&header[..header_len])?;
+            let mut encoder =
+                ZlibEncoder::new(&mut writer, Compression::new(options.compression_level));
+            if !store.write_streamable_blob(id, &mut encoder)? {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "streamable blob disappeared while writing pack",
+                ));
+            }
+            let _ = encoder.finish()?;
             continue;
         }
         let object = store.read_object(id)?;
@@ -3488,9 +3829,19 @@ impl PackedObjectStore {
             objects_dir: objects_dir.into(),
             algorithm,
             max_object_bytes: 512 * 1024 * 1024,
+            stable_pack_snapshot: false,
+            retain_requested_objects: true,
+            verify_requested_objects: true,
+            buffered_pack_reads: false,
+            pack_file_reader_buffer_capacity: PACK_FILE_READER_BUFFER_CAPACITY,
+            stable_pack_indexes: Arc::new(OnceLock::new()),
+            stable_pack_objects: Arc::new(OnceLock::new()),
+            stable_pack_files: Arc::new(Mutex::new(Vec::new())),
+            stable_pack_readers: Arc::new(Mutex::new(Vec::new())),
             idx_paths_cache: Arc::new(Mutex::new(None)),
             last_index_lookup: Arc::new(Mutex::new(None)),
             last_pack_file: Arc::new(Mutex::new(None)),
+            object_read_cache_byte_limit: PACK_OBJECT_READ_CACHE_BYTE_LIMIT,
             object_read_cache: Arc::new(Mutex::new(PackObjectReadCache::default())),
         }
     }
@@ -3500,7 +3851,115 @@ impl PackedObjectStore {
         self
     }
 
+    pub fn with_stable_pack_snapshot(mut self) -> Self {
+        self.stable_pack_snapshot = true;
+        self
+    }
+
+    pub fn with_transient_object_reads(mut self) -> Self {
+        self.retain_requested_objects = false;
+        self
+    }
+
+    pub fn with_trusted_object_reads(mut self) -> Self {
+        self.verify_requested_objects = false;
+        self
+    }
+
+    pub fn with_buffered_pack_reads(mut self) -> Self {
+        self.buffered_pack_reads = true;
+        self
+    }
+
+    pub fn with_pack_file_reader_buffer_capacity(mut self, capacity: usize) -> Self {
+        self.pack_file_reader_buffer_capacity = capacity.max(12);
+        self
+    }
+
+    pub fn with_object_read_cache_byte_limit(mut self, byte_limit: usize) -> Self {
+        self.object_read_cache_byte_limit = byte_limit;
+        self.object_read_cache =
+            Arc::new(Mutex::new(PackObjectReadCache::with_byte_limit(byte_limit)));
+        self
+    }
+
+    pub fn object_read_cache_usage(&self) -> io::Result<(usize, usize)> {
+        let cache = self
+            .object_read_cache
+            .lock()
+            .map_err(|_| io::Error::other("pack object read cache mutex poisoned"))?;
+        Ok((cache.entries.len(), cache.bytes))
+    }
+
+    pub fn single_pack_object_ordinals(&self) -> io::Result<Option<PackedObjectOrdinalLookup>> {
+        let indexes = self.stable_pack_indexes()?;
+        let [packed] = indexes.as_slice() else {
+            return Ok(None);
+        };
+        Ok(Some(PackedObjectOrdinalLookup {
+            index: packed.index.clone(),
+        }))
+    }
+
+    pub(crate) fn fork_for_parallel_reads(&self) -> Self {
+        Self {
+            objects_dir: self.objects_dir.clone(),
+            algorithm: self.algorithm,
+            max_object_bytes: self.max_object_bytes,
+            stable_pack_snapshot: self.stable_pack_snapshot,
+            retain_requested_objects: self.retain_requested_objects,
+            verify_requested_objects: self.verify_requested_objects,
+            buffered_pack_reads: self.buffered_pack_reads,
+            pack_file_reader_buffer_capacity: self.pack_file_reader_buffer_capacity,
+            stable_pack_indexes: self.stable_pack_indexes.clone(),
+            stable_pack_objects: self.stable_pack_objects.clone(),
+            stable_pack_files: self.stable_pack_files.clone(),
+            stable_pack_readers: Arc::new(Mutex::new(Vec::new())),
+            idx_paths_cache: self.idx_paths_cache.clone(),
+            last_index_lookup: Arc::new(Mutex::new(None)),
+            last_pack_file: self.last_pack_file.clone(),
+            object_read_cache_byte_limit: self.object_read_cache_byte_limit,
+            object_read_cache: Arc::new(Mutex::new(PackObjectReadCache::with_byte_limit(
+                self.object_read_cache_byte_limit,
+            ))),
+        }
+    }
+
+    pub(crate) fn retain_missing_objects(&self, missing: &mut HashSet<ObjectId>) -> io::Result<()> {
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let idx_paths = self.idx_paths()?;
+        for idx_path in idx_paths.iter() {
+            let index = match read_cached_pack_index(idx_path, self.algorithm) {
+                Ok(index) => index,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            let _all = index.object_ids_all(&mut |id| {
+                missing.remove(id);
+                Ok(!missing.is_empty())
+            })?;
+            if missing.is_empty() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     pub fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
+        self.read_object_with_retention(id, self.retain_requested_objects)
+    }
+
+    pub fn read_object_transient(&self, id: &ObjectId) -> io::Result<LooseObject> {
+        self.read_object_with_retention(id, false)
+    }
+
+    fn read_object_with_retention(
+        &self,
+        id: &ObjectId,
+        retain_result: bool,
+    ) -> io::Result<LooseObject> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -3510,10 +3969,12 @@ impl PackedObjectStore {
 
         if let Some(lookup) = self.lookup_pack_index_for(id)? {
             return self.read_pack_object(
-                lookup.pack_path.as_ref(),
+                &lookup.pack_path,
                 &lookup.index,
                 lookup.offset,
                 id,
+                retain_result,
+                self.verify_requested_objects,
             );
         }
 
@@ -3535,6 +3996,122 @@ impl PackedObjectStore {
             return Ok(None);
         };
         self.read_pack_blob_prefix(lookup.pack_path.as_ref(), lookup.offset, max_bytes)
+    }
+
+    pub fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        if id.algorithm() != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match packed store",
+            ));
+        }
+
+        let Some(lookup) = self.lookup_pack_index_for(id)? else {
+            return Ok(None);
+        };
+
+        if let Some((kind, content)) = self.cached_pack_object(&lookup.pack_path, lookup.offset)? {
+            let prefix_len = content.len().min(max_bytes);
+            return Ok(Some(LooseObject {
+                id: id.clone(),
+                kind,
+                content: content[..prefix_len].to_vec(),
+            }));
+        }
+
+        self.with_validated_pack_file(lookup.pack_path.as_ref(), |file, _| {
+            file.seek(SeekFrom::Start(lookup.offset))?;
+            match read_pack_object_header(file)? {
+                PackObjectHeader::Base { kind, size } => {
+                    let content =
+                        read_zlib_content_prefix(file, self.max_object_bytes, size, max_bytes)?;
+                    Ok(Some(LooseObject {
+                        id: id.clone(),
+                        kind,
+                        content,
+                    }))
+                }
+                PackObjectHeader::OfsDelta { .. } | PackObjectHeader::RefDelta { .. } => Ok(None),
+            }
+        })
+    }
+
+    pub fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        if id.algorithm() != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match packed store",
+            ));
+        }
+
+        let Some(lookup) = self.lookup_pack_index_for(id)? else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "packed git object not found",
+            ));
+        };
+
+        if let Some((kind, content)) = self.cached_pack_object(&lookup.pack_path, lookup.offset)? {
+            let is_complete = content.len() <= max_bytes;
+            let content = if is_complete {
+                content
+            } else {
+                content[..max_bytes].to_vec()
+            };
+            return Ok(PrefixOrFullObject {
+                object: LooseObject {
+                    id: id.clone(),
+                    kind,
+                    content,
+                },
+                is_complete,
+            });
+        }
+
+        self.with_validated_pack_file(lookup.pack_path.as_ref(), |file, _| {
+            file.seek(SeekFrom::Start(lookup.offset))?;
+            match read_pack_object_header(file)? {
+                PackObjectHeader::Base { kind, size } => {
+                    let content =
+                        read_zlib_content_prefix(file, self.max_object_bytes, size, max_bytes)?;
+                    let is_complete = size <= max_bytes as u64;
+                    Ok(PrefixOrFullObject {
+                        object: LooseObject {
+                            id: id.clone(),
+                            kind,
+                            content,
+                        },
+                        is_complete,
+                    })
+                }
+                PackObjectHeader::OfsDelta { .. } | PackObjectHeader::RefDelta { .. } => {
+                    let (kind, content) = self.read_pack_object_at(
+                        &lookup.pack_path,
+                        file,
+                        &lookup.index,
+                        lookup.offset,
+                        0,
+                        true,
+                    )?;
+                    Ok(PrefixOrFullObject {
+                        object: LooseObject {
+                            id: id.clone(),
+                            kind,
+                            content,
+                        },
+                        is_complete: true,
+                    })
+                }
+            }
+        })
     }
 
     pub fn resolve_prefix(&self, hex_prefix: &str) -> io::Result<ObjectId> {
@@ -3571,7 +4148,19 @@ impl PackedObjectStore {
 
     pub fn object_id_capacity_hint(&self) -> io::Result<usize> {
         let idx_paths = self.idx_paths()?;
-        count_packed_object_ids(self.algorithm, &idx_paths)
+        approximate_packed_object_id_count(self.algorithm, &idx_paths)
+    }
+
+    pub(crate) fn update_unique_abbrev_len_for_ids(
+        &self,
+        sorted_targets: &[ObjectId],
+        required: &mut usize,
+    ) -> io::Result<()> {
+        for idx_path in self.idx_paths()?.iter() {
+            read_cached_pack_index(idx_path, self.algorithm)?
+                .update_unique_abbrev_len_for_ids(sorted_targets, required);
+        }
+        Ok(())
     }
 
     pub(crate) fn has_object_ids(&self) -> io::Result<bool> {
@@ -3598,6 +4187,34 @@ impl PackedObjectStore {
     }
 
     fn lookup_pack_index_for(&self, id: &ObjectId) -> io::Result<Option<PackIndexLookup>> {
+        if self.stable_pack_snapshot {
+            let indexes = self.stable_pack_indexes()?;
+            if let [packed] = indexes.as_slice() {
+                let Some(offset) = packed.index.offset_for(id)? else {
+                    return Ok(None);
+                };
+                return Ok(Some(PackIndexLookup {
+                    pack_path: packed.pack_path.clone(),
+                    index: packed.index.clone(),
+                    offset,
+                }));
+            }
+            let objects = self.stable_pack_objects()?;
+            let Ok(position) =
+                objects.binary_search_by(|candidate| candidate.id.as_bytes().cmp(id.as_bytes()))
+            else {
+                return Ok(None);
+            };
+            let object = &objects[position];
+            let packed = indexes
+                .get(object.pack_index as usize)
+                .ok_or_else(|| io::Error::other("stable pack index lookup is out of bounds"))?;
+            return Ok(Some(PackIndexLookup {
+                pack_path: packed.pack_path.clone(),
+                index: packed.index.clone(),
+                offset: object.offset,
+            }));
+        }
         let mut checked_last_idx_path = None;
         {
             let mut last_lookup = self
@@ -3664,7 +4281,68 @@ impl PackedObjectStore {
         Ok(None)
     }
 
+    fn stable_pack_indexes(&self) -> io::Result<Arc<Vec<StablePackIndex>>> {
+        if let Some(indexes) = self.stable_pack_indexes.get() {
+            return Ok(indexes.clone());
+        }
+        let idx_paths = self.idx_paths()?;
+        let mut indexes = Vec::with_capacity(pack_index_list_initial_capacity(idx_paths.len()));
+        for idx_path in idx_paths.iter() {
+            let index = match read_cached_pack_index(idx_path, self.algorithm) {
+                Ok(index) => index,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            indexes.push(StablePackIndex {
+                idx_path: idx_path.clone(),
+                pack_path: Arc::new(idx_path.with_extension("pack")),
+                index,
+            });
+        }
+        let indexes = Arc::new(indexes);
+        let _ = self.stable_pack_indexes.set(indexes.clone());
+        Ok(self.stable_pack_indexes.get().cloned().unwrap_or(indexes))
+    }
+
+    fn stable_pack_objects(&self) -> io::Result<Arc<Vec<StablePackObjectLookup>>> {
+        if let Some(objects) = self.stable_pack_objects.get() {
+            return Ok(objects.clone());
+        }
+        let indexes = self.stable_pack_indexes()?;
+        let capacity = indexes.iter().fold(0_usize, |total, packed| {
+            total.saturating_add(packed.index.count)
+        });
+        let mut objects = Vec::with_capacity(capacity);
+        for (pack_index, packed) in indexes.iter().enumerate() {
+            let pack_index = u32::try_from(pack_index).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "too many stable pack indexes")
+            })?;
+            packed.index.for_each_entry(&mut |entry| {
+                objects.push(StablePackObjectLookup {
+                    id: entry.object_id,
+                    pack_index,
+                    offset: entry.offset,
+                });
+                Ok(())
+            })?;
+        }
+        objects.sort_unstable_by(|left, right| left.id.as_bytes().cmp(right.id.as_bytes()));
+        objects.dedup_by(|left, right| left.id == right.id);
+        let objects = Arc::new(objects);
+        let _ = self.stable_pack_objects.set(objects.clone());
+        Ok(self.stable_pack_objects.get().cloned().unwrap_or(objects))
+    }
+
     fn idx_paths(&self) -> io::Result<Arc<Vec<PathBuf>>> {
+        if self.stable_pack_snapshot {
+            let cache = self
+                .idx_paths_cache
+                .lock()
+                .map_err(|_| io::Error::other("pack index path cache mutex poisoned"))?;
+            if let Some(entry) = cache.as_ref() {
+                return Ok(entry.paths.clone());
+            }
+        }
         let pack_dir = self.objects_dir.join("pack");
         let metadata = match fs::metadata(&pack_dir) {
             Ok(metadata) => metadata,
@@ -3712,14 +4390,15 @@ impl PackedObjectStore {
 
     fn read_pack_object(
         &self,
-        pack_path: &Path,
+        pack_path: &Arc<PathBuf>,
         index: &PackIndex,
         offset: u64,
         id: &ObjectId,
+        retain_result: bool,
+        verify_id: bool,
     ) -> io::Result<LooseObject> {
         if let Some((kind, content)) = self.cached_pack_object(pack_path, offset)? {
-            let actual = hash_object(self.algorithm, kind, &content);
-            if &actual != id {
+            if verify_id && hash_object(self.algorithm, kind, &content) != *id {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "packed git object hash mismatch",
@@ -3732,12 +4411,10 @@ impl PackedObjectStore {
             });
         }
 
-        let (kind, content) = self.with_validated_pack_file(pack_path, |file, _| {
-            self.read_pack_object_at(pack_path, file, index, offset, 0)
+        let (kind, content) = self.with_validated_pack_file(pack_path.as_ref(), |file, _| {
+            self.read_pack_object_at(pack_path, file, index, offset, 0, retain_result)
         })?;
-        self.cache_pack_object(pack_path, offset, kind, &content)?;
-        let actual = hash_object(self.algorithm, kind, &content);
-        if &actual != id {
+        if verify_id && hash_object(self.algorithm, kind, &content) != *id {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "packed git object hash mismatch",
@@ -3774,11 +4451,11 @@ impl PackedObjectStore {
 
     fn cached_pack_object(
         &self,
-        pack_path: &Path,
+        pack_path: &Arc<PathBuf>,
         offset: u64,
     ) -> io::Result<Option<(GitObjectKind, Vec<u8>)>> {
         let key = PackObjectReadCacheKey {
-            pack_path: pack_path.to_path_buf(),
+            pack_path: Arc::clone(pack_path),
             offset,
         };
         let cache = self
@@ -3793,7 +4470,7 @@ impl PackedObjectStore {
 
     fn cache_pack_object(
         &self,
-        pack_path: &Path,
+        pack_path: &Arc<PathBuf>,
         offset: u64,
         kind: GitObjectKind,
         content: &[u8],
@@ -3804,7 +4481,7 @@ impl PackedObjectStore {
             .map_err(|_| io::Error::other("pack object read cache mutex poisoned"))?;
         cache.insert(
             PackObjectReadCacheKey {
-                pack_path: pack_path.to_path_buf(),
+                pack_path: Arc::clone(pack_path),
                 offset,
             },
             kind,
@@ -3815,11 +4492,12 @@ impl PackedObjectStore {
 
     fn read_pack_object_at(
         &self,
-        pack_path: &Path,
-        file: &mut fs::File,
+        pack_path: &Arc<PathBuf>,
+        file: &mut PackReader,
         index: &PackIndex,
         offset: u64,
         depth: usize,
+        retain_result: bool,
     ) -> io::Result<(GitObjectKind, Vec<u8>)> {
         if depth > MAX_DELTA_DEPTH {
             return Err(io::Error::new(
@@ -3841,7 +4519,7 @@ impl PackedObjectStore {
                 let base_offset = read_delta_base_offset(file, offset)?;
                 let delta_start = file.stream_position()?;
                 let (kind, base) =
-                    self.read_pack_object_at(pack_path, file, index, base_offset, depth + 1)?;
+                    self.read_pack_object_at(pack_path, file, index, base_offset, depth + 1, true)?;
                 file.seek(SeekFrom::Start(delta_start))?;
                 let content =
                     apply_zlib_delta_from_reader(&mut *file, &base, size, self.max_object_bytes)?;
@@ -3860,7 +4538,7 @@ impl PackedObjectStore {
                 })?;
                 let delta_start = file.stream_position()?;
                 let (kind, base) =
-                    self.read_pack_object_at(pack_path, file, index, base_offset, depth + 1)?;
+                    self.read_pack_object_at(pack_path, file, index, base_offset, depth + 1, true)?;
                 file.seek(SeekFrom::Start(delta_start))?;
                 let content =
                     apply_zlib_delta_from_reader(&mut *file, &base, size, self.max_object_bytes)?;
@@ -3868,7 +4546,9 @@ impl PackedObjectStore {
             }
         };
         let decoded = decoded?;
-        self.cache_pack_object(pack_path, offset, decoded.0, &decoded.1)?;
+        if retain_result {
+            self.cache_pack_object(pack_path, offset, decoded.0, &decoded.1)?;
+        }
         Ok(decoded)
     }
 
@@ -3940,38 +4620,98 @@ impl PackedObjectStore {
     fn with_validated_pack_file<T>(
         &self,
         pack_path: &Path,
-        read: impl FnOnce(&mut fs::File, u64) -> io::Result<T>,
+        read: impl FnOnce(&mut PackReader, u64) -> io::Result<T>,
     ) -> io::Result<T> {
+        if self.buffered_pack_reads {
+            let mut cache = self
+                .stable_pack_readers
+                .lock()
+                .map_err(|_| io::Error::other("pack reader cache mutex poisoned"))?;
+            let mut cached = if let Some(position) = cache
+                .iter()
+                .position(|cached| cached.pack_path == pack_path)
+            {
+                cache.remove(position)
+            } else {
+                open_validated_pack_reader(pack_path, self.pack_file_reader_buffer_capacity)?
+            };
+            let mut reader = PackReader::Buffered(cached.reader);
+            let result = read(&mut reader, cached.len);
+            let PackReader::Buffered(reader) = reader else {
+                unreachable!("buffered pack reader changed variants")
+            };
+            cached.reader = reader;
+            if cache.len() >= STABLE_PACK_FILE_CACHE_LIMIT {
+                cache.remove(0);
+            }
+            cache.push(cached);
+            return result;
+        }
+        if self.stable_pack_snapshot {
+            let (bytes, len) = {
+                let mut cache = self
+                    .stable_pack_files
+                    .lock()
+                    .map_err(|_| io::Error::other("pack file cache mutex poisoned"))?;
+                if let Some(position) = cache
+                    .iter()
+                    .position(|cached| cached.pack_path == pack_path)
+                {
+                    let cached = cache.remove(position);
+                    let bytes = cached.bytes.clone();
+                    let len = cached.len;
+                    cache.push(cached);
+                    (bytes, len)
+                } else {
+                    let (bytes, len) = map_validated_pack_file(pack_path)?;
+                    if cache.len() >= STABLE_PACK_FILE_CACHE_LIMIT {
+                        cache.remove(0);
+                    }
+                    cache.push(CachedStablePackFile {
+                        pack_path: pack_path.to_path_buf(),
+                        len,
+                        bytes: bytes.clone(),
+                    });
+                    (bytes, len)
+                }
+            };
+            return read(&mut PackReader::Mapped(Cursor::new(bytes)), len);
+        }
         let metadata = fs::metadata(pack_path)?;
         let modified = metadata.modified().ok();
         let len = metadata.len();
-        let mut cache = self
-            .last_pack_file
-            .lock()
-            .map_err(|_| io::Error::other("pack file cache mutex poisoned"))?;
-        if let Some(cached) = cache.as_mut().filter(|cached| {
-            cached.pack_path == pack_path && cached.modified == modified && cached.len == len
-        }) {
-            return read(&mut cached.file, cached.len);
-        }
-
-        let mut file = fs::File::open(pack_path)?;
-        validate_pack_header(&mut file)?;
-        *cache = Some(CachedLastPackFile {
-            pack_path: pack_path.to_path_buf(),
-            modified,
-            len,
-            file,
-        });
-        let cached = cache
-            .as_mut()
-            .expect("validated pack file was just inserted");
-        read(&mut cached.file, cached.len)
+        let bytes = {
+            let mut cache = self
+                .last_pack_file
+                .lock()
+                .map_err(|_| io::Error::other("pack file cache mutex poisoned"))?;
+            if let Some(cached) = cache.as_ref().filter(|cached| {
+                cached.pack_path == pack_path && cached.modified == modified && cached.len == len
+            }) {
+                cached.bytes.clone()
+            } else {
+                let (bytes, mapped_len) = map_validated_pack_file(pack_path)?;
+                if mapped_len != len {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "pack file changed while mapping",
+                    ));
+                }
+                *cache = Some(CachedLastPackFile {
+                    pack_path: pack_path.to_path_buf(),
+                    modified,
+                    len,
+                    bytes: bytes.clone(),
+                });
+                bytes
+            }
+        };
+        read(&mut PackReader::Mapped(Cursor::new(bytes)), len)
     }
 
     fn read_pack_object_hint_at(
         &self,
-        file: &mut fs::File,
+        file: &mut PackReader,
         index: &PackIndex,
         offset: u64,
         depth: usize,
@@ -4033,7 +4773,7 @@ impl PackedObjectStore {
 
     fn read_delta_object_hint(
         &self,
-        file: &mut fs::File,
+        file: &mut PackReader,
         index: &PackIndex,
         base_offset: u64,
         depth: usize,
@@ -4373,9 +5113,40 @@ fn count_packed_object_ids(
     count_unique_sorted_pack_index_ids(&indexes)
 }
 
+fn approximate_packed_object_id_count(
+    algorithm: GitHashAlgorithm,
+    idx_paths: &[PathBuf],
+) -> io::Result<usize> {
+    let mut count = 0_usize;
+    for path in idx_paths {
+        count = count
+            .checked_add(read_cached_pack_index(path, algorithm)?.count)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "pack object count overflow")
+            })?;
+    }
+    Ok(count)
+}
+
 impl GitObjectStore for PackedObjectStore {
     fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
         Self::read_object(self, id)
+    }
+
+    fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        PackedObjectStore::read_object_prefix(self, id, max_bytes)
+    }
+
+    fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        PackedObjectStore::read_object_prefix_or_full(self, id, max_bytes)
     }
 
     fn object_id_capacity_hint(&self) -> io::Result<usize> {
@@ -4743,7 +5514,7 @@ impl PartialOrd for PackIndexCursor<'_> {
 }
 
 fn verify_or_write_packed_base_object_content(
-    file: &mut fs::File,
+    file: &mut impl Read,
     max_compressed_len: u64,
     algorithm: GitHashAlgorithm,
     kind: GitObjectKind,
@@ -4839,7 +5610,7 @@ fn read_cached_pack_index(path: &Path, algorithm: GitHashAlgorithm) -> io::Resul
         }
     }
 
-    let index = Arc::new(PackIndex::read(path, algorithm)?);
+    let index = Arc::new(PackIndex::read_for_lookup(path, algorithm)?);
     let mut cache = cache
         .lock()
         .map_err(|_| io::Error::other("pack index cache mutex poisoned"))?;
@@ -4937,7 +5708,30 @@ struct PackIndexLayout {
 }
 
 impl PackIndex {
+    fn update_unique_abbrev_len_for_ids(&self, sorted_targets: &[ObjectId], required: &mut usize) {
+        let layout = self.scan_layout();
+        for index in 0..self.count {
+            update_unique_abbrev_len_for_candidate(
+                sorted_targets,
+                self.object_bytes_at_with_layout(index, layout.digest_len, layout.names_start),
+                required,
+            );
+        }
+    }
+
     fn read(path: &Path, algorithm: GitHashAlgorithm) -> io::Result<Self> {
+        Self::read_path(path, algorithm, true)
+    }
+
+    fn read_for_lookup(path: &Path, algorithm: GitHashAlgorithm) -> io::Result<Self> {
+        Self::read_path(path, algorithm, false)
+    }
+
+    fn read_path(
+        path: &Path,
+        algorithm: GitHashAlgorithm,
+        verify_checksum: bool,
+    ) -> io::Result<Self> {
         let file = fs::File::open(path)?;
         let len = file.metadata()?.len();
         let bytes = if len == 0 {
@@ -4945,15 +5739,20 @@ impl PackIndex {
         } else {
             PackIndexBytes::Mapped(unsafe { memmap2::Mmap::map(&file)? })
         };
-        Self::read_index_bytes(bytes, algorithm)
+        Self::read_index_bytes(bytes, algorithm, verify_checksum)
     }
 
     fn read_bytes(bytes: Vec<u8>, algorithm: GitHashAlgorithm) -> io::Result<Self> {
-        Self::read_index_bytes(PackIndexBytes::Owned(bytes), algorithm)
+        Self::read_index_bytes(PackIndexBytes::Owned(bytes), algorithm, true)
     }
 
-    fn read_index_bytes(bytes: PackIndexBytes, algorithm: GitHashAlgorithm) -> io::Result<Self> {
-        let (fanout, count, version, layout) = validate_pack_index_layout(algorithm, &bytes)?;
+    fn read_index_bytes(
+        bytes: PackIndexBytes,
+        algorithm: GitHashAlgorithm,
+        verify_checksum: bool,
+    ) -> io::Result<Self> {
+        let (fanout, count, version, layout) =
+            validate_pack_index_layout(algorithm, &bytes, verify_checksum)?;
         Ok(Self {
             bytes,
             fanout,
@@ -4968,6 +5767,7 @@ impl PackIndex {
 fn validate_pack_index_layout(
     algorithm: GitHashAlgorithm,
     bytes: &[u8],
+    verify_checksum: bool,
 ) -> io::Result<([u32; 256], usize, PackIndexVersion, PackIndexLayout)> {
     if bytes.len() < 8 + 256 * 4 {
         return Err(io::Error::new(
@@ -5009,13 +5809,24 @@ fn validate_pack_index_layout(
             "pack index is truncated",
         ));
     }
-    validate_pack_index_checksum(algorithm, bytes)?;
+    if verify_checksum {
+        validate_pack_index_checksum(algorithm, bytes)?;
+    }
 
     Ok((fanout, count, version, layout))
 }
 
 impl PackIndex {
     fn offset_for(&self, id: &ObjectId) -> io::Result<Option<u64>> {
+        self.position_for(id)
+            .map(|position| self.offset_at(position))
+            .transpose()
+    }
+
+    fn position_for(&self, id: &ObjectId) -> Option<usize> {
+        if id.algorithm() != self.algorithm {
+            return None;
+        }
         let first = id.as_bytes()[0] as usize;
         let start = if first == 0 {
             0
@@ -5037,12 +5848,10 @@ impl PackIndex {
                     {
                         std::cmp::Ordering::Less => lo = mid + 1,
                         std::cmp::Ordering::Greater => hi = mid,
-                        std::cmp::Ordering::Equal => {
-                            return Ok(Some(self.offset_at(mid)?));
-                        }
+                        std::cmp::Ordering::Equal => return Some(mid),
                     }
                 }
-                return Ok(None);
+                return None;
             }
             PackIndexVersion::V2 => {
                 let digest_len = self.algorithm.digest_len();
@@ -5050,12 +5859,11 @@ impl PackIndex {
                 let names = &self.bytes[names_start..names_start + self.count * digest_len];
                 match binary_search_object_name(names, digest_len, start, end, needle) {
                     Some(idx) => idx,
-                    None => return Ok(None),
+                    None => return None,
                 }
             }
         };
-
-        Ok(Some(self.offset_at(idx)?))
+        Some(idx)
     }
 
     fn collect_prefix(&self, hex_prefix: &str, resolved: &mut Option<ObjectId>) -> io::Result<()> {
@@ -5445,7 +6253,32 @@ fn binary_search_object_name(
     None
 }
 
-fn validate_pack_header(file: &mut fs::File) -> io::Result<()> {
+fn map_validated_pack_file(path: &Path) -> io::Result<(MappedPack, u64)> {
+    let file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    // Pack files are immutable and replaced atomically by Git. The mapping is
+    // read-only and every parser below performs checked reads through Cursor.
+    let bytes = MappedPack(Arc::new(unsafe { memmap2::Mmap::map(&file)? }));
+    validate_pack_header(&mut Cursor::new(bytes.clone()))?;
+    Ok((bytes, len))
+}
+
+fn open_validated_pack_reader(
+    path: &Path,
+    buffer_capacity: usize,
+) -> io::Result<CachedStablePackReader> {
+    let file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let mut reader = BufReader::with_capacity(buffer_capacity, file);
+    validate_pack_header(&mut reader)?;
+    Ok(CachedStablePackReader {
+        pack_path: path.to_path_buf(),
+        len,
+        reader,
+    })
+}
+
+fn validate_pack_header(file: &mut (impl Read + Seek)) -> io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     let mut header = [0_u8; 12];
     file.read_exact(&mut header)?;
@@ -6511,12 +7344,63 @@ fn read_u64(bytes: &[u8], offset: usize) -> io::Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
     use crate::{InMemoryObjectStore, LooseObjectStore};
+
+    #[test]
+    fn writes_undeltified_blob_pack_directly_from_streams() {
+        let first = b"first streamed blob\n";
+        let second = vec![b'x'; 128 * 1024];
+        let contents = [first.as_slice(), second.as_slice()];
+        let sources = contents
+            .iter()
+            .map(|content| PackBlobSource {
+                id: hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, content),
+                size: content.len() as u64,
+            })
+            .collect::<Vec<_>>();
+        let mut pack = Vec::new();
+
+        let indexed = write_undeltified_blob_pack_with_options(
+            GitHashAlgorithm::Sha1,
+            &sources,
+            6,
+            |source, out| {
+                let index = sources
+                    .iter()
+                    .position(|candidate| candidate.id == source.id)
+                    .expect("source position");
+                out.write_all(contents[index])
+            },
+            &mut pack,
+        )
+        .expect("write streamed blob pack");
+
+        let decoded = decode_pack_objects(GitHashAlgorithm::Sha1, &pack).expect("decode pack");
+        let actual_index_ids = decode_pack_index_object_ids(GitHashAlgorithm::Sha1, indexed.index)
+            .expect("decode generated index");
+        let mut expected_index_ids = sources
+            .iter()
+            .map(|source| source.id.clone())
+            .collect::<Vec<_>>();
+        expected_index_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        assert_eq!(actual_index_ids, expected_index_ids);
+        assert_eq!(
+            decoded
+                .iter()
+                .map(|object| object.id.clone())
+                .collect::<Vec<_>>(),
+            sources
+                .iter()
+                .map(|source| source.id.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(decoded[0].content, first);
+        assert_eq!(decoded[1].content, second);
+    }
 
     #[test]
     fn reads_non_delta_commit_from_stock_pack() {
@@ -8288,6 +9172,135 @@ mod tests {
     }
 
     #[test]
+    fn buffered_pack_reads_reuse_bounded_file_and_object_caches() {
+        const OBJECT_CACHE_BYTE_LIMIT: usize = 1024;
+
+        let repo = git_init();
+        std::fs::write(repo.path().join("packed.txt"), b"packed\n").expect("write packed file");
+        git_env(&repo, ["add", "packed.txt"]);
+        git_env(&repo, ["commit", "-m", "packed"]);
+        let id = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            &git(&repo, ["rev-parse", "HEAD:packed.txt"]),
+        )
+        .expect("blob id");
+        git_env(&repo, ["repack", "-adq"]);
+        let store =
+            PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1)
+                .with_stable_pack_snapshot()
+                .with_trusted_object_reads()
+                .with_buffered_pack_reads()
+                .with_object_read_cache_byte_limit(OBJECT_CACHE_BYTE_LIMIT);
+
+        let first = store.read_object(&id).expect("first buffered read");
+        let second = store.read_object(&id).expect("second buffered read");
+
+        assert_eq!(first.content, b"packed\n");
+        assert_eq!(second.content, b"packed\n");
+        assert_eq!(
+            store
+                .stable_pack_readers
+                .lock()
+                .expect("stable pack readers")
+                .len(),
+            1
+        );
+        assert!(
+            store
+                .stable_pack_files
+                .lock()
+                .expect("stable mapped pack files")
+                .is_empty()
+        );
+        assert!(store.stable_pack_objects.get().is_none());
+        let (_, cache_bytes) = store.object_read_cache_usage().expect("cache usage");
+        assert!(cache_bytes <= OBJECT_CACHE_BYTE_LIMIT);
+    }
+
+    #[test]
+    fn parallel_read_forks_share_immutable_indexes_but_isolate_mutable_read_caches() {
+        const OBJECT_CACHE_BYTE_LIMIT: usize = 4096;
+        const READER_BUFFER_CAPACITY: usize = 2048;
+
+        let store = PackedObjectStore::new("unused-objects", GitHashAlgorithm::Sha1)
+            .with_buffered_pack_reads()
+            .with_pack_file_reader_buffer_capacity(READER_BUFFER_CAPACITY)
+            .with_object_read_cache_byte_limit(OBJECT_CACHE_BYTE_LIMIT);
+        let fork = store.fork_for_parallel_reads();
+
+        assert!(Arc::ptr_eq(
+            &store.stable_pack_indexes,
+            &fork.stable_pack_indexes
+        ));
+        assert!(!Arc::ptr_eq(
+            &store.stable_pack_readers,
+            &fork.stable_pack_readers
+        ));
+        assert!(!Arc::ptr_eq(
+            &store.object_read_cache,
+            &fork.object_read_cache
+        ));
+        assert_eq!(
+            fork.object_read_cache
+                .lock()
+                .expect("fork object cache")
+                .byte_limit,
+            OBJECT_CACHE_BYTE_LIMIT
+        );
+        assert_eq!(
+            fork.pack_file_reader_buffer_capacity,
+            READER_BUFFER_CAPACITY
+        );
+    }
+
+    #[test]
+    fn transient_packed_read_does_not_retain_requested_object() {
+        let repo = git_init();
+        std::fs::write(repo.path().join("packed.txt"), b"packed\n").expect("write packed file");
+        git_env(&repo, ["add", "packed.txt"]);
+        git_env(&repo, ["commit", "-m", "packed"]);
+        let id = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            &git(&repo, ["rev-parse", "HEAD:packed.txt"]),
+        )
+        .expect("blob id");
+        git_env(&repo, ["repack", "-adq"]);
+        let store =
+            PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let lookup = store
+            .lookup_pack_index_for(&id)
+            .expect("lookup packed object")
+            .expect("packed object exists");
+        let key = PackObjectReadCacheKey {
+            pack_path: Arc::clone(&lookup.pack_path),
+            offset: lookup.offset,
+        };
+
+        let object = store.read_object_transient(&id).expect("transient read");
+
+        assert_eq!(object.content, b"packed\n");
+        let cache = store.object_read_cache.lock().expect("object read cache");
+        assert!(!cache.entries.contains_key(&key));
+    }
+
+    #[test]
+    fn zero_object_cache_limit_does_not_allocate_entries() {
+        let mut cache = PackObjectReadCache::with_byte_limit(0);
+        cache.insert(
+            PackObjectReadCacheKey {
+                pack_path: Arc::new(PathBuf::from("objects.pack")),
+                offset: 12,
+            },
+            GitObjectKind::Commit,
+            b"commit",
+        );
+
+        assert!(cache.entries.is_empty());
+        assert!(cache.order.is_empty());
+        assert_eq!(cache.bytes, 0);
+    }
+
+    #[test]
     fn rejects_pack_index_checksum_mismatch() {
         let repo = git_init();
         git_env(&repo, ["commit", "--allow-empty", "-m", "initial"]);
@@ -8502,7 +9515,7 @@ mod tests {
     }
 
     #[test]
-    fn packed_store_object_count_counts_unique_pack_index_objects() {
+    fn packed_store_object_count_is_exact_and_capacity_hint_is_approximate() {
         let repo = git_init();
         git_env(&repo, ["config", "user.name", "Zmin Test"]);
         git_env(&repo, ["config", "user.email", "zmin@example.invalid"]);
@@ -8536,7 +9549,7 @@ mod tests {
             store
                 .object_id_capacity_hint()
                 .expect("duplicate object id capacity hint"),
-            expected
+            expected * 2
         );
         assert_eq!(
             store.object_ids().expect("duplicate object ids").len(),
@@ -9301,33 +10314,19 @@ mod tests {
     }
 
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        git_env(&repo, ["init", "--quiet"]);
-        repo
+        stock_git_support::git_init()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        String::from_utf8(git_raw(repo, args))
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 
     fn git_raw<const N: usize>(repo: &TempDir, args: [&str; N]) -> Vec<u8> {
-        let output = git_output(repo, args);
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
+        stock_git_support::git_raw(repo, &args)
     }
 
     fn git_with_stdin<const N: usize>(repo: &TempDir, args: [&str; N], stdin: &[u8]) -> String {
-        String::from_utf8(git_raw_with_stdin(repo, args, stdin))
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git_with_stdin(repo, &args, stdin)
     }
 
     fn git_raw_with_stdin<const N: usize>(
@@ -9335,54 +10334,11 @@ mod tests {
         args: [&str; N],
         stdin: &[u8],
     ) -> Vec<u8> {
-        use std::io::Write as _;
-        use std::process::Stdio;
-
-        let mut child = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn git");
-        child
-            .stdin
-            .as_mut()
-            .expect("git stdin")
-            .write_all(stdin)
-            .expect("write git stdin");
-        let output = child.wait_with_output().expect("wait git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
+        stock_git_support::git_raw_with_stdin(repo, &args, stdin)
     }
 
     fn git_env<const N: usize>(repo: &TempDir, args: [&str; N]) {
-        let output = git_output(repo, args);
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn git_output<const N: usize>(repo: &TempDir, args: [&str; N]) -> std::process::Output {
-        Command::new("git")
-            .args(["-c", "commit.gpgsign=false"])
-            .args(args)
-            .current_dir(repo.path())
-            .env("GIT_AUTHOR_NAME", "Zmin Test")
-            .env("GIT_AUTHOR_EMAIL", "zmin@example.invalid")
-            .env("GIT_AUTHOR_DATE", "1700000000 +0000")
-            .env("GIT_COMMITTER_NAME", "Zmin Test")
-            .env("GIT_COMMITTER_EMAIL", "zmin@example.invalid")
-            .env("GIT_COMMITTER_DATE", "1700000000 +0000")
-            .output()
-            .expect("run git")
+        stock_git_support::git_env(repo, &args);
     }
 
     fn append_zlib(out: &mut Vec<u8>, content: &[u8]) {
@@ -9477,12 +10433,8 @@ mod tests {
     }
 
     fn first_delta_blob(repo: &TempDir, idx_path: &Path) -> String {
-        let output = Command::new("git")
-            .args(["verify-pack", "-v"])
-            .arg(idx_path)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git verify-pack");
+        let idx_arg = idx_path.to_str().expect("idx path utf8");
+        let output = stock_git_support::git_output(repo, &["verify-pack", "-v", idx_arg]);
         assert!(
             output.status.success(),
             "git verify-pack failed: {}",

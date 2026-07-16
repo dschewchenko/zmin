@@ -19,6 +19,7 @@ enum CombinedDiffMode {
 }
 
 pub(crate) fn diff(options: DiffOptions) -> Result<()> {
+    let _trace = phase_trace("diff.total");
     if options.combined_all_paths {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
@@ -130,16 +131,32 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         options.dd,
         options.ws_error_highlight.as_deref(),
     );
-    let repo = find_repo()?;
-    let relative_prefix =
-        diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?;
-    let (old_prefix, new_prefix) = porcelain_diff_prefixes(
-        &repo,
-        options.no_prefix,
-        options.default_prefix,
-        options.src_prefix,
-        options.dst_prefix,
-    )?;
+    let repo = {
+        let _trace = phase_trace("diff.find_repo");
+        match find_repo() {
+            Ok(repo) => repo,
+            Err(_error) if diff_outside_repo_can_use_no_index(&options) => {
+                let mut fallback = options.clone();
+                fallback.no_index = true;
+                return diff_no_index(&fallback);
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let relative_prefix = {
+        let _trace = phase_trace("diff.relative_prefix");
+        diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?
+    };
+    let (old_prefix, new_prefix) = {
+        let _trace = phase_trace("diff.prefixes");
+        porcelain_diff_prefixes(
+            &repo,
+            options.no_prefix,
+            options.default_prefix,
+            options.src_prefix,
+            options.dst_prefix,
+        )?
+    };
     let render_options = DiffRenderOptions {
         stat: options.stat,
         patch_with_raw: options.patch_with_raw,
@@ -180,18 +197,27 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         new_source: DiffSideSource::Index,
         line_prefix: options.line_prefix.clone(),
     };
-    render_options.validate_format(false)?;
+    {
+        let _trace = phase_trace("diff.validate_format");
+        render_options.validate_format(false)?;
+    }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let unmerged_selection = selected_unmerged_stage(options.base, options.ours, options.theirs);
     if let Some(stage) = unmerged_selection {
         if options.cached {
             return Err(diff_usage_error());
         }
-        let (revs, _) = split_diff_revs_and_paths(&repo, &store, options.paths.clone())?;
+        let (revs, _) = {
+            let _trace = phase_trace("diff.unmerged_stage.split_revs");
+            split_diff_revs_and_paths(&repo, &store, options.paths.clone())?
+        };
         if !revs.is_empty() {
             return Err(diff_usage_error());
         }
-        let index = read_repo_index(&repo)?;
+        let index = {
+            let _trace = phase_trace("diff.unmerged_stage.read_index");
+            read_repo_index(&repo)?
+        };
         if has_unmerged_entries(&index) {
             return render_diff_unmerged_stage(
                 &repo,
@@ -204,8 +230,10 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         }
     }
     if !options.cached
-        && let Some(combined_input) =
+        && let Some(combined_input) = {
+            let _trace = phase_trace("diff.parse_porcelain_combined");
             parse_porcelain_combined_diff_input(&repo, &store, &options.paths)
+        }
     {
         return render_porcelain_combined_diff(
             &repo,
@@ -218,14 +246,38 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
             options.line_prefix.as_deref(),
         );
     }
-    let index = read_repo_index(&repo)?;
-    let diff_input = parse_diff_input(&repo, &store, &index, options.cached, options.paths)?;
-    let (old_source, new_source) = diff_side_sources(diff_input.new_side_from_index);
-    let pathspecs = diff_input
-        .paths
-        .iter()
-        .map(|path| path_arg_to_repo_relative(&repo, path))
-        .collect::<Result<Vec<_>>>()?;
+    let explicit_tree_pair_input = if !options.cached {
+        let _trace = phase_trace("diff.explicit_tree_pair_fast_path");
+        try_explicit_tree_pair_diff_input(&repo, &store, &options.paths)?
+    } else {
+        None
+    };
+    let index = if explicit_tree_pair_input.is_some() {
+        GitIndex::new()
+    } else {
+        let _trace = phase_trace("diff.read_index");
+        read_repo_index(&repo)?
+    };
+    let diff_input = {
+        let _trace = phase_trace("diff.parse_input");
+        if let Some(input) = explicit_tree_pair_input {
+            input
+        } else {
+            parse_diff_input(&repo, &store, &index, options.cached, options.paths)?
+        }
+    };
+    let (old_source, new_source) = {
+        let _trace = phase_trace("diff.side_sources");
+        diff_side_sources(diff_input.new_side_from_index)
+    };
+    let pathspecs = {
+        let _trace = phase_trace("diff.pathspecs");
+        diff_input
+            .paths
+            .iter()
+            .map(|path| path_arg_to_repo_relative(&repo, path))
+            .collect::<Result<Vec<_>>>()?
+    };
     let precomputed_entries = diff_input.precomputed_entries;
     let (mut old_index, mut new_index, old_source, new_source, mut render_options) =
         if options.reverse {
@@ -252,8 +304,12 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
                 render_options,
             )
         };
-    let unmerged_entries = unmerged_diff_entries([&old_index, &new_index]);
+    let unmerged_entries = {
+        let _trace = phase_trace("diff.unmerged_entries");
+        unmerged_diff_entries([&old_index, &new_index])
+    };
     if !unmerged_entries.is_empty() {
+        let _trace = phase_trace("diff.stage_zero_indexes");
         old_index = stage_zero_index(&old_index)?;
         new_index = stage_zero_index(&new_index)?;
     }
@@ -263,6 +319,7 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         }
         entries
     } else {
+        let _trace = phase_trace("diff.entries_for_indexes");
         diff_entries_for_indexes(
             &old_index,
             &new_index,
@@ -271,7 +328,16 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
             find_copies_harder,
         )?
     };
-    entries.extend(unmerged_entries);
+    if !unmerged_entries.is_empty() {
+        let unmerged_paths = unmerged_entries
+            .iter()
+            .map(|entry| entry.path.as_slice())
+            .collect::<HashSet<_>>();
+        entries.retain(|entry| !unmerged_paths.contains(entry.path.as_slice()));
+    }
+    if !diff_filter.excludes_unmerged() {
+        entries.extend(unmerged_entries);
+    }
     let diff_context = DiffIndexContext {
         repo: &repo,
         store: &store,
@@ -280,40 +346,66 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         old_source,
         new_source,
     };
-    let entries = apply_similarity_detection(
-        &diff_context,
-        entries,
-        SimilarityDetectionOptions {
-            rename_threshold: detect_renames,
-            copy_threshold: detect_copies,
-            find_copies_harder,
-        },
-    )?;
-    let entries =
-        filter_ignored_submodule_entries(entries, &old_index, &new_index, ignore_submodules);
-    let entries = apply_break_rewrites(&diff_context, entries, break_rewrites)?;
-    let entries = entries
-        .into_iter()
-        .filter(|entry| diff_entry_matches_pathspec(entry, &pathspecs))
-        .collect::<Vec<_>>();
-    let entries = apply_pickaxe_filter(
-        &diff_context,
-        entries,
-        PickaxeOptions {
-            string: options.pickaxe_string.as_deref(),
-            regex: options.pickaxe_regex.as_deref(),
-            regex_mode: options.pickaxe_regex_mode,
-            all: options.pickaxe_all,
-        },
-    )?;
-    let entries = apply_diff_filter(entries, diff_filter);
-    let entries = apply_diff_order_file(entries, options.order_file.as_deref())?;
+    let entries = {
+        let _trace = phase_trace("diff.apply_similarity_detection");
+        apply_similarity_detection(
+            &diff_context,
+            entries,
+            SimilarityDetectionOptions {
+                rename_threshold: detect_renames,
+                copy_threshold: detect_copies,
+                find_copies_harder,
+            },
+        )?
+    };
+    let entries = {
+        let _trace = phase_trace("diff.filter_ignored_submodule_entries");
+        filter_ignored_submodule_entries(entries, &old_index, &new_index, ignore_submodules)
+    };
+    let entries = {
+        let _trace = phase_trace("diff.apply_break_rewrites");
+        apply_break_rewrites(&diff_context, entries, break_rewrites)?
+    };
+    let entries = {
+        let _trace = phase_trace("diff.filter_pathspec");
+        entries
+            .into_iter()
+            .filter(|entry| diff_entry_matches_pathspec(entry, &pathspecs))
+            .collect::<Vec<_>>()
+    };
+    let entries = {
+        let _trace = phase_trace("diff.apply_pickaxe_filter");
+        apply_pickaxe_filter(
+            &diff_context,
+            entries,
+            PickaxeOptions {
+                string: options.pickaxe_string.as_deref(),
+                regex: options.pickaxe_regex.as_deref(),
+                regex_mode: options.pickaxe_regex_mode,
+                all: options.pickaxe_all,
+            },
+        )?
+    };
+    let entries = {
+        let _trace = phase_trace("diff.apply_diff_filter");
+        apply_diff_filter(entries, diff_filter)
+    };
+    let entries = {
+        let _trace = phase_trace("diff.apply_diff_order_file");
+        apply_diff_order_file(entries, options.order_file.as_deref())?
+    };
     let entries = apply_diff_skip_rotate(
         entries,
         options.skip_to.as_deref(),
         options.rotate_to.as_deref(),
     );
-    let entries = filter_diff_relative(entries, render_options.relative_prefix.as_deref());
+    let entries = {
+        let _trace = phase_trace("diff.filter_relative");
+        filter_diff_relative(entries, render_options.relative_prefix.as_deref())
+    };
+    if entries.is_empty() && options.dirstat.is_none() && options.dirstat_by_file.is_none() {
+        return Ok(());
+    }
     if let Some(dirstat_mode) = normalize_dirstat_mode(
         options.dirstat.as_deref(),
         options.cumulative,
@@ -341,16 +433,109 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
             &repo, &store, &old_index, &new_index, &entries, old_source, new_source,
         );
     }
+    if maybe_run_external_diff_from_env(&repo, &entries, options.no_ext_diff)? {
+        return Ok(());
+    }
     render_options.old_source = old_source;
     render_options.new_source = new_source;
-    render_diff(
-        &repo,
-        &store,
-        &old_index,
-        &new_index,
-        &entries,
-        render_options,
-    )
+    {
+        let _trace = phase_trace("diff.render");
+        render_diff(
+            &repo,
+            &store,
+            &old_index,
+            &new_index,
+            &entries,
+            render_options,
+        )
+    }
+}
+
+fn diff_outside_repo_can_use_no_index(options: &DiffOptions) -> bool {
+    !options.cached && !options.base && !options.ours && !options.theirs && options.paths.len() == 2
+}
+
+fn maybe_run_external_diff_from_env(
+    repo: &GitRepo,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    disabled: bool,
+) -> Result<bool> {
+    if disabled || entries.is_empty() {
+        return Ok(false);
+    }
+    let Some(helper) = std::env::var_os("GIT_EXTERNAL_DIFF") else {
+        return Ok(false);
+    };
+    let prefix = diff_git_prefix(repo)?;
+    for _entry in entries {
+        let status = std::process::Command::new(git_shell_command_path())
+            .arg("-c")
+            .arg(helper.to_string_lossy().as_ref())
+            .current_dir(&repo.root)
+            .env("GIT_PREFIX", &prefix)
+            .status()
+            .map_err(CliError::Io)?;
+        if !status.success() {
+            return Err(CliError::Exit(status.code().unwrap_or(1)));
+        }
+    }
+    Ok(true)
+}
+
+fn diff_git_prefix(repo: &GitRepo) -> Result<String> {
+    let cwd = std::env::current_dir()?;
+    let relative = cwd.strip_prefix(&repo.root).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: "current directory is outside work tree".into(),
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!(
+        "{}/",
+        relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/")
+    ))
+}
+
+fn try_explicit_tree_pair_diff_input(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    args: &[PathBuf],
+) -> Result<Option<DiffInput>> {
+    if args.len() != 2 {
+        return Ok(None);
+    }
+    let old_arg = args[0].to_string_lossy();
+    let new_arg = args[1].to_string_lossy();
+    let old_tree = match resolve_treeish(repo, store, &old_arg) {
+        Ok(tree) => tree,
+        Err(_) => return Ok(None),
+    };
+    let new_tree = match resolve_treeish(repo, store, &new_arg) {
+        Ok(tree) => tree,
+        Err(_) => return Ok(None),
+    };
+    if old_tree == new_tree {
+        return Ok(Some(DiffInput {
+            old_index: GitIndex::new(),
+            new_index: GitIndex::new(),
+            precomputed_entries: Some(Vec::new()),
+            new_side_from_index: true,
+            paths: Vec::new(),
+        }));
+    }
+    let tree_cache = TreeObjectCache::new(store);
+    Ok(Some(DiffInput {
+        old_index: tree_cache.read_tree_to_index(&old_tree)?,
+        new_index: tree_cache.read_tree_to_index(&new_tree)?,
+        precomputed_entries: None,
+        new_side_from_index: true,
+        paths: Vec::new(),
+    }))
 }
 
 fn reverse_precomputed_diff_entries(entries: &mut [zmin_git_core::IndexDiffEntry]) {
@@ -579,7 +764,12 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
     let mut options = options;
-    if options.combined || options.dense_combined || options.dd || options.remerge_diff || options.diff_merges.is_some() {
+    if options.combined
+        || options.dense_combined
+        || options.dd
+        || options.remerge_diff
+        || options.diff_merges.is_some()
+    {
         options.patch = true;
     }
     let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
@@ -644,7 +834,11 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         }
     }
     let index = stage_zero_index(&full_index)?;
-    let new_index = worktree_diff_index_snapshot(&repo, &index)?;
+    let new_index = if ignore_submodules == IgnoreSubmodulesMode::All {
+        worktree_diff_index_snapshot_ignoring_gitlinks(&repo, &index)?
+    } else {
+        worktree_diff_index_snapshot(&repo, &index)?
+    };
     let (old_index, new_index, render_options) = if options.reverse {
         let mut render_options = render_options;
         render_options.old_source = DiffSideSource::Index;
@@ -711,8 +905,8 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
     let entries = if let Some(find_object) = options.find_object.as_deref() {
-        let id =
-            resolve_objectish(&repo, find_object).map_err(|_| ambiguous_revision_error(find_object))?;
+        let id = resolve_objectish(&repo, find_object)
+            .map_err(|_| ambiguous_revision_error(find_object))?;
         filter_entries_by_object_id(entries, &old_index, &new_index, &id)
     } else {
         entries
@@ -840,7 +1034,14 @@ fn render_diff_unmerged_stage(
     print_unmerged_patch_markers(index, &pathspecs, render_options.relative_prefix.as_deref())?;
     render_options.old_source = DiffSideSource::Index;
     render_options.new_source = DiffSideSource::WorktreeOrIndex;
-    render_diff(repo, store, &old_index, &new_index, &entries, render_options)
+    render_diff(
+        repo,
+        store,
+        &old_index,
+        &new_index,
+        &entries,
+        render_options,
+    )
 }
 
 fn render_diff_files_unmerged_stage(
@@ -899,7 +1100,14 @@ fn render_diff_files_unmerged_stage(
     if omit_unmerged && raw_only_mode {
         return Ok(());
     }
-    render_diff(repo, store, &selected_index, &new_index, &entries, render_options)
+    render_diff(
+        repo,
+        store,
+        &selected_index,
+        &new_index,
+        &entries,
+        render_options,
+    )
 }
 
 fn render_diff_files_unmerged_combined(
@@ -1083,7 +1291,10 @@ fn print_unmerged_patch_markers(
     relative_prefix: Option<&[u8]>,
 ) -> Result<()> {
     for path in filtered_unmerged_paths(index, pathspecs) {
-        println!("* Unmerged path {}", diff_display_path(&path, relative_prefix));
+        println!(
+            "* Unmerged path {}",
+            diff_display_path(&path, relative_prefix)
+        );
     }
     Ok(())
 }
@@ -1242,7 +1453,10 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         message: "diff-index requires a tree-ish".into(),
     })?;
     let old_index = read_treeish_index(&repo, &store, treeish)?;
-    if !options.cached && let Some(mode) = combined_mode && has_unmerged_entries(&full_index) {
+    if !options.cached
+        && let Some(mode) = combined_mode
+        && has_unmerged_entries(&full_index)
+    {
         let render_options = DiffRenderOptions {
             old_source: DiffSideSource::Index,
             new_source: DiffSideSource::WorktreeOrIndex,
@@ -1328,8 +1542,8 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
     let entries = if let Some(find_object) = options.find_object.as_deref() {
-        let id =
-            resolve_objectish(&repo, find_object).map_err(|_| ambiguous_revision_error(find_object))?;
+        let id = resolve_objectish(&repo, find_object)
+            .map_err(|_| ambiguous_revision_error(find_object))?;
         filter_entries_by_object_id(entries, &old_index, &new_index, &id)
     } else {
         entries
@@ -1665,6 +1879,13 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         code: 129,
         message: "diff-tree requires a tree-ish".into(),
     })?;
+    if let Some(new) = options.new_treeish.as_deref() {
+        let old_id = resolve_objectish(&repo, old).map_err(|_| ambiguous_revision_error(old))?;
+        let new_id = resolve_objectish(&repo, new).map_err(|_| ambiguous_revision_error(new))?;
+        if old_id == new_id {
+            return Ok(());
+        }
+    }
     if (options.combined || options.dense_combined)
         && options.new_treeish.is_none()
         && combined_diff_tree_patch_with_stat_mode(&options)
@@ -3210,83 +3431,187 @@ fn run_difftool_command(
 }
 
 fn show_difftool_tool_help() -> Result<()> {
-    let output = ProcessCommand::new(stock_git_binary())
-        .args(["difftool", "--tool-help"])
-        .output()
-        .map_err(CliError::Io)?;
-    io::stdout()
-        .write_all(&output.stdout)
-        .map_err(CliError::Io)?;
-    io::stderr()
-        .write_all(&output.stderr)
-        .map_err(CliError::Io)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(CliError::Exit(output.status.code().unwrap_or(1)))
-    }
+    let repo = find_repo()?;
+    print!("{}", render_difftool_tool_help(&repo)?);
+    Ok(())
 }
 
-fn stock_git_binary() -> &'static Path {
-    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
-}
+fn render_difftool_tool_help(repo: &GitRepo) -> Result<String> {
+    const BUILTINS: &[(&str, &str, &[&str])] = &[
+        (
+            "opendiff",
+            "Use FileMerge (requires a graphical session)",
+            &["opendiff"],
+        ),
+        ("vimdiff", "Use Vim", &["vimdiff", "vim"]),
+        (
+            "vscode",
+            "Use Visual Studio Code (requires a graphical session)",
+            &["code"],
+        ),
+        (
+            "araxis",
+            "Use Araxis Merge (requires a graphical session)",
+            &["compare", "araxis"],
+        ),
+        (
+            "bc",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "bc3",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "bc4",
+            "Use Beyond Compare (requires a graphical session)",
+            &["bcompare", "bcomp"],
+        ),
+        (
+            "codecompare",
+            "Use Code Compare (requires a graphical session)",
+            &["codecompare"],
+        ),
+        (
+            "deltawalker",
+            "Use DeltaWalker (requires a graphical session)",
+            &["deltawalker"],
+        ),
+        (
+            "diffmerge",
+            "Use DiffMerge (requires a graphical session)",
+            &["diffmerge"],
+        ),
+        (
+            "diffuse",
+            "Use Diffuse (requires a graphical session)",
+            &["diffuse"],
+        ),
+        (
+            "ecmerge",
+            "Use ECMerge (requires a graphical session)",
+            &["ecmerge"],
+        ),
+        ("emerge", "Use Emacs' Emerge", &["emacs"]),
+        (
+            "examdiff",
+            "Use ExamDiff Pro (requires a graphical session)",
+            &["examdiff"],
+        ),
+        (
+            "guiffy",
+            "Use Guiffy's Diff Tool (requires a graphical session)",
+            &["guiffy"],
+        ),
+        (
+            "gvimdiff",
+            "Use gVim (requires a graphical session)",
+            &["gvim"],
+        ),
+        (
+            "kdiff3",
+            "Use KDiff3 (requires a graphical session)",
+            &["kdiff3"],
+        ),
+        (
+            "kompare",
+            "Use Kompare (requires a graphical session)",
+            &["kompare"],
+        ),
+        ("meld", "Use Meld (requires a graphical session)", &["meld"]),
+        ("nvimdiff", "Use Neovim", &["nvim"]),
+        (
+            "p4merge",
+            "Use HelixCore P4Merge (requires a graphical session)",
+            &["p4merge"],
+        ),
+        (
+            "smerge",
+            "Use Sublime Merge (requires a graphical session)",
+            &["smerge"],
+        ),
+        (
+            "tkdiff",
+            "Use TkDiff (requires a graphical session)",
+            &["tkdiff"],
+        ),
+        (
+            "winmerge",
+            "Use WinMerge (requires a graphical session)",
+            &["winmergeu", "winmerge"],
+        ),
+        (
+            "xxdiff",
+            "Use xxdiff (requires a graphical session)",
+            &["xxdiff"],
+        ),
+    ];
 
-fn resolve_stock_git_binary() -> PathBuf {
-    for candidate in stock_git_candidates() {
-        if is_stock_git_binary(&candidate) {
-            return candidate;
+    let user_defined = configured_tool_help_commands(repo, "difftool")?;
+    let mut text =
+        String::from("'git difftool --tool=<tool>' may be set to one of the following:\n");
+    for (name, description, commands) in BUILTINS {
+        if tool_help_command_available(commands) {
+            text.push_str(&format!("\t\t{name:<16} {description}\n"));
         }
     }
-    for path in std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| {
-            stock_git_names()
-                .into_iter()
-                .map(move |name| dir.join(name))
-        })
-    {
-        if is_stock_git_binary(&path) {
-            return path;
+    if !user_defined.is_empty() {
+        text.push_str("\n\tuser-defined:\n");
+        for (name, command) in user_defined {
+            text.push_str(&format!("\t\t{name}.cmd {command}\n"));
         }
     }
-    PathBuf::from("/usr/bin/git")
+    text.push_str("\nThe following tools are valid, but not currently available:\n");
+    for (name, description, commands) in BUILTINS {
+        if !tool_help_command_available(commands) {
+            text.push_str(&format!("\t\t{name:<16} {description}\n"));
+        }
+    }
+    text.push_str(
+        "\nSome of the tools listed above only work in a windowed\nenvironment. If run in a terminal-only session, they will fail.\n",
+    );
+    Ok(text)
 }
 
-fn stock_git_candidates() -> Vec<PathBuf> {
+fn configured_tool_help_commands(repo: &GitRepo, section: &str) -> Result<Vec<(String, String)>> {
+    let mut commands = std::collections::BTreeMap::new();
+    for entry in read_config_entries(repo)? {
+        if entry.section != section {
+            continue;
+        }
+        if entry.key != "cmd" || entry.subsection.is_empty() {
+            continue;
+        }
+        commands.insert(entry.subsection, entry.value);
+    }
+    Ok(commands.into_iter().collect())
+}
+
+fn tool_help_command_available(commands: &[&str]) -> bool {
+    commands.iter().any(|command| command_on_path(command))
+}
+
+fn command_on_path(command: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|value| {
+        std::env::split_paths(&value).any(|dir| executable_exists(&dir.join(command)))
+    })
+}
+
+fn executable_exists(path: &Path) -> bool {
     #[cfg(windows)]
     {
-        vec![
-            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
-        ]
+        path.is_file()
     }
     #[cfg(not(windows))]
     {
-        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
-    }
-}
+        use std::os::unix::fs::PermissionsExt;
 
-fn stock_git_names() -> Vec<&'static str> {
-    if cfg!(windows) {
-        vec!["git.exe", "git"]
-    } else {
-        vec!["git"]
+        fs::metadata(path)
+            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
     }
-}
-
-fn is_stock_git_binary(path: &Path) -> bool {
-    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
-        return false;
-    };
-    if !output.status.success() {
-        return false;
-    }
-    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 #[cfg(unix)]

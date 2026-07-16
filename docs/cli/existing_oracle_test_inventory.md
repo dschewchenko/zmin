@@ -17,14 +17,15 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after importing the `git_commit_compat.rs` hook-failure rows on
-`compat/status-pathspec-matrix`.
+Regenerated from the current dirty workspace on 2026-07-16 after the
+replacement-readiness audit found that the checked-in inventory no longer
+covered the expanded differential suite.
 
 | Layer | Count |
 | --- | ---: |
-| Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `513` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `448` |
+| Stock-oracle test functions found | `1466` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `1248` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `218` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -46,36 +47,25 @@ currently unclassified stock-oracle test functions, not by product priority.
 
 | Test file | Missing or unclassified |
 | --- | ---: |
-| `git_transport_http_compat.rs` | `75` |
-| `git_transport_local_compat.rs` | `58` |
-| `git_pack_integrity_compat.rs` | `46` |
-| `git_index_mutation_compat.rs` | `39` |
-| `git_maintenance_compat.rs` | `32` |
-| `git_worktree_state_compat.rs` | `26` |
-| `git_commit_compat.rs` | `16` |
-| `git_notes_compat.rs` | `23` |
-| `git_submodule_compat.rs` | `16` |
-| `git_worktree_compat.rs` | `15` |
-| `git_merge_compat.rs` | `13` |
-| `git_sequencer_compat.rs` | `12` |
+| `git_global_cli_compat.rs` | `30` |
+| `git_mail_series_compat.rs` | `22` |
+| `git_lfs_local_compat.rs` | `18` |
+| `git_history_query_compat.rs` | `16` |
+| `git_credential_compat.rs` | `13` |
+| `git_object_plumbing_compat.rs` | `11` |
+| `git_help_compat.rs` | `11` |
 | `git_admin_tools_compat.rs` | `10` |
-| `git_merge_plumbing_compat.rs` | `9` |
-| `git_foreign_scm_compat.rs` | `8` |
-| `git_refs_compat.rs` | `7` |
-| `git_ref_resolution_compat.rs` | `6` |
-| `git_scalar_compat.rs` | `6` |
-| `git_fast_import_export_compat.rs` | `5` |
-| `git_global_cli_compat.rs` | `5` |
-| `git_cms_porcelain_compat.rs` | `4` |
-| `git_object_plumbing_compat.rs` | `4` |
-| `git_mail_tools_compat.rs` | `3` |
-| `git_sparse_checkout_compat.rs` | `3` |
-| `git_clone_compat.rs` | `2` |
-| `compatibility_command.rs` | `1` |
-| `git_cli_failure_compat.rs` | `1` |
-| `git_mail_series_compat.rs` | `1` |
-| `git_repository_state_compat.rs` | `1` |
-| `git_stash_compat.rs` | `1` |
+| `git_diff_compat.rs` | `9` |
+| `git_transport_local_compat.rs` | `8` |
+| `git_status_compat.rs` | `7` |
+| `git_ls_files_compat.rs` | `6` |
+| `git_worktree_state_compat.rs` | `5` |
+| `git_observed_client_compat.rs` | `10` |
+| `git_index_mutation_compat.rs` | `5` |
+| `git_clone_compat.rs` | `5` |
+| `git_refs_compat.rs` | `4` |
+| `git_rebase_interactive_compat.rs` | `4` |
+| `git_replacement_dogfood_compat.rs` | `3` |
 
 The full TSV is the backlog. Do not treat the table above as complete by
 itself; it only summarizes the largest buckets.

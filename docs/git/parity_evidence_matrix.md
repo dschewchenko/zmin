@@ -1,6 +1,6 @@
 # Git Compatibility Evidence Matrix
 
-Date: 2026-06-18
+Date: 2026-07-16
 
 ## Reading this matrix
 
@@ -8,6 +8,102 @@ This matrix records evidence for command presence, local scenario coverage, and
 repository-state handoff. It does not by itself prove full upstream Git behavior
 parity. Upstream Git test-suite status is tracked separately in
 `docs/git/upstream_compatibility_baseline.md`.
+
+## Latest local replacement checkpoint
+
+- Final 2026-07-16 release SHA-256:
+  `0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c`.
+  The current targeted integration set passed `295/295`
+  (`git_history_query_compat`, `git_ls_files_compat`,
+  `git_observed_client_compat`, and `git_status_compat`), and the release
+  replacement dogfood smoke passed. A fresh pinned Git `v2.47.1`
+  `all-nondeprecated` offset-`0`, limit-`50` run passed `50/50` files; the
+  offset-`100`, limit-`50` slice passed `39/50` files. The focused
+  `t1502-rev-parse-parseopt.sh` replay is now green at `37/37`, covering
+  usage rendering, option-spec parsing, short/long and optional arguments,
+  negation, abbreviation diagnostics, and shell-eval output.
+- The next offset-`150` slice initially passed `9/50`; focused reruns now pass
+  `t1511-rev-parse-caret.sh`, `t1513-rev-parse-prefix.sh`,
+  `t1514-rev-parse-push.sh`, `t1515-rev-parse-outside-repo.sh`,
+  `t1601-index-bogus.sh`, and `t2100-update-cache-badpath.sh` after exact
+  revision/path, push-destination, separate-git-dir, null-SHA, and D/F-conflict
+  fixes. The broader slice remains open.
+- The current release follow-up passes `t1600-index.sh` (`7/7`) and
+  `t1517-outside-repo.sh` (`10/10`), including index version/skip-hash policy,
+  patch and diff fallback outside a repository, empty IMAP input, and the
+  remote-http error contract.
+- The split-index implementation now passes `29/29` assertions in the pinned
+  `t1700-split-index.sh` slice, covering overlay entries, replacements,
+  deletions, expiry policy, permission handling, alternate shared-index lookup,
+  null-SHA cache-tree safety, and `GIT_TEST_SPLIT_INDEX`.
+- The final five-repeat standard corpus matched all semantic checks. Zmin beat
+  stock Git on median wall time and p95 RSS in every `7/7` operation. Median
+  time ratios ranged from `0.615x` (`init`) to `0.935x` (`index-pack`); p95 RSS
+  ratios ranged from `0.888x` to `0.997x`.
+- A fresh 20-repeat standard corpus against release SHA
+  `0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c` kept all
+  semantic checks green and stayed below stock Git on median time and p95 RSS
+  for all `7/7` operations. Median time ratios were `0.583x` (`init`),
+  `0.742x` (`status`), `0.722x` (`log`), `0.694x` (`rev-list`),
+  `0.681x` (`merge-base`), `0.645x` (`pack-objects`), and `0.988x`
+  (`index-pack`); p95 RSS ratios ranged from `0.878x` to `0.982x`.
+- The final 20-repeat observed-client corpus matched exit status, stdout, and
+  stderr on every repeat, and Zmin was faster by median in all `10/10` lanes.
+  All ten lanes had lower p95 RSS; the worst ratio was `0.997x` for
+  `show --numstat`. The optimized stdin-fed named `show` lane is now `0.602x`
+  median time and `0.901x` p95 RSS.
+
+- A fresh 20-repeat replay against the current release remained byte-exact on
+  all ten GUI lanes and kept p95 RSS below stock Git on all ten. On this dirty
+  workspace, median wall time was lower on `9/10` lanes; the unbounded `log`
+  lane was `1.183x` median and `1.374x` p95 wall time, so the speed gate remains
+  open for that workload despite the memory win.
+
+- The compatibility census is closed as a catalog: `151/151` complete command
+  matrices, `3212/3212` documented command/option pairs, `7758` behavior rows,
+  `6827` verified rows, `907` invalid-input rows, and no open or
+  implemented-but-unverified rows. This is not by itself a universal drop-in
+  compatibility proof.
+- The regenerated current oracle inventory contains `1466` stock-oracle test
+  functions: `1248` are referenced by a behavior matrix, extension inventory,
+  or deferral, and `218` remain missing or unclassified. The generator now
+  recognizes the shared observed-command differential helper; that exposed
+  five older tests which had been absent from the inventory. These are evidence
+  bookkeeping gaps to review, not automatically runtime incompatibilities.
+  Older prose counts in the detailed upstream history are retained as dated
+  evidence, not the current inventory.
+- On 2026-07-15, `zmin-git-core` passed `267/267`,
+  `git_status_compat` passed `36/36`, `git_history_query_compat` passed
+  `110/110`, `git_ls_files_compat` passed `21/21`,
+  `git_observed_client_compat` passed `18/18`, and the replacement
+  dogfood/runtime-dependency gates passed `6/6` and `1/1`. The observed
+  ten-lane GUI benchmark matched stock Git exactly for exit status, stdout, and
+  stderr on all 20 repeats.
+- The ten-repeat standard performance corpus (`init`, `status`, `log`,
+  `rev-list`, `merge-base`, `pack-objects`, and `index-pack`) kept all semantic
+  checks green. Zmin's median wall time and p95 RSS were lower on all seven
+  operations; current ratios are at most `0.989x` median time and `0.978x` p95
+  RSS. In
+  the current 20-repeat GUI corpus, `ls-files` is now at `1.004x` p95 RSS and
+  stdin-fed named `show` at `1.051x`; all ten lanes remain faster by median.
+- The post-`t1060` release SHA-256
+  `4245de5d38d8638aae2e729bcdf50f18254a661bace6eebe0a8b771b6fe57272`
+  passed a five-repeat standard-corpus follow-up. All semantic checks stayed
+  green; the worst median-time ratio was `0.987x` (`index-pack`) and the worst
+  p95 RSS ratio was `0.973x` (`merge-base`), so all seven operations remained
+  below stock Git on both gates.
+- The post-`t1050` release SHA-256
+  `5a0d3bb241489be906e03c06d143a4186231027319745806b9a1fc0a6dda0bbb`
+  passed the focused local differentials and the pinned upstream frontier.
+  On the warmed five-repeat 64 MiB large-file `add` corpus, median wall time
+  was `0.252573s` versus Git's `0.329741s` (`0.766x`) and median peak RSS was
+  `5,275,648` versus `5,554,176` bytes (`0.950x`).
+- The offset-`50`, limit-`50` pinned Git `v2.47.1` slice originally passed
+  `36/50`; all fourteen failures now have green reruns, including complete
+  `t0613`, `t1013`, and `t1022` closures. Combined with the fresh integrated
+  offset-`0` `50/50` run, the effective verified frontier is the first 100
+  selected files. The remaining manifest and cross-platform replay keep the
+  universal drop-in claim open.
 
 ## Baseline and command coverage
 
@@ -553,13 +649,14 @@ same canonical `.git` repository state.
 - Validation for managed hooks and CMS porcelain: macOS `cargo test -p zmin-cli
   --test git_admin_tools_compat hook -- --nocapture` (`2/2`), macOS
   `cargo test -p zmin-cli --test git_cms_porcelain_compat -- --nocapture`
-  (`4/4`), Windows/Git-for-Windows
+  (`6/6`), Windows/Git-for-Windows
   `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
   targeted git_admin_tools_compat
   managed_hooks_add_list_remove_and_protect_manual_hooks` (`1/1`), and
   Windows/Git-for-Windows
   `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
-  file git_cms_porcelain_compat` (`4/4`).
+  file git_cms_porcelain_compat` (`4/4`; Windows refresh still pending the two
+  newer additive CMS cases currently verified on macOS).
 - Validation for the smart HTTP, git-daemon, and SSH slices:
   `cargo fmt --all -- --check`,
   `cargo test -p zmin-cli --test git_transport_http_compat
@@ -637,7 +734,9 @@ same canonical `.git` repository state.
   single-object `show` includes the root patch like stock Git.
 - 2026-06-18 additive surface refresh: macOS
   `cargo test -p zmin-cli --test git_cms_porcelain_compat -- --nocapture`
-  passed `4/4`, macOS `cargo test -p zmin-cli --test git_admin_tools_compat
+  passed `4/4`; the current macOS refresh on 2026-07-02 now passes `6/6`
+  after adding root-history `undo` coverage. macOS
+  `cargo test -p zmin-cli --test git_admin_tools_compat
   hook -- --nocapture` passed `2/2`, macOS
   `cargo test -p zmin-cli --test git_clone_compat
   clone_worktree_first_rejects_non_worktree_or_remote_modes -- --nocapture`

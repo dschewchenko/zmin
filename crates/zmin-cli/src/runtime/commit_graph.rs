@@ -25,6 +25,10 @@ pub(crate) struct CommitGraphIndex {
 }
 
 impl CommitGraphIndex {
+    pub(crate) fn commit_count(&self) -> usize {
+        self.count
+    }
+
     pub(crate) fn open(repo: &GitRepo) -> Result<Option<Self>> {
         let path = repo.git_dir.join("objects/info/commit-graph");
         if !Path::new(&path).is_file() {
@@ -182,6 +186,13 @@ impl CommitGraphIndex {
         let row = self.commit_data_row(position)?;
         let value = read_u32_be(&row[self.digest_len + 8..self.digest_len + 12]).ok()?;
         Some(value >> 2)
+    }
+
+    pub(crate) fn committer_timestamp(&self, position: u32) -> Option<u64> {
+        let row = self.commit_data_row(position)?;
+        let high = read_u32_be(&row[self.digest_len + 8..self.digest_len + 12]).ok()? & 0x3;
+        let low = read_u32_be(&row[self.digest_len + 12..self.digest_len + 16]).ok()?;
+        Some(((high as u64) << 32) | (low as u64))
     }
 
     pub(crate) fn parent_positions(&self, position: u32, out: &mut Vec<u32>) -> Result<()> {

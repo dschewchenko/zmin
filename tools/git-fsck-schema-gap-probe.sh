@@ -26,7 +26,7 @@ make_seed_repo() {
   "$GIT_BIN" -C "$repo" hash-object -w --stdin >/dev/null <<<"dangling"
 }
 
-run_gap() {
+run_probe() {
   local name="$1"
   shift
   local git_work="$tmpdir/${name}.git"
@@ -44,27 +44,22 @@ run_gap() {
   zmin_exit=$?
   set -e
 
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stdout:\n'
-  sed -n '1,5p' "$tmpdir/${name}.git.out"
-  printf 'zmin stdout:\n'
-  sed -n '1,5p' "$tmpdir/${name}.zmin.out"
-  printf 'stock stderr:\n'
-  sed -n '1,8p' "$tmpdir/${name}.git.err"
-  printf 'zmin stderr:\n'
-  sed -n '1,8p' "$tmpdir/${name}.zmin.err"
+  local stdout_match=0
+  local stderr_match=0
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" && stdout_match=1
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" && stderr_match=1
+
+  printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\n' \
+    "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match"
 
   test "$git_exit" = "$zmin_exit"
-  if cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
-    && cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  test "$stdout_match" = "1"
+  test "$stderr_match" = "1"
 }
 
 base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 
-run_gap fsck_progress --progress
-run_gap fsck_verbose --verbose
-run_gap fsck_verbose_short -v
+run_probe fsck_progress --progress
+run_probe fsck_verbose --verbose
+run_probe fsck_verbose_short -v

@@ -515,6 +515,79 @@ fn check_attr_matches_stock_git_for_common_attributes() {
             b"main.rs\0file.bin\0",
         )
     );
+
+    fs::create_dir_all(repo.path().join("case/a/b/d")).expect("create case dirs");
+    fs::create_dir_all(repo.path().join("case/a/c")).expect("create case dirs");
+    fs::write(
+        repo.path().join("case/.gitattributes"),
+        b"[attr]notest !test\nf test=f\na/i test=a/i\nonoff test -test\noffon -test test\nno notest\nA/e/F test=A/e/F\n",
+    )
+    .expect("write case root attributes");
+    fs::write(
+        repo.path().join("case/a/.gitattributes"),
+        b"g test=a/g\nb/g test=a/b/g\n",
+    )
+    .expect("write case a attributes");
+    fs::write(
+        repo.path().join("case/a/b/.gitattributes"),
+        b"h test=a/b/h\nd/* test=a/b/d/*\nd/yes notest\n",
+    )
+    .expect("write case a/b attributes");
+
+    for args in [
+        [
+            "-c",
+            "core.ignorecase=0",
+            "check-attr",
+            "test",
+            "--",
+            "case/a/B/g",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.ignorecase=0",
+            "check-attr",
+            "test",
+            "--",
+            "case/A/B/D/NO",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.ignorecase=1",
+            "check-attr",
+            "test",
+            "--",
+            "case/a/B/g",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.ignorecase=1",
+            "check-attr",
+            "test",
+            "--",
+            "case/A/B/D/NO",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args)
+        );
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(
+            repo.path(),
+            &["check-attr", "builtin_objectmode", "--", "missing.file"],
+        ),
+        git_failure_output(
+            repo.path(),
+            &["check-attr", "builtin_objectmode", "--", "missing.file"],
+        )
+    );
 }
 
 #[test]

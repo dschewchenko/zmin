@@ -1,0 +1,66 @@
+GIT-CVSSERVER(1)                  Git Manual                  GIT-CVSSERVER(1)
+
+NAME
+       git-cvsserver - A CVS server emulator for Git
+
+SYNOPSIS
+       SSH:
+
+       export CVS_SERVER="git cvsserver"
+       cvs -d :ext:user@server/path/repo.git co <HEAD_name>
+
+       pserver (/etc/inetd.conf):
+
+       cvspserver stream tcp nowait nobody /usr/bin/git-cvsserver git-cvsserver pserver
+
+       Usage:
+
+       git-cvsserver [<options>] [pserver|server] [<directory> ...]
+
+DESCRIPTION
+       This application is a CVS emulation layer for Git.
+
+       It is highly functional. However, not all methods are implemented, and
+       for those methods that are implemented, not all switches are
+       implemented.
+
+       Testing has been done using both the CLI CVS client, and the Eclipse
+       CVS plugin. Most functionality works fine with both of these clients.
+
+OPTIONS
+       All these options obviously only make sense if enforced by the server
+       side. They have been implemented to resemble the git-daemon(1) options
+       as closely as possible.
+
+       --base-path <path>
+           Prepend path to requested CVSROOT
+
+       --strict-paths
+           Don't allow recursing into subdirectories
+
+       --export-all
+           Don't check for gitcvs.enabled in config. You also have to specify
+           a list of allowed directories (see below) if you want to use this
+           option.
+
+       -V, --version
+           Print version information and exit
+
+       -h, -H, --help
+           Print usage information and exit
+
+       <directory>
+           The remaining arguments provide a list of directories. If no
+           directories are given, then all are allowed. Repositories within
+           these directories still require the gitcvs.enabled config option,
+           unless --export-all is specified.
+
+LIMITATIONS
+       CVS clients cannot tag, branch or perform Git merges.
+
+       git-cvsserver maps Git branches to CVS modules. This is very different
+       from what most CVS users would expect since in CVS modules usually
+       represent one or more directories.
+
+GIT
+       Part of the git(1) suite

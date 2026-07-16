@@ -3,9 +3,9 @@ mod common;
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_failure_output_with_env, command_output_with_env,
-    configure_identity, git, git_init, git_with_env, run_zmin, run_zmin_with_env, write_file,
-    zmin_bin,
+    clone_repo_fixture, command_any_output, command_failure_output_with_env,
+    command_output_with_env, configure_identity, git, git_init, git_with_env, run_zmin,
+    run_zmin_with_env, write_file, zmin_bin,
 };
 
 const SEQUENCER_ENV: [(&str, &str); 6] = [
@@ -1354,7 +1354,8 @@ fn rebase_merge_backend_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -1453,7 +1454,8 @@ fn rebase_quiet_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -1635,8 +1637,18 @@ fn rebase_force_replay_option_family_matches_stock_git() {
             false,
             false,
         ),
-        ("no_ff_upstream", &["rebase", "--no-ff", "origin/main"], false, false),
-        ("force_short_upstream", &["rebase", "-f", "origin/main"], false, false),
+        (
+            "no_ff_upstream",
+            &["rebase", "--no-ff", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "force_short_upstream",
+            &["rebase", "-f", "origin/main"],
+            false,
+            false,
+        ),
         (
             "force_rebase_branch",
             &["rebase", "--force-rebase", "origin/main", "topic"],
@@ -1649,7 +1661,12 @@ fn rebase_force_replay_option_family_matches_stock_git() {
             true,
             false,
         ),
-        ("force_short_branch", &["rebase", "-f", "origin/main", "topic"], true, false),
+        (
+            "force_short_branch",
+            &["rebase", "-f", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "force_rebase_onto",
             &[
@@ -1665,13 +1682,27 @@ fn rebase_force_replay_option_family_matches_stock_git() {
         ),
         (
             "no_ff_onto",
-            &["rebase", "--no-ff", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--no-ff",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
         (
             "force_short_onto",
-            &["rebase", "-f", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "-f",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -1698,7 +1729,8 @@ fn rebase_force_replay_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -1755,7 +1787,12 @@ fn rebase_signoff_and_committer_date_option_family_matches_stock_git() {
         ),
         (
             "committer_date_branch",
-            &["rebase", "--committer-date-is-author-date", "origin/main", "topic"],
+            &[
+                "rebase",
+                "--committer-date-is-author-date",
+                "origin/main",
+                "topic",
+            ],
             true,
             false,
             Some("topic"),
@@ -1814,13 +1851,8 @@ fn rebase_signoff_and_committer_date_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env(
-            "git",
-            git_repo.path(),
-            args,
-            &REBASE_REPLAY_DATE_ENV,
-            "git",
-        );
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &REBASE_REPLAY_DATE_ENV, "git");
         let zmin_output = command_output_with_env(
             zmin_bin(),
             zmin_repo.path(),
@@ -1889,7 +1921,12 @@ fn rebase_signoff_and_committer_date_option_family_matches_stock_git() {
 #[test]
 fn rebase_clean_noop_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool, bool); 60] = [
-        ("verify_upstream", &["rebase", "--verify", "origin/main"], false, false),
+        (
+            "verify_upstream",
+            &["rebase", "--verify", "origin/main"],
+            false,
+            false,
+        ),
         (
             "no_verify_upstream",
             &["rebase", "--no-verify", "origin/main"],
@@ -2004,7 +2041,12 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
             false,
             false,
         ),
-        ("verify_branch", &["rebase", "--verify", "origin/main", "topic"], true, false),
+        (
+            "verify_branch",
+            &["rebase", "--verify", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "no_verify_branch",
             &["rebase", "--no-verify", "origin/main", "topic"],
@@ -2031,7 +2073,12 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
         ),
         (
             "no_reapply_cherry_picks_branch",
-            &["rebase", "--no-reapply-cherry-picks", "origin/main", "topic"],
+            &[
+                "rebase",
+                "--no-reapply-cherry-picks",
+                "origin/main",
+                "topic",
+            ],
             true,
             false,
         ),
@@ -2121,13 +2168,27 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
         ),
         (
             "verify_onto",
-            &["rebase", "--verify", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--verify",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
         (
             "no_verify_onto",
-            &["rebase", "--no-verify", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--no-verify",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2185,7 +2246,14 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
         ),
         (
             "autostash_onto",
-            &["rebase", "--autostash", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--autostash",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2204,7 +2272,14 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
         ),
         (
             "update_refs_onto",
-            &["rebase", "--update-refs", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--update-refs",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2376,7 +2451,8 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -2407,35 +2483,103 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
 #[test]
 fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool, bool); 27] = [
-        ("autosquash_upstream", &["rebase", "--autosquash", "origin/main"], false, false),
-        ("autosquash_branch", &["rebase", "--autosquash", "origin/main", "topic"], true, false),
+        (
+            "autosquash_upstream",
+            &["rebase", "--autosquash", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "autosquash_branch",
+            &["rebase", "--autosquash", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "autosquash_onto",
-            &["rebase", "--autosquash", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--autosquash",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
-        ("empty_drop_upstream", &["rebase", "--empty=drop", "origin/main"], false, false),
-        ("empty_drop_branch", &["rebase", "--empty=drop", "origin/main", "topic"], true, false),
+        (
+            "empty_drop_upstream",
+            &["rebase", "--empty=drop", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "empty_drop_branch",
+            &["rebase", "--empty=drop", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "empty_drop_onto",
-            &["rebase", "--empty=drop", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--empty=drop",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
-        ("gpg_sign_upstream", &["rebase", "--gpg-sign", "origin/main"], false, false),
-        ("gpg_sign_branch", &["rebase", "--gpg-sign", "origin/main", "topic"], true, false),
+        (
+            "gpg_sign_upstream",
+            &["rebase", "--gpg-sign", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "gpg_sign_branch",
+            &["rebase", "--gpg-sign", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "gpg_sign_onto",
-            &["rebase", "--gpg-sign", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--gpg-sign",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
-        ("ignore_date_upstream", &["rebase", "--ignore-date", "origin/main"], false, false),
-        ("ignore_date_branch", &["rebase", "--ignore-date", "origin/main", "topic"], true, false),
+        (
+            "ignore_date_upstream",
+            &["rebase", "--ignore-date", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "ignore_date_branch",
+            &["rebase", "--ignore-date", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "ignore_date_onto",
-            &["rebase", "--ignore-date", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--ignore-date",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2464,11 +2608,28 @@ fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
             false,
             true,
         ),
-        ("no_gpg_sign_upstream", &["rebase", "--no-gpg-sign", "origin/main"], false, false),
-        ("no_gpg_sign_branch", &["rebase", "--no-gpg-sign", "origin/main", "topic"], true, false),
+        (
+            "no_gpg_sign_upstream",
+            &["rebase", "--no-gpg-sign", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_gpg_sign_branch",
+            &["rebase", "--no-gpg-sign", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "no_gpg_sign_onto",
-            &["rebase", "--no-gpg-sign", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--no-gpg-sign",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2480,7 +2641,12 @@ fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
         ),
         (
             "no_reschedule_failed_exec_branch",
-            &["rebase", "--no-reschedule-failed-exec", "origin/main", "topic"],
+            &[
+                "rebase",
+                "--no-reschedule-failed-exec",
+                "origin/main",
+                "topic",
+            ],
             true,
             false,
         ),
@@ -2522,11 +2688,28 @@ fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
             false,
             true,
         ),
-        ("short_gpg_sign_upstream", &["rebase", "-S", "origin/main"], false, false),
-        ("short_gpg_sign_branch", &["rebase", "-S", "origin/main", "topic"], true, false),
+        (
+            "short_gpg_sign_upstream",
+            &["rebase", "-S", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "short_gpg_sign_branch",
+            &["rebase", "-S", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "short_gpg_sign_onto",
-            &["rebase", "-S", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "-S",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2553,7 +2736,8 @@ fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -2605,11 +2789,32 @@ fn rebase_remaining_helper_free_option_family_matches_stock_git() {
     }
 
     let cases: [(&str, &[&str], bool, bool, RebaseEnv, bool); 15] = [
-        ("keep_base_upstream", &["rebase", "--keep-base", "origin/main"], false, false, RebaseEnv::Default, false),
-        ("keep_base_branch", &["rebase", "--keep-base", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
+        (
+            "keep_base_upstream",
+            &["rebase", "--keep-base", "origin/main"],
+            false,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "keep_base_branch",
+            &["rebase", "--keep-base", "origin/main", "topic"],
+            true,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
         (
             "keep_base_with_onto_invalid",
-            &["rebase", "--keep-base", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--keep-base",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
             RebaseEnv::Default,
@@ -2633,21 +2838,115 @@ fn rebase_remaining_helper_free_option_family_matches_stock_git() {
         ),
         (
             "reset_author_date_onto",
-            &["rebase", "--reset-author-date", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--reset-author-date",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
             RebaseEnv::ReplayDates,
             true,
         ),
-        ("exec_upstream", &["rebase", "--exec", "true", "origin/main"], false, false, RebaseEnv::Default, false),
-        ("exec_branch", &["rebase", "--exec", "true", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
-        ("exec_onto", &["rebase", "--exec", "true", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
-        ("short_exec_upstream", &["rebase", "-x", "true", "origin/main"], false, false, RebaseEnv::Default, false),
-        ("short_exec_branch", &["rebase", "-x", "true", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
-        ("short_exec_onto", &["rebase", "-x", "true", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
-        ("context_lines_upstream", &["rebase", "-C", "1", "origin/main"], false, false, RebaseEnv::Default, false),
-        ("context_lines_branch", &["rebase", "-C", "1", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
-        ("context_lines_onto", &["rebase", "-C", "1", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
+        (
+            "exec_upstream",
+            &["rebase", "--exec", "true", "origin/main"],
+            false,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "exec_branch",
+            &["rebase", "--exec", "true", "origin/main", "topic"],
+            true,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "exec_onto",
+            &[
+                "rebase",
+                "--exec",
+                "true",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "short_exec_upstream",
+            &["rebase", "-x", "true", "origin/main"],
+            false,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "short_exec_branch",
+            &["rebase", "-x", "true", "origin/main", "topic"],
+            true,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "short_exec_onto",
+            &[
+                "rebase",
+                "-x",
+                "true",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "context_lines_upstream",
+            &["rebase", "-C", "1", "origin/main"],
+            false,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "context_lines_branch",
+            &["rebase", "-C", "1", "origin/main", "topic"],
+            true,
+            false,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "context_lines_onto",
+            &[
+                "rebase",
+                "-C",
+                "1",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+            RebaseEnv::Default,
+            false,
+        ),
     ];
 
     for (name, args, checkout_main, onto_fixture, env_kind, compare_dates) in cases {
@@ -2728,7 +3027,11 @@ fn rebase_remaining_helper_free_option_family_matches_stock_git() {
 fn rebase_root_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool); 3] = [
         ("root_current_branch", &["rebase", "--root"], false),
-        ("root_explicit_branch", &["rebase", "--root", "topic"], false),
+        (
+            "root_explicit_branch",
+            &["rebase", "--root", "topic"],
+            false,
+        ),
         (
             "root_onto_explicit_branch",
             &["rebase", "--root", "--onto", "origin/main", "topic"],
@@ -2751,19 +3054,26 @@ fn rebase_root_option_family_matches_stock_git() {
             git(git_repo.path(), ["checkout", "main"]);
             git(zmin_repo.path(), ["checkout", "main"]);
             git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
-            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
             git(git_repo.path(), ["checkout", "main"]);
             git(zmin_repo.path(), ["checkout", "main"]);
         } else if name == "root_explicit_branch" {
             git(git_repo.path(), ["checkout", "main"]);
             git(zmin_repo.path(), ["checkout", "main"]);
             git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
-            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
             git(git_repo.path(), ["checkout", "main"]);
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -2794,7 +3104,12 @@ fn rebase_root_option_family_matches_stock_git() {
 #[test]
 fn rebase_apply_backend_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool, bool); 6] = [
-        ("apply_upstream", &["rebase", "--apply", "origin/main"], false, false),
+        (
+            "apply_upstream",
+            &["rebase", "--apply", "origin/main"],
+            false,
+            false,
+        ),
         (
             "apply_branch",
             &["rebase", "--apply", "origin/main", "topic"],
@@ -2803,7 +3118,14 @@ fn rebase_apply_backend_option_family_matches_stock_git() {
         ),
         (
             "apply_onto",
-            &["rebase", "--apply", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--apply",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2821,7 +3143,14 @@ fn rebase_apply_backend_option_family_matches_stock_git() {
         ),
         (
             "whitespace_warn_onto",
-            &["rebase", "--whitespace=warn", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--whitespace=warn",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2848,7 +3177,8 @@ fn rebase_apply_backend_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 
@@ -2893,19 +3223,43 @@ fn rebase_verbose_and_stat_option_family_matches_stock_git() {
         ),
         (
             "verbose_onto",
-            &["rebase", "--verbose", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--verbose",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
         ("v_upstream", &["rebase", "-v", "origin/main"], false, false),
-        ("v_branch", &["rebase", "-v", "origin/main", "topic"], true, false),
+        (
+            "v_branch",
+            &["rebase", "-v", "origin/main", "topic"],
+            true,
+            false,
+        ),
         (
             "v_onto",
-            &["rebase", "-v", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "-v",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
-        ("stat_upstream", &["rebase", "--stat", "origin/main"], false, false),
+        (
+            "stat_upstream",
+            &["rebase", "--stat", "origin/main"],
+            false,
+            false,
+        ),
         (
             "stat_branch",
             &["rebase", "--stat", "origin/main", "topic"],
@@ -2914,7 +3268,14 @@ fn rebase_verbose_and_stat_option_family_matches_stock_git() {
         ),
         (
             "stat_onto",
-            &["rebase", "--stat", "--onto", "origin/main", "origin/oldbase", "topic"],
+            &[
+                "rebase",
+                "--stat",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
             false,
             true,
         ),
@@ -2941,7 +3302,8 @@ fn rebase_verbose_and_stat_option_family_matches_stock_git() {
             git(zmin_repo.path(), ["checkout", "main"]);
         }
 
-        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
         let zmin_output =
             command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
 

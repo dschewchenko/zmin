@@ -6,14 +6,178 @@ use std::io::{self, Read, Write};
 use zmin_git_core::commit::CommitObjectCache;
 use zmin_primitives::git_runtime::GitPrimitiveRuntime;
 
-pub(crate) type TrackedPathSet<'a> = HashSet<&'a [u8]>;
+pub(crate) struct TrackedPathSet<'a> {
+    exact_paths: Vec<&'a [u8]>,
+    folded_paths: HashSet<Vec<u8>>,
+    directory_paths: Vec<&'a [u8]>,
+    folded_directory_paths: HashSet<Vec<u8>>,
+    tracked_directories: Vec<&'a [u8]>,
+    folded_directories: HashSet<Vec<u8>>,
+    ignore_case: bool,
+}
+
+impl<'a> TrackedPathSet<'a> {
+    pub(crate) fn contains(&self, path: &[u8]) -> bool {
+        sorted_path_slices_contain(&self.exact_paths, path)
+            || (self.ignore_case
+                && folded_tracked_path_contains(&self.exact_paths, &self.folded_paths, path))
+    }
+
+    pub(crate) fn has_tracked_descendants(&self, relative_dir: &[u8]) -> bool {
+        sorted_path_slices_contain(&self.tracked_directories, relative_dir)
+            || (self.ignore_case
+                && folded_tracked_directory_contains(
+                    &self.tracked_directories,
+                    &self.folded_directories,
+                    relative_dir,
+                ))
+    }
+
+    fn contains_directory(&self, path: &[u8]) -> bool {
+        sorted_path_slices_contain(&self.directory_paths, path)
+            || (self.ignore_case
+                && folded_tracked_path_contains(
+                    &self.directory_paths,
+                    &self.folded_directory_paths,
+                    path,
+                ))
+    }
+}
 
 pub(crate) fn tracked_path_set(index: &GitIndex) -> TrackedPathSet<'_> {
-    index
+    tracked_path_set_with_ignore_case(index, false)
+}
+
+pub(crate) fn tracked_path_set_with_ignore_case(
+    index: &GitIndex,
+    ignore_case: bool,
+) -> TrackedPathSet<'_> {
+    let mut exact_paths = index
         .entries()
         .iter()
         .map(|entry| entry.path.as_slice())
-        .collect()
+        .collect::<Vec<_>>();
+    exact_paths.sort_unstable();
+    exact_paths.dedup();
+    let mut directory_paths = index
+        .entries()
+        .iter()
+        .filter(|entry| matches!(entry.mode, IndexMode::Gitlink | IndexMode::Tree))
+        .map(|entry| entry.path.as_slice())
+        .collect::<Vec<_>>();
+    directory_paths.sort_unstable();
+    directory_paths.dedup();
+    let mut tracked_directories = index
+        .entries()
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .path
+                .iter()
+                .enumerate()
+                .filter_map(|(index, byte)| (*byte == b'/').then_some(&entry.path[..index]))
+        })
+        .collect::<Vec<_>>();
+    tracked_directories.sort_unstable();
+    tracked_directories.dedup();
+    let mut folded_paths = HashSet::new();
+    let mut folded_directory_paths = HashSet::new();
+    let mut folded_directories = HashSet::new();
+    if ignore_case {
+        for entry in index.entries() {
+            let folded_path = fold_ascii_path(&entry.path);
+            if folded_path != entry.path {
+                if matches!(entry.mode, IndexMode::Gitlink | IndexMode::Tree) {
+                    folded_directory_paths.insert(folded_path.clone());
+                }
+                folded_paths.insert(folded_path);
+            }
+            for ancestor in index_path_ancestors(&entry.path) {
+                let folded_ancestor = fold_ascii_path(&ancestor);
+                if folded_ancestor != ancestor {
+                    folded_directories.insert(folded_ancestor);
+                }
+            }
+        }
+    }
+    TrackedPathSet {
+        exact_paths,
+        folded_paths,
+        directory_paths,
+        folded_directory_paths,
+        tracked_directories,
+        folded_directories,
+        ignore_case,
+    }
+}
+
+fn fold_ascii_path(path: &[u8]) -> Vec<u8> {
+    path.iter().map(u8::to_ascii_lowercase).collect()
+}
+
+fn sorted_path_slices_contain(paths: &[&[u8]], path: &[u8]) -> bool {
+    paths.binary_search(&path).is_ok()
+}
+
+fn folded_tracked_path_contains(
+    exact_paths: &[&[u8]],
+    folded_paths: &HashSet<Vec<u8>>,
+    path: &[u8],
+) -> bool {
+    if path.iter().any(u8::is_ascii_uppercase) {
+        let folded = fold_ascii_path(path);
+        sorted_path_slices_contain(exact_paths, &folded) || folded_paths.contains(&folded)
+    } else {
+        folded_paths.contains(path)
+    }
+}
+
+fn folded_tracked_directory_contains(
+    tracked_directories: &[&[u8]],
+    folded_directories: &HashSet<Vec<u8>>,
+    relative_dir: &[u8],
+) -> bool {
+    if relative_dir.iter().any(u8::is_ascii_uppercase) {
+        let folded = fold_ascii_path(relative_dir);
+        sorted_path_slices_contain(tracked_directories, &folded)
+            || folded_directories.contains(&folded)
+    } else {
+        folded_directories.contains(relative_dir)
+    }
+}
+
+fn relative_child_path(relative_dir: &[u8], entry_name: &std::ffi::OsStr) -> Vec<u8> {
+    let entry = entry_name.to_string_lossy();
+    let mut relative = Vec::with_capacity(
+        relative_dir.len() + usize::from(!relative_dir.is_empty()) + entry.len(),
+    );
+    relative.extend_from_slice(relative_dir);
+    if !relative_dir.is_empty() {
+        relative.push(b'/');
+    }
+    relative.extend_from_slice(entry.as_bytes());
+    relative
+}
+
+fn tracked_path_set_for_repo<'a>(
+    repo: &GitRepo,
+    index: &'a GitIndex,
+) -> Result<TrackedPathSet<'a>> {
+    Ok(tracked_path_set_with_ignore_case(
+        index,
+        repo_ignore_case(repo)?,
+    ))
+}
+
+fn repo_ignore_case(repo: &GitRepo) -> Result<bool> {
+    Ok(read_local_config_entries(repo)?
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "core" && entry.subsection.is_empty() && entry.key == "ignorecase"
+        })
+        .and_then(|entry| entry.bool_value())
+        .unwrap_or(false))
 }
 
 struct CleanOptions {
@@ -59,7 +223,7 @@ pub(crate) fn clean(args: Vec<String>) -> Result<()> {
     }
 
     let index = read_repo_index(&repo)?;
-    let tracked_paths = tracked_path_set(&index);
+    let tracked_paths = tracked_path_set_for_repo(&repo, &index)?;
     let mut ignore = GitIgnore::load_from_root(&repo.root)?;
     let extra_ignore = GitIgnore::parse(&options.excludes.join("\n"));
     if !options.ignored {
@@ -366,13 +530,6 @@ fn clean_untracked_files(
     directories: bool,
     mode: CleanIgnoredMode,
 ) -> Result<Vec<Vec<u8>>> {
-    if mode == CleanIgnoredMode::Normal {
-        return Ok(untracked_files(root, tracked_paths, ignore)?
-            .into_iter()
-            .filter(|entry| directories || !entry.ends_with(b"/"))
-            .collect());
-    }
-
     let mut files = Vec::new();
     collect_clean_untracked_files(
         root,
@@ -407,16 +564,7 @@ fn collect_clean_untracked_files(
         let is_dir = metadata.is_dir();
         let is_ignored = ignore.is_ignored(&relative, is_dir);
         if is_dir {
-            if mode == CleanIgnoredMode::Only && !is_ignored {
-                collect_clean_untracked_files(
-                    root,
-                    &path,
-                    tracked_paths,
-                    ignore,
-                    directories,
-                    mode,
-                    files,
-                )?;
+            if mode == CleanIgnoredMode::Normal && is_ignored {
                 continue;
             }
             if tracked_paths_under(tracked_paths, &relative) {
@@ -429,19 +577,72 @@ fn collect_clean_untracked_files(
                     mode,
                     files,
                 )?;
-            } else if directories {
+                continue;
+            }
+            if !directories {
+                continue;
+            }
+            if clean_directory_fully_removable(root, &path, tracked_paths, ignore, mode)? {
                 let mut dir = relative;
                 dir.push(b'/');
                 files.push(dir);
+            } else {
+                collect_clean_untracked_files(
+                    root,
+                    &path,
+                    tracked_paths,
+                    ignore,
+                    directories,
+                    mode,
+                    files,
+                )?;
             }
         } else if (metadata.is_file() || metadata.file_type().is_symlink())
             && !tracked_paths.contains(relative.as_slice())
-            && (mode == CleanIgnoredMode::All || is_ignored)
+            && clean_mode_removes_path(mode, is_ignored)
         {
             files.push(relative);
         }
     }
     Ok(())
+}
+
+fn clean_mode_removes_path(mode: CleanIgnoredMode, is_ignored: bool) -> bool {
+    match mode {
+        CleanIgnoredMode::Normal => !is_ignored,
+        CleanIgnoredMode::All => true,
+        CleanIgnoredMode::Only => is_ignored,
+    }
+}
+
+fn clean_directory_fully_removable(
+    root: &Path,
+    directory: &Path,
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+    mode: CleanIgnoredMode,
+) -> Result<bool> {
+    if is_nested_worktree(directory) {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        let relative = repo_relative_path(root, &path)?;
+        if tracked_paths.contains(&relative) || tracked_paths_under(tracked_paths, &relative) {
+            return Ok(false);
+        }
+        let is_dir = metadata.is_dir();
+        let is_ignored = ignore.is_ignored(&relative, is_dir);
+        if !clean_mode_removes_path(mode, is_ignored) {
+            return Ok(false);
+        }
+        if is_dir && !clean_directory_fully_removable(root, &path, tracked_paths, ignore, mode)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub(crate) fn status(
@@ -464,7 +665,10 @@ pub(crate) fn status(
     let ignored_mode = IgnoredMode::parse(ignored)?;
     let porcelain_version = match porcelain {
         None => PorcelainVersion::V1,
+        Some("1") => PorcelainVersion::V1,
         Some("v1") => PorcelainVersion::V1,
+        Some("2") if short => PorcelainVersion::V1,
+        Some("2") => PorcelainVersion::V2,
         Some("v2") if short => PorcelainVersion::V1,
         Some("v2") => PorcelainVersion::V2,
         Some(value) => {
@@ -488,10 +692,17 @@ pub(crate) fn status(
             message: "this operation must be run in a work tree".into(),
         });
     }
-    repo_object_format(&repo)?;
+    {
+        let _trace = phase_trace("status.repo_object_format");
+        repo_object_format(&repo)?;
+    }
     let machine_readable = porcelain.is_some() || short || null;
-    let column_untracked = status_column_untracked(&repo, column, no_column)?;
+    let column_untracked = {
+        let _trace = phase_trace("status.column_config");
+        status_column_untracked(&repo, column, no_column)?
+    };
     let stash_count = if show_stash {
+        let _trace = phase_trace("status.stash_count");
         Some(status_stash_count(&repo)?)
     } else {
         None
@@ -507,16 +718,61 @@ pub(crate) fn status(
         }
     }
 
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let runtime = {
+        let _trace = phase_trace("status.runtime_init");
+        CliPrimitiveRuntime::new_default(&repo)
+    };
     let head_tree = {
         let _trace = phase_trace("status.read_head_tree");
         read_head_tree_id_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?
     };
-    let index = if repo.index_path.exists() {
+    let index = {
         let _trace = phase_trace("status.read_index");
-        read_index(&repo.index_path)?
-    } else {
-        GitIndex::new()
+        if config_bool_enabled(&repo, "core.splitIndex")?
+            && fs::read(&repo.index_path)
+                .map(|bytes| !bytes.windows(4).any(|window| window == b"link"))
+                .unwrap_or(false)
+        {
+            super::admin_commands::ensure_split_index(&repo.index_path)?;
+        }
+        let raw_index = read_repo_index_raw(&repo)?;
+        let raw_sparse = index_has_sparse_directories(&raw_index);
+        let sparse_index_enabled = config_bool_enabled(&repo, "index.sparse")?;
+        let materialized_sparse_directory = raw_index.entries().iter().any(|entry| {
+            entry.stage == 0
+                && entry.mode == IndexMode::Tree
+                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+        });
+        let mut index = {
+            let _region = (raw_sparse && (!sparse_index_enabled || materialized_sparse_directory))
+                .then(|| trace2_region("index", "ensure_full_index"));
+            if raw_sparse {
+                expand_repo_sparse_index(&repo, &raw_index)?
+            } else {
+                raw_index
+            }
+        };
+        if materialized_sparse_directory && sparse_index_expansion_advice_enabled(&repo)? {
+            eprintln!(
+                "The sparse index is expanding to a full index, a slow operation.\n\
+Your working directory likely has contents that are outside of\n\
+your sparse-checkout patterns. Use 'git sparse-checkout list' to\n\
+see your sparse-checkout definition and compare it to your working\n\
+directory contents. Running 'git clean' may assist in this cleanup."
+            );
+        }
+        if raw_sparse && (!sparse_index_enabled || materialized_sparse_directory) {
+            index.write_to_path(&repo.index_path)?;
+        } else if !raw_sparse && sparse_index_enabled && sparse_checkout_active(&repo)? {
+            let store = LooseObjectStore::new(repo.objects_dir.clone(), index.hash_algorithm());
+            let collapsed = collapse_sparse_index(&repo, &store, &index)?;
+            if index_has_sparse_directories(&collapsed) {
+                let _region = trace2_region("index", "convert_to_sparse");
+                collapsed.write_to_path(&repo.index_path)?;
+            }
+        }
+        refresh_materialized_sparse_index_entries(&repo, &mut index)?;
+        index
     };
     let pathspecs = {
         let _trace = phase_trace("status.pathspecs");
@@ -579,6 +835,9 @@ pub(crate) fn status(
             }
             paths.entry(path).or_default().worktree_status = code;
         }
+    }
+    {
+        let _trace = phase_trace("status.submodule_states");
         apply_status_submodule_worktree_states(
             &repo,
             status_index,
@@ -587,23 +846,60 @@ pub(crate) fn status(
         )?;
     }
 
-    let tracked_paths = tracked_path_set(&index);
-    let untracked = if untracked_mode == UntrackedMode::No {
-        Vec::new()
-    } else {
-        let _trace = phase_trace("status.untracked");
-        let ignore = status_excludes(&repo)?;
-        untracked_files_with_mode(&repo.root, &tracked_paths, &ignore, untracked_mode, true)?
+    let tracked_paths = {
+        let _trace = phase_trace("status.tracked_paths");
+        tracked_path_set_for_repo(&repo, &index)?
     };
-    let ignored = if ignored_mode == IgnoredMode::No {
-        Vec::new()
+    let status_ignore = if untracked_mode == UntrackedMode::No && ignored_mode == IgnoredMode::No {
+        None
     } else {
-        let _trace = phase_trace("status.ignored");
-        let ignore = status_excludes(&repo)?;
-        ignored_untracked_files_for_status(&repo.root, &tracked_paths, &ignore)?
+        let _trace = phase_trace("status.ignore_graph");
+        Some(status_excludes(&repo, &tracked_paths)?)
     };
+    let (untracked, ignored) =
+        if untracked_mode != UntrackedMode::No && ignored_mode != IgnoredMode::No {
+            let _trace = phase_trace("status.untracked_ignored");
+            status_untracked_and_ignored_files(
+                &repo.root,
+                &tracked_paths,
+                status_ignore
+                    .as_ref()
+                    .expect("status ignore graph for combined untracked/ignored scan"),
+                untracked_mode,
+                true,
+            )?
+        } else {
+            let untracked = if untracked_mode == UntrackedMode::No {
+                Vec::new()
+            } else {
+                let _trace = phase_trace("status.untracked");
+                untracked_files_with_mode(
+                    &repo.root,
+                    &tracked_paths,
+                    status_ignore
+                        .as_ref()
+                        .expect("status ignore graph for untracked scan"),
+                    untracked_mode,
+                    true,
+                )?
+            };
+            let ignored = if ignored_mode == IgnoredMode::No {
+                Vec::new()
+            } else {
+                let _trace = phase_trace("status.ignored");
+                ignored_untracked_files_for_status(
+                    &repo.root,
+                    &tracked_paths,
+                    status_ignore
+                        .as_ref()
+                        .expect("status ignore graph for ignored scan"),
+                )?
+            };
+            (untracked, ignored)
+        };
     if !machine_readable {
         let _trace = phase_trace("status.render_human");
+        let display_comment_prefix = status_display_comment_prefix(&repo)?;
         print_human_status(
             &repo,
             &paths,
@@ -614,6 +910,7 @@ pub(crate) fn status(
             untracked_mode,
             stash_count.unwrap_or(0),
             column_untracked,
+            display_comment_prefix,
         )?;
         print_status_verbose_diff(verbose, diff_paths)?;
         return Ok(());
@@ -676,20 +973,34 @@ pub(crate) fn status(
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
-        for (_, row) in rows {
-            write_status_record(&row, null)?;
-        }
-        for path in untracked
-            .into_iter()
-            .filter(|path| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
-        {
-            write_status_record(&format!("?? {}", String::from_utf8_lossy(&path)), null)?;
-        }
-        for path in ignored
-            .into_iter()
-            .filter(|path| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
-        {
-            write_status_record(&format!("!! {}", String::from_utf8_lossy(&path)), null)?;
+        let mut output_rows = rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
+        output_rows.extend(
+            untracked
+                .into_iter()
+                .filter(|path| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
+                .map(|path| format!("?? {}", String::from_utf8_lossy(&path))),
+        );
+        output_rows.extend(
+            ignored
+                .into_iter()
+                .filter(|path| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
+                .map(|path| format!("!! {}", String::from_utf8_lossy(&path))),
+        );
+        if null {
+            use std::io::Write;
+            let total_bytes = output_rows.iter().map(|row| row.len() + 1).sum();
+            let mut output = Vec::with_capacity(total_bytes);
+            for row in &output_rows {
+                output.extend_from_slice(row.as_bytes());
+                output.push(b'\0');
+            }
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(&output)?;
+        } else {
+            let mut stdout = std::io::stdout().lock();
+            for row in &output_rows {
+                writeln!(stdout, "{row}")?;
+            }
         }
     }
     Ok(())
@@ -777,8 +1088,10 @@ fn print_porcelain_v2_status(
     stash_count: usize,
     null: bool,
 ) -> Result<()> {
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
     if stash_count > 0 {
-        write_status_record(&format!("# stash {stash_count}"), null)?;
+        write_status_record_to(&mut out, &format!("# stash {stash_count}"), null)?;
     }
     let mut rows = paths
         .iter()
@@ -833,19 +1146,27 @@ fn print_porcelain_v2_status(
         .collect::<Result<Vec<_>>>()?;
     rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
     for (_, row) in rows {
-        write_status_record(&row, null)?;
+        write_status_record_to(&mut out, &row, null)?;
     }
     for path in untracked
         .iter()
         .filter(|path| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
     {
-        write_status_record(&format!("? {}", String::from_utf8_lossy(path)), null)?;
+        write_status_record_to(
+            &mut out,
+            &format!("? {}", String::from_utf8_lossy(path)),
+            null,
+        )?;
     }
     for path in ignored
         .iter()
         .filter(|path| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
     {
-        write_status_record(&format!("! {}", String::from_utf8_lossy(path)), null)?;
+        write_status_record_to(
+            &mut out,
+            &format!("! {}", String::from_utf8_lossy(path)),
+            null,
+        )?;
     }
     Ok(())
 }
@@ -870,7 +1191,7 @@ fn status_v2_metadata(
         Some(tree) => find_tree_entry(store, tree, old_path.unwrap_or(path))?,
         None => None,
     };
-    let entry = status_find_index_entry(index, path);
+    let entry = find_index_entry(index, path);
     let head_mode = head
         .as_ref()
         .map(|entry| status_v2_tree_mode(entry.mode))
@@ -900,13 +1221,17 @@ fn status_v2_metadata(
 }
 
 fn write_status_record(row: &str, null: bool) -> Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    write_status_record_to(&mut out, row, null)
+}
+
+fn write_status_record_to(out: &mut impl Write, row: &str, null: bool) -> Result<()> {
     if null {
-        use std::io::Write;
-        let mut stdout = std::io::stdout().lock();
-        stdout.write_all(row.as_bytes())?;
-        stdout.write_all(b"\0")?;
+        out.write_all(row.as_bytes())?;
+        out.write_all(b"\0")?;
     } else {
-        println!("{row}");
+        writeln!(out, "{row}")?;
     }
     Ok(())
 }
@@ -978,13 +1303,20 @@ fn porcelain_v2_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<Vec<
     Ok(rows)
 }
 
-fn status_excludes(repo: &GitRepo) -> Result<GitIgnore> {
+fn status_excludes(repo: &GitRepo, tracked_paths: &TrackedPathSet<'_>) -> Result<GitIgnore> {
     let mut ignore = GitIgnore::default();
     if let Some(path) = ls_files_global_excludes_file(repo)? {
         append_ignore_file(&mut ignore, &path, "")?;
     }
     append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
-    append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
+    append_per_directory_excludes_pruned(
+        &repo.root,
+        &repo.root,
+        b"",
+        ".gitignore",
+        &mut ignore,
+        tracked_paths,
+    )?;
     Ok(ignore)
 }
 
@@ -1051,6 +1383,13 @@ fn apply_status_submodule_worktree_states(
         .iter()
         .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
     {
+        if ignore_mode == StatusIgnoreSubmodulesMode::All {
+            if let Some(path_state) = paths.get_mut(entry.path.as_slice()) {
+                path_state.worktree_status = ' ';
+                path_state.submodule = None;
+            }
+            continue;
+        }
         let submodule_path = repo
             .root
             .join(String::from_utf8_lossy(&entry.path).as_ref());
@@ -1060,6 +1399,9 @@ fn apply_status_submodule_worktree_states(
         let path_state = paths.entry(entry.path.to_vec()).or_default();
         path_state.worktree_status = 'M';
         path_state.submodule = Some(state);
+    }
+    if ignore_mode == StatusIgnoreSubmodulesMode::All {
+        paths.retain(|_, state| state.index_status != ' ' || state.worktree_status != ' ');
     }
     Ok(())
 }
@@ -1090,8 +1432,8 @@ fn status_submodule_state(
     .is_empty();
     let worktree_dirty = !worktree_status(&submodule_repo, &submodule_index)?.is_empty();
     let modified = index_dirty || worktree_dirty;
-    let tracked_paths = tracked_path_set(&submodule_index);
-    let ignore = status_excludes(&submodule_repo)?;
+    let tracked_paths = tracked_path_set_for_repo(&submodule_repo, &submodule_index)?;
+    let ignore = status_excludes(&submodule_repo, &tracked_paths)?;
     let untracked = !untracked_files_with_mode(
         &submodule_repo.root,
         &tracked_paths,
@@ -1126,9 +1468,6 @@ fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
     match verbose {
         0 => Ok(()),
         1 => {
-            if paths.is_empty() {
-                return Ok(());
-            }
             println!();
             super::diff_commands::diff(DiffOptions {
                 cached: true,
@@ -1180,118 +1519,19 @@ where
             })
             .collect());
     };
+    if index.cached_root_tree_id() == Some(head_tree) {
+        return Ok(Vec::new());
+    }
+    let tree_cache = TreeObjectCache::new(store);
+    let head_index = tree_cache.read_tree_to_index(head_tree)?;
     if detect_renames {
-        let tree_cache = TreeObjectCache::new(store);
-        let head_index = tree_cache.read_tree_to_index(head_tree)?;
         let mut diff = diff_indexes_with_exact_renames(&head_index, index)?;
         diff.sort_by(|left, right| left.path.cmp(&right.path));
         return Ok(diff);
     }
-    let tree_cache = TreeObjectCache::new(store);
-    let mut seen = HashSet::new();
-    let mut diff = Vec::new();
-    let mut path = Vec::new();
-    status_head_tree_diff(
-        &tree_cache,
-        head_tree,
-        index,
-        &mut path,
-        &mut seen,
-        &mut diff,
-    )?;
-    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
-        if !seen.contains(entry.path.as_slice()) {
-            diff.push(IndexDiffEntry {
-                status: IndexDiffStatus::Added,
-                path: entry.path.to_vec(),
-                old_path: None,
-                similarity: None,
-            });
-        }
-    }
+    let mut diff = diff_indexes(&head_index, index)?;
     diff.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(diff)
-}
-
-fn status_head_tree_diff<S>(
-    tree_cache: &TreeObjectCache<'_, S>,
-    tree_id: &ObjectId,
-    index: &GitIndex,
-    path: &mut Vec<u8>,
-    seen: &mut HashSet<Vec<u8>>,
-    diff: &mut Vec<IndexDiffEntry>,
-) -> Result<()>
-where
-    S: GitObjectStore,
-    S: ?Sized,
-{
-    for entry in tree_cache.read_tree(tree_id)?.iter() {
-        let original_len = path.len();
-        path.extend_from_slice(&entry.name);
-        match entry.mode {
-            TreeMode::Tree => {
-                path.push(b'/');
-                status_head_tree_diff(tree_cache, &entry.id, index, path, seen, diff)?;
-            }
-            TreeMode::File | TreeMode::Executable | TreeMode::Symlink | TreeMode::Gitlink => {
-                seen.insert(path.clone());
-                match status_find_index_entry(index, path) {
-                    Some(index_entry)
-                        if index_entry.id == entry.id
-                            && index_entry.mode
-                                == index_mode_from_tree_mode_for_status(entry.mode) => {}
-                    Some(_) => diff.push(IndexDiffEntry {
-                        status: IndexDiffStatus::Modified,
-                        path: path.clone(),
-                        old_path: None,
-                        similarity: None,
-                    }),
-                    None => diff.push(IndexDiffEntry {
-                        status: IndexDiffStatus::Deleted,
-                        path: path.clone(),
-                        old_path: None,
-                        similarity: None,
-                    }),
-                }
-            }
-        }
-        path.truncate(original_len);
-    }
-    Ok(())
-}
-
-fn status_find_index_entry<'a>(index: &'a GitIndex, path: &[u8]) -> Option<&'a IndexEntry> {
-    let entries = index.entries();
-    let mut left = 0usize;
-    let mut right = entries.len();
-    while left < right {
-        let mid = left + (right - left) / 2;
-        match entries[mid].path.as_slice().cmp(path) {
-            std::cmp::Ordering::Less => left = mid + 1,
-            std::cmp::Ordering::Greater => right = mid,
-            std::cmp::Ordering::Equal => {
-                let mut idx = mid;
-                while idx > 0 && entries[idx - 1].path.as_slice() == path {
-                    idx -= 1;
-                }
-                return entries[idx..]
-                    .iter()
-                    .take_while(|entry| entry.path.as_slice() == path)
-                    .find(|entry| entry.stage == 0);
-            }
-        }
-    }
-    None
-}
-
-fn index_mode_from_tree_mode_for_status(mode: TreeMode) -> IndexMode {
-    match mode {
-        TreeMode::File => IndexMode::File,
-        TreeMode::Executable => IndexMode::Executable,
-        TreeMode::Symlink => IndexMode::Symlink,
-        TreeMode::Gitlink => IndexMode::Gitlink,
-        TreeMode::Tree => IndexMode::Tree,
-    }
 }
 
 fn status_unmerged_code(index: &GitIndex, path: &[u8]) -> (char, char) {
@@ -1380,19 +1620,59 @@ fn print_human_status(
     untracked_mode: UntrackedMode,
     stash_count: usize,
     column_untracked: bool,
+    display_comment_prefix: bool,
 ) -> Result<()> {
+    macro_rules! status_line {
+        () => {
+            print_human_status_line(display_comment_prefix, "")
+        };
+        ($($argument:tt)*) => {
+            print_human_status_line(display_comment_prefix, &format!($($argument)*))
+        };
+    }
+
+    let status_hints_enabled = advice_status_hints_enabled(repo)?;
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
     let head_has_commit = refs.resolve("HEAD").is_ok();
-    println!("{}", human_status_branch_header(&refs)?);
+    status_line!("{}", human_status_branch_header(&refs)?);
     if !head_has_commit {
-        println!();
-        println!("No commits yet");
+        status_line!();
+        status_line!("No commits yet");
     }
     let mut printed_body = !head_has_commit;
     if head_has_commit && let Some(lines) = human_status_upstream(repo, &refs, ahead_behind)? {
         for line in lines {
-            println!("{line}");
+            status_line!("{line}");
+        }
+        printed_body = true;
+    }
+    if sparse_checkout_active(repo)? {
+        let sparse_index_collapsed = config_bool_enabled(repo, "index.sparse")?
+            && read_repo_index_raw(repo)?
+                .entries()
+                .iter()
+                .any(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree);
+        if sparse_index_collapsed {
+            status_line!("You are in a sparse checkout.");
+        } else {
+            let index = read_repo_index(repo)?;
+            let total = index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0)
+                .count();
+            let present = index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0 && !entry.skip_worktree())
+                .count();
+            let percent = if total == 0 {
+                100
+            } else {
+                present * 100 / total
+            };
+            status_line!("You are in a sparse checkout with {percent}% of tracked files present.");
         }
         printed_body = true;
     }
@@ -1433,13 +1713,13 @@ fn print_human_status(
 
     if !staged.is_empty() {
         if printed_body {
-            println!();
+            status_line!();
         }
-        println!("Changes to be committed:");
+        status_line!("Changes to be committed:");
         if head_has_commit {
-            println!("  (use \"git restore --staged <file>...\" to unstage)");
+            status_line!("  (use \"git restore --staged <file>...\" to unstage)");
         } else {
-            println!("  (use \"git rm --cached <file>...\" to unstage)");
+            status_line!("  (use \"git rm --cached <file>...\" to unstage)");
         }
         for (path, status, old_path) in &staged {
             let display = if let Some(old_path) = old_path {
@@ -1451,30 +1731,30 @@ fn print_human_status(
             } else {
                 String::from_utf8_lossy(path).into_owned()
             };
-            println!("\t{:<12}{}", human_status_label(*status), display);
+            status_line!("\t{:<12}{}", human_status_label(*status), display);
         }
         printed_body = true;
     }
 
     if !worktree.is_empty() {
         if printed_body {
-            println!();
+            status_line!();
         }
-        println!("Changes not staged for commit:");
+        status_line!("Changes not staged for commit:");
         if worktree.iter().any(|(_, status, _)| *status == 'D') {
-            println!("  (use \"git add/rm <file>...\" to update what will be committed)");
+            status_line!("  (use \"git add/rm <file>...\" to update what will be committed)");
         } else {
-            println!("  (use \"git add <file>...\" to update what will be committed)");
+            status_line!("  (use \"git add <file>...\" to update what will be committed)");
         }
-        println!("  (use \"git restore <file>...\" to discard changes in working directory)");
+        status_line!("  (use \"git restore <file>...\" to discard changes in working directory)");
         if worktree.iter().any(|(_, _, submodule)| submodule.is_some()) {
-            println!("  (commit or discard the untracked or modified content in submodules)");
+            status_line!("  (commit or discard the untracked or modified content in submodules)");
         }
         for (path, status, submodule) in &worktree {
             let suffix = submodule
                 .and_then(StatusSubmoduleState::human_suffix)
                 .unwrap_or_default();
-            println!(
+            status_line!(
                 "\t{:<12}{}{}",
                 human_status_label(*status),
                 String::from_utf8_lossy(path),
@@ -1486,15 +1766,17 @@ fn print_human_status(
 
     if !untracked.is_empty() {
         if printed_body {
-            println!();
+            status_line!();
         }
-        println!("Untracked files:");
-        println!("  (use \"git add <file>...\" to include in what will be committed)");
+        status_line!("Untracked files:");
+        if status_hints_enabled {
+            status_line!("  (use \"git add <file>...\" to include in what will be committed)");
+        }
         if column_untracked {
-            print_status_path_columns(&untracked);
+            print_status_path_columns(&untracked, display_comment_prefix);
         } else {
             for path in &untracked {
-                println!("\t{}", String::from_utf8_lossy(path));
+                status_line!("\t{}", String::from_utf8_lossy(path));
             }
         }
         printed_body = true;
@@ -1502,38 +1784,44 @@ fn print_human_status(
 
     if !ignored.is_empty() {
         if printed_body {
-            println!();
+            status_line!();
         }
-        println!("Ignored files:");
-        println!("  (use \"git add -f <file>...\" to include in what will be committed)");
+        status_line!("Ignored files:");
+        if status_hints_enabled {
+            status_line!("  (use \"git add -f <file>...\" to include in what will be committed)");
+        }
         for path in &ignored {
-            println!("\t{}", String::from_utf8_lossy(path));
+            status_line!("\t{}", String::from_utf8_lossy(path));
         }
         printed_body = true;
     }
 
     if staged.is_empty() {
         if printed_body {
-            println!();
+            status_line!();
         }
         if !worktree.is_empty() {
-            println!("no changes added to commit (use \"git add\" and/or \"git commit -a\")");
+            status_line!("no changes added to commit (use \"git add\" and/or \"git commit -a\")");
         } else if !untracked.is_empty() {
-            println!(
-                "nothing added to commit but untracked files present (use \"git add\" to track)"
-            );
+            if status_hints_enabled {
+                status_line!(
+                    "nothing added to commit but untracked files present (use \"git add\" to track)"
+                );
+            } else {
+                status_line!("nothing added to commit but untracked files present");
+            }
         } else if head_has_commit && untracked_mode == UntrackedMode::No {
-            println!("nothing to commit (use -u to show untracked files)");
+            status_line!("nothing to commit (use -u to show untracked files)");
         } else if head_has_commit {
-            println!("nothing to commit, working tree clean");
+            status_line!("nothing to commit, working tree clean");
         } else {
-            println!("nothing to commit (create/copy files and use \"git add\" to track)");
+            status_line!("nothing to commit (create/copy files and use \"git add\" to track)");
         }
     } else if worktree.is_empty() && untracked.is_empty() {
-        println!();
+        status_line!();
     }
     if stash_count > 0 {
-        println!(
+        status_line!(
             "Your stash currently has {stash_count} {}",
             plural(stash_count, "entry", "entries")
         );
@@ -1541,7 +1829,58 @@ fn print_human_status(
     Ok(())
 }
 
-fn print_status_path_columns(paths: &[Vec<u8>]) {
+fn status_display_comment_prefix(repo: &GitRepo) -> Result<bool> {
+    let Some(entry) = read_config_entry(repo, "status.displayCommentPrefix")? else {
+        return Ok(false);
+    };
+    entry.bool_value().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("bad boolean config value '{}'", entry.value),
+    })
+}
+
+fn print_human_status_line(display_comment_prefix: bool, line: &str) {
+    if !display_comment_prefix {
+        println!("{line}");
+    } else if line.is_empty() {
+        println!("#");
+    } else if line.starts_with('\t') {
+        println!("#{line}");
+    } else {
+        println!("# {line}");
+    }
+}
+
+fn advice_status_hints_enabled(repo: &GitRepo) -> Result<bool> {
+    if let Ok(value) = std::env::var("GIT_ADVICE") {
+        let normalized = value.trim().to_ascii_lowercase();
+        if matches!(normalized.as_str(), "false" | "0" | "no" | "off") {
+            return Ok(false);
+        }
+        if matches!(normalized.as_str(), "true" | "1" | "yes" | "on") {
+            return Ok(true);
+        }
+    }
+    let Some(entry) = read_config_entry(repo, "advice.statusHints")? else {
+        return Ok(true);
+    };
+    entry.bool_value().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("bad boolean config value '{}'", entry.value),
+    })
+}
+
+fn sparse_index_expansion_advice_enabled(repo: &GitRepo) -> Result<bool> {
+    let Some(entry) = read_config_entry(repo, "advice.sparseIndexExpanded")? else {
+        return Ok(true);
+    };
+    entry.bool_value().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("bad boolean config value '{}'", entry.value),
+    })
+}
+
+fn print_status_path_columns(paths: &[Vec<u8>], display_comment_prefix: bool) {
     let items = paths
         .iter()
         .map(|path| String::from_utf8_lossy(path).into_owned())
@@ -1559,20 +1898,20 @@ fn print_status_path_columns(paths: &[Vec<u8>]) {
         .min(items.len());
     let rows = items.len().div_ceil(columns);
     for row in 0..rows {
-        print!("\t");
+        let mut line = String::from("\t");
         for column in 0..columns {
             let index = column * rows + row;
             let Some(item) = items.get(index) else {
                 continue;
             };
             if column + 1 == columns || index + rows >= items.len() {
-                print!("{item}");
+                line.push_str(item);
             } else {
-                print!("{item:<item_width$}");
-                print!("{}", " ".repeat(padding));
+                line.push_str(&format!("{item:<item_width$}"));
+                line.push_str(&" ".repeat(padding));
             }
         }
-        println!();
+        print_human_status_line(display_comment_prefix, &line);
     }
 }
 
@@ -1691,8 +2030,29 @@ pub(crate) fn ignored_untracked_files(
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
 ) -> Result<Vec<Vec<u8>>> {
+    ignored_untracked_files_with_mode(root, tracked_paths, ignore, UntrackedMode::All, true)
+}
+
+fn ignored_untracked_files_with_mode(
+    root: &std::path::Path,
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+) -> Result<Vec<Vec<u8>>> {
     let mut files = Vec::new();
-    collect_ignored_untracked_files(root, root, tracked_paths, ignore, false, &mut files)?;
+    let _ = collect_ignored_untracked_files(
+        root,
+        root,
+        b"",
+        tracked_paths,
+        ignore,
+        mode,
+        include_empty_directories,
+        false,
+        false,
+        &mut files,
+    )?;
     files.sort();
     Ok(files)
 }
@@ -1703,14 +2063,42 @@ pub(crate) fn ignored_untracked_files_for_status(
     ignore: &GitIgnore,
 ) -> Result<Vec<Vec<u8>>> {
     let mut files = Vec::new();
-    collect_ignored_untracked_status(root, root, tracked_paths, ignore, false, &mut files)?;
+    collect_ignored_untracked_status(root, root, b"", tracked_paths, ignore, false, &mut files)?;
     files.sort();
     Ok(files)
+}
+
+pub(crate) fn status_untracked_and_ignored_files(
+    root: &std::path::Path,
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>)> {
+    let mut untracked = Vec::new();
+    let mut ignored = Vec::new();
+    let _ = collect_status_untracked_and_ignored(
+        root,
+        root,
+        b"",
+        tracked_paths,
+        ignore,
+        mode,
+        include_empty_directories,
+        false,
+        false,
+        &mut untracked,
+        &mut ignored,
+    )?;
+    untracked.sort();
+    ignored.sort();
+    Ok((untracked, ignored))
 }
 
 fn collect_ignored_untracked_status(
     root: &std::path::Path,
     dir: &std::path::Path,
+    relative_dir: &[u8],
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     parent_ignored: bool,
@@ -1722,10 +2110,11 @@ fn collect_ignored_untracked_status(
         if entry.file_name() == ".git" {
             continue;
         }
-        let metadata = entry.metadata()?;
-        let relative = repo_relative_path(root, &path)?;
-        let is_ignored = parent_ignored || ignore.is_ignored(&relative, metadata.is_dir());
-        if metadata.is_dir() {
+        let file_type = entry.file_type()?;
+        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let is_dir = file_type.is_dir();
+        let is_ignored = parent_ignored || ignore.is_ignored(&relative, is_dir);
+        if is_dir {
             if is_ignored && !tracked_paths_under(tracked_paths, &relative) {
                 let mut dir = relative;
                 dir.push(b'/');
@@ -1734,6 +2123,7 @@ fn collect_ignored_untracked_status(
                 collect_ignored_untracked_status(
                     root,
                     &path,
+                    &relative,
                     tracked_paths,
                     ignore,
                     is_ignored,
@@ -1741,7 +2131,7 @@ fn collect_ignored_untracked_status(
                 )?;
             }
         } else if is_ignored
-            && (metadata.is_file() || metadata.file_type().is_symlink())
+            && (file_type.is_file() || file_type.is_symlink())
             && !tracked_paths.contains(relative.as_slice())
         {
             files.push(relative);
@@ -1750,12 +2140,130 @@ fn collect_ignored_untracked_status(
     Ok(())
 }
 
+fn collect_status_untracked_and_ignored(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    relative_dir: &[u8],
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+    collapse_untracked_dirs: bool,
+    parent_ignored: bool,
+    untracked: &mut Vec<Vec<u8>>,
+    ignored: &mut Vec<Vec<u8>>,
+) -> Result<bool> {
+    let mut has_reportable_untracked = false;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let file_type = entry.file_type()?;
+        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let is_dir = file_type.is_dir();
+        let is_ignored = parent_ignored || ignore.is_ignored(&relative, is_dir);
+        if is_ignored {
+            if is_dir {
+                if tracked_paths_under(tracked_paths, &relative) {
+                    let child_has_reportable_untracked = collect_status_untracked_and_ignored(
+                        root,
+                        &path,
+                        &relative,
+                        tracked_paths,
+                        ignore,
+                        mode,
+                        include_empty_directories,
+                        collapse_untracked_dirs,
+                        true,
+                        untracked,
+                        ignored,
+                    )?;
+                    if collapse_untracked_dirs {
+                        has_reportable_untracked |= child_has_reportable_untracked;
+                    }
+                } else {
+                    let mut ignored_dir = relative;
+                    ignored_dir.push(b'/');
+                    ignored.push(ignored_dir);
+                }
+            } else if (file_type.is_file() || file_type.is_symlink())
+                && !tracked_paths.contains(relative.as_slice())
+            {
+                ignored.push(relative);
+            }
+            continue;
+        }
+        if is_dir {
+            let tracked_directory = tracked_paths.contains_directory(&relative)
+                || (mode != UntrackedMode::All && tracked_paths.contains(&relative));
+            if is_nested_worktree(&path) && !tracked_directory {
+                if !collapse_untracked_dirs {
+                    let mut directory = relative;
+                    directory.push(b'/');
+                    untracked.push(directory);
+                }
+                has_reportable_untracked = true;
+                continue;
+            }
+            if tracked_directory {
+                continue;
+            }
+            let has_tracked_descendants = tracked_paths_under(tracked_paths, &relative);
+            let collapse_child_dir =
+                !collapse_untracked_dirs && mode != UntrackedMode::All && !has_tracked_descendants;
+            let child_has_reportable_untracked = if collapse_child_dir
+                && mode == UntrackedMode::Directory
+                && include_empty_directories
+            {
+                true
+            } else {
+                collect_status_untracked_and_ignored(
+                    root,
+                    &path,
+                    &relative,
+                    tracked_paths,
+                    ignore,
+                    mode,
+                    include_empty_directories,
+                    collapse_untracked_dirs || collapse_child_dir,
+                    false,
+                    untracked,
+                    ignored,
+                )?
+            };
+            if collapse_untracked_dirs {
+                has_reportable_untracked |= child_has_reportable_untracked;
+            } else if collapse_child_dir {
+                if !child_has_reportable_untracked {
+                    continue;
+                }
+                let mut dir = relative;
+                dir.push(b'/');
+                untracked.push(dir);
+                has_reportable_untracked = true;
+            } else if child_has_reportable_untracked {
+                has_reportable_untracked = true;
+            }
+        } else if (file_type.is_file() || file_type.is_symlink())
+            && !tracked_paths.contains(relative.as_slice())
+        {
+            has_reportable_untracked = true;
+            if !collapse_untracked_dirs {
+                untracked.push(relative);
+            }
+        }
+    }
+    Ok(has_reportable_untracked)
+}
+
 pub(crate) fn killed_files(
     repo: &GitRepo,
     index: &GitIndex,
     directory: bool,
 ) -> Result<Vec<Vec<u8>>> {
-    let tracked_paths = tracked_path_set(index);
+    let tracked_paths = tracked_path_set_for_repo(repo, index)?;
     let mut killed = BTreeSet::new();
     for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
         let full_path = repo
@@ -1830,11 +2338,16 @@ fn index_path_ancestors(path: &[u8]) -> Vec<Vec<u8>> {
 fn collect_ignored_untracked_files(
     root: &std::path::Path,
     dir: &std::path::Path,
+    relative_dir: &[u8],
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+    collapse_ignored_dirs: bool,
     parent_ignored: bool,
     files: &mut Vec<Vec<u8>>,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut has_reportable_ignored = false;
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -1842,18 +2355,45 @@ fn collect_ignored_untracked_files(
             continue;
         }
         let metadata = entry.metadata()?;
-        let relative = repo_relative_path(root, &path)?;
+        let relative = relative_child_path(relative_dir, &entry.file_name());
         let is_ignored = parent_ignored || ignore.is_ignored(&relative, metadata.is_dir());
         if metadata.is_dir() {
-            collect_ignored_untracked_files(root, &path, tracked_paths, ignore, is_ignored, files)?;
+            let collapse_child = mode == UntrackedMode::Directory
+                && is_ignored
+                && !tracked_paths_under(tracked_paths, &relative);
+            let child_has_reportable_ignored = if collapse_child && include_empty_directories {
+                true
+            } else {
+                collect_ignored_untracked_files(
+                    root,
+                    &path,
+                    &relative,
+                    tracked_paths,
+                    ignore,
+                    mode,
+                    include_empty_directories,
+                    collapse_ignored_dirs || collapse_child,
+                    is_ignored,
+                    files,
+                )?
+            };
+            if collapse_child && child_has_reportable_ignored && !collapse_ignored_dirs {
+                let mut directory = relative;
+                directory.push(b'/');
+                files.push(directory);
+            }
+            has_reportable_ignored |= child_has_reportable_ignored;
         } else if is_ignored
             && (metadata.is_file() || metadata.file_type().is_symlink())
             && !tracked_paths.contains(relative.as_slice())
         {
-            files.push(relative);
+            has_reportable_ignored = true;
+            if !collapse_ignored_dirs {
+                files.push(relative);
+            }
         }
     }
-    Ok(())
+    Ok(has_reportable_ignored)
 }
 
 pub(crate) fn untracked_files_with_mode(
@@ -1864,109 +2404,388 @@ pub(crate) fn untracked_files_with_mode(
     include_empty_directories: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut files = Vec::new();
-    collect_untracked_files(
+    let _ = collect_untracked_files(
         root,
-        root,
+        b"",
         tracked_paths,
         ignore,
         mode,
         include_empty_directories,
+        false,
         &mut files,
     )?;
     files.sort();
     Ok(files)
 }
 
-fn collect_untracked_files(
+fn untracked_files_for_simple_pathspecs(
     root: &std::path::Path,
-    dir: &std::path::Path,
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
     include_empty_directories: bool,
-    files: &mut Vec<Vec<u8>>,
-) -> Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_name() == ".git" {
-            continue;
+    pathspecs: &[Vec<u8>],
+) -> Result<Option<Vec<Vec<u8>>>> {
+    if pathspecs.is_empty() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut all_untracked = None;
+    for raw in pathspecs {
+        let rule = parse_pathspec_rule(raw);
+        if rule.exclude || rule.pattern.is_empty() {
+            return Ok(None);
         }
-        let metadata = entry.metadata()?;
-        let relative = repo_relative_path(root, &path)?;
-        if ignore.is_ignored(&relative, metadata.is_dir()) {
-            continue;
-        }
-        if metadata.is_dir() {
-            if mode != UntrackedMode::All && tracked_paths.contains(relative.as_slice()) {
-                continue;
-            }
-            if mode == UntrackedMode::All || tracked_paths_under(tracked_paths, &relative) {
-                collect_untracked_files(
+        let has_glob = rule.options.glob
+            && rule
+                .pattern
+                .iter()
+                .any(|byte| matches!(*byte, b'*' | b'?' | b'['));
+        if has_glob {
+            if all_untracked.is_none() {
+                all_untracked = Some(untracked_files_with_mode(
                     root,
-                    &path,
+                    tracked_paths,
+                    ignore,
+                    UntrackedMode::All,
+                    true,
+                )?);
+            }
+            collect_untracked_glob_pathspec_matches(
+                all_untracked.as_deref().unwrap_or_default(),
+                tracked_paths,
+                mode,
+                rule,
+                &mut files,
+                &mut seen,
+            );
+        } else {
+            collect_untracked_pathspec_target(
+                root,
+                tracked_paths,
+                ignore,
+                mode,
+                include_empty_directories,
+                rule.pattern,
+                &mut files,
+                &mut seen,
+            )?;
+        }
+    }
+    files.sort();
+    Ok(Some(files))
+}
+
+fn literal_untracked_files_for_ls_files(
+    repo: &GitRepo,
+    index: &GitIndex,
+    options: &LsFilesOptions,
+    pathspecs: &[Vec<u8>],
+) -> Result<Option<Vec<Vec<u8>>>> {
+    if !options.others
+        || options.ignored
+        || options.directory
+        || !options.exclude_standard
+        || !options.excludes.is_empty()
+        || !options.exclude_from.is_empty()
+        || options.exclude_per_directory.is_some()
+        || pathspecs.is_empty()
+    {
+        return Ok(None);
+    }
+    let mut literal_paths = Vec::with_capacity(pathspecs.len());
+    for raw in pathspecs {
+        let rule = parse_pathspec_rule(raw);
+        if rule.exclude
+            || rule.pattern.is_empty()
+            || rule.options.icase
+            || (rule.options.glob
+                && rule
+                    .pattern
+                    .iter()
+                    .any(|byte| matches!(*byte, b'*' | b'?' | b'[')))
+        {
+            return Ok(None);
+        }
+        let absolute = repo
+            .root
+            .join(String::from_utf8_lossy(rule.pattern).as_ref());
+        match fs::symlink_metadata(&absolute) {
+            Ok(metadata) if metadata.is_dir() => return Ok(None),
+            Ok(_) => literal_paths.push(rule.pattern.to_vec()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                literal_paths.push(rule.pattern.to_vec())
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    let ignore = standard_repo_ignore_for_literal_paths(repo, &literal_paths)?;
+    let mut files = Vec::new();
+    for path in literal_paths {
+        if path == b".git" || path.starts_with(b".git/") {
+            continue;
+        }
+        let absolute = repo.root.join(String::from_utf8_lossy(&path).as_ref());
+        let metadata = match fs::symlink_metadata(&absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if !(metadata.is_file() || metadata.file_type().is_symlink())
+            || ignore.is_ignored(&path, false)
+            || index
+                .entries()
+                .iter()
+                .any(|entry| entry.path.as_slice() == path.as_slice())
+        {
+            continue;
+        }
+        files.push(path);
+    }
+    files.sort();
+    files.dedup();
+    Ok(Some(files))
+}
+
+fn standard_repo_ignore_for_literal_paths(repo: &GitRepo, paths: &[Vec<u8>]) -> Result<GitIgnore> {
+    let mut ignore = GitIgnore::default();
+    if let Some(path) = ls_files_global_excludes_file(repo)? {
+        append_ignore_file(&mut ignore, &path, "")?;
+    }
+    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
+
+    let mut directories = BTreeSet::new();
+    directories.insert((0usize, Vec::new()));
+    for path in paths {
+        for separator in path
+            .iter()
+            .enumerate()
+            .filter_map(|(index, byte)| (*byte == b'/').then_some(index))
+        {
+            let directory = path[..separator].to_vec();
+            let depth = directory.iter().filter(|byte| **byte == b'/').count() + 1;
+            directories.insert((depth, directory));
+        }
+    }
+    for (_, directory) in directories {
+        let base = String::from_utf8_lossy(&directory);
+        let path = if directory.is_empty() {
+            repo.root.join(".gitignore")
+        } else {
+            repo.root.join(base.as_ref()).join(".gitignore")
+        };
+        append_ignore_file(&mut ignore, &path, base.as_ref())?;
+    }
+    Ok(ignore)
+}
+
+fn collect_untracked_glob_pathspec_matches(
+    all_untracked: &[Vec<u8>],
+    tracked_paths: &TrackedPathSet<'_>,
+    mode: UntrackedMode,
+    rule: PathspecRule<'_>,
+    files: &mut Vec<Vec<u8>>,
+    seen: &mut BTreeSet<Vec<u8>>,
+) {
+    for path in all_untracked
+        .iter()
+        .filter(|path| pathspec_rule_matches(path, rule))
+    {
+        let collapsed = (mode == UntrackedMode::Directory)
+            .then(|| ls_files_matching_untracked_directory(path, tracked_paths, rule))
+            .flatten();
+        let output = collapsed.unwrap_or_else(|| path.clone());
+        if seen.insert(output.clone()) {
+            files.push(output);
+        }
+    }
+}
+
+fn ls_files_matching_untracked_directory(
+    path: &[u8],
+    tracked_paths: &TrackedPathSet<'_>,
+    rule: PathspecRule<'_>,
+) -> Option<Vec<u8>> {
+    for separator in path
+        .iter()
+        .enumerate()
+        .filter_map(|(index, byte)| (*byte == b'/').then_some(index))
+    {
+        let directory = &path[..separator];
+        if pathspec_rule_matches(directory, rule) && !tracked_paths_under(tracked_paths, directory)
+        {
+            let mut output = directory.to_vec();
+            output.push(b'/');
+            return Some(output);
+        }
+    }
+    None
+}
+
+fn collect_untracked_pathspec_target(
+    root: &std::path::Path,
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+    pathspec: &[u8],
+    files: &mut Vec<Vec<u8>>,
+    seen: &mut BTreeSet<Vec<u8>>,
+) -> Result<()> {
+    if pathspec == b".git" || pathspec.starts_with(b".git/") {
+        return Ok(());
+    }
+    let absolute = root.join(String::from_utf8_lossy(pathspec).as_ref());
+    let metadata = match fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_dir() {
+        let tracked_directory = tracked_paths.contains_directory(pathspec)
+            || (mode != UntrackedMode::All && tracked_paths.contains(pathspec));
+        if ignore.is_ignored(pathspec, true) || tracked_directory {
+            return Ok(());
+        }
+        if is_nested_worktree(&absolute) && !tracked_directory {
+            let mut directory = pathspec.to_vec();
+            directory.push(b'/');
+            if seen.insert(directory.clone()) {
+                files.push(directory);
+            }
+            return Ok(());
+        }
+        let has_tracked_descendants = tracked_paths_under(tracked_paths, pathspec);
+        let collapse_root_dir = mode != UntrackedMode::All && !has_tracked_descendants;
+        let child_has_reportable_entries =
+            if collapse_root_dir && mode == UntrackedMode::Directory && include_empty_directories {
+                true
+            } else {
+                collect_untracked_files(
+                    &absolute,
+                    pathspec,
                     tracked_paths,
                     ignore,
                     mode,
                     include_empty_directories,
+                    collapse_root_dir,
                     files,
-                )?;
-            } else if (mode == UntrackedMode::Directory && include_empty_directories)
-                || untracked_dir_contains_reportable_file(root, &path, tracked_paths, ignore)?
-            {
-                let mut dir = relative;
-                dir.push(b'/');
+                )?
+            };
+        if collapse_root_dir && child_has_reportable_entries {
+            let mut dir = pathspec.to_vec();
+            dir.push(b'/');
+            if seen.insert(dir.clone()) {
                 files.push(dir);
             }
-        } else if (metadata.is_file() || metadata.file_type().is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
-        {
-            files.push(relative);
         }
+        return Ok(());
+    }
+    if (file_type.is_file() || file_type.is_symlink())
+        && !ignore.is_ignored(pathspec, false)
+        && !tracked_paths.contains(pathspec)
+        && seen.insert(pathspec.to_vec())
+    {
+        files.push(pathspec.to_vec());
     }
     Ok(())
 }
 
-fn untracked_dir_contains_reportable_file(
-    root: &std::path::Path,
+fn collect_untracked_files(
     dir: &std::path::Path,
+    relative_dir: &[u8],
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
+    mode: UntrackedMode,
+    include_empty_directories: bool,
+    collapse_untracked_dirs: bool,
+    files: &mut Vec<Vec<u8>>,
 ) -> Result<bool> {
+    let mut has_reportable_entries = false;
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if entry.file_name() == ".git" {
             continue;
         }
-        let metadata = entry.metadata()?;
-        let relative = repo_relative_path(root, &path)?;
-        if ignore.is_ignored(&relative, metadata.is_dir()) {
+        let file_type = entry.file_type()?;
+        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let is_dir = file_type.is_dir();
+        if ignore.is_ignored(&relative, is_dir) {
             continue;
         }
-        if metadata.is_dir() {
-            if untracked_dir_contains_reportable_file(root, &path, tracked_paths, ignore)? {
-                return Ok(true);
+        if is_dir {
+            let tracked_directory = tracked_paths.contains_directory(&relative)
+                || (mode != UntrackedMode::All && tracked_paths.contains(&relative));
+            if is_nested_worktree(&path) && !tracked_directory {
+                if !collapse_untracked_dirs {
+                    let mut directory = relative;
+                    directory.push(b'/');
+                    files.push(directory);
+                }
+                has_reportable_entries = true;
+                continue;
             }
-        } else if (metadata.is_file() || metadata.file_type().is_symlink())
+            if tracked_directory {
+                continue;
+            }
+            let has_tracked_descendants = tracked_paths_under(tracked_paths, &relative);
+            let collapse_child_dir =
+                !collapse_untracked_dirs && mode != UntrackedMode::All && !has_tracked_descendants;
+            let child_has_reportable_entries = if collapse_child_dir
+                && mode == UntrackedMode::Directory
+                && include_empty_directories
+            {
+                true
+            } else {
+                collect_untracked_files(
+                    &path,
+                    &relative,
+                    tracked_paths,
+                    ignore,
+                    mode,
+                    include_empty_directories,
+                    collapse_untracked_dirs || collapse_child_dir,
+                    files,
+                )?
+            };
+            if collapse_untracked_dirs {
+                has_reportable_entries |= child_has_reportable_entries;
+            } else if collapse_child_dir {
+                if !child_has_reportable_entries {
+                    continue;
+                }
+                let mut dir = relative;
+                dir.push(b'/');
+                files.push(dir);
+                has_reportable_entries = true;
+            } else if child_has_reportable_entries {
+                has_reportable_entries = true;
+            }
+        } else if (file_type.is_file() || file_type.is_symlink())
             && !tracked_paths.contains(relative.as_slice())
         {
-            return Ok(true);
+            has_reportable_entries = true;
+            if !collapse_untracked_dirs {
+                files.push(relative);
+            }
         }
     }
-    Ok(false)
+    Ok(has_reportable_entries)
+}
+
+fn is_nested_worktree(path: &std::path::Path) -> bool {
+    fs::symlink_metadata(path.join(".git")).is_ok() && exact_repo_at(path).is_some()
 }
 
 pub(crate) fn tracked_paths_under(tracked_paths: &TrackedPathSet<'_>, relative_dir: &[u8]) -> bool {
-    let mut prefix = relative_dir.to_vec();
-    prefix.push(b'/');
-    tracked_paths
-        .iter()
-        .any(|path| path.starts_with(prefix.as_slice()))
+    tracked_paths.has_tracked_descendants(relative_dir)
 }
 
 pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
-    let _sparse = options.sparse;
     let recurse_submodules = options.recurse_submodules && !options.no_recurse_submodules;
     let include_empty_directories = options.directory && !options.no_empty_directory;
     let has_exclude_patterns = options.exclude_standard
@@ -1985,12 +2804,6 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             message: "ls-files --ignored needs some exclude pattern".into(),
         });
     }
-    if options.exclude_standard && !options.others && !(options.ignored && options.cached) {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "--exclude-standard is only supported with --others".into(),
-        });
-    }
     if recurse_submodules
         && (options.others
             || options.killed
@@ -2006,21 +2819,21 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             message: "ls-files --recurse-submodules unsupported mode".into(),
         });
     }
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     if options.with_tree.is_some() && (options.stage || options.unmerged) {
         return Err(CliError::Fatal {
             code: 128,
             message: "options 'ls-files --with-tree' and '-s/-u' cannot be used together".into(),
         });
     }
-    let _deduplicate = options.deduplicate;
     let pathspecs = options
         .path_args
         .iter()
         .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
         .collect::<Result<Vec<_>>>()?;
+    let pathspecs_empty = pathspecs.is_empty();
     let cwd_prefix = repo_relative_path(&repo.root, &std::env::current_dir()?)?;
-    let effective_pathspecs = if pathspecs.is_empty() && !cwd_prefix.is_empty() {
+    let effective_pathspecs = if pathspecs_empty && !cwd_prefix.is_empty() {
         vec![cwd_prefix.clone()]
     } else {
         pathspecs
@@ -2034,7 +2847,20 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         && !options.deleted
         && !options.modified
         && !options.killed;
-    let mut index = read_repo_index(&repo)?;
+    let raw_index = read_repo_index_raw(&repo)?;
+    let requires_sparse_expansion = !options.sparse
+        && index_has_sparse_directories(&raw_index)
+        && (effective_pathspecs.is_empty()
+            || effective_pathspecs
+                .iter()
+                .any(|pathspec| ls_files_pathspec_requires_sparse_expansion(&raw_index, pathspec)));
+    let _sparse_expansion_region =
+        requires_sparse_expansion.then(|| trace2_region("index", "ensure_full_index"));
+    let mut index = if requires_sparse_expansion {
+        expand_repo_sparse_index(&repo, &raw_index)?
+    } else {
+        raw_index
+    };
     if recurse_submodules && !cached_ignored_recurse_submodules {
         index = ls_files_index_with_submodules(&repo, index)?;
     }
@@ -2063,12 +2889,24 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         }
         return Ok(());
     }
-    let ignore = if ls_files_needs_ignore(&options) {
-        Some(ls_files_excludes(&repo, &options)?)
+    let literal_other_paths =
+        literal_untracked_files_for_ls_files(&repo, &index, &options, &effective_pathspecs)?;
+    let tracked_paths = if options.others && literal_other_paths.is_none() {
+        Some(tracked_path_set_for_repo(&repo, &index)?)
     } else {
         None
     };
-    let eol_store = if options.eol {
+    let ignore = if ls_files_needs_ignore(&options) && literal_other_paths.is_none() {
+        Some(ls_files_excludes(
+            &repo,
+            &options,
+            tracked_paths.as_ref(),
+            &index,
+        )?)
+    } else {
+        None
+    };
+    let eol_store = if options.eol || options.format.is_some() {
         Some(LooseObjectStore::new(
             repo.objects_dir.clone(),
             GitHashAlgorithm::Sha1,
@@ -2076,23 +2914,49 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
     } else {
         None
     };
-    let eol_attrs = if options.eol {
-        Some(GitAttributes::load_from_root(&repo.root)?)
+    let eol_attrs = if options.eol
+        || options
+            .format
+            .as_deref()
+            .is_some_and(|format| format.contains("%(eolattr)"))
+    {
+        Some(load_repo_attributes(&repo, None)?)
     } else {
         None
     };
-    let other_paths = if options.others {
-        let tracked_paths = tracked_path_set(&index);
+    let mut other_paths = if let Some(paths) = literal_other_paths {
+        Some(paths)
+    } else if options.others {
+        let tracked_paths = tracked_paths.as_ref().expect("tracked paths for others");
         if options.ignored {
-            Some(ignored_untracked_files(
+            Some(ignored_untracked_files_with_mode(
                 &repo.root,
-                &tracked_paths,
+                tracked_paths,
                 ignore.as_ref().expect("ignore graph for ignored others"),
+                if options.directory {
+                    UntrackedMode::Directory
+                } else {
+                    UntrackedMode::All
+                },
+                include_empty_directories,
             )?)
+        } else if let Some(paths) = untracked_files_for_simple_pathspecs(
+            &repo.root,
+            tracked_paths,
+            ignore.as_ref().expect("ignore graph for plain others"),
+            if options.directory {
+                UntrackedMode::Directory
+            } else {
+                UntrackedMode::All
+            },
+            include_empty_directories,
+            &effective_pathspecs,
+        )? {
+            Some(paths)
         } else if options.directory {
             Some(untracked_files_with_mode(
                 &repo.root,
-                &tracked_paths,
+                tracked_paths,
                 ignore.as_ref().expect("ignore graph for directory others"),
                 UntrackedMode::Directory,
                 include_empty_directories,
@@ -2100,7 +2964,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         } else {
             Some(untracked_files_with_mode(
                 &repo.root,
-                &tracked_paths,
+                tracked_paths,
                 ignore.as_ref().expect("ignore graph for plain others"),
                 UntrackedMode::All,
                 true,
@@ -2109,14 +2973,63 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
     } else {
         None
     };
-    let unmatched_pathspec = if options.error_unmatch {
-        ls_files_first_unmatched_pathspec(
+    if options.others
+        && options.directory
+        && pathspecs_empty
+        && !cwd_prefix.is_empty()
+        && let Some(paths) = other_paths.as_mut()
+    {
+        let tracked_paths = tracked_paths
+            .as_ref()
+            .expect("tracked paths for directory others");
+        let cwd_absolute = repo
+            .root
+            .join(String::from_utf8_lossy(&cwd_prefix).as_ref());
+        if let Ok(metadata) = fs::symlink_metadata(&cwd_absolute)
+            && metadata.is_dir()
+            && !ignore
+                .as_ref()
+                .expect("ignore graph for implicit cwd directory others")
+                .is_ignored(&cwd_prefix, true)
+            && ((include_empty_directories && !tracked_paths_under(&tracked_paths, &cwd_prefix))
+                || collect_untracked_files(
+                    &cwd_absolute,
+                    &cwd_prefix,
+                    &tracked_paths,
+                    ignore
+                        .as_ref()
+                        .expect("ignore graph for implicit cwd directory others"),
+                    UntrackedMode::Directory,
+                    include_empty_directories,
+                    true,
+                    &mut Vec::new(),
+                )?)
+        {
+            let mut cwd_dir = cwd_prefix.clone();
+            cwd_dir.push(b'/');
+            if !paths.iter().any(|path| path == &cwd_dir) {
+                paths.push(cwd_dir);
+                paths.sort();
+            }
+        }
+    }
+    let mut unmatched_pathspecs = if options.error_unmatch {
+        ls_files_unmatched_pathspecs(
             &index,
             other_paths.as_deref().unwrap_or(&[]),
             &effective_pathspecs,
+            &options.path_args,
+            !options.others
+                || options.cached
+                || options.stage
+                || options.unmerged
+                || options.deleted
+                || options.modified
+                || options.killed,
+            options.others,
         )
     } else {
-        None
+        Vec::new()
     };
     if options.format.is_some() && options.resolve_undo {
         return Err(CliError::Fatal {
@@ -2135,8 +3048,8 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             &cwd_prefix,
             &options,
         )?;
-        if let Some(pathspec) = unmatched_pathspec {
-            return Err(ls_files_error_unmatch(pathspec));
+        if !unmatched_pathspecs.is_empty() {
+            return Err(ls_files_error_unmatch(&unmatched_pathspecs));
         }
         return Ok(());
     }
@@ -2159,13 +3072,30 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                         .into(),
             });
         }
+        let format_statuses = if options.deleted || options.modified {
+            let status_index = ls_files_worktree_status_index(&repo, &index)?;
+            let mut statuses = worktree_status(&repo, status_index.as_ref())?
+                .into_iter()
+                .collect::<HashMap<_, _>>();
+            for entry in index.entries().iter().filter(|entry| entry.stage > 0) {
+                let exists = path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path));
+                statuses.insert(entry.path.clone(), if exists { 'M' } else { 'D' });
+            }
+            Some(statuses)
+        } else {
+            None
+        };
         let mut stdout = io::stdout().lock();
         let mut seen_paths = BTreeSet::new();
-        for entry in index
-            .entries()
-            .iter()
-            .filter(|entry| pathspec_matches(&entry.path, &effective_pathspecs))
-        {
+        for entry in index.entries().iter().filter(|entry| {
+            pathspec_matches(&entry.path, &effective_pathspecs)
+                && format_statuses.as_ref().is_none_or(|statuses| {
+                    statuses.get(&entry.path).is_some_and(|status| {
+                        (options.deleted && *status == 'D')
+                            || (options.modified && matches!(*status, 'M' | 'D'))
+                    })
+                })
+        }) {
             if options.error_unmatch
                 && !effective_pathspecs.is_empty()
                 && !seen_paths.insert(entry.path.to_vec())
@@ -2177,14 +3107,24 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             else {
                 continue;
             };
-            let record = render_ls_files_format(format, entry, &display_path, options.abbrev)?;
+            let record = render_ls_files_format(
+                format,
+                entry,
+                &display_path,
+                options.abbrev,
+                &repo,
+                eol_store
+                    .as_ref()
+                    .expect("object store for ls-files format"),
+                eol_attrs.as_ref(),
+            )?;
             write_ls_files_record(&mut stdout, &record, options.zero)?;
             if options.debug {
                 write_ls_files_debug(&mut stdout, entry)?;
             }
         }
-        if let Some(pathspec) = unmatched_pathspec {
-            return Err(ls_files_error_unmatch(pathspec));
+        if !unmatched_pathspecs.is_empty() {
+            return Err(ls_files_error_unmatch(&unmatched_pathspecs));
         }
         return Ok(());
     }
@@ -2217,8 +3157,8 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             && !options.modified
             && !options.killed
         {
-            if let Some(pathspec) = unmatched_pathspec {
-                return Err(ls_files_error_unmatch(pathspec));
+            if !unmatched_pathspecs.is_empty() {
+                return Err(ls_files_error_unmatch(&unmatched_pathspecs));
             }
             return Ok(());
         }
@@ -2281,8 +3221,8 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                 &cwd_prefix,
                 &options,
             )?;
-            if let Some(pathspec) = unmatched_pathspec {
-                return Err(ls_files_error_unmatch(pathspec));
+            if !unmatched_pathspecs.is_empty() {
+                return Err(ls_files_error_unmatch(&unmatched_pathspecs));
             }
             return Ok(());
         }
@@ -2313,7 +3253,8 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         }
     }
     if options.deleted || options.modified {
-        for (path, status) in worktree_status(&repo, &index)? {
+        let status_index = ls_files_worktree_status_index(&repo, &index)?;
+        for (path, status) in worktree_status(&repo, status_index.as_ref())? {
             if pathspec_matches(&path, &effective_pathspecs)
                 && ((options.deleted && status == 'D')
                     || (options.modified && matches!(status, 'M' | 'D')))
@@ -2338,6 +3279,41 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                 }
             }
         }
+        for entry in index.entries().iter().filter(|entry| entry.stage > 0) {
+            if !pathspec_matches(&entry.path, &effective_pathspecs) {
+                continue;
+            }
+            let exists = path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path));
+            if options.deleted && !exists {
+                push_ls_files_path_record(
+                    &mut records,
+                    &mut seen_records,
+                    entry.path.clone(),
+                    b'R',
+                    &options,
+                );
+            }
+            if options.modified {
+                push_ls_files_path_record(
+                    &mut records,
+                    &mut seen_records,
+                    entry.path.clone(),
+                    b'C',
+                    &options,
+                );
+            }
+        }
+    }
+    records.sort_by(|left, right| left.0.cmp(&right.0));
+    if options.error_unmatch
+        && (options.deleted || options.modified || options.killed)
+        && !options.cached
+        && !options.stage
+        && !options.unmerged
+        && !options.others
+    {
+        unmatched_pathspecs =
+            ls_files_unmatched_record_pathspecs(&records, &effective_pathspecs, &options.path_args);
     }
     let mut stdout = io::stdout().lock();
     for (path, tag) in records {
@@ -2372,10 +3348,38 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             }
         }
     }
-    if let Some(pathspec) = unmatched_pathspec {
-        return Err(ls_files_error_unmatch(pathspec));
+    if !unmatched_pathspecs.is_empty() {
+        return Err(ls_files_error_unmatch(&unmatched_pathspecs));
     }
     Ok(())
+}
+
+fn ls_files_pathspec_requires_sparse_expansion(index: &GitIndex, pathspec: &[u8]) -> bool {
+    sparse_index_path_requires_expansion(index, pathspec)
+        || index.entries().iter().any(|entry| {
+            entry.stage == 0
+                && entry.mode == IndexMode::Tree
+                && entry.path.strip_suffix(b"/") == Some(pathspec)
+        })
+}
+
+fn ls_files_worktree_status_index<'a>(
+    repo: &GitRepo,
+    index: &'a GitIndex,
+) -> Result<Cow<'a, GitIndex>> {
+    if index_has_sparse_directories(index) {
+        let expanded = expand_repo_sparse_index(repo, index)?;
+        return if expanded.entries().iter().any(|entry| entry.stage > 0) {
+            Ok(Cow::Owned(stage_zero_index(&expanded)?))
+        } else {
+            Ok(Cow::Owned(expanded))
+        };
+    }
+    if index.entries().iter().any(|entry| entry.stage > 0) {
+        Ok(Cow::Owned(stage_zero_index(index)?))
+    } else {
+        Ok(Cow::Borrowed(index))
+    }
 }
 
 fn ls_files_needs_ignore(options: &LsFilesOptions) -> bool {
@@ -2393,6 +3397,7 @@ fn can_stream_plain_ls_files(
         && !options.others
         && !options.resolve_undo
         && !options.error_unmatch
+        && !options.deduplicate
         && !options.tagged
         && !options.lowercase_assume_valid
         && !options.fsmonitor_clean
@@ -2411,6 +3416,7 @@ fn ls_files_index_with_tree(
     let mut existing_paths = index
         .entries()
         .iter()
+        .filter(|entry| entry.stage == 0)
         .map(|entry| entry.path.to_vec())
         .collect::<HashSet<_>>();
     let mut entries = index.entries().to_vec();
@@ -2448,31 +3454,83 @@ fn ls_files_index_with_submodules(repo: &GitRepo, index: GitIndex) -> Result<Git
     Ok(GitIndex::from_entries(entries)?)
 }
 
-fn ls_files_excludes(repo: &GitRepo, options: &LsFilesOptions) -> Result<GitIgnore> {
+fn ls_files_excludes(
+    repo: &GitRepo,
+    options: &LsFilesOptions,
+    tracked_paths: Option<&TrackedPathSet<'_>>,
+    index: &GitIndex,
+) -> Result<GitIgnore> {
     let mut ignore = GitIgnore::default();
     if options.exclude_standard {
-        ignore = standard_repo_ignore(repo)?;
-    }
-    if !options.excludes.is_empty() {
-        ignore.append(GitIgnore::parse(&options.excludes.join("\n")));
+        ignore = if let Some(tracked_paths) = tracked_paths {
+            standard_repo_ignore_pruned(repo, tracked_paths)?
+        } else {
+            standard_repo_ignore(repo)?
+        };
     }
     for path in &options.exclude_from {
         let content = fs::read_to_string(path)?;
         ignore.append(GitIgnore::parse(&content));
     }
     if let Some(name) = &options.exclude_per_directory {
-        append_per_directory_excludes(&repo.root, &repo.root, name, &mut ignore)?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        append_per_directory_excludes_with_index(
+            &repo.root,
+            &repo.root,
+            name,
+            &mut ignore,
+            index,
+            &store,
+        )?;
+    }
+    if !options.excludes.is_empty() {
+        ignore.append(GitIgnore::parse(&options.excludes.join("\n")));
     }
     Ok(ignore)
 }
 
 pub(crate) fn standard_repo_ignore(repo: &GitRepo) -> Result<GitIgnore> {
     let mut ignore = GitIgnore::default();
-    append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
-    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
     if let Some(path) = ls_files_global_excludes_file(repo)? {
         append_ignore_file(&mut ignore, &path, "")?;
     }
+    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
+    append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
+    Ok(ignore)
+}
+
+fn add_repo_ignore(repo: &GitRepo, ignore_errors: bool) -> Result<GitIgnore> {
+    let repo_ignore = if ignore_errors {
+        GitIgnore::load_from_root_ignore_errors(&repo.root)?
+    } else {
+        GitIgnore::load_from_root(&repo.root)?
+    };
+    let mut ignore = GitIgnore::default();
+    if let Some(path) = ls_files_global_excludes_file(repo)? {
+        append_ignore_file(&mut ignore, &path, "")?;
+    }
+    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
+    ignore.append(repo_ignore);
+    Ok(ignore)
+}
+
+fn standard_repo_ignore_pruned(
+    repo: &GitRepo,
+    tracked_paths: &TrackedPathSet<'_>,
+) -> Result<GitIgnore> {
+    let mut ignore = GitIgnore::default();
+    if let Some(path) = ls_files_global_excludes_file(repo)? {
+        append_ignore_file(&mut ignore, &path, "")?;
+    }
+    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
+    append_per_directory_excludes_pruned(
+        &repo.root,
+        &repo.root,
+        b"",
+        ".gitignore",
+        &mut ignore,
+        tracked_paths,
+    )?;
     Ok(ignore)
 }
 
@@ -2534,6 +3592,79 @@ fn append_per_directory_excludes(
         if entry.file_type()?.is_dir() {
             append_per_directory_excludes(root, &path, name, ignore)?;
         }
+    }
+    Ok(())
+}
+
+fn append_per_directory_excludes_with_index(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    name: &str,
+    ignore: &mut GitIgnore,
+    index: &GitIndex,
+    store: &LooseObjectStore,
+) -> Result<()> {
+    let exclude_path = dir.join(name);
+    let base = repo_relative_path(root, dir)?;
+    let base_text = String::from_utf8_lossy(&base);
+    match fs::read_to_string(&exclude_path) {
+        Ok(content) => ignore.append(GitIgnore::parse_with_base(&content, &base_text)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut index_path =
+                Vec::with_capacity(base.len() + usize::from(!base.is_empty()) + name.len());
+            index_path.extend_from_slice(&base);
+            if !index_path.is_empty() {
+                index_path.push(b'/');
+            }
+            index_path.extend_from_slice(name.as_bytes());
+            if let Some(entry) = find_index_entry(index, &index_path) {
+                let object = store.read_object(&entry.id)?;
+                let content = String::from_utf8_lossy(&object.content);
+                ignore.append(GitIgnore::parse_with_base(&content, &base_text));
+            }
+        }
+        Err(error) => return Err(error.into()),
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            append_per_directory_excludes_with_index(root, &path, name, ignore, index, store)?;
+        }
+    }
+    Ok(())
+}
+
+fn append_per_directory_excludes_pruned(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    relative_dir: &[u8],
+    name: &str,
+    ignore: &mut GitIgnore,
+    tracked_paths: &TrackedPathSet<'_>,
+) -> Result<()> {
+    let exclude_path = dir.join(name);
+    let base = String::from_utf8_lossy(relative_dir);
+    append_ignore_file(ignore, &exclude_path, &base)?;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let tracked_visible = tracked_paths.contains(relative.as_slice())
+            || tracked_paths_under(tracked_paths, &relative);
+        if ignore.is_ignored(&relative, true) && !tracked_visible {
+            continue;
+        }
+        append_per_directory_excludes_pruned(root, &path, &relative, name, ignore, tracked_paths)?;
     }
     Ok(())
 }
@@ -2899,7 +4030,20 @@ fn render_ls_files_format(
     entry: &IndexEntry,
     display_path: &[u8],
     abbrev: Option<usize>,
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    attrs: Option<&GitAttributes>,
 ) -> Result<String> {
+    let needs_object = format.contains("%(objecttype)")
+        || format.contains("%(objectsize)")
+        || format.contains("%(objectsize:padded)")
+        || format.contains("%(eolinfo:index)");
+    let needs_gitlink_content = format.contains("%(eolinfo:index)");
+    let object = if needs_object && (entry.mode != IndexMode::Gitlink || needs_gitlink_content) {
+        Some(store.read_object(&entry.id)?)
+    } else {
+        None
+    };
     let mut out = String::new();
     let mut chars = format.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -2932,8 +4076,51 @@ fn render_ls_files_format(
                 match atom.as_str() {
                     "objectmode" => out.push_str(&format!("{:06o}", entry.mode_bits())),
                     "objectname" => out.push_str(&ls_files_object_name(&entry.id, abbrev)),
+                    "objecttype" => out.push_str(if entry.mode == IndexMode::Gitlink {
+                        "commit"
+                    } else {
+                        object
+                            .as_ref()
+                            .expect("object loaded for objecttype")
+                            .kind
+                            .as_str()
+                    }),
+                    "objectsize" => {
+                        if entry.mode == IndexMode::Gitlink {
+                            out.push('-');
+                        } else {
+                            out.push_str(
+                                &object
+                                    .as_ref()
+                                    .expect("object loaded for objectsize")
+                                    .content
+                                    .len()
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    "objectsize:padded" => {
+                        let size = if entry.mode == IndexMode::Gitlink {
+                            "-".to_owned()
+                        } else {
+                            object
+                                .as_ref()
+                                .expect("object loaded for padded objectsize")
+                                .content
+                                .len()
+                                .to_string()
+                        };
+                        out.push_str(&format!("{size:>7}"));
+                    }
                     "stage" => out.push_str(&entry.stage.to_string()),
                     "path" => out.push_str(&String::from_utf8_lossy(display_path)),
+                    "eolinfo:index" => out.push_str(
+                        object
+                            .as_ref()
+                            .map_or("", |object| classify_eol(&object.content)),
+                    ),
+                    "eolinfo:worktree" => out.push_str(read_worktree_eol(repo, &entry.path)?),
+                    "eolattr" => out.push_str(&ls_files_eol_attr(&entry.path, attrs)),
                     _ => return Err(bad_ls_files_format(format)),
                 }
             }
@@ -2956,35 +4143,77 @@ fn hex_pair_value(hi: char, lo: char) -> Option<u8> {
     Some(((hi << 4) | lo) as u8)
 }
 
-fn ls_files_first_unmatched_pathspec(
+fn ls_files_unmatched_pathspecs(
     index: &GitIndex,
     other_paths: &[Vec<u8>],
     pathspecs: &[Vec<u8>],
-) -> Option<String> {
-    pathspecs.iter().find_map(|pathspec| {
-        let rule = parse_pathspec_rule(pathspec);
-        if rule.exclude {
-            return None;
-        }
-        let matches_index = index
-            .entries()
-            .iter()
-            .any(|entry| pathspec_rule_matches(&entry.path, rule));
-        let matches_other = other_paths
-            .iter()
-            .any(|path| pathspec_rule_matches(path, rule));
-        (!matches_index && !matches_other).then(|| String::from_utf8_lossy(pathspec).into_owned())
-    })
+    original_pathspecs: &[PathBuf],
+    match_index: bool,
+    match_other: bool,
+) -> Vec<String> {
+    pathspecs
+        .iter()
+        .enumerate()
+        .filter_map(|(index_position, pathspec)| {
+            let rule = parse_pathspec_rule(pathspec);
+            if rule.exclude {
+                return None;
+            }
+            let matches_index = match_index
+                && index
+                    .entries()
+                    .iter()
+                    .any(|entry| pathspec_rule_matches(&entry.path, rule));
+            let matches_other = match_other
+                && other_paths
+                    .iter()
+                    .any(|path| pathspec_rule_matches(path, rule));
+            (!matches_index && !matches_other).then(|| {
+                original_pathspecs
+                    .get(index_position)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| String::from_utf8_lossy(pathspec).into_owned())
+            })
+        })
+        .collect()
 }
 
-fn ls_files_error_unmatch(pathspec: String) -> CliError {
-    CliError::Stderr {
-        code: 1,
-        text: format!(
-            "error: pathspec '{pathspec}' did not match any file(s) known to git\n\
-             Did you forget to 'git add'?\n"
-        ),
+fn ls_files_unmatched_record_pathspecs(
+    records: &[(Vec<u8>, u8)],
+    pathspecs: &[Vec<u8>],
+    original_pathspecs: &[PathBuf],
+) -> Vec<String> {
+    pathspecs
+        .iter()
+        .enumerate()
+        .filter_map(|(index_position, pathspec)| {
+            let rule = parse_pathspec_rule(pathspec);
+            if rule.exclude
+                || records
+                    .iter()
+                    .any(|(path, _tag)| pathspec_rule_matches(path, rule))
+            {
+                return None;
+            }
+            Some(
+                original_pathspecs
+                    .get(index_position)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| String::from_utf8_lossy(pathspec).into_owned()),
+            )
+        })
+        .collect()
+}
+
+fn ls_files_error_unmatch(pathspecs: &[String]) -> CliError {
+    let mut text = String::new();
+    for pathspec in pathspecs {
+        text.push_str(&format!(
+            "error: pathspec '{pathspec}' did not match any file(s) known to git\n"
+        ));
     }
+    text.push_str("Did you forget to 'git add'?\n");
+    CliError::Stderr { code: 1, text }
 }
 
 fn ls_files_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Option<Vec<u8>> {
@@ -2992,12 +4221,15 @@ fn ls_files_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Opt
         return Some(path.to_vec());
     }
     if path == cwd_prefix {
-        return Some(Vec::new());
+        return Some(b"./".to_vec());
     }
     if let Some(rest) = path
         .strip_prefix(cwd_prefix)
         .and_then(|rest| rest.strip_prefix(b"/"))
     {
+        if rest.is_empty() {
+            return Some(b"./".to_vec());
+        }
         return Some(rest.to_vec());
     }
     Some(relative_pathspec_bytes(cwd_prefix, path))
@@ -3013,12 +4245,16 @@ fn write_ls_files_plain_path_record(
     let display_path = if full_name || cwd_prefix.is_empty() {
         Some(path)
     } else if path == cwd_prefix {
-        Some(&[][..])
+        Some(&b"./"[..])
     } else if let Some(rest) = path
         .strip_prefix(cwd_prefix)
         .and_then(|rest| rest.strip_prefix(b"/"))
     {
-        Some(rest)
+        if rest.is_empty() {
+            Some(&b"./"[..])
+        } else {
+            Some(rest)
+        }
     } else {
         None
     };
@@ -3076,14 +4312,116 @@ fn write_ls_files_record(out: &mut impl Write, record: &str, zero: bool) -> Resu
     Ok(())
 }
 
+struct SparsePathScope {
+    matcher: GitIgnore,
+    cone_mode: bool,
+}
+
+impl SparsePathScope {
+    fn load(repo: &GitRepo) -> Result<Option<Self>> {
+        if !sparse_checkout_active(repo)? {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            matcher: sparse_pattern_matcher(&read_sparse_checkout_match_patterns(repo)?),
+            cone_mode: sparse_checkout_cone_mode(repo)?,
+        }))
+    }
+
+    fn contains(&self, path: &[u8]) -> bool {
+        sparse_path_matches(path, &self.matcher, self.cone_mode)
+    }
+}
+
+fn add_path_is_sparse(entry: &IndexEntry, scope: Option<&SparsePathScope>) -> bool {
+    entry.skip_worktree() || scope.is_some_and(|scope| !scope.contains(&entry.path))
+}
+
+struct AddSparseErrorOptions {
+    allow_sparse: bool,
+    all: bool,
+    dense_matches_are_candidates: bool,
+    materialized_sparse_is_candidate: bool,
+}
+
+fn add_sparse_path_error(
+    repo: &GitRepo,
+    index: &GitIndex,
+    scope: Option<&SparsePathScope>,
+    paths: &[PathBuf],
+    additional_files: &[Vec<u8>],
+    options: AddSparseErrorOptions,
+) -> Result<Option<CliError>> {
+    if options.allow_sparse || options.all || paths.is_empty() {
+        return Ok(None);
+    }
+    let pathspecs = paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative_allow_root(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let mut has_sparse = false;
+    let mut has_dense_candidate = false;
+    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        if !pathspec_matches(&entry.path, &pathspecs) {
+            continue;
+        }
+        if add_path_is_sparse(entry, scope) {
+            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            if options.materialized_sparse_is_candidate && scope.is_some() && path_exists(&absolute)
+            {
+                has_dense_candidate = true;
+            } else {
+                has_sparse = true;
+            }
+            continue;
+        }
+        if options.dense_matches_are_candidates {
+            has_dense_candidate = true;
+            continue;
+        }
+        let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+        has_dense_candidate |= !path_exists(&absolute)
+            || worktree_entry_modified(repo, &absolute, entry).unwrap_or(true);
+    }
+    for path in additional_files {
+        if find_index_entry(index, path).is_some() {
+            continue;
+        }
+        if scope.is_some_and(|scope| !scope.contains(path)) {
+            has_sparse = true;
+        } else {
+            has_dense_candidate = true;
+        }
+    }
+    if !has_sparse || has_dense_candidate {
+        return Ok(None);
+    }
+    let display_paths = paths
+        .iter()
+        .map(|path| {
+            let relative = path_arg_to_repo_relative_allow_root(repo, path)?;
+            Ok(if relative.is_empty() {
+                b".".to_vec()
+            } else {
+                relative
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(sparse_path_update_error(repo, &display_paths)?))
+}
+
 pub(crate) fn add(
     all: bool,
+    ignore_removal: bool,
+    sparse: bool,
     force: bool,
     update: bool,
+    renormalize: bool,
     intent_to_add: bool,
     refresh: bool,
     verbose: bool,
     ignore_errors: bool,
+    no_ignore_errors: bool,
     ignore_missing: bool,
     interactive: bool,
     patch: bool,
@@ -3096,12 +4434,16 @@ pub(crate) fn add(
 ) -> Result<()> {
     add_with_embedded_repo_warning(
         all,
+        ignore_removal,
+        sparse,
         force,
         update,
+        renormalize,
         intent_to_add,
         refresh,
         verbose,
         ignore_errors,
+        no_ignore_errors,
         ignore_missing,
         false,
         interactive,
@@ -3117,12 +4459,16 @@ pub(crate) fn add(
 
 pub(crate) fn add_with_embedded_repo_warning(
     all: bool,
+    ignore_removal: bool,
+    sparse: bool,
     force: bool,
     update: bool,
+    renormalize: bool,
     intent_to_add: bool,
     refresh: bool,
     verbose: bool,
     ignore_errors: bool,
+    no_ignore_errors: bool,
     ignore_missing: bool,
     no_warn_embedded_repo: bool,
     interactive: bool,
@@ -3136,13 +4482,13 @@ pub(crate) fn add_with_embedded_repo_warning(
 ) -> Result<()> {
     let _trace = phase_trace("add.total");
     let update = update || edit;
-    if all && update {
+    if all && (update || renormalize) {
         return Err(CliError::Fatal {
             code: 128,
             message: "options '-A' and '-u' cannot be used together".into(),
         });
     }
-    if intent_to_add && (all || update || refresh) {
+    if intent_to_add && (all || update || renormalize || refresh) {
         return Err(CliError::Fatal {
             code: 128,
             message: "--intent-to-add cannot be combined with -A, -u, or --refresh".into(),
@@ -3157,19 +4503,48 @@ pub(crate) fn add_with_embedded_repo_warning(
             message: "--pathspec-file-nul requires --pathspec-from-file".into(),
         });
     }
-    if paths.is_empty() && !all && !update && !interactive && !patch {
+    if paths.is_empty() && !all && !update && !renormalize && !interactive && !patch {
         eprintln!("Nothing specified, nothing added.");
         eprintln!("hint: Maybe you wanted to say 'git add .'?");
-        eprintln!(
-            "hint: Disable this message with \"git config set advice.addEmptyPathspec false\""
-        );
+        eprintln!("hint: Disable this message with \"git config advice.addEmptyPathspec false\"");
         return Ok(());
     }
+    let requested_paths = paths.clone();
     let _setup_trace = phase_trace("add.setup");
-    let repo = find_repo()?;
-    preflight_explicit_submodule_hash_mismatch(&repo, all, update || refresh, &paths)?;
+    let repo = {
+        let _trace = phase_trace("add.find_repo");
+        find_repo()?
+    };
+    {
+        let _trace = phase_trace("add.preflight_submodule_hash_mismatch");
+        preflight_explicit_submodule_hash_mismatch(
+            &repo,
+            all,
+            update || renormalize || refresh,
+            &paths,
+        )?;
+    }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut index = read_repo_index(&repo)?;
+    let raw_index = {
+        let _trace = phase_trace("add.read_index");
+        read_repo_index_raw(&repo)?
+    };
+    let mut index = expand_repo_sparse_index(&repo, &raw_index)?;
+    let sparse_scope = SparsePathScope::load(&repo)?;
+    if !sparse && let Some(scope) = sparse_scope.as_ref() {
+        let entries = index
+            .entries()
+            .iter()
+            .cloned()
+            .map(|mut entry| {
+                if entry.stage == 0 && !scope.contains(&entry.path) {
+                    entry.set_skip_worktree(true);
+                }
+                entry
+            })
+            .collect::<Vec<_>>();
+        index = GitIndex::from_entries(entries)?;
+    }
     if interactive || patch {
         if all || force || update || intent_to_add || refresh || edit || chmod.is_some() || dry_run
         {
@@ -3182,15 +4557,44 @@ pub(crate) fn add_with_embedded_repo_warning(
             .iter()
             .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
             .collect::<Result<Vec<_>>>()?;
+        let requires_sparse_expansion = raw_index.entries().iter().any(|entry| {
+            entry.stage == 0
+                && entry.mode == IndexMode::Tree
+                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+        });
+        let _sparse_expansion_region =
+            requires_sparse_expansion.then(|| trace2_region("index", "ensure_full_index"));
         if patch {
             return add_patch_quit_lane(&repo, &store, &index, &pathspecs);
         }
         return add_interactive_quit_lane(&repo, &store, &index, &pathspecs);
     }
-    let ignore_errors = ignore_errors || add_ignore_errors_config_enabled(&repo)?;
+    let ignore_errors = {
+        let _trace = phase_trace("add.ignore_errors_config");
+        if no_ignore_errors {
+            false
+        } else {
+            ignore_errors || add_ignore_errors_config_enabled(&repo)?
+        }
+    };
     let chmod = chmod.as_deref().map(parse_add_chmod).transpose()?;
     drop(_setup_trace);
     if refresh {
+        if let Some(error) = add_sparse_path_error(
+            &repo,
+            &index,
+            sparse_scope.as_ref(),
+            &requested_paths,
+            &[],
+            AddSparseErrorOptions {
+                allow_sparse: sparse,
+                all,
+                dense_matches_are_candidates: true,
+                materialized_sparse_is_candidate: true,
+            },
+        )? {
+            return Err(error);
+        }
         let _trace = phase_trace("add.refresh");
         let pathspecs = paths
             .iter()
@@ -3198,52 +4602,96 @@ pub(crate) fn add_with_embedded_repo_warning(
             .collect::<Result<Vec<_>>>()?;
         ensure_add_pathspecs_match(&repo, &index, &pathspecs)?;
         refresh_tracked_index_metadata_matching(&repo, &mut index, &pathspecs)?;
-        index.write_to_path(&repo.index_path)?;
+        write_add_index(&repo, &store, &index)?;
         return Ok(());
     }
     if update {
+        if let Some(error) = add_sparse_path_error(
+            &repo,
+            &index,
+            sparse_scope.as_ref(),
+            &requested_paths,
+            &[],
+            AddSparseErrorOptions {
+                allow_sparse: sparse,
+                all,
+                dense_matches_are_candidates: true,
+                materialized_sparse_is_candidate: false,
+            },
+        )? {
+            return Err(error);
+        }
         let _trace = phase_trace("add.update");
         let pathspecs = paths
             .iter()
             .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
             .collect::<Result<Vec<_>>>()?;
         ensure_add_pathspecs_match(&repo, &index, &pathspecs)?;
-        stage_tracked_worktree_changes_matching(
+        let changed = stage_tracked_worktree_changes_matching(
             &repo,
             &store,
             &mut index,
             &pathspecs,
             &HashSet::new(),
         )?;
-        index.write_to_path(&repo.index_path)?;
+        if changed {
+            let _trace = phase_trace("add.write_index");
+            write_add_index(&repo, &store, &index)?;
+        }
+        return Ok(());
+    }
+    if renormalize {
+        if let Some(error) = add_sparse_path_error(
+            &repo,
+            &index,
+            sparse_scope.as_ref(),
+            &requested_paths,
+            &[],
+            AddSparseErrorOptions {
+                allow_sparse: sparse,
+                all,
+                dense_matches_are_candidates: true,
+                materialized_sparse_is_candidate: false,
+            },
+        )? {
+            return Err(error);
+        }
+        let _trace = phase_trace("add.renormalize");
+        let pathspecs = paths
+            .iter()
+            .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
+            .collect::<Result<Vec<_>>>()?;
+        ensure_add_pathspecs_match(&repo, &index, &pathspecs)?;
+        let changed =
+            renormalize_tracked_worktree_changes_matching(&repo, &store, &mut index, &pathspecs)?;
+        if changed {
+            let _trace = phase_trace("add.write_index");
+            write_add_index(&repo, &store, &index)?;
+        }
         return Ok(());
     }
 
     let _collect_trace = phase_trace("add.collect_files");
-    let ignore = if ignore_errors {
-        GitIgnore::load_from_root_ignore_errors(&repo.root)?
-    } else {
-        GitIgnore::load_from_root(&repo.root)?
-    };
+    let ignore = add_repo_ignore(&repo, ignore_errors)?;
     let mut files = Vec::new();
-    let all_pathspecs = if all && paths.is_empty() {
+    let tracked_pathspecs = if all && paths.is_empty() {
         Vec::new()
-    } else if all {
+    } else {
         paths
             .iter()
             .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
             .collect::<Result<Vec<_>>>()?
-    } else {
-        Vec::new()
     };
     if all {
-        ensure_add_pathspecs_match(&repo, &index, &all_pathspecs)?;
+        ensure_add_pathspecs_match(&repo, &index, &tracked_pathspecs)?;
     }
     let add_paths = if all && paths.is_empty() {
         vec![repo.root.clone()]
     } else {
         paths
     };
+    let add_paths =
+        expand_add_pathspec_args(&repo, &index, &ignore, force, ignore_errors, add_paths)?;
     let mut ignored_explicit_paths = Vec::new();
     for path in add_paths {
         let raw_path = path.to_string_lossy();
@@ -3255,9 +4703,15 @@ pub(crate) fn add_with_embedded_repo_warning(
             path_for_lookup = PathBuf::from(unescaped_path.into_owned());
             &path_for_lookup
         };
-        let absolute = absolute_path_from_arg(lookup_path)?;
+        let absolute = path_arg_absolute_for_repo(&repo, lookup_path)?;
         if all && !path_exists(&absolute) {
             continue;
+        }
+        if path_traverses_symlink_ancestor(&repo.root, &absolute)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("'{}' is beyond a symbolic link", path.display()),
+            });
         }
         if !path_exists(&absolute) {
             if dry_run && ignore_missing {
@@ -3267,12 +4721,16 @@ pub(crate) fn add_with_embedded_repo_warning(
                 }
                 continue;
             }
+            let relative = path_arg_to_repo_relative(&repo, lookup_path)?;
+            if !ignore_removal && find_index_entry(&index, &relative).is_some() {
+                continue;
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!("pathspec '{}' did not match any files", path.display()),
             });
         }
-        if !force {
+        if !force && !(all && requested_paths.is_empty()) {
             if let Some(ignored) = explicit_ignored_add_path(&repo, &index, &ignore, &absolute)? {
                 ignored_explicit_paths.push(ignored);
                 continue;
@@ -3298,23 +4756,56 @@ pub(crate) fn add_with_embedded_repo_warning(
         .iter()
         .map(|file| Ok((file.clone(), repo_relative_path(&repo.root, file)?)))
         .collect::<Result<Vec<_>>>()?;
+    let additional_files = file_entries
+        .iter()
+        .map(|(_, relative)| relative.clone())
+        .collect::<Vec<_>>();
+    if let Some(error) = add_sparse_path_error(
+        &repo,
+        &index,
+        sparse_scope.as_ref(),
+        &requested_paths,
+        &additional_files,
+        AddSparseErrorOptions {
+            allow_sparse: sparse,
+            all,
+            dense_matches_are_candidates: chmod.is_some(),
+            materialized_sparse_is_candidate: false,
+        },
+    )? {
+        return Err(error);
+    }
+    let file_entries = if sparse {
+        file_entries
+    } else {
+        file_entries
+            .into_iter()
+            .filter(|(_, relative)| {
+                find_index_entry(&index, relative)
+                    .is_none_or(|entry| !add_path_is_sparse(entry, sparse_scope.as_ref()))
+                    && sparse_scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.contains(relative))
+            })
+            .collect::<Vec<_>>()
+    };
     let files_to_stage = file_entries
         .iter()
         .map(|(_, relative)| relative.clone())
         .collect::<HashSet<_>>();
     drop(_collect_trace);
-    if all {
-        let already_staged = if chmod.is_none() {
+    if all || !ignore_removal {
+        let already_staged = if all && chmod.is_none() {
             HashSet::new()
         } else {
             files_to_stage.clone()
         };
         let _trace = phase_trace("add.stage_tracked");
-        stage_tracked_worktree_changes_matching(
+        let _ = stage_tracked_worktree_changes_matching(
             &repo,
             &store,
             &mut index,
-            &all_pathspecs,
+            &tracked_pathspecs,
             &already_staged,
         )?;
     }
@@ -3340,8 +4831,11 @@ pub(crate) fn add_with_embedded_repo_warning(
     let mut embedded_repo_hint_printed = false;
     let mut chmod_error = None;
     let stage_index_mtime = repo_index_mtime(&repo)?;
-    let stage_options = WorktreeStageOptions::load(&repo)?;
-    let stage_file_entries = if all && chmod.is_none() {
+    let stage_options = {
+        let _trace = phase_trace("add.stage_options");
+        WorktreeStageOptions::load(&repo)?
+    };
+    let mut stage_file_entries = if all && chmod.is_none() {
         let _trace = phase_trace("add.filter_tracked_file_entries");
         file_entries
             .into_iter()
@@ -3360,11 +4854,33 @@ pub(crate) fn add_with_embedded_repo_warning(
     } else {
         file_entries
     };
+    let bulk_checkin_candidates = if intent_to_add || ignore_errors || chmod.is_some() {
+        Vec::new()
+    } else {
+        let threshold = core_big_file_threshold(&repo)?;
+        let mut candidates = Vec::new();
+        for (path, relative) in &stage_file_entries {
+            if let Some(candidate) =
+                bulk_checkin_candidate(&repo, &stage_options, path, relative, threshold)?
+            {
+                candidates.push(candidate);
+            }
+        }
+        candidates
+    };
+    if !bulk_checkin_candidates.is_empty() {
+        let bulk_paths = bulk_checkin_candidates
+            .iter()
+            .map(|candidate| candidate.relative.as_slice())
+            .collect::<HashSet<_>>();
+        stage_file_entries.retain(|(_, relative)| !bulk_paths.contains(relative.as_slice()));
+    }
     {
         let _trace = phase_trace("add.stage_files");
         let mut stage_files_trace = StageFilesTrace::new();
         let parallel_staged = if all && chmod.is_none() && !intent_to_add && !ignore_errors {
             try_stage_regular_files_parallel(
+                &repo,
                 &store,
                 &mut index,
                 &stage_file_entries,
@@ -3422,6 +4938,16 @@ pub(crate) fn add_with_embedded_repo_warning(
                         eprintln!("error: unable to add '{}'", file.display());
                         continue;
                     }
+                    if object_database_permission_denied(&repo, &error).is_some() {
+                        let display = String::from_utf8_lossy(&relative);
+                        return Err(CliError::Stderr {
+                            code: 128,
+                            text: format!(
+                                "{}error: {display}: failed to insert into database\nerror: unable to index file '{display}'\nfatal: updating files failed\n",
+                                object_database_permission_denied_prefix(&repo)
+                            ),
+                        });
+                    }
                     return Err(error);
                 }
                 if verbose {
@@ -3436,8 +4962,23 @@ pub(crate) fn add_with_embedded_repo_warning(
         stage_files_trace.emit();
     }
     {
+        let _trace = phase_trace("add.bulk_checkin");
+        stage_bulk_checkin_candidates(
+            &repo,
+            &store,
+            &mut index,
+            &bulk_checkin_candidates,
+            &stage_options,
+        )?;
+        if verbose {
+            for candidate in &bulk_checkin_candidates {
+                println!("add '{}'", String::from_utf8_lossy(&candidate.relative));
+            }
+        }
+    }
+    {
         let _trace = phase_trace("add.write_index");
-        index.write_to_path(&repo.index_path)?;
+        write_add_index(&repo, &store, &index)?;
     }
     if !ignored_explicit_paths.is_empty() {
         return Err(explicit_ignored_add_error(&ignored_explicit_paths));
@@ -3449,6 +4990,65 @@ pub(crate) fn add_with_embedded_repo_warning(
         return Err(CliError::Exit(1));
     }
     Ok(())
+}
+
+fn write_add_index(repo: &GitRepo, store: &LooseObjectStore, index: &GitIndex) -> Result<()> {
+    let write_index = collapse_sparse_index(repo, store, index)?;
+    let options = add_index_write_options(repo)?;
+    write_index_with_lockfile_diagnostics(
+        repo,
+        &write_index,
+        add_lockfile_pid_config_enabled(repo)?,
+        options,
+    )
+}
+
+#[derive(Clone, Copy, Default)]
+struct AddIndexWriteOptions {
+    version: Option<zmin_git_core::GitIndexVersion>,
+    skip_hash: bool,
+}
+
+fn add_index_write_options(repo: &GitRepo) -> Result<AddIndexWriteOptions> {
+    if repo.index_path.exists() {
+        return Ok(AddIndexWriteOptions::default());
+    }
+    let feature_many_files = read_config_value(repo, "feature.manyFiles")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(false);
+    let version = if let Ok(raw) = std::env::var("GIT_INDEX_VERSION") {
+        parse_add_index_version(&raw, "GIT_INDEX_VERSION")?
+    } else if let Some(raw) = read_config_value(repo, "index.version")? {
+        parse_add_index_version(&raw, "index.version")?
+    } else if feature_many_files {
+        Some(zmin_git_core::GitIndexVersion::V4)
+    } else {
+        None
+    };
+    let skip_hash = read_config_value(repo, "index.skipHash")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(feature_many_files);
+    Ok(AddIndexWriteOptions { version, skip_hash })
+}
+
+fn parse_add_index_version(
+    raw: &str,
+    name: &str,
+) -> Result<Option<zmin_git_core::GitIndexVersion>> {
+    let version = match raw {
+        "2" => Some(zmin_git_core::GitIndexVersion::V2),
+        "3" => None,
+        "4" => Some(zmin_git_core::GitIndexVersion::V4),
+        _ => {
+            eprintln!("warning: {name} set, but the value is invalid.\nUsing version 3");
+            // Git reports the fallback as version 3 but writes the legacy
+            // v2 on-disk format for a newly-created index.
+            None
+        }
+    };
+    Ok(version)
 }
 
 fn add_interactive_quit_lane(
@@ -3469,10 +5069,18 @@ fn add_interactive_quit_lane(
         .into_iter()
         .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
         .collect::<Vec<_>>();
-    let paths = staged
+    let staged_paths = staged
         .iter()
-        .chain(&unstaged)
         .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    let unstaged_paths = unstaged
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    let paths = staged_paths
+        .iter()
+        .chain(&unstaged_paths)
+        .cloned()
         .collect::<BTreeSet<_>>();
     if paths.is_empty() {
         return Ok(());
@@ -3517,17 +5125,25 @@ fn add_interactive_quit_lane(
 
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    let command = input.lines().next().unwrap_or_default().trim();
-    match command {
-        "" | "q" | "quit" | "7" => {
+    match parse_add_interactive_action(&input, &staged_paths, &unstaged_paths)? {
+        AddInteractiveAction::Quit => {
             print!("Bye.");
             Ok(())
         }
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: "interactive add only supports the quit lane in this compatibility batch"
-                .into(),
-        }),
+        AddInteractiveAction::Patch {
+            selected_paths,
+            patch_answers,
+        } => {
+            let mut answers = patch_commands::PatchAnswers::from_text(&patch_answers);
+            stage_worktree_patch_hunks_to_index(repo, store, index, &selected_paths, &mut answers)?;
+            Ok(())
+        }
+        AddInteractiveAction::Update { selected_paths } => {
+            stage_add_interactive_update(repo, store, index, &selected_paths)
+        }
+        AddInteractiveAction::Revert { selected_paths } => {
+            revert_add_interactive_paths(repo, store, index, &head_index, &selected_paths)
+        }
     }
 }
 
@@ -3567,16 +5183,240 @@ pub(crate) fn add_patch_quit_lane(
     index: &GitIndex,
     pathspecs: &[Vec<u8>],
 ) -> Result<()> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
-    let head_index =
-        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let mut answers = patch_commands::PatchAnswers::read()?;
+    let _ = stage_worktree_patch_hunks_to_index(repo, store, index, pathspecs, &mut answers)?;
+    Ok(())
+}
+
+pub(crate) fn commit_interactive_stage(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+) -> Result<()> {
     let worktree_index = worktree_index_snapshot(repo, index)?;
-    let entries = diff_indexes(&head_index, &worktree_index)?
+    let entries = diff_indexes(index, &worktree_index)?
+        .into_iter()
+        .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
+        .collect::<Vec<_>>();
+    let paths = entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+
+    if !paths.is_empty() {
+        println!("           staged     unstaged path");
+        for (row, path) in paths.iter().enumerate() {
+            let staged_text = add_interactive_diff_stat(
+                index,
+                &worktree_index,
+                repo,
+                store,
+                &entries,
+                path,
+                DiffSideSource::WorktreeOrIndex,
+            )?
+            .unwrap_or_else(|| "unchanged".to_owned());
+            println!(
+                "{:>3}: {:>12} {:>12} {}",
+                row + 1,
+                "unchanged",
+                staged_text,
+                String::from_utf8_lossy(path)
+            );
+        }
+        println!();
+    }
+
+    println!("*** Commands ***");
+    println!("  1: [s]tatus\t  2: [u]pdate\t  3: [r]evert\t  4: [a]dd untracked");
+    println!("  5: [p]atch\t  6: [d]iff\t  7: [q]uit\t  8: [h]elp");
+    print!("What now> ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    match parse_add_interactive_action(&input, &BTreeSet::new(), &paths)? {
+        AddInteractiveAction::Quit => Ok(()),
+        AddInteractiveAction::Patch {
+            selected_paths,
+            patch_answers,
+        } => {
+            let mut answers = patch_commands::PatchAnswers::from_text(&patch_answers);
+            let _ = stage_worktree_patch_hunks_to_index(
+                repo,
+                store,
+                index,
+                &selected_paths,
+                &mut answers,
+            )?;
+            Ok(())
+        }
+        AddInteractiveAction::Update { selected_paths } => {
+            stage_add_interactive_update(repo, store, index, &selected_paths)
+        }
+        AddInteractiveAction::Revert { selected_paths } => {
+            let runtime = CliPrimitiveRuntime::new_default(repo);
+            let head_index = read_head_index_from_primitive_stores(
+                runtime.refs(),
+                runtime.object_store_adapter(),
+            )?;
+            revert_add_interactive_paths(repo, store, index, &head_index, &selected_paths)
+        }
+    }
+}
+
+enum AddInteractiveAction {
+    Quit,
+    Update {
+        selected_paths: Vec<Vec<u8>>,
+    },
+    Revert {
+        selected_paths: Vec<Vec<u8>>,
+    },
+    Patch {
+        selected_paths: Vec<Vec<u8>>,
+        patch_answers: String,
+    },
+}
+
+fn parse_add_interactive_action(
+    input: &str,
+    staged_paths: &BTreeSet<Vec<u8>>,
+    unstaged_paths: &BTreeSet<Vec<u8>>,
+) -> Result<AddInteractiveAction> {
+    let mut lines = input.lines();
+    while let Some(line) = lines.next() {
+        let command = line.trim();
+        if command.is_empty() {
+            continue;
+        }
+        match command {
+            "q" | "quit" | "7" => return Ok(AddInteractiveAction::Quit),
+            "h" | "help" | "8" | "s" | "status" | "1" => continue,
+            "u" | "update" | "2" => {
+                if unstaged_paths.is_empty() {
+                    continue;
+                }
+                let selected_paths =
+                    parse_add_interactive_path_selection(&mut lines, unstaged_paths)?;
+                if selected_paths.is_empty() {
+                    continue;
+                }
+                return Ok(AddInteractiveAction::Update { selected_paths });
+            }
+            "r" | "revert" | "3" => {
+                if staged_paths.is_empty() {
+                    continue;
+                }
+                let selected_paths =
+                    parse_add_interactive_path_selection(&mut lines, staged_paths)?;
+                if selected_paths.is_empty() {
+                    continue;
+                }
+                return Ok(AddInteractiveAction::Revert { selected_paths });
+            }
+            "p" | "patch" | "5" => {
+                let selected_paths =
+                    parse_add_interactive_path_selection(&mut lines, unstaged_paths)?;
+                let patch_answers = lines.collect::<Vec<_>>().join("\n");
+                return Ok(AddInteractiveAction::Patch {
+                    selected_paths,
+                    patch_answers,
+                });
+            }
+            _ => {
+                eprintln!("Huh ({command})?");
+            }
+        }
+    }
+    Ok(AddInteractiveAction::Quit)
+}
+
+fn stage_add_interactive_update(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    selected_paths: &[Vec<u8>],
+) -> Result<()> {
+    if selected_paths.is_empty() {
+        return Ok(());
+    }
+    let mut updated_index = index.clone();
+    if stage_tracked_worktree_changes_matching(
+        repo,
+        store,
+        &mut updated_index,
+        selected_paths,
+        &HashSet::new(),
+    )? {
+        write_add_index(repo, store, &updated_index)?;
+    }
+    Ok(())
+}
+
+fn revert_add_interactive_paths(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    head_index: &GitIndex,
+    selected_paths: &[Vec<u8>],
+) -> Result<()> {
+    if selected_paths.is_empty() {
+        return Ok(());
+    }
+    let mut updated_index = index.clone();
+    for path in selected_paths {
+        updated_index.remove_path(path)?;
+        if let Some(entry) = find_index_entry(head_index, path) {
+            updated_index.upsert(entry.clone())?;
+        }
+    }
+    write_add_index(repo, store, &updated_index)
+}
+
+fn parse_add_interactive_path_selection<'a>(
+    lines: &mut std::str::Lines<'a>,
+    candidate_paths: &BTreeSet<Vec<u8>>,
+) -> Result<Vec<Vec<u8>>> {
+    let ordered_paths = candidate_paths.iter().cloned().collect::<Vec<_>>();
+    let mut selected = BTreeSet::new();
+    for line in lines.by_ref() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        for token in trimmed.split_whitespace() {
+            let index = token.parse::<usize>().map_err(|_| CliError::Fatal {
+                code: 129,
+                message: format!("invalid interactive path selection: {token}"),
+            })?;
+            let Some(path) = ordered_paths.get(index.saturating_sub(1)) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: format!("interactive path selection out of range: {index}"),
+                });
+            };
+            selected.insert(path.clone());
+        }
+    }
+    Ok(selected.into_iter().collect())
+}
+
+pub(crate) fn stage_worktree_patch_hunks_to_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+    answers: &mut patch_commands::PatchAnswers,
+) -> Result<bool> {
+    let worktree_index = worktree_index_snapshot(repo, index)?;
+    let entries = diff_indexes(index, &worktree_index)?
         .into_iter()
         .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     let mut patch_bytes = Vec::new();
@@ -3584,28 +5424,149 @@ pub(crate) fn add_patch_quit_lane(
         &mut patch_bytes,
         repo,
         store,
-        &head_index,
+        index,
         &worktree_index,
         &entries,
         PatchFormatOptions::worktree(),
     )?;
-    let output = String::from_utf8(patch_bytes).map_err(|error| CliError::Fatal {
+    let output = String::from_utf8(patch_bytes.clone()).map_err(|error| CliError::Fatal {
         code: 128,
         message: format!("patch output was not valid utf-8: {error}"),
     })?;
-    print!("{output}");
-    print!("(1/1) Stage this hunk [y,n,q,a,d,e,p,?]? ");
-    io::stdout().flush()?;
+    let patches = patch_commands::parse_apply_patches(&patch_bytes)?;
+    let displays = reset_patch_displays(&output);
+    let mut updated_index = index.clone();
+    let mut selected_any = false;
+    let mut all_remaining = None;
+    let mut quit = false;
+    for (patch, display) in patches.into_iter().zip(displays) {
+        print!("{}", display.header);
+        let target_path = patch
+            .new_path
+            .as_ref()
+            .or(patch.old_path.as_ref())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "patch has no target path".into(),
+            })?
+            .clone();
+        let mut selected_hunks = Vec::new();
+        for (hunk_index, (hunk, hunk_display)) in patch.hunks.iter().zip(&display.hunks).enumerate()
+        {
+            print!("{hunk_display}");
+            let selected = match all_remaining {
+                Some(value) => value,
+                None => {
+                    print!(
+                        "({}/{}) Stage this hunk {}? ",
+                        hunk_index + 1,
+                        patch.hunks.len(),
+                        stage_patch_prompt_options(hunk_index, patch.hunks.len())
+                    );
+                    io::stdout().flush()?;
+                    let answer = answers.next();
+                    println!();
+                    match answer {
+                        patch_commands::PatchAnswer::Yes => true,
+                        patch_commands::PatchAnswer::No => false,
+                        patch_commands::PatchAnswer::Split => {
+                            let split_hunks = patch_commands::split_apply_hunk(hunk);
+                            if split_hunks.len() == 1 {
+                                false
+                            } else {
+                                for split_hunk in split_hunks {
+                                    print!("Stage this split hunk [y,n,q,a,d]? ");
+                                    io::stdout().flush()?;
+                                    let split_selected = match answers.next() {
+                                        patch_commands::PatchAnswer::Yes => true,
+                                        patch_commands::PatchAnswer::All => {
+                                            all_remaining = Some(true);
+                                            true
+                                        }
+                                        patch_commands::PatchAnswer::Done => {
+                                            all_remaining = Some(false);
+                                            false
+                                        }
+                                        patch_commands::PatchAnswer::Quit => {
+                                            quit = true;
+                                            false
+                                        }
+                                        patch_commands::PatchAnswer::No
+                                        | patch_commands::PatchAnswer::Split => false,
+                                    };
+                                    println!();
+                                    if split_selected {
+                                        selected_hunks.push(split_hunk);
+                                    }
+                                    if quit {
+                                        break;
+                                    }
+                                }
+                                false
+                            }
+                        }
+                        patch_commands::PatchAnswer::All => {
+                            all_remaining = Some(true);
+                            true
+                        }
+                        patch_commands::PatchAnswer::Done => {
+                            all_remaining = Some(false);
+                            false
+                        }
+                        patch_commands::PatchAnswer::Quit => {
+                            quit = true;
+                            false
+                        }
+                    }
+                }
+            };
+            if selected {
+                selected_hunks.push(hunk.clone());
+            }
+            if quit {
+                break;
+            }
+        }
+        if selected_hunks.is_empty() {
+            if quit {
+                break;
+            }
+            continue;
+        }
+        selected_any = true;
+        let base_entry = find_index_entry(index, &target_path);
+        let base = base_entry
+            .map(|entry| read_index_entry_content(store, entry))
+            .transpose()?
+            .unwrap_or_default();
+        if patch.deleted && selected_hunks.len() == patch.hunks.len() {
+            updated_index.remove_path(&target_path)?;
+            continue;
+        }
+        let content = patch_commands::apply_hunks_to_content(&base, &selected_hunks, &target_path)?;
+        let mode = patch
+            .new_mode
+            .or_else(|| find_index_entry(&worktree_index, &target_path).map(|entry| entry.mode))
+            .or_else(|| base_entry.map(|entry| entry.mode))
+            .unwrap_or(IndexMode::File);
+        upsert_index_content(store, &mut updated_index, target_path, content, mode)?;
+        if quit {
+            break;
+        }
+    }
+    if selected_any {
+        updated_index.refresh_cache_tree();
+        updated_index.write_to_path(&repo.index_path)?;
+    }
+    Ok(selected_any)
+}
 
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
-    let answer = input.chars().find(|value| !value.is_whitespace());
-    match answer {
-        None | Some('q' | 'Q') => Ok(()),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: "patch add only supports the quit lane in this compatibility batch".into(),
-        }),
+fn stage_patch_prompt_options(index: usize, total: usize) -> &'static str {
+    match (index, total) {
+        (_, 1) => "[y,n,q,a,d,e,p,?]",
+        (0, _) => "[y,n,q,a,d,j,J,g,/,e,p,?]",
+        (index, total) if index + 1 == total => "[y,n,q,a,d,K,g,/,e,p,?]",
+        _ => "[y,n,q,a,d,k,j,J,K,g,/,e,p,?]",
     }
 }
 
@@ -3650,9 +5611,7 @@ fn warn_add_embedded_repo(
         eprintln!("hint: \tgit rm --cached {display}");
         eprintln!("hint:");
         eprintln!("hint: See \"git help submodule\" for more information.");
-        eprintln!(
-            "hint: Disable this message with \"git config set advice.addEmbeddedRepo false\""
-        );
+        eprintln!("hint: Disable this message with \"git config advice.addEmbeddedRepo false\"");
         *hint_printed = true;
     }
     Ok(())
@@ -3690,6 +5649,80 @@ fn add_ignore_errors_config_enabled(repo: &GitRepo) -> Result<bool> {
         });
     }
     Ok(false)
+}
+
+fn expand_add_pathspec_args(
+    repo: &GitRepo,
+    index: &GitIndex,
+    ignore: &GitIgnore,
+    force: bool,
+    ignore_errors: bool,
+    paths: Vec<PathBuf>,
+) -> Result<Vec<PathBuf>> {
+    let mut expanded = Vec::new();
+    for path in paths {
+        let absolute = path_arg_absolute_for_repo(repo, &path)?;
+        if path_exists(&absolute) || !add_arg_looks_like_pathspec_pattern(&path) {
+            expanded.push(path);
+            continue;
+        }
+        let pathspec = path_arg_to_repo_relative_allow_root(repo, &path)?;
+        let matches =
+            add_paths_matching_pathspec(repo, index, ignore, force, ignore_errors, &pathspec)?;
+        if matches.is_empty() {
+            expanded.push(path);
+        } else {
+            expanded.extend(matches);
+        }
+    }
+    Ok(expanded)
+}
+
+fn add_arg_looks_like_pathspec_pattern(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    raw.starts_with(":/")
+        || raw.starts_with(":!")
+        || raw.starts_with(":^")
+        || raw.starts_with(":(")
+        || raw.contains('*')
+        || raw.contains('?')
+        || raw.contains('[')
+}
+
+fn add_paths_matching_pathspec(
+    repo: &GitRepo,
+    index: &GitIndex,
+    ignore: &GitIgnore,
+    force: bool,
+    ignore_errors: bool,
+    pathspec: &[u8],
+) -> Result<Vec<PathBuf>> {
+    let pathspecs = vec![pathspec.to_vec()];
+    let mut matched = BTreeSet::new();
+    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        if pathspec_matches(&entry.path, &pathspecs) {
+            matched.insert(worktree_path_for_index_entry(&repo.root, &entry.path));
+        }
+    }
+    let mut worktree_files = Vec::new();
+    if ignore_errors {
+        collect_add_files_ignore_errors(
+            &repo.root,
+            &repo.root,
+            ignore,
+            force,
+            &mut worktree_files,
+        )?;
+    } else {
+        collect_add_files(&repo.root, &repo.root, ignore, force, &mut worktree_files)?;
+    }
+    for path in worktree_files {
+        let relative = repo_relative_path(&repo.root, &path)?;
+        if pathspec_matches(&relative, &pathspecs) {
+            matched.insert(path);
+        }
+    }
+    Ok(matched.into_iter().collect())
 }
 
 fn preflight_explicit_submodule_hash_mismatch(
@@ -3840,8 +5873,7 @@ fn explicit_ignored_add_error(paths: &[Vec<u8>]) -> CliError {
     }
     message.push_str("hint: Use -f if you really want to add them.");
     message.push('\n');
-    message
-        .push_str("hint: Disable this message with \"git config set advice.addIgnoredFile false\"");
+    message.push_str("hint: Disable this message with \"git config advice.addIgnoredFile false\"");
     message.push('\n');
     CliError::Stderr {
         code: 1,
@@ -3850,7 +5882,6 @@ fn explicit_ignored_add_error(paths: &[Vec<u8>]) -> CliError {
 }
 
 pub(crate) fn rm(options: RmOptions) -> Result<()> {
-    let _sparse = options.sparse;
     let mut paths = options.paths;
     if let Some(pathspec_file) = options.pathspec_from_file {
         let loaded = read_pathspec_file(&pathspec_file, options.pathspec_file_nul)?;
@@ -3864,12 +5895,21 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
     if paths.is_empty() {
         return Err(CliError::Message("`rm` requires at least one path".into()));
     }
-    let repo = find_repo()?;
-    let _store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
-    let mut index = read_repo_index(&repo)?;
+    let raw_index = read_repo_index_raw(&repo)?;
+    let mut index = expand_repo_sparse_index(&repo, &raw_index)?;
+    let sparse_matcher = if sparse_checkout_active(&repo)? && !options.sparse {
+        Some((
+            sparse_pattern_matcher(&read_sparse_checkout_match_patterns(&repo)?),
+            sparse_checkout_cone_mode(&repo)?,
+        ))
+    } else {
+        None
+    };
     let mut removed = Vec::new();
 
     for path in paths {
@@ -3879,6 +5919,14 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
             path_arg_to_repo_relative(&repo, &path)?
         };
         let matches = rm_path_matches(&index, &relative, options.recursive)?;
+        let sparse_directories = if options.sparse {
+            rm_matching_sparse_directories(&raw_index, &relative, options.recursive)
+        } else {
+            Vec::new()
+        };
+        let _expansion_region = (sparse_directories.is_empty()
+            && rm_matches_inside_sparse_directory(&raw_index, &matches))
+        .then(|| trace2_region("index", "ensure_full_index"));
         if matches.is_empty() {
             if relative.is_empty() {
                 continue;
@@ -3893,6 +5941,49 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
                     String::from_utf8_lossy(&relative)
                 ),
             });
+        }
+        if !sparse_directories.is_empty() {
+            for directory in sparse_directories {
+                let prefix = directory.strip_suffix(b"/").unwrap_or(&directory);
+                let descendants = index
+                    .entries()
+                    .iter()
+                    .filter(|entry| {
+                        entry.stage == 0 && path_is_below_sparse_directory(&entry.path, prefix)
+                    })
+                    .map(|entry| entry.path.clone())
+                    .collect::<Vec<_>>();
+                if !options.force {
+                    for descendant in &descendants {
+                        ensure_rm_safe(&repo, &head_index, &index, descendant, options.cached)?;
+                    }
+                }
+                if !options.dry_run {
+                    index.remove_dir(prefix)?;
+                }
+                removed.push(directory);
+            }
+            continue;
+        }
+        let (matches, rejected) = if let Some((matcher, cone_mode)) = sparse_matcher.as_ref() {
+            let mut allowed = Vec::new();
+            let mut rejected = Vec::new();
+            for matched in matches {
+                if sparse_path_matches(&matched, matcher, *cone_mode) {
+                    allowed.push(matched);
+                } else {
+                    rejected.push(matched);
+                }
+            }
+            (allowed, rejected)
+        } else {
+            (matches, Vec::new())
+        };
+        if matches.is_empty() && !rejected.is_empty() {
+            if options.ignore_unmatch {
+                continue;
+            }
+            return Err(sparse_path_update_error(&repo, &rejected)?);
         }
         for matched in matches {
             if !options.force {
@@ -3918,9 +6009,69 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
         }
     }
     if !options.dry_run {
-        index.write_to_path(&repo.index_path)?;
+        let write_index = collapse_sparse_index(&repo, &store, &index)?;
+        write_index.write_to_path(&repo.index_path)?;
     }
     Ok(())
+}
+
+fn rm_matching_sparse_directories(
+    raw_index: &GitIndex,
+    pathspec: &[u8],
+    recursive: bool,
+) -> Vec<Vec<u8>> {
+    let pathspecs = [pathspec.to_vec()];
+    raw_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree)
+        .filter(|entry| {
+            let directory = entry.path.strip_suffix(b"/").unwrap_or(&entry.path);
+            (recursive && directory == pathspec) || pathspec_matches(&entry.path, &pathspecs)
+        })
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
+fn rm_matches_inside_sparse_directory(raw_index: &GitIndex, matches: &[Vec<u8>]) -> bool {
+    raw_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree)
+        .any(|directory| {
+            let prefix = directory.path.strip_suffix(b"/").unwrap_or(&directory.path);
+            matches
+                .iter()
+                .any(|path| path_is_below_sparse_directory(path, prefix))
+        })
+}
+
+fn sparse_path_update_error(repo: &GitRepo, paths: &[Vec<u8>]) -> Result<CliError> {
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup();
+    let mut text = String::from(
+        "The following paths and/or pathspecs matched paths that exist\n\
+         outside of your sparse-checkout definition, so will not be\n\
+         updated in the index:\n",
+    );
+    for path in paths {
+        text.push_str(&String::from_utf8_lossy(&path));
+        text.push('\n');
+    }
+    if read_config_value(repo, "advice.updateSparsePath")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(true)
+    {
+        text.push_str(
+            "hint: If you intend to update such entries, try one of the following:\n\
+             hint: * Use the --sparse option.\n\
+             hint: * Disable or modify the sparsity rules.\n\
+             hint: Disable this message with \"git config advice.updateSparsePath false\"\n",
+        );
+    }
+    Ok(CliError::Stderr { code: 1, text })
 }
 
 pub(crate) fn mv(
@@ -3928,6 +6079,7 @@ pub(crate) fn mv(
     dry_run: bool,
     verbose: bool,
     skip_errors: bool,
+    sparse: bool,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
     if paths.len() < 2 {
@@ -3935,8 +6087,20 @@ pub(crate) fn mv(
             "`mv` requires at least one source and a destination".into(),
         ));
     }
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let mut index = read_repo_index(&repo)?;
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
+    let sparse_rules = if sparse_checkout_active(&repo)? {
+        Some((
+            sparse_pattern_matcher(&read_sparse_checkout_match_patterns(&repo)?),
+            sparse_checkout_cone_mode(&repo)?,
+        ))
+    } else {
+        None
+    };
     let Some(destination) = paths.last().cloned() else {
         return Err(CliError::Message(
             "`mv` requires at least one source and a destination".into(),
@@ -3955,15 +6119,22 @@ pub(crate) fn mv(
     for source in sources {
         let source_absolute = absolute_path_from_arg(source)?;
         let source_relative = path_arg_to_repo_relative(&repo, source)?;
-        let target_absolute =
-            mv_target_path(&source_absolute, &destination_absolute, multiple_sources)?;
-        let target_relative = repo_relative_path(&repo.root, &target_absolute)?;
-        let target_display = if multiple_sources {
+        let destination_is_directory = destination_absolute.is_dir();
+        let target_absolute = mv_target_path(
+            &source_absolute,
+            &destination_absolute,
+            multiple_sources || destination_is_directory,
+        )?;
+        let target_relative = crate::runtime::repo_relative_path_preserve_final_component(
+            &repo.root,
+            &target_absolute,
+        )?;
+        let target_display = if multiple_sources || destination_is_directory {
             PathBuf::from(String::from_utf8_lossy(&target_relative).as_ref())
         } else {
             destination.clone()
         };
-        let moves = mv_index_moves(&index, &source_relative, &target_relative)?;
+        let mut moves = mv_index_moves(&index, &source_relative, &target_relative)?;
         if moves.is_empty() {
             if skip_errors {
                 if dry_run {
@@ -3983,6 +6154,18 @@ pub(crate) fn mv(
                     destination.display()
                 ),
             });
+        }
+        if !sparse && moves.iter().any(|(_, entry)| entry.skip_worktree()) {
+            let paths = moves
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            return Err(sparse_path_update_error(&repo, &paths)?);
+        }
+        if let Some((matcher, cone_mode)) = sparse_rules.as_ref() {
+            for (_, entry) in &mut moves {
+                entry.set_skip_worktree(!sparse_path_matches(&entry.path, matcher, *cone_mode));
+            }
         }
         let overwrites_tracked_destination = find_index_entry(&index, &target_relative).is_some();
         ensure_mv_destination_available(&index, &target_relative, force)?;
@@ -4007,13 +6190,43 @@ pub(crate) fn mv(
             );
         }
         if !dry_run {
-            rename_worktree_path(&source_absolute, &target_absolute, force)?;
+            let source_exists = path_exists(&source_absolute);
+            if source_exists {
+                rename_worktree_path(&source_absolute, &target_absolute, force)?;
+            }
+            let checkout_entries = if source_exists {
+                Vec::new()
+            } else {
+                moves
+                    .iter()
+                    .map(|(_, entry)| entry)
+                    .filter(|entry| !entry.skip_worktree())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
             apply_index_moves(&mut index, moves)?;
+            if !checkout_entries.is_empty() {
+                let checkout = GitIndex::from_entries(checkout_entries)?;
+                checkout_index(
+                    &store,
+                    &checkout,
+                    &repo.root,
+                    CheckoutIndexOptions { force },
+                )?;
+                smudge_worktree_filter_entries_with_metadata_for_index(
+                    &repo,
+                    &store,
+                    &index,
+                    &checkout,
+                    &WorktreeCheckoutMetadata::default(),
+                )?;
+            }
         }
     }
 
     if !dry_run {
-        index.write_to_path(&repo.index_path)?;
+        let write_index = collapse_sparse_index(&repo, &store, &index)?;
+        write_index.write_to_path(&repo.index_path)?;
     }
     Ok(())
 }
@@ -4032,10 +6245,12 @@ pub(crate) struct ReadTreeCommandOptions {
     pub(crate) quiet: bool,
     pub(crate) index_output: Option<PathBuf>,
     pub(crate) prefix: Option<String>,
+    pub(crate) exclude_per_directory: Option<String>,
+    pub(crate) super_prefix: Option<String>,
     pub(crate) recurse_submodules: bool,
     pub(crate) no_recurse_submodules: bool,
     pub(crate) no_sparse_checkout: bool,
-    pub(crate) treeish: Option<String>,
+    pub(crate) treeish: Vec<String>,
 }
 
 pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
@@ -4052,21 +6267,15 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
         quiet,
         index_output,
         prefix,
+        exclude_per_directory,
+        super_prefix,
         recurse_submodules,
         no_recurse_submodules,
         no_sparse_checkout,
         treeish,
     } = options;
-    let _ = (
-        quiet,
-        recurse_submodules,
-        no_recurse_submodules,
-        no_sparse_checkout,
-        verbose,
-        trivial,
-        aggressive,
-    );
-    if empty && treeish.is_some() {
+    let _ = (quiet, no_sparse_checkout, verbose, trivial, aggressive);
+    if empty && !treeish.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
             message: "passing trees as arguments contradicts --empty".into(),
@@ -4096,52 +6305,651 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
             text: "fatal: -u is meaningless without -m, --reset, or --prefix\n".into(),
         });
     }
-    let repo = find_repo()?;
+    if exclude_per_directory.is_some() && !update_worktree {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: --exclude-per-directory is meaningless unless -u\n".into(),
+        });
+    }
+    if let Some(value) = exclude_per_directory.as_deref()
+        && value != ".gitignore"
+    {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: --exclude-per-directory argument must be .gitignore\n".into(),
+        });
+    }
+    let repo = find_repo_or_bare()?;
+    let recurse_submodules = !no_recurse_submodules
+        && (recurse_submodules
+            || read_config_value(&repo, "submodule.recurse")?
+                .as_deref()
+                .and_then(parse_git_bool)
+                .unwrap_or(false));
     let output_path = index_output.unwrap_or_else(|| repo.index_path.clone());
-    let original_index = if repo.index_path.exists() {
-        read_index(&repo.index_path).map_err(CliError::Io)?
-    } else {
-        GitIndex::new()
-    };
+    let original_index = read_repo_index(&repo)?;
     if empty {
         if !dry_run {
             GitIndex::new().write_to_path(&output_path)?;
         }
         return Ok(());
     }
-    let Some(treeish) = treeish.as_deref() else {
+    if treeish.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
             message: "read-tree requires --empty or a tree-ish".into(),
         });
-    };
+    }
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let tree_id = resolve_treeish_or_invalid_object(&repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
-    let imported_index = tree_cache.read_tree_to_index(&tree_id)?;
-    let result_index = if let Some(prefix) = prefix.as_deref() {
-        let existing = if repo.index_path.exists() {
-            read_index(&repo.index_path).map_err(CliError::Io)?
-        } else {
-            GitIndex::new()
-        };
+    let mut result_index = if let Some(prefix) = prefix.as_deref() {
+        if prefix.starts_with('/') {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: "fatal: Invalid prefix, prefix cannot start with '/'\n".into(),
+            });
+        }
+        let tree_id = resolve_treeish_or_invalid_object(
+            &repo,
+            &store,
+            treeish.last().expect("treeish checked"),
+        )?;
+        let imported_index = tree_cache.read_tree_to_index(&tree_id)?;
+        let existing = original_index.clone();
         prefix_index_onto_existing(existing, imported_index, prefix)?
+    } else if reset {
+        read_tree_resolved_index(
+            &repo,
+            &store,
+            &tree_cache,
+            treeish.last().expect("treeish checked"),
+        )?
+    } else if merge {
+        read_tree_merge_index(&repo, &store, &tree_cache, &original_index, &treeish)?
     } else {
-        imported_index
+        read_tree_resolved_index(
+            &repo,
+            &store,
+            &tree_cache,
+            treeish.last().expect("treeish checked"),
+        )?
     };
+    reject_null_read_tree_entries(&result_index)?;
+    read_tree_prefetch_missing_objects(&repo, &store, &result_index)?;
+    validate_read_tree_submodule_targets(&repo, &result_index, recurse_submodules)?;
+    if !no_sparse_checkout && sparse_checkout_active(&repo)? {
+        apply_sparse_checkout_bits_to_index(&repo, &mut result_index)?;
+        result_index = expand_repo_sparse_index(&repo, &result_index)?;
+    }
+    preserve_read_tree_index_metadata(&original_index, &mut result_index)?;
+    result_index.refresh_cache_tree();
+    read_tree_validate_confusing_paths(&repo, &result_index)?;
+    if !index_only && (merge || reset) {
+        read_tree_validate_worktree(&repo, &original_index, &result_index)?;
+    }
+    if update_worktree {
+        read_tree_validate_update_worktree(
+            &repo,
+            &original_index,
+            &result_index,
+            merge && !reset,
+            reset,
+            exclude_per_directory.as_deref(),
+            super_prefix.as_deref(),
+        )?;
+    }
     if !dry_run {
-        result_index.write_to_path(&output_path)?;
+        let write_index = collapse_sparse_index(&repo, &store, &result_index)?;
+        write_index.write_to_path(&output_path)?;
         if update_worktree {
-            read_tree_update_worktree(
+            remove_read_tree_submodules(&repo, &original_index, &result_index, recurse_submodules)?;
+            let refreshed_paths = read_tree_update_worktree(
                 &repo,
                 &store,
                 &original_index,
                 &result_index,
+                merge && !reset,
+                reset,
                 prefix.is_some(),
+                exclude_per_directory.as_deref(),
+                super_prefix.as_deref(),
             )?;
+            checkout_read_tree_submodules(
+                &repo,
+                &original_index,
+                &result_index,
+                recurse_submodules,
+                reset,
+            )?;
+            refresh_tracked_index_metadata_matching(&repo, &mut result_index, &refreshed_paths)?;
+            result_index.refresh_cache_tree();
+            let write_index = collapse_sparse_index(&repo, &store, &result_index)?;
+            write_index.write_to_path(&output_path)?;
         }
     }
     Ok(())
+}
+
+fn reject_null_read_tree_entries(index: &GitIndex) -> Result<()> {
+    let Some(entry) = index
+        .entries()
+        .iter()
+        .find(|entry| entry.id.as_bytes().iter().all(|byte| *byte == 0))
+    else {
+        return Ok(());
+    };
+    let path = String::from_utf8_lossy(&entry.path);
+    if std::env::var_os("GIT_ALLOW_NULL_SHA1").is_some_and(|value| value == "1") {
+        eprintln!("warning: cache entry has null sha1: {path}");
+        return Ok(());
+    }
+    Err(CliError::Stderr {
+        code: 128,
+        text: format!(
+            "error: cache entry has null sha1: {path}\nfatal: unable to write new index file\n"
+        ),
+    })
+}
+
+fn preserve_read_tree_index_metadata(
+    original_index: &GitIndex,
+    result_index: &mut GitIndex,
+) -> Result<()> {
+    let preserved = result_index
+        .entries()
+        .iter()
+        .filter_map(|result| {
+            let current = find_index_entry(original_index, &result.path)?;
+            if result.stage != 0 || !merge_tree_same_entry(Some(current), Some(result)) {
+                return None;
+            }
+            let mut entry = current.clone();
+            entry.set_skip_worktree(result.skip_worktree());
+            Some(entry)
+        })
+        .collect::<Vec<_>>();
+    for entry in preserved {
+        result_index.upsert(entry)?;
+    }
+    Ok(())
+}
+
+fn read_tree_prefetch_missing_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<()> {
+    if !super::transport_commands::lazy_fetch_allowed() || !partial_clone_enabled(repo)? {
+        return Ok(());
+    }
+    let object_ids = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Gitlink)
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let mut missing = store
+        .missing_objects(&object_ids)
+        .map_err(CliError::Io)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort_by_key(ObjectId::to_hex);
+    super::admin_commands::backfill_promisor_objects(repo, &missing)?;
+    Ok(())
+}
+
+fn read_tree_validate_update_worktree(
+    repo: &GitRepo,
+    original_index: &GitIndex,
+    result_index: &GitIndex,
+    preserve_dirty_local: bool,
+    force_checkout: bool,
+    exclude_per_directory: Option<&str>,
+    super_prefix: Option<&str>,
+) -> Result<()> {
+    for entry in result_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+    {
+        if entry.skip_worktree() {
+            continue;
+        }
+        let current = find_index_entry(original_index, &entry.path);
+        if !read_tree_entry_needs_checkout(repo, current, entry, preserve_dirty_local)? {
+            continue;
+        }
+        if force_checkout {
+            continue;
+        }
+        if entry.mode == IndexMode::Gitlink {
+            let ignore = standard_repo_ignore(repo)?;
+            if ignore.is_ignored(&entry.path, false) || ignore.is_ignored(&entry.path, true) {
+                continue;
+            }
+        }
+        read_tree_preflight_checkout_path(
+            repo,
+            original_index,
+            &entry.path,
+            exclude_per_directory,
+            super_prefix,
+        )?;
+    }
+    Ok(())
+}
+
+fn read_tree_validate_worktree(
+    repo: &GitRepo,
+    current_index: &GitIndex,
+    result_index: &GitIndex,
+) -> Result<()> {
+    let mut paths = BTreeSet::new();
+    paths.extend(
+        current_index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .map(|entry| entry.path.clone()),
+    );
+    paths.extend(
+        result_index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .map(|entry| entry.path.clone()),
+    );
+    for path in paths {
+        let current = find_index_entry(current_index, &path);
+        let result = find_index_entry(result_index, &path);
+        if merge_tree_same_entry(current, result) {
+            continue;
+        }
+        let Some(current) = current else {
+            continue;
+        };
+        let absolute = repo.root.join(String::from_utf8_lossy(&path).as_ref());
+        if path_exists(&absolute) && worktree_entry_modified(repo, &absolute, current)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "Entry '{}' not uptodate. Cannot merge.",
+                    String::from_utf8_lossy(&path)
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn read_tree_resolved_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    treeish: &str,
+) -> Result<GitIndex> {
+    let tree_id = resolve_treeish_or_invalid_object(repo, store, treeish)?;
+    Ok(tree_cache.read_tree_to_index(&tree_id)?)
+}
+
+fn read_tree_merge_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    current_index: &GitIndex,
+    treeishes: &[String],
+) -> Result<GitIndex> {
+    match treeishes.len() {
+        0 => Err(CliError::Fatal {
+            code: 129,
+            message: "read-tree requires --empty or a tree-ish".into(),
+        }),
+        1 => read_tree_resolved_index(repo, store, tree_cache, &treeishes[0]),
+        2 => {
+            let base = read_tree_resolved_index(repo, store, tree_cache, &treeishes[0])?;
+            let target = read_tree_resolved_index(repo, store, tree_cache, &treeishes[1])?;
+            read_tree_two_way_merge_index(current_index, &base, &target)
+        }
+        _ => {
+            let base = read_tree_resolved_index(repo, store, tree_cache, &treeishes[0])?;
+            let ours = read_tree_resolved_index(repo, store, tree_cache, &treeishes[1])?;
+            let theirs = read_tree_resolved_index(repo, store, tree_cache, &treeishes[2])?;
+            read_tree_validate_three_way_current_index(current_index, &base, &ours, &theirs)?;
+            read_tree_three_way_merge_index(&base, &ours, &theirs)
+        }
+    }
+}
+
+fn read_tree_two_way_merge_index(
+    current_index: &GitIndex,
+    base: &GitIndex,
+    target: &GitIndex,
+) -> Result<GitIndex> {
+    let mut paths = BTreeSet::new();
+    for index in [current_index, base, target] {
+        paths.extend(
+            index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0)
+                .map(|entry| entry.path.clone()),
+        );
+    }
+    let mut entries = Vec::new();
+    for path in paths {
+        let current = find_index_entry(current_index, &path);
+        let old = find_index_entry(base, &path);
+        let new = find_index_entry(target, &path);
+        match read_tree_two_way_path_result(current, old, new) {
+            ReadTreeTwoWayPathResult::UseCurrent => {
+                if let Some(entry) = current {
+                    entries.push(entry.clone());
+                }
+            }
+            ReadTreeTwoWayPathResult::UseTarget => {
+                if let Some(current) = current
+                    && merge_tree_same_entry(Some(current), new)
+                {
+                    entries.push(current.clone());
+                } else if let Some(entry) = new {
+                    entries.push(entry.clone());
+                }
+            }
+            ReadTreeTwoWayPathResult::Remove => {}
+            ReadTreeTwoWayPathResult::Conflict => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "Entry not uptodate. Cannot merge.".into(),
+                });
+            }
+        }
+    }
+    Ok(GitIndex::from_entries(entries)?)
+}
+
+fn read_tree_validate_three_way_current_index(
+    current_index: &GitIndex,
+    base: &GitIndex,
+    ours: &GitIndex,
+    theirs: &GitIndex,
+) -> Result<()> {
+    let mut paths = BTreeSet::new();
+    for index in [current_index, base, ours, theirs] {
+        paths.extend(
+            index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0)
+                .map(|entry| entry.path.clone()),
+        );
+    }
+
+    for path in paths {
+        let Some(current) = find_index_entry(current_index, &path) else {
+            continue;
+        };
+        let base_entry = find_index_entry(base, &path);
+        let our_entry = find_index_entry(ours, &path);
+        let their_entry = find_index_entry(theirs, &path);
+        if read_tree_three_way_current_entry_allowed(current, base_entry, our_entry, their_entry) {
+            continue;
+        }
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "error: Entry '{}' would be overwritten by merge. Cannot merge.\n",
+                String::from_utf8_lossy(&path)
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn read_tree_three_way_current_entry_allowed(
+    current: &IndexEntry,
+    base: Option<&IndexEntry>,
+    ours: Option<&IndexEntry>,
+    theirs: Option<&IndexEntry>,
+) -> bool {
+    if merge_tree_same_entry(ours, theirs) {
+        return merge_tree_same_entry(Some(current), ours);
+    }
+    if merge_tree_same_entry(base, ours) {
+        return merge_tree_same_entry(Some(current), base)
+            || merge_tree_same_entry(Some(current), theirs);
+    }
+    if merge_tree_same_entry(base, theirs) {
+        return merge_tree_same_entry(Some(current), ours);
+    }
+    if ours.is_none() {
+        return false;
+    }
+    if base.is_none() || theirs.is_none() {
+        return merge_tree_same_entry(Some(current), ours);
+    }
+    merge_tree_same_entry(Some(current), ours)
+}
+
+fn read_tree_three_way_merge_index(
+    base: &GitIndex,
+    ours: &GitIndex,
+    theirs: &GitIndex,
+) -> Result<GitIndex> {
+    let mut paths = BTreeSet::new();
+    for index in [base, ours, theirs] {
+        paths.extend(
+            index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0)
+                .map(|entry| entry.path.clone()),
+        );
+    }
+
+    let mut entries = Vec::new();
+    let mut consumed = BTreeSet::new();
+    read_tree_three_way_directory_file_conflicts(base, ours, theirs, &mut entries, &mut consumed);
+    for path in paths {
+        if consumed.contains(&path) {
+            continue;
+        }
+        let base_entry = find_index_entry(base, &path);
+        let our_entry = find_index_entry(ours, &path);
+        let their_entry = find_index_entry(theirs, &path);
+        match (base_entry, our_entry, their_entry) {
+            (None, None, None) => {}
+            (None, Some(ours), None) => entries.push(ours.clone()),
+            (None, None, Some(theirs)) => entries.push(theirs.clone()),
+            (None, Some(ours), Some(theirs)) => {
+                if merge_tree_same_entry(Some(ours), Some(theirs)) {
+                    entries.push(ours.clone());
+                } else {
+                    let mut ours_stage = ours.clone();
+                    ours_stage.stage = 2;
+                    entries.push(ours_stage);
+                    let mut theirs_stage = theirs.clone();
+                    theirs_stage.stage = 3;
+                    entries.push(theirs_stage);
+                }
+            }
+            (Some(base), None, None) => {
+                let mut base_stage = base.clone();
+                base_stage.stage = 1;
+                entries.push(base_stage);
+            }
+            (Some(base), Some(ours), None) => {
+                let mut base_stage = base.clone();
+                base_stage.stage = 1;
+                entries.push(base_stage);
+                let mut ours_stage = ours.clone();
+                ours_stage.stage = 2;
+                entries.push(ours_stage);
+            }
+            (Some(base), None, Some(theirs)) => {
+                let mut base_stage = base.clone();
+                base_stage.stage = 1;
+                entries.push(base_stage);
+                let mut theirs_stage = theirs.clone();
+                theirs_stage.stage = 3;
+                entries.push(theirs_stage);
+            }
+            (Some(base), Some(ours), Some(theirs)) => {
+                if merge_tree_same_entry(Some(ours), Some(theirs)) {
+                    entries.push(ours.clone());
+                } else if merge_tree_same_entry(Some(base), Some(ours)) {
+                    entries.push(theirs.clone());
+                } else if merge_tree_same_entry(Some(base), Some(theirs)) {
+                    entries.push(ours.clone());
+                } else {
+                    let mut base_stage = base.clone();
+                    base_stage.stage = 1;
+                    entries.push(base_stage);
+                    let mut ours_stage = ours.clone();
+                    ours_stage.stage = 2;
+                    entries.push(ours_stage);
+                    let mut theirs_stage = theirs.clone();
+                    theirs_stage.stage = 3;
+                    entries.push(theirs_stage);
+                }
+            }
+        }
+    }
+    Ok(GitIndex::from_entries(entries)?)
+}
+
+fn read_tree_three_way_directory_file_conflicts(
+    base: &GitIndex,
+    ours: &GitIndex,
+    theirs: &GitIndex,
+    entries: &mut Vec<IndexEntry>,
+    consumed: &mut BTreeSet<Vec<u8>>,
+) {
+    let mut candidate_paths = BTreeSet::new();
+    for index in [base, ours, theirs] {
+        candidate_paths.extend(
+            index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0)
+                .map(|entry| entry.path.clone()),
+        );
+    }
+
+    for path in candidate_paths {
+        if consumed.contains(&path) {
+            continue;
+        }
+        let exact_entries = [
+            find_index_entry(base, &path),
+            find_index_entry(ours, &path),
+            find_index_entry(theirs, &path),
+        ];
+        if exact_entries.iter().all(Option::is_none) {
+            continue;
+        }
+        let mut prefix = path.clone();
+        prefix.push(b'/');
+        let mut nested_paths = BTreeSet::new();
+        for index in [base, ours, theirs] {
+            nested_paths.extend(
+                index
+                    .entries()
+                    .iter()
+                    .filter(|entry| {
+                        entry.stage == 0
+                            && !consumed.contains(&entry.path)
+                            && entry.path.starts_with(prefix.as_slice())
+                    })
+                    .map(|entry| entry.path.clone()),
+            );
+        }
+        if nested_paths.is_empty() {
+            continue;
+        }
+
+        for (stage, entry) in [
+            (1u8, exact_entries[0]),
+            (2u8, exact_entries[1]),
+            (3u8, exact_entries[2]),
+        ] {
+            if let Some(entry) = entry {
+                let mut staged = entry.clone();
+                staged.stage = stage;
+                entries.push(staged);
+            }
+        }
+        consumed.insert(path.clone());
+
+        for nested_path in nested_paths {
+            for (stage, index) in [(1u8, base), (2u8, ours), (3u8, theirs)] {
+                if let Some(entry) = find_index_entry(index, &nested_path) {
+                    let mut staged = entry.clone();
+                    staged.stage = stage;
+                    entries.push(staged);
+                }
+            }
+            consumed.insert(nested_path);
+        }
+    }
+}
+
+enum ReadTreeTwoWayPathResult {
+    UseCurrent,
+    UseTarget,
+    Remove,
+    Conflict,
+}
+
+fn read_tree_two_way_path_result(
+    current: Option<&IndexEntry>,
+    old: Option<&IndexEntry>,
+    new: Option<&IndexEntry>,
+) -> ReadTreeTwoWayPathResult {
+    if merge_tree_same_entry(old, new) {
+        return if current.is_some() {
+            ReadTreeTwoWayPathResult::UseCurrent
+        } else if new.is_some() {
+            ReadTreeTwoWayPathResult::UseTarget
+        } else {
+            ReadTreeTwoWayPathResult::Remove
+        };
+    }
+    match (current, old, new) {
+        (None, None, Some(_)) => ReadTreeTwoWayPathResult::UseTarget,
+        (Some(current), None, None) => {
+            let _ = current;
+            ReadTreeTwoWayPathResult::UseCurrent
+        }
+        (Some(current), None, Some(new)) => {
+            if merge_tree_same_entry(Some(current), Some(new)) {
+                ReadTreeTwoWayPathResult::UseTarget
+            } else {
+                ReadTreeTwoWayPathResult::Conflict
+            }
+        }
+        (Some(current), Some(old), None) => {
+            if merge_tree_same_entry(Some(current), Some(old)) {
+                ReadTreeTwoWayPathResult::Remove
+            } else {
+                ReadTreeTwoWayPathResult::Conflict
+            }
+        }
+        (Some(current), Some(old), Some(new)) => {
+            if merge_tree_same_entry(Some(current), Some(old))
+                || merge_tree_same_entry(Some(current), Some(new))
+            {
+                ReadTreeTwoWayPathResult::UseTarget
+            } else {
+                ReadTreeTwoWayPathResult::Conflict
+            }
+        }
+        (None, Some(_), None) => ReadTreeTwoWayPathResult::Remove,
+        (None, Some(_), Some(_)) => ReadTreeTwoWayPathResult::UseTarget,
+        (None, None, None) => ReadTreeTwoWayPathResult::Remove,
+    }
 }
 
 fn read_tree_update_worktree(
@@ -4149,33 +6957,69 @@ fn read_tree_update_worktree(
     store: &LooseObjectStore,
     original_index: &GitIndex,
     result_index: &GitIndex,
+    preserve_dirty_local: bool,
+    force_checkout: bool,
     keep_existing_paths: bool,
-) -> Result<()> {
-    let target_paths = result_index
+    exclude_per_directory: Option<&str>,
+    super_prefix: Option<&str>,
+) -> Result<Vec<Vec<u8>>> {
+    let target_entries = result_index
         .entries()
         .iter()
         .filter(|entry| entry.stage == 0)
-        .map(|entry| entry.path.as_slice())
-        .collect::<HashSet<_>>();
+        .map(|entry| (entry.path.as_slice(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut checkout_entries = Vec::new();
+    let mut refreshed_paths = Vec::new();
     if !keep_existing_paths {
-        for entry in original_index
-            .entries()
-            .iter()
-            .filter(|entry| entry.stage == 0)
-        {
-            if !target_paths.contains(entry.path.as_slice()) {
-                remove_worktree_path(repo, &entry.path)?;
+        let mut original_paths = BTreeSet::new();
+        original_paths.extend(
+            original_index
+                .entries()
+                .iter()
+                .map(|entry| entry.path.clone()),
+        );
+        for path in original_paths {
+            match target_entries.get(path.as_slice()).copied() {
+                None => remove_worktree_path(repo, &path)?,
+                Some(entry) if entry.skip_worktree() => {
+                    let current = find_index_entry(original_index, &path);
+                    if current.is_none_or(|current| !current.skip_worktree()) {
+                        remove_worktree_path(repo, &path)?;
+                    }
+                }
+                Some(_) => {}
             }
         }
     }
-    let checkout_entries = GitIndex::from_entries(
-        result_index
-            .entries()
-            .iter()
-            .filter(|entry| entry.stage == 0)
-            .cloned()
-            .collect(),
-    )?;
+    for entry in result_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Gitlink)
+    {
+        if entry.skip_worktree() {
+            continue;
+        }
+        let current = find_index_entry(original_index, &entry.path);
+        if !read_tree_entry_needs_checkout(repo, current, entry, preserve_dirty_local)? {
+            continue;
+        }
+        if !force_checkout {
+            read_tree_preflight_checkout_path(
+                repo,
+                original_index,
+                &entry.path,
+                exclude_per_directory,
+                super_prefix,
+            )?;
+        }
+        checkout_entries.push(entry.clone());
+        refreshed_paths.push(entry.path.clone());
+    }
+    if checkout_entries.is_empty() {
+        return Ok(refreshed_paths);
+    }
+    let checkout_entries = GitIndex::from_entries(checkout_entries)?;
     let materialized_paths = checkout_entries
         .entries()
         .iter()
@@ -4201,7 +7045,142 @@ fn read_tree_update_worktree(
         }
         return Err(error);
     }
+    Ok(refreshed_paths)
+}
+
+fn read_tree_same_materialized_entry(current: Option<&IndexEntry>, result: &IndexEntry) -> bool {
+    current.is_some_and(|current| {
+        merge_tree_same_entry(Some(current), Some(result))
+            && current.skip_worktree() == result.skip_worktree()
+    })
+}
+
+fn read_tree_entry_needs_checkout(
+    repo: &GitRepo,
+    current: Option<&IndexEntry>,
+    result: &IndexEntry,
+    preserve_dirty_local: bool,
+) -> Result<bool> {
+    if !read_tree_same_materialized_entry(current, result) {
+        return Ok(true);
+    }
+    let path = worktree_path_for_index_entry(&repo.root, &result.path);
+    if !path_exists(&path) {
+        return Ok(true);
+    }
+    let modified = worktree_entry_modified(repo, &path, result)?;
+    Ok(modified && !preserve_dirty_local)
+}
+
+fn read_tree_preflight_checkout_path(
+    repo: &GitRepo,
+    original_index: &GitIndex,
+    path: &[u8],
+    exclude_per_directory: Option<&str>,
+    super_prefix: Option<&str>,
+) -> Result<()> {
+    let absolute = worktree_path_for_index_entry(&repo.root, path);
+    let Ok(metadata) = fs::symlink_metadata(&absolute) else {
+        return Ok(());
+    };
+    let tracked_paths = tracked_path_set_for_repo(repo, original_index)?;
+    let ignore = GitIgnore::load_from_root(&repo.root)?;
+    let ignored = ignored_untracked_files(&repo.root, &tracked_paths, &ignore)?;
+    let allow_ignored = exclude_per_directory == Some(".gitignore");
+    if !metadata.is_dir() {
+        let is_tracked = tracked_paths.contains(path);
+        let is_ignored = ignored.iter().any(|candidate| candidate.as_slice() == path);
+        if !is_tracked && (!is_ignored || !allow_ignored) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "Untracked working tree file '{}' would be overwritten by merge.",
+                    String::from_utf8_lossy(path)
+                ),
+            });
+        }
+        return Ok(());
+    }
+    let untracked = untracked_files(&repo.root, &tracked_paths, &ignore)?;
+    let path_prefix = format!("{}/", String::from_utf8_lossy(path));
+    if untracked.iter().any(|candidate| {
+        candidate == path || String::from_utf8_lossy(candidate).starts_with(&path_prefix)
+    }) {
+        let display = match super_prefix {
+            Some(prefix) if !prefix.is_empty() => {
+                format!("{prefix}{}", String::from_utf8_lossy(path))
+            }
+            _ => String::from_utf8_lossy(path).into_owned(),
+        };
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!("error: Updating '{display}' would lose untracked files in it\n"),
+        });
+    }
     Ok(())
+}
+
+fn read_tree_validate_confusing_paths(repo: &GitRepo, index: &GitIndex) -> Result<()> {
+    let protect_hfs = config_bool_enabled(repo, "core.protectHFS")?;
+    let protect_ntfs = config_bool_enabled(repo, "core.protectNTFS")?;
+    if !protect_hfs && !protect_ntfs {
+        return Ok(());
+    }
+    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        if read_tree_path_is_confusing(&entry.path, protect_hfs, protect_ntfs) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("invalid path '{}'", String::from_utf8_lossy(&entry.path)),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn read_tree_path_is_confusing(path: &[u8], protect_hfs: bool, protect_ntfs: bool) -> bool {
+    path.split(|byte| *byte == b'/').any(|component| {
+        component.is_empty()
+            || component == b"."
+            || component == b".."
+            || (protect_ntfs && component.contains(&b'\\'))
+            || read_tree_component_matches_dotgit(component, protect_hfs, protect_ntfs)
+    })
+}
+
+fn read_tree_component_matches_dotgit(
+    component: &[u8],
+    protect_hfs: bool,
+    protect_ntfs: bool,
+) -> bool {
+    if !protect_hfs && !protect_ntfs {
+        return false;
+    }
+    let mut candidate = if protect_ntfs {
+        match component.iter().position(|byte| *byte == b':') {
+            Some(index) => &component[..index],
+            None => component,
+        }
+    } else {
+        component
+    };
+    let mut normalized = Vec::with_capacity(candidate.len());
+    let mut cursor = 0usize;
+    while cursor < candidate.len() {
+        if protect_hfs && candidate[cursor..].starts_with(&[0xE2, 0x80, 0x8C]) {
+            cursor += 3;
+            continue;
+        }
+        normalized.push(candidate[cursor].to_ascii_lowercase());
+        cursor += 1;
+    }
+    candidate = &normalized;
+    while candidate
+        .last()
+        .is_some_and(|byte| *byte == b'.' || *byte == b' ')
+    {
+        candidate = &candidate[..candidate.len() - 1];
+    }
+    candidate == b".git" || candidate == b"git~1"
 }
 
 fn prefix_index(index: GitIndex, prefix: &str) -> Result<GitIndex> {
@@ -4228,8 +7207,26 @@ fn prefix_index_onto_existing(
     imported: GitIndex,
     prefix: &str,
 ) -> Result<GitIndex> {
+    let imported = prefix_index(imported, prefix)?;
+    for entry in imported.entries().iter().filter(|entry| entry.stage == 0) {
+        if let Some(overlap) = existing.entries().iter().find(|existing_entry| {
+            existing_entry.stage == 0
+                && (existing_entry.path == entry.path
+                    || path_is_below_sparse_directory(&existing_entry.path, &entry.path)
+                    || path_is_below_sparse_directory(&entry.path, &existing_entry.path))
+        }) {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: Entry '{}' overlaps with '{}'. Cannot bind.\n",
+                    String::from_utf8_lossy(&entry.path),
+                    String::from_utf8_lossy(&overlap.path)
+                ),
+            });
+        }
+    }
     let mut entries = existing.entries().to_vec();
-    entries.extend(prefix_index(imported, prefix)?.entries().iter().cloned());
+    entries.extend(imported.entries().iter().cloned());
     Ok(GitIndex::from_entries(entries)?)
 }
 
@@ -4263,7 +7260,8 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
 
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut index = read_repo_index(&repo)?;
+    let raw_index = read_repo_index_raw(&repo)?;
+    let mut index = expand_repo_sparse_index(&repo, &raw_index)?;
     let stage_mode = checkout_index_stage_mode(stage.as_deref())?;
     let use_temp_output = temp || matches!(stage_mode, CheckoutIndexStageMode::All);
     let selected = if all {
@@ -4285,10 +7283,40 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
         }
         let mut selected = Vec::new();
         for path in inputs {
-            let relative = path_arg_to_repo_relative(&repo, &path)?;
+            let trailing_slash = path.to_string_lossy().ends_with('/');
+            let mut relative = path_arg_to_repo_relative(&repo, &path)?;
+            if trailing_slash && !relative.ends_with(b"/") {
+                relative.push(b'/');
+            }
             match stage_mode {
                 CheckoutIndexStageMode::Normal => match find_index_entry(&index, &relative) {
-                    Some(entry) if entry.stage == 0 => selected.push(entry.clone()),
+                    _ if raw_index
+                        .entry(&relative, 0)
+                        .is_some_and(|entry| entry.mode == IndexMode::Tree) =>
+                    {
+                        return Err(CliError::Stderr {
+                            code: 1,
+                            text: format!(
+                                "git checkout-index: {} is a sparse directory\n",
+                                String::from_utf8_lossy(&relative)
+                            ),
+                        });
+                    }
+                    Some(entry)
+                        if entry.stage == 0
+                            && (ignore_skip_worktree_bits || !entry.skip_worktree()) =>
+                    {
+                        selected.push(entry.clone());
+                    }
+                    Some(entry) if entry.stage == 0 && !quiet => {
+                        return Err(CliError::Stderr {
+                            code: 1,
+                            text: format!(
+                                "git checkout-index: {} has skip-worktree enabled; use '--ignore-skip-worktree-bits' to checkout\n",
+                                String::from_utf8_lossy(&relative)
+                            ),
+                        });
+                    }
                     _ if quiet => {}
                     _ => {
                         return Err(CliError::Stderr {
@@ -4371,6 +7399,28 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
     } else {
         checkout_entries
     };
+    let checkout_entries = if !force && prefix_is_none {
+        let mut pending = Vec::with_capacity(checkout_entries.len());
+        for entry in checkout_entries {
+            let path = worktree_path_for_index_entry(&repo.root, &entry.path);
+            if path_exists(&path) {
+                if worktree_entry_modified(&repo, &path, &entry)? {
+                    return Err(CliError::Stderr {
+                        code: 1,
+                        text: format!(
+                            "{} already exists, no checkout\n",
+                            String::from_utf8_lossy(&entry.path)
+                        ),
+                    });
+                }
+                continue;
+            }
+            pending.push(entry);
+        }
+        pending
+    } else {
+        checkout_entries
+    };
     let selected_index = GitIndex::from_entries(checkout_entries)?;
     let materialized_paths = selected_index
         .entries()
@@ -4388,7 +7438,13 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
         CheckoutIndexOptions { force },
     )?;
     let smudge_result = if prefixed_paths.is_empty() {
-        smudge_worktree_filter_entries(&repo, &selected_index)
+        smudge_worktree_filter_entries_with_metadata_for_index(
+            &repo,
+            &store,
+            &index,
+            &selected_index,
+            &WorktreeCheckoutMetadata::default(),
+        )
     } else {
         (|| {
             for (entry, path) in original_selected.iter().zip(prefixed_paths) {
@@ -4599,7 +7655,7 @@ pub(crate) fn restore(
     _overlay: bool,
     _no_overlay: bool,
     _ignore_unmerged: bool,
-    _ignore_skip_worktree_bits: bool,
+    ignore_skip_worktree_bits: bool,
     _recurse_submodules: bool,
     _no_recurse_submodules: bool,
     patch: bool,
@@ -4607,6 +7663,7 @@ pub(crate) fn restore(
     pathspec_file_nul: bool,
     mut paths: Vec<PathBuf>,
 ) -> Result<usize> {
+    let _trace = phase_trace("restore.total");
     if let Some(pathspec_file) = pathspec_from_file {
         let loaded = read_pathspec_file(&pathspec_file, pathspec_file_nul)?;
         paths.extend(loaded);
@@ -4623,7 +7680,7 @@ pub(crate) fn restore(
         });
     }
     if patch {
-        checkout_patch(&paths)?;
+        checkout_patch(source, &paths)?;
         return Ok(0);
     }
     let restore_index = staged;
@@ -4644,28 +7701,36 @@ pub(crate) fn restore(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
-    let mut index = read_repo_index(&repo)?;
+    let mut index = {
+        let _trace = phase_trace("restore.read_index");
+        read_repo_index(&repo)?
+    };
     let pathspecs = paths
         .iter()
         .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
         .collect::<Result<Vec<_>>>()?;
 
-    let source_index = if let Some(source) = source {
-        let source_id = resolve_commitish(&repo, &store, source).map_err(|_| CliError::Fatal {
-            code: 128,
-            message: restore_source_resolve_error(source),
-        })?;
-        let source_commit = commit_cache.read_commit(&source_id)?;
-        tree_cache.read_tree_to_index(&source_commit.tree)?
-    } else if restore_index {
-        read_head_index_with_caches(&repo, &commit_cache, &tree_cache)?
-    } else {
-        index.clone()
+    let source_index = {
+        let _trace = phase_trace("restore.read_source_index");
+        if let Some(source) = source {
+            let source_id =
+                resolve_commitish(&repo, &store, source).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: restore_source_resolve_error(source),
+                })?;
+            let source_commit = commit_cache.read_commit(&source_id)?;
+            tree_cache.read_tree_to_index(&source_commit.tree)?
+        } else if restore_index {
+            read_head_index_with_caches(&repo, &commit_cache, &tree_cache)?
+        } else {
+            index.clone()
+        }
     };
     let original_index = index.clone();
     for pathspec in &pathspecs {
-        let source_matches = matching_index_entries(&source_index, pathspec);
-        let current_matches = matching_index_entries(&original_index, pathspec);
+        let include_skipped = restore_index || ignore_skip_worktree_bits;
+        let source_matches = restore_matching_entries(&source_index, pathspec, include_skipped);
+        let current_matches = restore_matching_entries(&original_index, pathspec, include_skipped);
         if source_matches.is_empty() && current_matches.is_empty() {
             return Err(unmatched_restore_pathspec_error(std::slice::from_ref(
                 pathspec,
@@ -4675,24 +7740,40 @@ pub(crate) fn restore(
     let mut checkout_entries = Vec::new();
 
     if restore_index {
+        let _trace = phase_trace("restore.update_index");
         for pathspec in &pathspecs {
-            let source_matches = matching_index_entries(&source_index, pathspec);
-            let current_matches = matching_index_entries(&index, pathspec);
+            let source_matches = restore_matching_entries(&source_index, pathspec, true);
+            let current_matches = restore_matching_entries(&index, pathspec, true);
             if source_matches.is_empty() && current_matches.is_empty() {
                 continue;
             }
-            remove_index_path_or_dir(&mut index, pathspec)?;
+            for entry in current_matches {
+                index.remove_path(&entry.path)?;
+            }
             for entry in source_matches {
+                remove_index_path_or_dir(&mut index, &entry.path)?;
                 index.upsert(entry)?;
             }
         }
-        index.write_to_path(&repo.index_path)?;
+        if sparse_checkout_active(&repo)? {
+            apply_sparse_checkout_bits_to_index(&repo, &mut index)?;
+            index = expand_repo_sparse_index(&repo, &index)?;
+        }
+        let write_index = collapse_sparse_index(&repo, &store, &index)?;
+        write_index.write_to_path(&repo.index_path)?;
     }
 
     if restore_worktree {
+        let _trace = phase_trace("restore.update_worktree");
+        let worktree_source_index = if restore_index { &index } else { &source_index };
         for pathspec in &pathspecs {
-            let source_matches = matching_index_entries(&source_index, pathspec);
-            let current_matches = matching_index_entries(&original_index, pathspec);
+            let source_matches = restore_matching_entries(
+                worktree_source_index,
+                pathspec,
+                ignore_skip_worktree_bits,
+            );
+            let current_matches =
+                restore_matching_entries(&original_index, pathspec, ignore_skip_worktree_bits);
             if source_matches.is_empty() && current_matches.is_empty() {
                 continue;
             }
@@ -4751,6 +7832,17 @@ pub(crate) fn restore(
     Ok(0)
 }
 
+fn restore_matching_entries(
+    index: &GitIndex,
+    pathspec: &[u8],
+    ignore_skip_worktree_bits: bool,
+) -> Vec<IndexEntry> {
+    matching_index_entries(index, pathspec)
+        .into_iter()
+        .filter(|entry| ignore_skip_worktree_bits || !entry.skip_worktree())
+        .collect()
+}
+
 fn restore_source_resolve_error(source: &str) -> String {
     #[cfg(windows)]
     {
@@ -4773,20 +7865,16 @@ pub(crate) fn unmatched_restore_pathspec_error(pathspecs: &[Vec<u8>]) -> CliErro
 }
 
 pub(crate) fn reset(options: ResetOptions) -> Result<()> {
-    let (soft, mixed, hard, args) = normalize_reset_mode_options(
-        options.soft,
-        options.mixed,
-        options.hard,
-        options.args,
-    )?;
-    let selected = [soft, mixed, hard]
+    let (soft, mixed, hard, merge, keep, args) =
+        normalize_reset_mode_options(options.soft, options.mixed, options.hard, options.args)?;
+    let selected = [soft, mixed, hard, merge, keep]
         .into_iter()
         .filter(|value| *value)
         .count();
     if selected > 1 {
         return Err(CliError::Fatal {
             code: 129,
-            message: "reset mode must be one of --soft, --mixed, or --hard".into(),
+            message: "reset mode must be one of --soft, --mixed, --hard, --merge, or --keep".into(),
         });
     }
 
@@ -4794,6 +7882,10 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
         ResetMode::Soft
     } else if hard {
         ResetMode::Hard
+    } else if merge {
+        ResetMode::Merge
+    } else if keep {
+        ResetMode::Keep
     } else {
         let _ = mixed;
         ResetMode::Mixed
@@ -4808,17 +7900,22 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
         options.pathspec_from_file,
         options.pathspec_file_nul,
     )?;
-    let pathspec_args = reset_effective_args(
-        args,
-        pathspec_from_file.as_deref(),
-        pathspec_file_nul,
-    )?;
+    let pathspec_args =
+        reset_effective_args(args, pathspec_from_file.as_deref(), pathspec_file_nul)?;
+    let patch_mode = pathspec_args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-p" | "--patch"));
+    if patch_mode {
+        return reset_patch(&repo, &store, &commit_cache, &tree_cache, &pathspec_args);
+    }
     if let Some((source, paths)) = reset_path_mode(&repo, &store, &pathspec_args)? {
         if mode != ResetMode::Mixed {
             let mode_name = match mode {
                 ResetMode::Soft => "soft",
                 ResetMode::Hard => "hard",
                 ResetMode::Mixed => "mixed",
+                ResetMode::Merge => "merge",
+                ResetMode::Keep => "keep",
             };
             return Err(CliError::Fatal {
                 code: 128,
@@ -4842,9 +7939,17 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
         );
     }
     let target = pathspec_args.first().map(String::as_str).unwrap_or("HEAD");
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    if target == "HEAD"
+        && refs
+            .resolve("HEAD")
+            .err()
+            .is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
+    {
+        return reset_unborn_head(&repo, &store, mode, options.quiet, should_refresh);
+    }
     let target_id = resolve_commitish(&repo, &store, target)?;
     let target_commit = commit_cache.read_commit(&target_id)?;
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let target_ref_name = branch_checkout_ref(&refs, target)?;
     update_head_to_commit_with_reflog(
         &repo,
@@ -4856,16 +7961,32 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
     match mode {
         ResetMode::Soft => {}
         ResetMode::Mixed => {
-            let new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
-            new_index.write_to_path(&repo.index_path)?;
+            let mut new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+            if sparse_checkout_active(&repo)? {
+                new_index = sparse_checkout_index(&repo, &new_index)?;
+            }
+            let write_index = collapse_sparse_index(&repo, &store, &new_index)?;
+            write_index.write_to_path(&repo.index_path)?;
             if !options.quiet && should_refresh {
                 print_reset_mixed_refresh_summary(&repo, &new_index, &[])?;
             }
         }
         ResetMode::Hard => {
-            let old_index = read_repo_index(&repo)?;
+            let raw_index = read_repo_index_raw(&repo)?;
+            let preserve_full_index = !index_has_sparse_directories(&raw_index);
+            let old_index = expand_sparse_index(&repo, &raw_index)?;
             let mut new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
             remove_tracked_paths_missing_from_target(&repo, &old_index, &new_index)?;
+            if sparse_checkout_active(&repo)? {
+                new_index = sparse_checkout_index(&repo, &new_index)?;
+                for entry in new_index
+                    .entries()
+                    .iter()
+                    .filter(|entry| entry.stage == 0 && entry.skip_worktree())
+                {
+                    remove_worktree_path(&repo, &entry.path)?;
+                }
+            }
             new_index.write_to_path(&repo.index_path)?;
             let checkout_metadata = WorktreeCheckoutMetadata {
                 ref_name: target_ref_name,
@@ -4878,9 +7999,15 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
                 &checkout_metadata,
             )?;
             if should_refresh {
-                refresh_tracked_index_metadata_matching(&repo, &mut new_index, &[])?;
-                new_index.write_to_path(&repo.index_path)?;
+                refresh_tracked_index_metadata_after_checkout(&repo, &mut new_index, &[])?;
+                new_index.refresh_cache_tree();
             }
+            let write_index = if preserve_full_index {
+                new_index
+            } else {
+                collapse_sparse_index(&repo, &store, &new_index)?
+            };
+            write_index.write_to_path(&repo.index_path)?;
             if !options.quiet {
                 println!(
                     "HEAD is now at {} {}",
@@ -4889,8 +8016,293 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
                 );
             }
         }
+        ResetMode::Merge | ResetMode::Keep => {
+            let checkout_metadata = WorktreeCheckoutMetadata {
+                ref_name: target_ref_name,
+                treeish: Some(target_id.clone()),
+            };
+            checkout_clean_worktree_replacement_with_metadata(
+                &repo,
+                &store,
+                &target_id,
+                &checkout_metadata,
+            )?;
+        }
     }
     Ok(())
+}
+
+struct ResetPatchTarget {
+    source: String,
+    paths: Vec<PathBuf>,
+}
+
+struct ResetPatchDisplay {
+    header: String,
+    hunks: Vec<String>,
+}
+
+fn reset_patch(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    args: &[String],
+) -> Result<()> {
+    let target = reset_patch_target(repo, store, args)?;
+    let source_id = resolve_commitish(repo, store, &target.source)?;
+    let source_commit = commit_cache.read_commit(&source_id)?;
+    let source_index = tree_cache.read_tree_to_index(&source_commit.tree)?;
+    let raw_index = read_repo_index_raw(repo)?;
+    let current_index = expand_repo_sparse_index(repo, &raw_index)?;
+    let pathspecs = target
+        .paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let entries = diff_indexes(&source_index, &current_index)?
+        .into_iter()
+        .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, &pathspecs))
+        .collect::<Vec<_>>();
+    let _sparse_expansion_region =
+        patch_changes_require_sparse_expansion(repo, &raw_index, &entries)
+            .then(|| trace2_region("index", "ensure_full_index"));
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let mut patch_bytes = Vec::new();
+    write_patch_entries(
+        &mut patch_bytes,
+        repo,
+        store,
+        &source_index,
+        &current_index,
+        &entries,
+        PatchFormatOptions::cached(),
+    )?;
+    let output = String::from_utf8(patch_bytes.clone()).map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("patch output was not valid utf-8: {error}"),
+    })?;
+    let patches = patch_commands::parse_apply_patches(&patch_bytes)?;
+    let displays = reset_patch_displays(&output);
+    let mut answers = patch_commands::PatchAnswers::read()?;
+    let mut updated_index = current_index;
+    let mut selected_any = false;
+    let mut all_remaining = None;
+    let mut quit = false;
+    let mut last_output_was_prompt = false;
+    for (patch, display) in patches.into_iter().zip(displays) {
+        print!("{}", display.header);
+        last_output_was_prompt = false;
+        let target_path = patch
+            .new_path
+            .as_ref()
+            .or(patch.old_path.as_ref())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "reset patch has no target path".into(),
+            })?
+            .clone();
+        let mut selected_hunks = Vec::new();
+        for (index, (hunk, hunk_display)) in patch.hunks.iter().zip(&display.hunks).enumerate() {
+            print!("{hunk_display}");
+            last_output_was_prompt = false;
+            let selected = match all_remaining {
+                Some(value) => value,
+                None => {
+                    print!(
+                        "({}/{}) Unstage this hunk {}? ",
+                        index + 1,
+                        patch.hunks.len(),
+                        reset_patch_prompt_options(index, patch.hunks.len())
+                    );
+                    last_output_was_prompt = true;
+                    io::stdout().flush()?;
+                    match answers.next() {
+                        patch_commands::PatchAnswer::Yes => true,
+                        patch_commands::PatchAnswer::No | patch_commands::PatchAnswer::Split => {
+                            false
+                        }
+                        patch_commands::PatchAnswer::All => {
+                            all_remaining = Some(true);
+                            true
+                        }
+                        patch_commands::PatchAnswer::Done => {
+                            all_remaining = Some(false);
+                            false
+                        }
+                        patch_commands::PatchAnswer::Quit => {
+                            quit = true;
+                            false
+                        }
+                    }
+                }
+            };
+            if selected {
+                selected_hunks.push(hunk.clone());
+            }
+            if quit {
+                break;
+            }
+        }
+        if selected_hunks.is_empty() {
+            if quit {
+                break;
+            }
+            continue;
+        }
+        selected_any = true;
+        let remaining_hunks = patch_commands::rejected_hunks_for_selection(&patch, &selected_hunks);
+        let source_entry = find_index_entry(&source_index, &target_path);
+        if source_entry.is_none() && remaining_hunks.is_empty() {
+            updated_index.remove_path(&target_path)?;
+            continue;
+        }
+        let base = source_entry
+            .map(|entry| read_index_entry_content(store, entry))
+            .transpose()?
+            .unwrap_or_default();
+        let content =
+            patch_commands::apply_hunks_to_content(&base, &remaining_hunks, &target_path)?;
+        let mode = find_index_entry(&updated_index, &target_path)
+            .map(|entry| entry.mode)
+            .or_else(|| source_entry.map(|entry| entry.mode))
+            .unwrap_or(IndexMode::File);
+        upsert_index_content(store, &mut updated_index, target_path, content, mode)?;
+        if quit {
+            break;
+        }
+    }
+    if last_output_was_prompt {
+        println!();
+    }
+    if selected_any {
+        updated_index.refresh_cache_tree();
+        let write_index = collapse_sparse_index(repo, store, &updated_index)?;
+        let _conversion_region = index_has_sparse_directories(&write_index)
+            .then(|| trace2_region("index", "convert_to_sparse"));
+        write_index.write_to_path(&repo.index_path)?;
+    }
+    Ok(())
+}
+
+fn reset_patch_displays(output: &str) -> Vec<ResetPatchDisplay> {
+    let mut displays = Vec::new();
+    let mut current = None;
+    for line in output.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            if let Some(display) = current.take() {
+                displays.push(display);
+            }
+            current = Some(ResetPatchDisplay {
+                header: String::new(),
+                hunks: Vec::new(),
+            });
+        }
+        let display = current.get_or_insert_with(|| ResetPatchDisplay {
+            header: String::new(),
+            hunks: Vec::new(),
+        });
+        if line.starts_with("@@ ") {
+            display.hunks.push(String::new());
+        }
+        if let Some(hunk) = display.hunks.last_mut() {
+            hunk.push_str(line);
+        } else {
+            display.header.push_str(line);
+        }
+    }
+    if let Some(display) = current {
+        displays.push(display);
+    }
+    displays
+}
+
+fn reset_patch_prompt_options(index: usize, total: usize) -> &'static str {
+    match (index, total) {
+        (_, 1) => "[y,n,q,a,d,e,p,P,?]",
+        (0, _) => "[y,n,q,a,d,j,J,g,/,e,p,?]",
+        (index, total) if index + 1 == total => "[y,n,q,a,d,K,g,/,e,p,?]",
+        _ => "[y,n,q,a,d,k,j,J,K,g,/,e,p,?]",
+    }
+}
+
+fn reset_patch_target(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    args: &[String],
+) -> Result<ResetPatchTarget> {
+    let mut positional = args
+        .iter()
+        .filter(|arg| !matches!(arg.as_str(), "-p" | "--patch"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let separator = positional.iter().position(|arg| arg == "--");
+    if let Some(separator) = separator {
+        let paths = positional
+            .drain(separator + 1..)
+            .map(PathBuf::from)
+            .collect();
+        positional.pop();
+        let source = positional
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "HEAD".to_owned());
+        return Ok(ResetPatchTarget { source, paths });
+    }
+    let source = positional
+        .first()
+        .filter(|arg| resolve_commitish(repo, store, arg).is_ok())
+        .cloned();
+    let paths = positional
+        .into_iter()
+        .skip(usize::from(source.is_some()))
+        .map(PathBuf::from)
+        .collect();
+    Ok(ResetPatchTarget {
+        source: source.unwrap_or_else(|| "HEAD".to_owned()),
+        paths,
+    })
+}
+
+fn reset_unborn_head(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    mode: ResetMode,
+    quiet: bool,
+    should_refresh: bool,
+) -> Result<()> {
+    match mode {
+        ResetMode::Soft => Ok(()),
+        ResetMode::Mixed => {
+            let new_index = GitIndex::new();
+            new_index.write_to_path(&repo.index_path)?;
+            if !quiet && should_refresh {
+                print_reset_mixed_refresh_summary(repo, &new_index, &[])?;
+            }
+            Ok(())
+        }
+        ResetMode::Hard | ResetMode::Merge | ResetMode::Keep => {
+            let old_index = read_repo_index(repo)?;
+            let mut new_index = GitIndex::new();
+            remove_tracked_paths_missing_from_target(repo, &old_index, &new_index)?;
+            new_index.write_to_path(&repo.index_path)?;
+            checkout_worktree_updates_to_index_with_metadata(
+                repo,
+                store,
+                &new_index,
+                &WorktreeCheckoutMetadata::default(),
+            )?;
+            if should_refresh {
+                refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &[])?;
+                new_index.refresh_cache_tree();
+                new_index.write_to_path(&repo.index_path)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn reset_effective_args(
@@ -4995,9 +8407,11 @@ fn normalize_reset_mode_options(
     mut mixed: bool,
     mut hard: bool,
     args: Vec<String>,
-) -> Result<(bool, bool, bool, Vec<String>)> {
+) -> Result<(bool, bool, bool, bool, bool, Vec<String>)> {
     let mut normalized = Vec::with_capacity(args.len());
     let mut pathspec_mode = false;
+    let mut merge = false;
+    let mut keep = false;
     for arg in args {
         if pathspec_mode {
             normalized.push(arg);
@@ -5011,10 +8425,14 @@ fn normalize_reset_mode_options(
             "--soft" => soft = true,
             "--mixed" => mixed = true,
             "--hard" => hard = true,
+            "--merge" => merge = true,
+            "--keep" => keep = true,
             value
                 if value.starts_with("--soft=")
                     || value.starts_with("--mixed=")
-                    || value.starts_with("--hard=") =>
+                    || value.starts_with("--hard=")
+                    || value.starts_with("--merge=")
+                    || value.starts_with("--keep=") =>
             {
                 return Err(CliError::Fatal {
                     code: 129,
@@ -5024,7 +8442,7 @@ fn normalize_reset_mode_options(
             _ => normalized.push(arg),
         }
     }
-    Ok((soft, mixed, hard, normalized))
+    Ok((soft, mixed, hard, merge, keep, normalized))
 }
 
 fn reset_path_mode<'a>(
@@ -5063,20 +8481,36 @@ fn reset_paths(
     let source_id = resolve_commitish(repo, store, source)?;
     let source_commit = commit_cache.read_commit(&source_id)?;
     let source_index = tree_cache.read_tree_to_index(&source_commit.tree)?;
-    let mut index = read_repo_index(repo)?;
-    for path in &paths {
-        let pathspec = path_arg_to_repo_relative(repo, path)?;
+    let pathspecs = paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let raw_index = read_repo_index_raw(repo)?;
+    let requires_expansion = pathspecs
+        .iter()
+        .any(|pathspec| sparse_index_path_requires_expansion(&raw_index, pathspec));
+    let mut index = {
+        let _region = requires_expansion.then(|| trace2_region("index", "ensure_full_index"));
+        expand_repo_sparse_index(repo, &raw_index)?
+    };
+    for pathspec in &pathspecs {
         let source_matches = matching_index_entries(&source_index, &pathspec);
         let current_matches = matching_index_entries(&index, &pathspec);
         if source_matches.is_empty() && current_matches.is_empty() {
             continue;
         }
-        remove_index_path_or_dir(&mut index, &pathspec)?;
+        for entry in current_matches {
+            index.remove_path(&entry.path)?;
+        }
         for entry in source_matches {
+            remove_index_path_or_dir(&mut index, &entry.path)?;
             index.upsert(entry)?;
         }
     }
-    index.write_to_path(&repo.index_path)?;
+    let write_index = collapse_sparse_index(repo, store, &index)?;
+    let _conversion_region = (requires_expansion && index_has_sparse_directories(&write_index))
+        .then(|| trace2_region("index", "convert_to_sparse"));
+    write_index.write_to_path(&repo.index_path)?;
     if !quiet && refresh {
         print_reset_mixed_refresh_summary(repo, &index, &paths)?;
     }
@@ -5088,6 +8522,8 @@ enum ResetMode {
     Soft,
     Mixed,
     Hard,
+    Merge,
+    Keep,
 }
 
 pub(crate) fn worktree(args: Vec<String>) -> Result<()> {
@@ -5110,10 +8546,11 @@ pub(crate) fn sparse_checkout(args: Vec<String>) -> Result<()> {
     match subcommand {
         "set" => sparse_checkout_set(&args[1..]),
         "add" => sparse_checkout_add(&args[1..]),
-        "reapply" => sparse_checkout_reapply(),
+        "reapply" => sparse_checkout_reapply(&args[1..]),
         "list" => sparse_checkout_list(),
         "disable" => sparse_checkout_disable(),
         "init" => sparse_checkout_init(&args[1..]),
+        "check-rules" => sparse_checkout_check_rules(&args[1..]),
         _ => Err(sparse_checkout_unknown_subcommand_error(subcommand)),
     }
 }
@@ -5385,6 +8822,13 @@ fn worktree_add(args: &[String]) -> Result<()> {
         .unwrap_or("HEAD");
     let explicit_commitish = values.get(1).copied();
     let commitish = explicit_commitish.unwrap_or(default_commitish);
+    let inferred_orphan = !orphan
+        && !detach
+        && branch_option.is_none()
+        && values.len() == 1
+        && explicit_commitish.is_none()
+        && resolve_commitish(&repo, &store, commitish).is_err();
+    let orphan = orphan || inferred_orphan;
     let mut id = if orphan {
         None
     } else {
@@ -5506,13 +8950,32 @@ fn worktree_add(args: &[String]) -> Result<()> {
         format!("{}\n", git_file.display()),
     )?;
     fs::write(admin_dir.join("commondir"), "../..\n")?;
-    if let Some(branch_ref) = &branch_ref {
-        fs::write(admin_dir.join("HEAD"), format!("ref: {branch_ref}\n"))?;
-    } else {
-        fs::write(
-            admin_dir.join("HEAD"),
-            format!("{}\n", id.as_ref().expect("detached worktree id").to_hex()),
+    let ref_kind = refs.storage_kind()?;
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    if ref_kind == zmin_git_core::refs::RefStorageKind::Reftable {
+        zmin_git_core::initialize_alternate_ref_store(
+            &admin_dir,
+            &admin_dir,
+            algorithm,
+            ref_kind,
+            "refs/heads/.invalid",
         )?;
+        let linked_refs = RefStore::new(&admin_dir, algorithm);
+        if let Some(branch_ref) = &branch_ref {
+            linked_refs.write_symbolic_ref("HEAD", branch_ref)?;
+        } else {
+            linked_refs.write_ref("HEAD", id.as_ref().expect("detached worktree id"))?;
+        }
+    } else {
+        fs::create_dir_all(admin_dir.join("refs"))?;
+        if let Some(branch_ref) = &branch_ref {
+            fs::write(admin_dir.join("HEAD"), format!("ref: {branch_ref}\n"))?;
+        } else {
+            fs::write(
+                admin_dir.join("HEAD"),
+                format!("{}\n", id.as_ref().expect("detached worktree id").to_hex()),
+            )?;
+        }
     }
     let linked_repo = GitRepo {
         root: target_root.clone(),
@@ -5524,6 +8987,38 @@ fn worktree_add(args: &[String]) -> Result<()> {
         index_path: linked_repo.git_dir.join("index"),
         ..linked_repo
     };
+    if sparse_checkout_active(&repo)? {
+        let info_dir = linked_repo.git_dir.join("info");
+        fs::create_dir_all(&info_dir)?;
+        fs::copy(
+            sparse_checkout_file(&repo),
+            info_dir.join("sparse-checkout"),
+        )?;
+        set_config_value(&repo, "extensions.worktreeConfig", "true")?;
+        set_config_value_in_file(
+            &linked_repo.git_dir.join("config.worktree"),
+            "core.sparseCheckout",
+            "true",
+        )?;
+        set_config_value_in_file(
+            &linked_repo.git_dir.join("config.worktree"),
+            "core.sparseCheckoutCone",
+            if sparse_checkout_cone_mode(&repo)? {
+                "true"
+            } else {
+                "false"
+            },
+        )?;
+        set_config_value_in_file(
+            &linked_repo.git_dir.join("config.worktree"),
+            "index.sparse",
+            if config_bool_enabled(&repo, "index.sparse")? {
+                "true"
+            } else {
+                "false"
+            },
+        )?;
+    }
     if let Some(id) = id.as_ref() {
         append_reflog_if_identity_available(
             &linked_repo,
@@ -5541,12 +9036,23 @@ fn worktree_add(args: &[String]) -> Result<()> {
     if orphan {
         GitIndex::new().write_to_path(&linked_repo.index_path)?;
     } else if checkout {
-        let new_index =
+        let mut new_index =
             tree_cache.read_tree_to_index(&commit.as_ref().expect("worktree commit").tree)?;
+        if sparse_checkout_active(&linked_repo)? {
+            apply_sparse_checkout_bits_to_index(&linked_repo, &mut new_index)?;
+        }
         new_index.write_to_path(&linked_repo.index_path)?;
+        let checkout_entries = GitIndex::from_entries(
+            new_index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0 && !entry.skip_worktree())
+                .cloned()
+                .collect(),
+        )?;
         checkout_index(
             &store,
-            &new_index,
+            &checkout_entries,
             &linked_repo.root,
             CheckoutIndexOptions { force: true },
         )?;
@@ -5571,6 +9077,9 @@ fn worktree_add(args: &[String]) -> Result<()> {
         )?;
     }
     if !quiet {
+        if inferred_orphan {
+            eprintln!("No possible source branch, inferring '--orphan'");
+        }
         if let Some(branch_ref) = &branch_ref {
             let action = if orphan || created_new_branch {
                 if let Some((_, reset)) = branch_option {
@@ -5811,6 +9320,22 @@ fn worktree_remove(args: &[String]) -> Result<()> {
         && force_count < 2
     {
         return Err(locked_worktree_error("remove", &reason));
+    }
+    if force_count == 0 {
+        let linked_repo = find_repo_at(&target)?;
+        let store = LooseObjectStore::new(
+            linked_repo.objects_dir.clone(),
+            repo_hash_algorithm_from_config(&linked_repo)?,
+        );
+        if !worktree_clean(&linked_repo, &store)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "'{}' contains modified or untracked files, use --force to delete it",
+                    values[0]
+                ),
+            });
+        }
     }
     fs::remove_dir_all(&target)?;
     fs::remove_dir_all(admin_dir)?;
@@ -6155,12 +9680,14 @@ fn branch_checked_out_worktree(repo: &GitRepo, ref_name: &str) -> Result<Option<
 
 fn sparse_checkout_set(patterns: &[String]) -> Result<()> {
     let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Set)?;
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
     apply_sparse_checkout_config_options(&repo, &options)?;
-    set_config_value(&repo, "core.sparseCheckout", "true")?;
-    let patterns = options.patterns();
-    write_sparse_checkout_patterns(&repo, patterns)?;
-    apply_sparse_checkout(&repo, patterns)
+    let cone_mode = sparse_checkout_cone_mode(&repo)?;
+    validate_sparse_checkout_inputs(&repo, options.patterns(), cone_mode, options.skip_checks)?;
+    let patterns = normalize_sparse_checkout_inputs(&repo, options.patterns(), cone_mode)?;
+    write_sparse_checkout_patterns(&repo, &patterns, cone_mode)?;
+    apply_sparse_checkout(&repo)
 }
 
 pub(crate) fn enable_clone_sparse_checkout(repo: &GitRepo) -> Result<()> {
@@ -6171,25 +9698,32 @@ pub(crate) fn enable_clone_sparse_checkout(repo: &GitRepo) -> Result<()> {
     set_config_value(repo, "extensions.worktreeConfig", "true")?;
     write_clone_sparse_checkout_worktree_config(repo)?;
     apply_sparse_checkout_config_options(repo, &options)?;
-    write_sparse_checkout_patterns(repo, &[])?;
-    apply_sparse_checkout(repo, &[])
+    write_sparse_checkout_patterns(repo, &[], true)?;
+    apply_sparse_checkout(repo)
 }
 
 fn sparse_checkout_add(patterns: &[String]) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
     ensure_sparse_checkout_enabled(&repo, "no sparse-checkout to add to")?;
     let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Add)?;
     apply_sparse_checkout_config_options(&repo, &options)?;
-    set_config_value(&repo, "core.sparseCheckout", "true")?;
+    let cone_mode = sparse_checkout_cone_mode(&repo)?;
+    validate_sparse_checkout_inputs(&repo, options.patterns(), cone_mode, options.skip_checks)?;
+    if cone_mode && !sparse_checkout_file_uses_cone_patterns(&repo)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "existing sparse-checkout patterns do not use cone mode".into(),
+        });
+    }
     let mut combined = read_sparse_checkout_patterns(&repo)?;
-    for pattern in options.patterns() {
-        let pattern = normalize_sparse_pattern(pattern)?;
-        if !combined.iter().any(|existing| existing == &pattern) {
+    for pattern in normalize_sparse_checkout_inputs(&repo, options.patterns(), cone_mode)? {
+        if !cone_mode || !combined.iter().any(|existing| existing == &pattern) {
             combined.push(pattern);
         }
     }
-    write_sparse_checkout_patterns(&repo, &combined)?;
-    apply_sparse_checkout(&repo, &combined)
+    write_sparse_checkout_patterns(&repo, &combined, cone_mode)?;
+    apply_sparse_checkout(&repo)
 }
 
 fn sparse_checkout_init(args: &[String]) -> Result<()> {
@@ -6200,55 +9734,230 @@ fn sparse_checkout_init(args: &[String]) -> Result<()> {
             message: "sparse-checkout init does not take patterns".into(),
         });
     }
-    let repo = find_repo()?;
-    set_config_value(&repo, "core.sparseCheckout", "true")?;
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
     apply_sparse_checkout_config_options(&repo, &options)?;
-    write_sparse_checkout_patterns(&repo, &[])?;
-    Ok(())
+    if !sparse_checkout_file(&repo).exists() {
+        write_sparse_checkout_patterns(&repo, &["/*".to_owned(), "!/*/".to_owned()], false)?;
+    }
+    apply_sparse_checkout(&repo)
 }
 
-fn sparse_checkout_reapply() -> Result<()> {
-    let repo = find_repo()?;
+fn sparse_checkout_reapply(args: &[String]) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
     ensure_sparse_checkout_enabled(
         &repo,
         "must be in a sparse-checkout to reapply sparsity patterns",
     )?;
-    remove_sparse_excluded_paths(&repo, &read_sparse_checkout_patterns(&repo)?)
+    let options = parse_sparse_checkout_options(args, false, SparseCheckoutUsage::Reapply)?;
+    apply_sparse_checkout_config_options(&repo, &options)?;
+    apply_sparse_checkout(&repo)
 }
 
 fn sparse_checkout_list() -> Result<()> {
-    let repo = find_repo()?;
-    ensure_sparse_checkout_enabled(&repo, "this worktree is not sparse")?;
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
+    if !sparse_checkout_file(&repo).exists() {
+        let message = if config_bool_enabled(&repo, "core.sparseCheckout")? {
+            "this worktree is not sparse (sparse-checkout file may not exist)"
+        } else {
+            "this worktree is not sparse"
+        };
+        if config_bool_enabled(&repo, "core.sparseCheckout")? {
+            return Err(CliError::Stderr {
+                code: 0,
+                text: format!("warning: {message}\n"),
+            });
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: message.to_owned(),
+        });
+    }
+    let raw = fs::read_to_string(sparse_checkout_file(&repo))?;
+    let quote_paths = sparse_checkout_cone_mode(&repo)? && valid_cone_sparse_checkout_file(&raw);
+    let quote_non_ascii = read_config_value(&repo, "core.quotePath")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(true);
     for pattern in read_sparse_checkout_patterns(&repo)? {
-        println!("{}", quote_sparse_list_pattern(&pattern));
+        if quote_paths {
+            let quoted = reference_commands::quote_git_path(pattern.as_bytes(), quote_non_ascii);
+            println!("{}", String::from_utf8_lossy(&quoted));
+        } else {
+            println!("{pattern}");
+        }
     }
     Ok(())
 }
 
 fn sparse_checkout_disable() -> Result<()> {
-    let repo = find_repo()?;
-    let patterns = read_sparse_checkout_patterns(&repo)?;
-    set_config_value(&repo, "core.sparseCheckout", "false")?;
-    remove_file_if_exists(&sparse_checkout_file(&repo))?;
-    checkout_sparse_excluded_entries(&repo, &patterns)
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
+    checkout_sparse_excluded_entries(&repo)?;
+    let _ = unset_worktree_config_value(&repo, "core.sparseCheckout");
+    let _ = unset_worktree_config_value(&repo, "core.sparseCheckoutCone");
+    set_worktree_config_value(&repo, "index.sparse", "false")?;
+    Ok(())
 }
 
-fn write_sparse_checkout_patterns(repo: &GitRepo, patterns: &[String]) -> Result<()> {
+fn sparse_checkout_check_rules(args: &[String]) -> Result<()> {
+    let options = parse_sparse_checkout_check_rules_options(args)?;
+    let repo = find_repo_or_bare()?;
+    let (patterns, cone_mode) = if let Some(rules_file) = options.rules_file.as_ref() {
+        let path = if rules_file.is_absolute() {
+            rules_file.clone()
+        } else {
+            repo.root.join(rules_file)
+        };
+        let raw = fs::read_to_string(path)?;
+        let cone_mode = options.cone.unwrap_or(true);
+        let rules = raw
+            .lines()
+            .map(unquote_sparse_checkout_input)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        let patterns = if cone_mode {
+            cone_sparse_checkout_file(&rules)
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        } else {
+            rules
+        };
+        (patterns, cone_mode)
+    } else {
+        ensure_sparse_checkout_enabled(&repo, "this worktree is not sparse")?;
+        (
+            read_sparse_checkout_match_patterns(&repo)?,
+            options.cone.unwrap_or(sparse_checkout_cone_mode(&repo)?),
+        )
+    };
+    let matcher = sparse_pattern_matcher(&patterns);
+    let mut input = Vec::new();
+    io::stdin().read_to_end(&mut input)?;
+    let separator = if options.nul { b'\0' } else { b'\n' };
+    let mut output = io::stdout().lock();
+    for raw_path in input.split(|byte| *byte == separator) {
+        if raw_path.is_empty() {
+            continue;
+        }
+        let path = if options.nul {
+            raw_path.to_vec()
+        } else {
+            unquote_sparse_checkout_input(&String::from_utf8_lossy(raw_path)).into_bytes()
+        };
+        if sparse_path_matches(&path, &matcher, cone_mode) {
+            output.write_all(raw_path)?;
+            output.write_all(&[separator])?;
+        }
+    }
+    Ok(())
+}
+
+fn parse_sparse_checkout_check_rules_options(
+    args: &[String],
+) -> Result<SparseCheckoutCheckRulesOptions> {
+    let mut options = SparseCheckoutCheckRulesOptions::default();
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        match arg.as_str() {
+            "--cone" => options.cone = Some(true),
+            "--no-cone" => options.cone = Some(false),
+            "-z" => options.nul = true,
+            "--rules-file" => {
+                cursor += 1;
+                options.rules_file = Some(PathBuf::from(args.get(cursor).ok_or_else(|| {
+                    CliError::Fatal {
+                        code: 129,
+                        message: "option `rules-file' requires a value".into(),
+                    }
+                })?));
+            }
+            value if value.starts_with("--rules-file=") => {
+                options.rules_file = Some(PathBuf::from(&value["--rules-file=".len()..]));
+            }
+            value => {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: format!(
+                        "error: unknown option `{}`\nusage: git sparse-checkout check-rules [--[no-]cone] [--rules-file <file>] [-z]\n",
+                        value.trim_start_matches('-')
+                    ),
+                });
+            }
+        }
+        cursor += 1;
+    }
+    Ok(options)
+}
+
+fn unquote_sparse_checkout_input(input: &str) -> String {
+    let Some(quoted) = input
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return input.to_owned();
+    };
+    let mut out = String::with_capacity(quoted.len());
+    let mut chars = quoted.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn write_sparse_checkout_patterns(
+    repo: &GitRepo,
+    patterns: &[String],
+    cone_mode: bool,
+) -> Result<()> {
     let path = sparse_checkout_file(repo);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut out = String::from("/*\n!/*/\n");
-    for pattern in patterns {
-        let pattern = normalize_sparse_pattern(pattern)?;
-        out.push('/');
-        out.push_str(&pattern);
-        if !out.ends_with('/') {
-            out.push('/');
-        }
-        out.push('\n');
+    let out = if cone_mode {
+        cone_sparse_checkout_file(patterns)
+    } else {
+        patterns
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + if patterns.is_empty() { "" } else { "\n" }
+    };
+    let lock_path = path.with_file_name("sparse-checkout.lock");
+    let mut lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                CliError::Fatal {
+                    code: 128,
+                    message: format!("Unable to create '{}': File exists", lock_path.display()),
+                }
+            } else {
+                CliError::Io(error)
+            }
+        })?;
+    if let Err(error) = lock
+        .write_all(out.as_bytes())
+        .and_then(|()| lock.sync_all())
+    {
+        let _ = fs::remove_file(&lock_path);
+        return Err(CliError::Io(error));
     }
-    fs::write(path, out)?;
+    drop(lock);
+    fs::rename(&lock_path, &path)?;
     Ok(())
 }
 
@@ -6266,30 +9975,85 @@ fn read_sparse_checkout_patterns(repo: &GitRepo) -> Result<Vec<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(CliError::Io(error)),
     };
-    Ok(raw
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line == "/*" || line == "!/*/" || line.is_empty() {
-                return None;
-            }
-            Some(line.trim_matches('/').to_owned())
-        })
-        .collect())
+    if sparse_checkout_cone_mode(repo)? {
+        if valid_cone_sparse_checkout_file(&raw) {
+            return Ok(cone_sparse_checkout_directories(&raw));
+        }
+        warn_invalid_cone_sparse_checkout(&raw);
+    }
+    Ok(raw.lines().map(str::to_owned).collect())
 }
 
-fn apply_sparse_checkout(repo: &GitRepo, patterns: &[String]) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let index = sparse_checkout_index(repo, &store, patterns)?;
-    let mut keep_entries = Vec::new();
-    for entry in index.entries() {
-        if entry.skip_worktree() {
-            remove_worktree_path(repo, &entry.path)?;
-        } else {
-            keep_entries.push(entry.clone());
-        }
+fn apply_sparse_checkout(repo: &GitRepo) -> Result<()> {
+    if !repo.index_path.exists() {
+        return Ok(());
     }
-    index.write_to_path(&repo.index_path)?;
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let old_index = expand_sparse_index(repo, &read_repo_index(repo)?)?;
+    let patterns = read_sparse_checkout_match_patterns(repo)?;
+    let cone_mode = sparse_checkout_cone_mode(repo)?;
+    let matcher = sparse_pattern_matcher(&patterns);
+    let unmerged_paths = old_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage != 0)
+        .filter(|entry| !sparse_path_matches(&entry.path, &matcher, cone_mode))
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let index = sparse_checkout_index(repo, &old_index)?;
+    let mut keep_entries = Vec::new();
+    let mut preserved_paths = Vec::new();
+    let mut updated_entries = Vec::with_capacity(index.entries().len());
+    for mut entry in index.entries().iter().cloned() {
+        if entry.skip_worktree() {
+            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            if path_exists(&absolute)
+                && old_index.entry(&entry.path, 0).is_some_and(|old| {
+                    worktree_entry_modified(repo, &absolute, old).unwrap_or(true)
+                })
+            {
+                entry.set_skip_worktree(false);
+                preserved_paths.push(entry.path.clone());
+            } else {
+                remove_worktree_path(repo, &entry.path)?;
+            }
+        } else {
+            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            if !path_exists(&absolute)
+                && old_index
+                    .entry(&entry.path, 0)
+                    .is_some_and(IndexEntry::skip_worktree)
+            {
+                keep_entries.push(entry.clone());
+            }
+        }
+        updated_entries.push(entry);
+    }
+    if !preserved_paths.is_empty() {
+        print_sparse_checkout_update_warning(&preserved_paths);
+    }
+    if !unmerged_paths.is_empty() {
+        print_sparse_checkout_unmerged_warning(&unmerged_paths);
+    }
+    let untracked_directories = cleanup_sparse_checkout_ignored_paths(
+        repo,
+        &old_index,
+        &index,
+        &matcher,
+        cone_mode,
+        &preserved_paths,
+    )?;
+    if !untracked_directories.is_empty() {
+        print_sparse_checkout_untracked_warning(&untracked_directories);
+    }
+    let mut index = GitIndex::from_entries(updated_entries)?;
+    let checkout_paths = keep_entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
     let checkout = GitIndex::from_entries(keep_entries)?;
     checkout_index(
         &store,
@@ -6297,41 +10061,154 @@ fn apply_sparse_checkout(repo: &GitRepo, patterns: &[String]) -> Result<()> {
         &repo.root,
         CheckoutIndexOptions { force: true },
     )
-    .map_err(CliError::Io)
-}
-
-fn remove_sparse_excluded_paths(repo: &GitRepo, patterns: &[String]) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let index = sparse_checkout_index(repo, &store, patterns)?;
-    for entry in index.entries() {
-        if entry.skip_worktree() {
-            remove_worktree_path(repo, &entry.path)?;
-        }
-    }
-    index.write_to_path(&repo.index_path)?;
+    .map_err(CliError::Io)?;
+    refresh_tracked_index_metadata_after_checkout(repo, &mut index, &checkout_paths)?;
+    let write_index = collapse_sparse_index(repo, &store, &index)?;
+    write_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
 
-fn checkout_sparse_excluded_entries(repo: &GitRepo, patterns: &[String]) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let runtime = CliPrimitiveRuntime::new_default(repo);
-    let mut index =
-        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
-    let patterns = patterns
+fn cleanup_sparse_checkout_ignored_paths(
+    repo: &GitRepo,
+    old_index: &GitIndex,
+    sparse_index: &GitIndex,
+    matcher: &GitIgnore,
+    cone_mode: bool,
+    preserved_paths: &[Vec<u8>],
+) -> Result<Vec<Vec<u8>>> {
+    let mut candidates = BTreeSet::new();
+    for entry in sparse_index
+        .entries()
         .iter()
-        .map(|pattern| normalize_sparse_pattern(pattern))
-        .collect::<Result<Vec<_>>>()?;
+        .filter(|entry| entry.stage == 0 && entry.skip_worktree())
+    {
+        for directory in index_path_ancestors(&entry.path) {
+            let mut probe = directory.clone();
+            probe.extend_from_slice(b"/.zmin-sparse-probe");
+            if !sparse_path_matches(&probe, matcher, cone_mode) {
+                candidates.insert(directory);
+            }
+        }
+    }
+    let mut candidates = candidates.into_iter().collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
+    let mut top_level: Vec<Vec<u8>> = Vec::new();
+    for candidate in candidates {
+        if top_level
+            .iter()
+            .any(|parent| path_is_below_sparse_directory(&candidate, parent))
+        {
+            continue;
+        }
+        top_level.push(candidate);
+    }
+
+    let tracked_paths = tracked_path_set_for_repo(repo, old_index)?;
+    let ignore = GitIgnore::load_from_root(&repo.root)?;
+    let mut blocked: Vec<Vec<u8>> = Vec::new();
+    for directory in top_level {
+        if old_index.entries().iter().any(|entry| {
+            path_is_below_sparse_directory(&entry.path, &directory)
+                && (entry.stage != 0 || entry.mode == IndexMode::Gitlink)
+        }) {
+            continue;
+        }
+        let absolute = worktree_path_for_index_entry(&repo.root, &directory);
+        if !absolute.is_dir() {
+            continue;
+        }
+        if preserved_paths
+            .iter()
+            .any(|path| path_is_below_sparse_directory(path, &directory))
+        {
+            continue;
+        }
+        if sparse_directory_contains_untracked(&absolute, &directory, &tracked_paths, &ignore)? {
+            blocked.push(directory);
+        } else {
+            fs::remove_dir_all(absolute)?;
+        }
+    }
+    Ok(blocked)
+}
+
+fn sparse_directory_contains_untracked(
+    directory: &Path,
+    relative_directory: &[u8],
+    tracked_paths: &TrackedPathSet<'_>,
+    ignore: &GitIgnore,
+) -> Result<bool> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let relative = relative_child_path(relative_directory, &entry.file_name());
+        if tracked_paths.contains(&relative) {
+            continue;
+        }
+        if ignore.is_ignored(&relative, file_type.is_dir()) {
+            continue;
+        }
+        if !file_type.is_dir() || is_nested_worktree(&entry.path()) {
+            return Ok(true);
+        }
+        if sparse_directory_contains_untracked(&entry.path(), &relative, tracked_paths, ignore)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn print_sparse_checkout_untracked_warning(paths: &[Vec<u8>]) {
+    for path in paths {
+        eprintln!(
+            "warning: directory '{}/' contains untracked files, but is not in the sparse-checkout cone",
+            String::from_utf8_lossy(path)
+        );
+    }
+}
+
+fn print_sparse_checkout_unmerged_warning(paths: &[Vec<u8>]) {
+    eprintln!("warning: The following paths are unmerged and were left despite sparse patterns:");
+    for path in paths {
+        eprintln!("\t{}", String::from_utf8_lossy(path));
+    }
+    eprintln!();
+    eprintln!("After fixing the above paths, you may want to run `git sparse-checkout reapply`.");
+}
+
+fn checkout_sparse_excluded_entries(repo: &GitRepo) -> Result<()> {
+    if !repo.index_path.exists() {
+        return Ok(());
+    }
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let mut index = read_repo_index(repo)?;
+    index = expand_sparse_index(repo, &index)?;
+    let unmerged_paths = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage != 0)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !unmerged_paths.is_empty() {
+        print_sparse_checkout_unmerged_warning(&unmerged_paths);
+    }
     let mut restore_entries = Vec::new();
     let mut full_entries = Vec::new();
     for mut entry in index.entries().to_vec() {
-        if !sparse_path_matches(&entry.path, &patterns) {
+        if entry.skip_worktree() {
             restore_entries.push(entry.clone());
         }
         entry.set_skip_worktree(false);
         full_entries.push(entry);
     }
     index = GitIndex::from_entries(full_entries)?;
-    index.write_to_path(&repo.index_path)?;
+    let checkout_paths = restore_entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
     let checkout = GitIndex::from_entries(restore_entries)?;
     checkout_index(
         &store,
@@ -6339,77 +10216,275 @@ fn checkout_sparse_excluded_entries(repo: &GitRepo, patterns: &[String]) -> Resu
         &repo.root,
         CheckoutIndexOptions { force: true },
     )
-    .map_err(CliError::Io)
+    .map_err(CliError::Io)?;
+    refresh_tracked_index_metadata_after_checkout(repo, &mut index, &checkout_paths)?;
+    index.write_to_path(&repo.index_path)?;
+    Ok(())
 }
 
-fn sparse_checkout_index(
-    repo: &GitRepo,
-    _store: &LooseObjectStore,
-    patterns: &[String],
-) -> Result<GitIndex> {
-    let patterns = patterns
+fn sparse_checkout_index(repo: &GitRepo, index: &GitIndex) -> Result<GitIndex> {
+    let patterns = read_sparse_checkout_match_patterns(repo)?;
+    let cone_mode = config_bool_enabled(repo, "core.sparseCheckoutCone")?;
+    let matcher = sparse_pattern_matcher(&patterns);
+    let entries = index
+        .entries()
         .iter()
-        .map(|pattern| normalize_sparse_pattern(pattern))
-        .collect::<Result<Vec<_>>>()?;
-    let runtime = CliPrimitiveRuntime::new_default(repo);
-    let entries =
-        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?
-            .entries()
-            .iter()
-            .cloned()
-            .map(|mut entry| {
-                entry.set_skip_worktree(!sparse_path_matches(&entry.path, &patterns));
-                entry
-            })
-            .collect::<Vec<_>>();
+        .cloned()
+        .map(|mut entry| {
+            if entry.stage == 0 {
+                entry.set_skip_worktree(!sparse_path_matches(&entry.path, &matcher, cone_mode));
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
     Ok(GitIndex::from_entries(entries)?)
 }
 
-fn sparse_path_matches(path: &[u8], patterns: &[String]) -> bool {
-    let path = String::from_utf8_lossy(path);
-    if !path.contains('/') {
+fn sparse_checkout_active(repo: &GitRepo) -> Result<bool> {
+    Ok(sparse_checkout_file(repo).exists() && config_bool_enabled(repo, "core.sparseCheckout")?)
+}
+
+fn apply_sparse_checkout_bits_to_index(repo: &GitRepo, index: &mut GitIndex) -> Result<()> {
+    let patterns = read_sparse_checkout_match_patterns(repo)?;
+    let mut cone_mode = config_bool_enabled(repo, "core.sparseCheckoutCone")?;
+    if cone_mode {
+        let raw = fs::read_to_string(sparse_checkout_file(repo)).unwrap_or_default();
+        if !valid_cone_sparse_checkout_file(&raw) {
+            warn_invalid_cone_sparse_checkout(&raw);
+            cone_mode = false;
+        }
+    }
+    let matcher = sparse_pattern_matcher(&patterns);
+    let entries = index
+        .entries()
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if entry.stage == 0 {
+                entry.set_skip_worktree(!sparse_path_matches(&entry.path, &matcher, cone_mode));
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
+    let full_index = GitIndex::from_entries(entries)?;
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
+    *index = collapse_sparse_index(repo, &store, &full_index)?;
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct SparseDirectoryState {
+    all_skipped: bool,
+    entry_count: usize,
+    contains_gitlink: bool,
+}
+
+fn collapse_sparse_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<GitIndex> {
+    if !config_bool_enabled(repo, "index.sparse")?
+        || index.entries().iter().any(|entry| entry.stage != 0)
+    {
+        return Ok(index.clone());
+    }
+    let mut directories = BTreeMap::<Vec<u8>, SparseDirectoryState>::new();
+    for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        for directory in index_path_ancestors(&entry.path) {
+            let state = directories
+                .entry(directory)
+                .or_insert(SparseDirectoryState {
+                    all_skipped: true,
+                    entry_count: 0,
+                    contains_gitlink: false,
+                });
+            state.all_skipped &= entry.skip_worktree();
+            state.entry_count += 1;
+            state.contains_gitlink |= entry.mode == IndexMode::Gitlink;
+        }
+    }
+    let mut candidates = directories
+        .into_iter()
+        .filter(|(_, state)| state.all_skipped && state.entry_count > 0 && !state.contains_gitlink)
+        .map(|(path, _)| path)
+        .collect::<Vec<_>>();
+    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let head_index =
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    candidates.retain(|directory| sparse_directory_matches_head(index, &head_index, directory));
+    candidates.sort_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
+    let mut collapsed = Vec::new();
+    for candidate in candidates {
+        if collapsed
+            .iter()
+            .any(|parent: &Vec<u8>| path_is_below_sparse_directory(&candidate, parent))
+        {
+            continue;
+        }
+        collapsed.push(candidate);
+    }
+    if collapsed.is_empty() {
+        return Ok(index.clone());
+    }
+    let head = resolve_commitish(repo, store, "HEAD")?;
+    let commit = CommitObjectCache::new(store).read_commit(&head)?;
+    let mut entries = index
+        .entries()
+        .iter()
+        .filter(|entry| {
+            !collapsed
+                .iter()
+                .any(|directory| path_is_below_sparse_directory(&entry.path, directory))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for directory in collapsed {
+        let Some(tree) = find_tree_entry(store, &commit.tree, &directory)? else {
+            continue;
+        };
+        if tree.mode != TreeMode::Tree {
+            continue;
+        }
+        let mut path = directory;
+        path.push(b'/');
+        let mut entry = IndexEntry::new(path, tree.id, IndexMode::Tree, 0)?;
+        entry.set_skip_worktree(true);
+        entries.push(entry);
+    }
+    Ok(GitIndex::from_entries(entries)?)
+}
+
+fn sparse_directory_matches_head(
+    index: &GitIndex,
+    head_index: &GitIndex,
+    directory: &[u8],
+) -> bool {
+    let mut current = index
+        .entries()
+        .iter()
+        .filter(|entry| path_is_below_sparse_directory(&entry.path, directory));
+    let mut head = head_index
+        .entries()
+        .iter()
+        .filter(|entry| path_is_below_sparse_directory(&entry.path, directory));
+    loop {
+        match (current.next(), head.next()) {
+            (Some(current), Some(head))
+                if current.stage == 0
+                    && current.path == head.path
+                    && current.id == head.id
+                    && current.mode == head.mode => {}
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
+
+fn expand_sparse_index(repo: &GitRepo, index: &GitIndex) -> Result<GitIndex> {
+    let sparse_directories = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree)
+        .map(|entry| {
+            entry
+                .path
+                .strip_suffix(b"/")
+                .unwrap_or(&entry.path)
+                .to_vec()
+        })
+        .collect::<Vec<_>>();
+    if sparse_directories.is_empty() {
+        return Ok(index.clone());
+    }
+    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let mut expanded =
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let entries = expanded
+        .entries()
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if sparse_directories
+                .iter()
+                .any(|directory| path_is_below_sparse_directory(&entry.path, directory))
+            {
+                entry.set_skip_worktree(true);
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
+    expanded = GitIndex::from_entries(entries)?;
+    for entry in index
+        .entries()
+        .iter()
+        .filter(|entry| entry.mode != IndexMode::Tree)
+    {
+        expanded.upsert(entry.clone())?;
+    }
+    Ok(expanded)
+}
+
+fn path_is_below_sparse_directory(path: &[u8], directory: &[u8]) -> bool {
+    path.starts_with(directory) && path.get(directory.len()) == Some(&b'/')
+}
+
+fn read_sparse_checkout_match_patterns(repo: &GitRepo) -> Result<Vec<String>> {
+    let raw = match fs::read_to_string(sparse_checkout_file(repo)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    Ok(raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+fn sparse_pattern_matcher(patterns: &[String]) -> GitIgnore {
+    GitIgnore::parse(&patterns.join("\n"))
+}
+
+fn sparse_path_matches(path: &[u8], matcher: &GitIgnore, cone_mode: bool) -> bool {
+    if cone_mode && !path.contains(&b'/') {
         return true;
     }
-    patterns.iter().any(|pattern| {
-        path == pattern.as_str()
-            || path
-                .strip_prefix(pattern)
-                .is_some_and(|rest| rest.starts_with('/'))
-    })
+    sparse_path_match(path, matcher, cone_mode).is_some_and(|(_, is_negation)| !is_negation)
 }
 
-fn normalize_sparse_pattern(pattern: &str) -> Result<String> {
-    #[cfg(windows)]
-    let normalized;
-    #[cfg(windows)]
-    let pattern = {
-        normalized = pattern.replace('\\', "/");
-        normalized.as_str()
-    };
-    let pattern = pattern.trim().trim_matches('/');
-    if pattern.is_empty() || pattern.contains("..") {
-        return Err(CliError::Stderr {
-            code: 128,
-            text: format!("fatal: could not normalize path {pattern}\n"),
+fn sparse_path_match(path: &[u8], matcher: &GitIgnore, cone_mode: bool) -> Option<(usize, bool)> {
+    let mut best = matcher
+        .match_path(path, false)
+        .map(|matched| (matched.line_number, matched.is_negation));
+    for ancestor in index_path_ancestors(path) {
+        let candidate = matcher.match_path(&ancestor, true).and_then(|matched| {
+            if cone_mode && !matched.is_negation && matched.pattern == "/*" {
+                None
+            } else {
+                Some((matched.line_number, matched.is_negation))
+            }
         });
+        if sparse_match_is_newer(candidate.as_ref(), best.as_ref()) {
+            best = candidate;
+        }
     }
-    Ok(pattern.to_owned())
+    best
 }
 
-fn quote_sparse_list_pattern(pattern: &str) -> String {
-    if !pattern.contains('\\') && !pattern.contains('"') {
-        return pattern.to_owned();
+fn sparse_match_is_newer(
+    candidate: Option<&(usize, bool)>,
+    current: Option<&(usize, bool)>,
+) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate.0 >= current.0,
+        (Some(_), None) => true,
+        _ => false,
     }
-    let mut quoted = String::with_capacity(pattern.len() + 2);
-    quoted.push('"');
-    for ch in pattern.chars() {
-        if ch == '\\' || ch == '"' {
-            quoted.push('\\');
-        }
-        quoted.push(ch);
-    }
-    quoted.push('"');
-    quoted
 }
 
 fn sparse_checkout_file(repo: &GitRepo) -> PathBuf {
@@ -6422,6 +10497,14 @@ struct SparseCheckoutOptions {
     stdin: bool,
     cone: Option<bool>,
     sparse_index: Option<bool>,
+    skip_checks: bool,
+}
+
+#[derive(Debug, Default)]
+struct SparseCheckoutCheckRulesOptions {
+    cone: Option<bool>,
+    rules_file: Option<PathBuf>,
+    nul: bool,
 }
 
 impl SparseCheckoutOptions {
@@ -6435,6 +10518,7 @@ enum SparseCheckoutUsage {
     Set,
     Add,
     Init,
+    Reapply,
 }
 
 fn parse_sparse_checkout_options(
@@ -6443,15 +10527,20 @@ fn parse_sparse_checkout_options(
     usage: SparseCheckoutUsage,
 ) -> Result<SparseCheckoutOptions> {
     let mut options = SparseCheckoutOptions::default();
+    let mut end_of_options = false;
     for arg in args {
+        if !end_of_options && arg == "--end-of-options" {
+            end_of_options = true;
+            continue;
+        }
         match arg.as_str() {
-            "--stdin" if allow_stdin => options.stdin = true,
-            "--cone" => options.cone = Some(true),
-            "--no-cone" => options.cone = Some(false),
-            "--sparse-index" => options.sparse_index = Some(true),
-            "--no-sparse-index" => options.sparse_index = Some(false),
-            "--skip-checks" => {}
-            option if option.starts_with('-') => {
+            "--stdin" if !end_of_options && allow_stdin => options.stdin = true,
+            "--cone" if !end_of_options => options.cone = Some(true),
+            "--no-cone" if !end_of_options => options.cone = Some(false),
+            "--sparse-index" if !end_of_options => options.sparse_index = Some(true),
+            "--no-sparse-index" if !end_of_options => options.sparse_index = Some(false),
+            "--skip-checks" if !end_of_options => options.skip_checks = true,
+            option if !end_of_options && option.starts_with('-') => {
                 return Err(sparse_checkout_unknown_option_error(option, usage));
             }
             pattern => options.patterns.push(pattern.to_owned()),
@@ -6464,7 +10553,7 @@ fn parse_sparse_checkout_options(
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
-            .map(ToOwned::to_owned)
+            .map(unquote_sparse_checkout_input)
             .collect();
     }
     Ok(options)
@@ -6503,6 +10592,12 @@ fn sparse_checkout_usage(usage: SparseCheckoutUsage) -> &'static str {
             "    --[no-]cone           initialize the sparse-checkout in cone mode\n",
             "    --[no-]sparse-index   toggle the use of a sparse index\n",
         ),
+        SparseCheckoutUsage::Reapply => concat!(
+            "usage: git sparse-checkout reapply [--[no-]cone] [--[no-]sparse-index]\n",
+            "\n",
+            "    --[no-]cone           initialize the sparse-checkout in cone mode\n",
+            "    --[no-]sparse-index   toggle the use of a sparse index\n",
+        ),
     }
 }
 
@@ -6510,23 +10605,297 @@ fn apply_sparse_checkout_config_options(
     repo: &GitRepo,
     options: &SparseCheckoutOptions,
 ) -> Result<()> {
-    if let Some(cone) = options.cone {
-        set_config_value(
-            repo,
-            "core.sparseCheckoutCone",
-            if cone { "true" } else { "false" },
-        )?;
-    } else if read_config_value(repo, "core.sparseCheckoutCone")?.is_none() {
-        set_config_value(repo, "core.sparseCheckoutCone", "true")?;
+    set_config_value(repo, "core.repositoryFormatVersion", "1")?;
+    set_config_value(repo, "extensions.worktreeConfig", "true")?;
+    let cone = options.cone.unwrap_or(
+        read_config_value(repo, "core.sparseCheckoutCone")?
+            .as_deref()
+            .and_then(parse_git_bool)
+            .unwrap_or(true),
+    );
+    let existing_sparse_index = read_config_value(repo, "index.sparse")?;
+    let sparse_index = options
+        .sparse_index
+        .or_else(|| existing_sparse_index.as_deref().and_then(parse_git_bool));
+    let mut values = vec![
+        ("core.sparseCheckout".to_owned(), "true".to_owned()),
+        ("core.sparseCheckoutCone".to_owned(), cone.to_string()),
+    ];
+    if let Some(sparse_index) = sparse_index {
+        values.push(("index.sparse".to_owned(), sparse_index.to_string()));
     }
-    if let Some(sparse_index) = options.sparse_index {
-        set_config_value(
-            repo,
-            "index.sparse",
-            if sparse_index { "true" } else { "false" },
-        )?;
+    set_ordered_worktree_config_values(repo, &values)
+}
+
+fn ensure_sparse_checkout_worktree(repo: &GitRepo) -> Result<()> {
+    if repo_is_bare(repo) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "this operation must be run in a work tree".into(),
+        });
     }
     Ok(())
+}
+
+fn sparse_checkout_cone_mode(repo: &GitRepo) -> Result<bool> {
+    Ok(read_config_value(repo, "core.sparseCheckoutCone")?
+        .and_then(|value| parse_git_bool(&value))
+        .unwrap_or(true))
+}
+
+fn validate_sparse_checkout_inputs(
+    repo: &GitRepo,
+    patterns: &[String],
+    cone_mode: bool,
+    skip_checks: bool,
+) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    if !cone_mode && cwd != repo.root {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "must run from the toplevel directory in non-cone mode".into(),
+        });
+    }
+    if skip_checks {
+        return Ok(());
+    }
+    for pattern in patterns {
+        let path = cwd.join(pattern);
+        if cone_mode {
+            if path.exists() && !path.is_dir() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "'{}' is not a directory; to treat it as a directory anyway, rerun with --skip-checks",
+                        pattern
+                    ),
+                });
+            }
+        } else if !pattern.starts_with('/') {
+            eprintln!(
+                "warning: pass a leading slash before paths such as '{pattern}' if you want a single file"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn normalize_sparse_checkout_inputs(
+    repo: &GitRepo,
+    patterns: &[String],
+    cone_mode: bool,
+) -> Result<Vec<String>> {
+    if !cone_mode {
+        return Ok(patterns.to_vec());
+    }
+    let cwd = std::env::current_dir()?;
+    let prefix = cwd
+        .strip_prefix(&repo.root)
+        .unwrap_or_else(|_| Path::new(""));
+    let mut normalized = BTreeSet::new();
+    for pattern in patterns {
+        let path = prefix.join(pattern);
+        let mut components = Vec::new();
+        for component in path.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::Normal(component) => {
+                    components.push(component.to_string_lossy().into_owned());
+                }
+                std::path::Component::ParentDir => {
+                    if components.pop().is_none() {
+                        return Err(CliError::Stderr {
+                            code: 128,
+                            text: format!("fatal: could not normalize path {pattern}\n"),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(CliError::Stderr {
+                        code: 128,
+                        text: format!("fatal: could not normalize path {pattern}\n"),
+                    });
+                }
+            }
+        }
+        if components.is_empty() {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!("fatal: could not normalize path {pattern}\n"),
+            });
+        }
+        normalized.insert(components.join("/"));
+    }
+    let mut minimal = Vec::new();
+    for path in normalized {
+        if minimal
+            .iter()
+            .any(|parent: &String| path.starts_with(&format!("{parent}/")))
+        {
+            continue;
+        }
+        minimal.push(path);
+    }
+    Ok(minimal)
+}
+
+fn cone_sparse_checkout_file(patterns: &[String]) -> String {
+    let patterns = minimal_cone_directories(patterns);
+    let explicit = patterns.iter().cloned().collect::<BTreeSet<_>>();
+    let mut prefixes = BTreeSet::new();
+    for pattern in patterns {
+        let components = pattern.split('/').collect::<Vec<_>>();
+        for end in 1..=components.len() {
+            prefixes.insert(components[..end].join("/"));
+        }
+    }
+    let mut out = String::from("/*\n!/*/\n");
+    for prefix in prefixes {
+        let escaped = escape_cone_sparse_path(&prefix);
+        out.push('/');
+        out.push_str(&escaped);
+        out.push_str("/\n");
+        if !explicit.contains(&prefix) {
+            out.push_str("!/");
+            out.push_str(&escaped);
+            out.push_str("/*/\n");
+        }
+    }
+    out
+}
+
+fn minimal_cone_directories(patterns: &[String]) -> Vec<String> {
+    let mut minimal = Vec::new();
+    for path in patterns.iter().cloned().collect::<BTreeSet<_>>() {
+        if minimal
+            .iter()
+            .any(|parent: &String| path.starts_with(&format!("{parent}/")))
+        {
+            continue;
+        }
+        minimal.push(path);
+    }
+    minimal
+}
+
+fn escape_cone_sparse_path(path: &str) -> String {
+    let mut escaped = String::with_capacity(path.len());
+    for ch in path.chars() {
+        if matches!(ch, '\\' | '*' | '?' | '[') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn unescape_cone_sparse_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut chars = path.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn cone_sparse_checkout_directories(raw: &str) -> Vec<String> {
+    let mut positives = BTreeSet::new();
+    let mut internal = BTreeSet::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line == "/*" || line == "!/*/" || line.is_empty() {
+            continue;
+        }
+        if let Some(path) = line
+            .strip_prefix("!/")
+            .and_then(|line| line.strip_suffix("/*/"))
+        {
+            internal.insert(unescape_cone_sparse_path(path));
+        } else if let Some(path) = line
+            .strip_prefix('/')
+            .and_then(|line| line.strip_suffix('/'))
+        {
+            positives.insert(unescape_cone_sparse_path(path));
+        }
+    }
+    positives
+        .into_iter()
+        .filter(|path| !internal.contains(path))
+        .collect()
+}
+
+fn sparse_checkout_file_uses_cone_patterns(repo: &GitRepo) -> Result<bool> {
+    match fs::read_to_string(sparse_checkout_file(repo)) {
+        Ok(raw) => Ok(valid_cone_sparse_checkout_file(&raw)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn valid_cone_sparse_checkout_file(raw: &str) -> bool {
+    let lines = raw.lines().collect::<Vec<_>>();
+    if lines.get(0) != Some(&"/*") || lines.get(1) != Some(&"!/*/") {
+        return false;
+    }
+    let mut positives = BTreeSet::new();
+    let mut negatives = Vec::new();
+    for line in &lines[2..] {
+        if let Some(path) = line
+            .strip_prefix("!/")
+            .and_then(|line| line.strip_suffix("/*/"))
+        {
+            if path.is_empty() || sparse_pattern_has_unescaped_glob(path) {
+                return false;
+            }
+            negatives.push(unescape_cone_sparse_path(path));
+            continue;
+        }
+        let Some(path) = line
+            .strip_prefix('/')
+            .and_then(|line| line.strip_suffix('/'))
+        else {
+            return false;
+        };
+        if path.is_empty() || sparse_pattern_has_unescaped_glob(path) {
+            return false;
+        }
+        let path = unescape_cone_sparse_path(path);
+        if path.ends_with("/*") {
+            return false;
+        }
+        positives.insert(path);
+    }
+    negatives.into_iter().all(|path| positives.contains(&path))
+}
+
+fn sparse_pattern_has_unescaped_glob(pattern: &str) -> bool {
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+        } else if matches!(ch, '*' | '?' | '[') {
+            return true;
+        }
+    }
+    false
+}
+
+fn warn_invalid_cone_sparse_checkout(raw: &str) {
+    if raw.lines().any(|line| line.starts_with("!/")) {
+        eprintln!("warning: unrecognized negative pattern in sparse-checkout file");
+    }
+    eprintln!("warning: your sparse-checkout file may have issues: pattern '/foo/*/' is repeated");
+    eprintln!("warning: disabling cone pattern matching");
 }
 
 pub(crate) fn ensure_sparse_checkout_enabled(repo: &GitRepo, message: &str) -> Result<()> {
@@ -6559,7 +10928,10 @@ fn submodule_add(args: &[String]) -> Result<()> {
         .clone()
         .unwrap_or_else(|| default_submodule_path(&options.repository));
     let absolute_submodule_path = absolute_path_from_arg(&submodule_path)?;
-    if exact_repo_at(&absolute_submodule_path).is_none() {
+    let existing_repo = exact_repo_at(&absolute_submodule_path).is_some();
+    if !existing_repo {
+        let clone_repository =
+            resolve_submodule_clone_url(&submodule_parent_repository(&repo), &options.repository);
         transport_commands::clone(CloneOptions {
             quiet: options.quiet,
             configs: Vec::new(),
@@ -6597,14 +10969,14 @@ fn submodule_add(args: &[String]) -> Result<()> {
             bundle_uri: None,
             ref_format: None,
             keep_partial_on_missing_branch: false,
-            repository: options.repository.clone(),
+            repository: clone_repository,
             directory: Some(absolute_submodule_path.clone()),
         })?;
-    } else if !options.force {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!("'{}' already exists in the index", submodule_path.display()),
-        });
+    } else if !options.quiet {
+        println!(
+            "Adding existing repo at '{}' to the index",
+            submodule_path.display()
+        );
     }
     let submodule_path_string = submodule_path.to_string_lossy().replace('\\', "/");
     let submodule_name = options
@@ -6618,6 +10990,7 @@ fn submodule_add(args: &[String]) -> Result<()> {
         &submodule_path_string,
         options.branch.as_deref(),
     )?;
+    absorb_submodule_gitdir(&repo, &submodule_path_string, &submodule_name)?;
     set_config_value(
         &repo,
         &format!("submodule.{submodule_name}.url"),
@@ -6872,6 +11245,7 @@ pub(crate) fn stash(args: Vec<String>) -> Result<()> {
                 options.quiet,
                 options.index,
                 options.no_index,
+                &options.labels,
             )
         }
         "pop" => {
@@ -6882,6 +11256,7 @@ pub(crate) fn stash(args: Vec<String>) -> Result<()> {
                 options.quiet,
                 options.index,
                 options.no_index,
+                &options.labels,
             )
         }
         "drop" => stash_drop(&args[1..]),
@@ -7178,7 +11553,7 @@ fn stash_push(args: &[String], usage: StashPushUsage) -> Result<()> {
         return Ok(());
     }
     let head_commit = commit_cache.read_commit(&head_id)?;
-    stage_tracked_worktree_changes_matching(
+    let _ = stage_tracked_worktree_changes_matching(
         &repo,
         &store,
         &mut snapshot,
@@ -7267,11 +11642,116 @@ fn stash_locked_index_error(repo: &GitRepo) -> Option<CliError> {
     let lock_path = repo.index_path.with_extension("lock");
     lock_path.exists().then(|| CliError::Stderr {
         code: 1,
-        text: format!(
-            "error: could not write index\nerror: Unable to create '{}': File exists.\n",
-            lock_path.display()
-        ),
+        text: "error: could not write index\n".to_owned(),
     })
+}
+
+fn add_lockfile_pid_config_enabled(repo: &GitRepo) -> Result<bool> {
+    let Some(entry) = read_config_entry(repo, "core.lockfilepid").map_err(CliError::Io)? else {
+        return Ok(false);
+    };
+    entry.bool_value().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("bad boolean config value '{}'", entry.value),
+    })
+}
+
+fn write_index_with_lockfile_diagnostics(
+    repo: &GitRepo,
+    index: &GitIndex,
+    lockfile_pid_enabled: bool,
+    options: AddIndexWriteOptions,
+) -> Result<()> {
+    let write_result = match options.version {
+        Some(version) => index.write_to_path_with_version(&repo.index_path, version),
+        None => index.write_to_path(&repo.index_path),
+    };
+    write_result.map_err(|error| add_index_write_error(repo, error, lockfile_pid_enabled))?;
+    if options.skip_hash {
+        zero_index_trailing_hash(&repo.index_path, index.hash_algorithm())
+            .map_err(|error| add_index_write_error(repo, error, lockfile_pid_enabled))?;
+    }
+    Ok(())
+}
+
+fn zero_index_trailing_hash(
+    path: &Path,
+    algorithm: zmin_git_core::GitHashAlgorithm,
+) -> io::Result<()> {
+    let mut bytes = fs::read(path)?;
+    let digest_len = algorithm.digest_len();
+    if bytes.len() < digest_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index is too short",
+        ));
+    }
+    let checksum_offset = bytes.len() - digest_len;
+    bytes[checksum_offset..].fill(0);
+    fs::write(path, bytes)
+}
+
+fn add_index_write_error(repo: &GitRepo, error: io::Error, lockfile_pid_enabled: bool) -> CliError {
+    if error.kind() != io::ErrorKind::AlreadyExists {
+        return CliError::Io(error);
+    }
+    let lock_path = repo.index_path.with_extension("lock");
+    let mut text = format!(
+        "error: could not write index\nerror: Unable to create '{}': File exists.\n",
+        lock_path.display()
+    );
+    if let Some(pid_diagnostic) = add_lockfile_pid_diagnostic(repo, lockfile_pid_enabled) {
+        text.push_str(&pid_diagnostic);
+    }
+    CliError::Stderr { code: 128, text }
+}
+
+fn add_lockfile_pid_diagnostic(repo: &GitRepo, lockfile_pid_enabled: bool) -> Option<String> {
+    let pid_path = add_lockfile_pid_path(repo);
+    let content = fs::read_to_string(pid_path).ok()?;
+    let pid = parse_lockfile_pid(&content)?;
+    if pid > 0 && lockfile_pid_enabled && process_id_is_running(pid) {
+        return Some(format!("error: index.lock is held by process {pid}\n"));
+    }
+    Some(format!(
+        "error: index.lock was written by process {pid}, which is no longer running\nerror: index.lock appears to be stale\n"
+    ))
+}
+
+fn add_lockfile_pid_path(repo: &GitRepo) -> PathBuf {
+    repo.index_path.with_file_name("index~pid.lock")
+}
+
+fn parse_lockfile_pid(content: &str) -> Option<i32> {
+    content
+        .trim()
+        .strip_prefix("pid ")?
+        .trim()
+        .parse::<i32>()
+        .ok()
+}
+
+fn process_id_is_running(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(pid, 0) does not send a signal and is the standard existence probe.
+        let rc = unsafe { libc::kill(pid, 0) };
+        if rc == 0 {
+            return true;
+        }
+        let errno = io::Error::last_os_error()
+            .raw_os_error()
+            .unwrap_or_default();
+        errno != libc::ESRCH
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 fn stage_recreated_tracked_worktree_paths(
@@ -7424,7 +11904,13 @@ fn stash_create(args: &[String]) -> Result<()> {
     if stash_selection_clean(&repo, &store, &snapshot, &[])? {
         return Ok(());
     }
-    stage_tracked_worktree_changes_matching(&repo, &store, &mut snapshot, &[], &HashSet::new())?;
+    let _ = stage_tracked_worktree_changes_matching(
+        &repo,
+        &store,
+        &mut snapshot,
+        &[],
+        &HashSet::new(),
+    )?;
     let stash_id = create_stash_commit(
         &repo,
         &store,
@@ -7909,6 +12395,7 @@ fn reset_stashed_worktree_paths_to_head(
         CheckoutIndexOptions { force: true },
     )?;
     refresh_tracked_index_metadata_matching(repo, &mut current_index, pathspecs)?;
+    current_index.refresh_cache_tree();
     current_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -7947,6 +12434,7 @@ fn reset_staged_paths_to_head(
         .map(|change| change.path.to_vec())
         .collect::<Vec<_>>();
     refresh_tracked_index_metadata_matching(repo, &mut current_index, &refreshed_paths)?;
+    current_index.refresh_cache_tree();
     current_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -7958,10 +12446,12 @@ fn restore_index_to_worktree(
 ) -> Result<()> {
     let current_index = read_repo_index(repo)?;
     remove_tracked_paths_missing_from_target(repo, &current_index, target_index)?;
+    let mut target_index = target_index.clone();
+    target_index.refresh_cache_tree();
     target_index.write_to_path(&repo.index_path)?;
     checkout_index(
         store,
-        target_index,
+        &target_index,
         &repo.root,
         CheckoutIndexOptions { force: true },
     )?;
@@ -8010,6 +12500,7 @@ fn restore_index_paths_to_worktree(
         CheckoutIndexOptions { force: true },
     )?;
     refresh_tracked_index_metadata_matching(repo, &mut current_index, pathspecs)?;
+    current_index.refresh_cache_tree();
     current_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -9181,8 +13672,8 @@ fn signature_human_date(signature: &[u8]) -> Result<String> {
     let commit = utc.with_timezone(&offset);
     let now = git_test_date_now()
         .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-        .map(|timestamp| timestamp.with_timezone(&chrono::Local))
-        .unwrap_or_else(chrono::Local::now);
+        .and_then(|timestamp| crate::runtime::local_datetime(timestamp.timestamp()))
+        .unwrap_or_else(crate::runtime::local_now);
     if commit.year() == now.year()
         && commit.month() == now.month()
         && commit.day() == now.day()
@@ -9311,6 +13802,7 @@ fn stash_show(args: &[String]) -> Result<()> {
     let mut show_summary = false;
     let mut show_raw = false;
     let mut only_untracked = false;
+    let mut include_untracked = false;
     let mut nul_terminated = false;
     let mut name_only = false;
     let mut name_status = false;
@@ -9715,12 +14207,14 @@ fn stash_show(args: &[String]) -> Result<()> {
                 name_only = false;
                 diff_format_explicit = true;
             }
-            "-u" | "--include-untracked" | "--no-include-untracked" => {}
+            "-u" | "--include-untracked" => {
+                include_untracked = true;
+            }
+            "--no-include-untracked" => {
+                include_untracked = false;
+            }
             "--only-untracked" => {
                 only_untracked = true;
-                show_stat = false;
-                show_patch = false;
-                diff_format_explicit = true;
             }
             value if value.starts_with('-') => {
                 return Err(CliError::Stderr {
@@ -9763,8 +14257,20 @@ fn stash_show(args: &[String]) -> Result<()> {
     };
     let parent_commit = commit_cache.read_commit(parent)?;
     let tree_cache = TreeObjectCache::new(&store);
-    let old_index = read_commit_tree_index_cached(&tree_cache, &parent_commit)?;
-    let new_index = read_commit_tree_index_cached(&tree_cache, &commit)?;
+    let mut old_index = read_commit_tree_index_cached(&tree_cache, &parent_commit)?;
+    let mut new_index = read_commit_tree_index_cached(&tree_cache, &commit)?;
+    if include_untracked || only_untracked {
+        let untracked_index = stash_untracked_parent_index(&commit_cache, &tree_cache, &commit)?
+            .unwrap_or_else(GitIndex::new);
+        if only_untracked {
+            old_index = GitIndex::new();
+            new_index = untracked_index;
+        } else {
+            let mut entries = new_index.entries().to_vec();
+            entries.extend(untracked_index.entries().iter().cloned());
+            new_index = GitIndex::from_entries(entries)?;
+        }
+    }
     let entries = diff_entries_for_indexes(
         &old_index,
         &new_index,
@@ -9811,9 +14317,6 @@ fn stash_show(args: &[String]) -> Result<()> {
     let entries = apply_diff_filter(entries, diff_filter);
     let entries = apply_diff_order_file(entries, order_file.as_deref())?;
     let entries = apply_diff_skip_rotate(entries, skip_to.as_deref(), rotate_to.as_deref());
-    if only_untracked {
-        return Ok(());
-    }
     let has_changes = !entries.is_empty();
     if quiet {
         return if has_changes {
@@ -9933,6 +14436,7 @@ fn stash_apply(
     quiet: bool,
     restore_index: bool,
     no_restore_index: bool,
+    labels: &StashApplyLabels,
 ) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -9958,6 +14462,7 @@ fn stash_apply(
         &tree_cache,
         &id,
         restore_index,
+        labels,
     )?;
     if !quiet {
         status(
@@ -10045,6 +14550,14 @@ struct StashReferenceOptions {
     index: bool,
     no_index: bool,
     stash: Option<String>,
+    labels: StashApplyLabels,
+}
+
+#[derive(Default)]
+struct StashApplyLabels {
+    ours: Option<String>,
+    theirs: Option<String>,
+    base: Option<String>,
 }
 
 fn parse_stash_reference_options(
@@ -10055,7 +14568,9 @@ fn parse_stash_reference_options(
     let mut index = false;
     let mut no_index = false;
     let mut stash = None;
-    for arg in args {
+    let mut index_arg = 0usize;
+    while index_arg < args.len() {
+        let arg = &args[index_arg];
         match arg.as_str() {
             "-q" | "--quiet" => quiet = true,
             "--no-quiet" => quiet = false,
@@ -10076,12 +14591,14 @@ fn parse_stash_reference_options(
                 }
             }
         }
+        index_arg += 1;
     }
     Ok(StashReferenceOptions {
         quiet,
         index,
         no_index,
         stash,
+        labels: StashApplyLabels::default(),
     })
 }
 
@@ -10140,7 +14657,15 @@ fn stash_branch(args: &[String]) -> Result<()> {
             message: "local changes would be overwritten by stash apply".into(),
         });
     }
-    apply_stash_commit(&repo, &store, &commit_cache, &tree_cache, &id, true)?;
+    apply_stash_commit(
+        &repo,
+        &store,
+        &commit_cache,
+        &tree_cache,
+        &id,
+        true,
+        &StashApplyLabels::default(),
+    )?;
     if let Some(index) = stack_index {
         drop_stash_entry(&repo, index, false)?;
     }
@@ -10162,6 +14687,10 @@ fn stash_clear() -> Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(CliError::Io(error)),
     };
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        refs.delete_reftable_log(stash_ref_name())?;
+        return Ok(());
+    }
     match fs::remove_file(stash_reflog_path(&repo)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -10176,6 +14705,7 @@ fn apply_stash_commit(
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     id: &ObjectId,
     restore_index: bool,
+    labels: &StashApplyLabels,
 ) -> Result<()> {
     if let Some(error) = stash_locked_index_error(repo) {
         return Err(error);
@@ -10242,9 +14772,43 @@ fn apply_stash_commit(
     };
     let applied_head = match apply_tree_delta(&base_index, &patch_index, &head_index) {
         Ok(index) => index,
-        Err(error) => {
-            restore_stash_untracked_index(repo, store, untracked_index.as_ref())?;
-            return Err(error);
+        Err(_) => {
+            let merge_result = merge_indexes(
+                store,
+                &base_index,
+                &head_index,
+                &patch_index,
+                labels.theirs.as_deref().unwrap_or("Stashed changes"),
+            )?;
+            match merge_result {
+                MergeIndexResult::Clean(index) => index,
+                MergeIndexResult::Conflicted { index, mut files } => {
+                    let conflict_index =
+                        merge_stash_apply_index(&current_index, &index, &stash_changed_paths)?;
+                    remove_stash_deleted_paths(repo, &stash_changed_paths, &index)?;
+                    let checkout = GitIndex::from_entries(
+                        conflict_index
+                            .entries()
+                            .iter()
+                            .filter(|entry| {
+                                entry.stage == 0
+                                    && stash_changed_paths.contains(entry.path.as_slice())
+                            })
+                            .cloned()
+                            .collect(),
+                    )?;
+                    checkout_index(
+                        store,
+                        &checkout,
+                        &repo.root,
+                        CheckoutIndexOptions { force: true },
+                    )?;
+                    render_stash_conflicts(repo, store, &conflict_index, &mut files, labels)?;
+                    restore_stash_untracked_index(repo, store, untracked_index.as_ref())?;
+                    conflict_index.write_to_path(&repo.index_path)?;
+                    return Err(CliError::Exit(1));
+                }
+            }
         }
     };
     let checkout_source =
@@ -10273,6 +14837,57 @@ fn apply_stash_commit(
     )?;
     restore_stash_untracked_index(repo, store, untracked_index.as_ref())?;
     final_index.write_to_path(&repo.index_path)?;
+    Ok(())
+}
+
+fn render_stash_conflicts(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    files: &mut [MergeConflictFile],
+    labels: &StashApplyLabels,
+) -> Result<()> {
+    let merge_labels = MergeFileLabels {
+        current: labels
+            .ours
+            .clone()
+            .unwrap_or_else(|| "Updated upstream".to_owned()),
+        ancestor: labels
+            .base
+            .clone()
+            .unwrap_or_else(|| "Stash base".to_owned()),
+        other: labels
+            .theirs
+            .clone()
+            .unwrap_or_else(|| "Stashed changes".to_owned()),
+    };
+    let diff3 = read_config_entry(repo, "merge.conflictStyle")?
+        .is_some_and(|entry| matches!(entry.value.as_str(), "diff3" | "zdiff3"));
+    for file in files {
+        if matches!(file.kind, MergeConflictKind::Content)
+            && let (Some(base), Some(ours), Some(theirs)) = (
+                index.entry(&file.path, 1),
+                index.entry(&file.path, 2),
+                index.entry(&file.path, 3),
+            )
+        {
+            let base_content = read_index_entry_content(store, base)?;
+            let ours_content = read_index_entry_content(store, ours)?;
+            let theirs_content = read_index_entry_content(store, theirs)?;
+            let merged = if diff3 {
+                merge_file_diff3_core(&ours_content, &base_content, &theirs_content, &merge_labels)
+            } else {
+                merge_file_core(&ours_content, &base_content, &theirs_content, &merge_labels)
+            };
+            file.content = merged.content;
+        }
+        merge_commands::write_worktree_file(repo, &file.path, &file.content)?;
+        println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+        eprintln!(
+            "CONFLICT (content): Merge conflict in {}",
+            String::from_utf8_lossy(&file.path)
+        );
+    }
     Ok(())
 }
 
@@ -10347,7 +14962,7 @@ fn remove_stash_deleted_paths(
     Ok(())
 }
 
-fn reset_worktree_to_head(repo: &GitRepo, store: &LooseObjectStore) -> Result<()> {
+pub(crate) fn reset_worktree_to_head(repo: &GitRepo, store: &LooseObjectStore) -> Result<()> {
     let old_index = read_repo_index(repo)?;
     let runtime = CliPrimitiveRuntime::new_default(repo);
     let head_index =
@@ -10361,6 +14976,7 @@ fn reset_worktree_to_head(repo: &GitRepo, store: &LooseObjectStore) -> Result<()
         CheckoutIndexOptions { force: true },
     )?;
     refresh_tracked_index_metadata_matching(repo, &mut head_index, &[])?;
+    head_index.refresh_cache_tree();
     head_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -10406,7 +15022,7 @@ fn stash_untracked_paths(
     index: &GitIndex,
     include_ignored: bool,
 ) -> Result<Vec<Vec<u8>>> {
-    let tracked_paths = tracked_path_set(index);
+    let tracked_paths = tracked_path_set_for_repo(repo, index)?;
     let ignore = GitIgnore::load_from_root(&repo.root)?;
     let mut paths = worktree_commands::untracked_files_with_mode(
         &repo.root,
@@ -10521,6 +15137,23 @@ fn parse_stash_selector(selector: &str) -> Result<usize> {
 }
 
 fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEntry>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let mut records = refs
+            .reftable_logs()?
+            .into_iter()
+            .filter(|record| record.ref_name == stash_ref_name())
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| std::cmp::Reverse(record.update_index));
+        return Ok(records
+            .into_iter()
+            .map(|record| StashEntry {
+                id: record.new_id,
+                message: record.message.trim_end_matches('\n').to_owned(),
+                reflog_identity: format!("{} <{}>", record.name, record.email),
+            })
+            .collect());
+    }
     let path = stash_reflog_path(repo);
     match fs::read_to_string(path) {
         Ok(content) => {
@@ -10576,26 +15209,7 @@ fn append_stash_reflog(
     committer: &Signature,
     message: &str,
 ) -> Result<()> {
-    let path = stash_reflog_path(repo);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(
-        file,
-        "{} {} {} <{}> {} {}\t{}",
-        old_id.to_hex(),
-        new_id.to_hex(),
-        committer.name,
-        committer.email,
-        committer.timestamp,
-        committer.timezone,
-        message
-    )?;
-    Ok(())
+    append_reflog_with_committer(repo, stash_ref_name(), old_id, new_id, message, committer)
 }
 
 fn drop_stash_entry(repo: &GitRepo, index: usize, quiet: bool) -> Result<()> {
@@ -10683,7 +15297,7 @@ pub(crate) fn checkout(
     _overwrite_ignore: bool,
     _no_overwrite_ignore: bool,
     _ignore_other_worktrees: bool,
-    _ignore_skip_worktree_bits: bool,
+    ignore_skip_worktree_bits: bool,
     track: Option<String>,
     no_track: bool,
     create: Option<String>,
@@ -10835,42 +15449,41 @@ pub(crate) fn checkout(
     }
     if let Some((source, paths, report_updated_paths)) = path_mode {
         if patch {
-            if source.is_some() {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: "patch mode for tree-ish checkout is not implemented in this compatibility batch"
-                        .into(),
-                });
-            }
-            return checkout_patch(&paths);
+            return checkout_patch(source, &paths);
         }
         return checkout_paths(
             source,
             paths,
             report_updated_paths && !explicit_pathspec_separator && !quiet,
+            ignore_skip_worktree_bits,
         );
+    }
+    if patch && implicit_path_checkout {
+        return checkout_patch(None, &args.iter().map(PathBuf::from).collect::<Vec<_>>());
     }
     let Some(target) = args.first() else {
         if detach {
             return checkout_detached(force, "HEAD", "checkout", true);
         }
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "`checkout` requires a branch, commit, or -b <branch>".into(),
-        });
+        return checkout_current_head(force);
     };
     if detach {
         return checkout_detached(force, target, "checkout", true);
     }
     if patch {
-        return checkout_patch(&[PathBuf::from(target)]);
+        return checkout_patch(Some(target), &[]);
     }
     if target == "HEAD" || target == "@" {
         return checkout_current_head(force);
     }
     if target == "-" {
         let previous = previous_checkout_target(1)?;
-        return checkout_existing(force, &previous);
+        return checkout_existing_with_message(
+            force,
+            &previous,
+            CheckoutBranchMessage::ExistingBranch,
+            !quiet,
+        );
     }
     if target.starts_with("refs/heads/") {
         return checkout_detached(force, target, "checkout", true);
@@ -10880,27 +15493,42 @@ pub(crate) fn checkout(
             None,
             vec![PathBuf::from(target)],
             !explicit_pathspec_separator && !quiet,
+            ignore_skip_worktree_bits,
         );
     }
-    checkout_existing(force, target)
+    checkout_existing_with_message(force, target, CheckoutBranchMessage::ExistingBranch, !quiet)
 }
 
-fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
+fn checkout_patch(source: Option<&str>, paths: &[PathBuf]) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let current_index = read_repo_index(&repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
-    let head_index =
-        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let raw_index = read_repo_index_raw(&repo)?;
+    let current_index = expand_repo_sparse_index(&repo, &raw_index)?;
+    let source_index = if let Some(source) = source {
+        let source_id = resolve_commitish(&repo, &store, source)?;
+        let source_commit = CommitObjectCache::new(&store).read_commit(&source_id)?;
+        TreeObjectCache::new(&store).read_tree_to_index(&source_commit.tree)?
+    } else {
+        let runtime = CliPrimitiveRuntime::new_default(&repo);
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?
+    };
     let worktree_index = worktree_index_snapshot(&repo, &current_index)?;
     let pathspecs = paths
         .iter()
         .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
         .collect::<Result<Vec<_>>>()?;
-    let entries = diff_indexes(&head_index, &worktree_index)?
+    let entries = diff_indexes(&source_index, &worktree_index)?
         .into_iter()
+        .filter(|entry| {
+            find_index_entry(&current_index, &entry.path)
+                .is_some_and(|entry| !entry.intent_to_add())
+                || find_index_entry(&source_index, &entry.path).is_some()
+        })
         .filter(|entry| pathspec_matches(&entry.path, &pathspecs))
         .collect::<Vec<_>>();
+    let _sparse_expansion_region =
+        patch_changes_require_sparse_expansion(&repo, &raw_index, &entries)
+            .then(|| trace2_region("index", "ensure_full_index"));
     if entries.is_empty() {
         return Ok(());
     }
@@ -10913,7 +15541,7 @@ fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
                 &mut patch_bytes,
                 &repo,
                 &store,
-                &head_index,
+                &source_index,
                 &worktree_index,
                 std::slice::from_ref(entry),
                 PatchFormatOptions::worktree(),
@@ -10940,7 +15568,7 @@ fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
                     message: format!("patch output was not valid utf-8: {error}"),
                 })?;
                 print!("{output}");
-                print!("(1/1) Discard this hunk from worktree [y,n,q,a,d,e,p,P,?]? ");
+                print!("(1/1) Discard this hunk from worktree [y,n,q,a,d,e,p,?]? ");
                 io::stdout().flush()?;
                 let answer = answers.next();
                 println!();
@@ -10974,25 +15602,41 @@ fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
                 code: 128,
                 message: "patch has no target path".into(),
             })?;
-        let base_entry =
-            find_index_entry(&head_index, target_path).ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: format!(
-                    "cannot restore untracked path '{}' in checkout --patch",
-                    String::from_utf8_lossy(target_path)
-                ),
-            })?;
-        let base = read_index_entry_content(&store, base_entry)?;
+        let base_entry = find_index_entry(&source_index, target_path);
+        let base = base_entry
+            .map(|entry| read_index_entry_content(&store, entry))
+            .transpose()?
+            .unwrap_or_default();
         write_patch_worktree_update(
             &repo,
             PatchWorktreeUpdate {
                 path: target_path.clone(),
                 content: base,
-                remove_if_empty_untracked: false,
+                remove_if_empty_untracked: base_entry.is_none(),
             },
         )?;
     }
     Ok(())
+}
+
+fn patch_changes_require_sparse_expansion(
+    repo: &GitRepo,
+    raw_index: &GitIndex,
+    entries: &[zmin_git_core::IndexDiffEntry],
+) -> bool {
+    entries.iter().any(|change| {
+        sparse_index_path_requires_expansion(raw_index, &change.path)
+            || find_index_entry(raw_index, &change.path).is_some_and(IndexEntry::skip_worktree)
+            || raw_index.entries().iter().any(|entry| {
+                entry.stage == 0
+                    && entry.mode == IndexMode::Tree
+                    && change.path.starts_with(&entry.path)
+                    && path_exists(&worktree_path_for_index_entry(
+                        repo.root.as_path(),
+                        &entry.path,
+                    ))
+            })
+    })
 }
 
 fn checkout_raw_args_have_separator() -> bool {
@@ -11001,19 +15645,52 @@ fn checkout_raw_args_have_separator() -> bool {
 
 fn checkout_current_head(force: bool) -> Result<()> {
     let repo = find_repo()?;
+    let index_exists = repo.index_path.exists();
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let target_id = refs.resolve("HEAD")?;
+    let checkout_metadata = WorktreeCheckoutMetadata {
+        ref_name: current_branch_ref(&refs)?,
+        treeish: Some(target_id.clone()),
+    };
     if force {
-        let checkout_metadata = WorktreeCheckoutMetadata {
-            ref_name: current_branch_ref(&refs)?,
-            treeish: Some(target_id.clone()),
-        };
-        checkout_worktree_with_metadata(&repo, &store, &target_id, &checkout_metadata)?;
+        checkout_worktree_with_metadata(&repo, &store, &target_id, &checkout_metadata)
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
+    } else if !index_exists {
+        checkout_clean_missing_index_transition_with_metadata(
+            &repo,
+            &store,
+            &target_id,
+            &checkout_metadata,
+        )
+        .map_err(|error| map_promisor_checkout_error(&repo, error))?;
     } else {
-        refs.read_head()?;
+        checkout_clean_worktree_transition_with_metadata(
+            &repo,
+            &store,
+            &target_id,
+            &checkout_metadata,
+        )
+        .map_err(|error| map_promisor_checkout_error(&repo, error))?;
     }
     Ok(())
+}
+
+fn map_promisor_checkout_error(repo: &GitRepo, error: CliError) -> CliError {
+    let is_missing = matches!(&error, CliError::Io(io_error) if io_error.kind() == io::ErrorKind::NotFound)
+        || matches!(&error, CliError::Fatal { message, .. } if message.contains("git object not found"))
+        || matches!(&error, CliError::Stderr { text, .. } if text.contains("git object not found"));
+    if is_missing
+        && admin_commands::promisor_remote_names(repo)
+            .map(|remotes| !remotes.is_empty())
+            .unwrap_or(false)
+    {
+        return CliError::Fatal {
+            code: 128,
+            message: "could not fetch required object from promisor remote".into(),
+        };
+    }
+    error
 }
 
 pub(crate) fn previous_checkout_target(index: usize) -> Result<String> {
@@ -11024,29 +15701,18 @@ pub(crate) fn previous_checkout_target(index: usize) -> Result<String> {
         });
     }
     let repo = find_repo()?;
-    let contents = fs::read_to_string(repo.git_dir.join("logs").join("HEAD"))?;
-    contents
-        .lines()
-        .rev()
-        .filter_map(|line| line.split_once('\t').map(|(_, message)| message))
-        .filter_map(|message| {
-            message
-                .strip_prefix("checkout: moving from ")
-                .and_then(|rest| rest.split_once(" to "))
-                .map(|(previous, _)| previous.to_owned())
-        })
-        .nth(index - 1)
-        .ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: "could not resolve previous checkout".into(),
-        })
+    super::previous_checkout_target_from_repo(&repo, index).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: "could not resolve previous checkout".into(),
+    })
 }
 
 fn checkout_target_exists(target: &str) -> Result<bool> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-    let refs = RefStore::new(common_git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(common_git_dir, algorithm);
     if branch_checkout_ref(&refs, target)?.is_some() {
         return Ok(true);
     }
@@ -11105,17 +15771,58 @@ fn checkout_paths(
     source: Option<&str>,
     paths: Vec<PathBuf>,
     report_updated_paths: bool,
+    ignore_skip_worktree_bits: bool,
 ) -> Result<()> {
     let report_from_index = source.is_none();
     let updated_paths = if source.is_some() {
         worktree_commands::restore(
-            source, false, false, false, true, false, true, false, false, None, false, false,
-            false, false, false, false, false, false, false, None, false, paths,
+            source,
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            ignore_skip_worktree_bits,
+            false,
+            false,
+            false,
+            None,
+            false,
+            paths,
         )?
     } else {
         worktree_commands::restore(
-            source, false, false, false, false, false, true, false, false, None, false, false,
-            false, false, false, false, false, false, false, None, false, paths,
+            source,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            ignore_skip_worktree_bits,
+            false,
+            false,
+            false,
+            None,
+            false,
+            paths,
         )?
     };
     if report_updated_paths && report_from_index && updated_paths > 0 {
@@ -11135,9 +15842,10 @@ fn checkout_new_branch(
     switch_reset_message: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
 
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     let ref_name = branch_ref_name(branch)?;
     if !reset_existing && ref_exists(&refs, &ref_name)? {
         return Err(CliError::Fatal {
@@ -11208,7 +15916,6 @@ fn checkout_branch_reflog_enabled(repo: &GitRepo) -> Result<bool> {
 
 fn orphan_checkout(force: bool, branch: &str) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let ref_name = branch_ref_name(branch)?;
     if ref_exists(&refs, &ref_name)? {
@@ -11217,11 +15924,11 @@ fn orphan_checkout(force: bool, branch: &str) -> Result<()> {
             message: format!("a branch named '{branch}' already exists"),
         });
     }
-    if !force {
-        reject_orphan_checkout_dirty_worktree(&repo, &store)?;
-    }
     let old_index = read_repo_index(&repo)?;
     let empty_index = GitIndex::new();
+    if !force {
+        verify_checkout_transition_clean(&repo, &old_index, &empty_index)?;
+    }
     remove_tracked_paths_missing_from_target(&repo, &old_index, &empty_index)?;
     empty_index.write_to_path(&repo.index_path)?;
     refs.write_head_symbolic(&ref_name)?;
@@ -11229,9 +15936,8 @@ fn orphan_checkout(force: bool, branch: &str) -> Result<()> {
     Ok(())
 }
 
-fn checkout_orphan(force: bool, branch: &str) -> Result<()> {
+fn checkout_orphan(_force: bool, branch: &str) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let ref_name = branch_ref_name(branch)?;
     if ref_exists(&refs, &ref_name)? {
@@ -11240,41 +15946,13 @@ fn checkout_orphan(force: bool, branch: &str) -> Result<()> {
             message: format!("a branch named '{branch}' already exists"),
         });
     }
-    if !force {
-        reject_orphan_checkout_dirty_worktree(&repo, &store)?;
-    }
+    let index = read_repo_index(&repo)?;
     refs.write_head_symbolic(&ref_name)?;
+    for entry in index.entries() {
+        println!("A\t{}", String::from_utf8_lossy(&entry.path));
+    }
     eprintln!("Switched to a new branch '{branch}'");
     Ok(())
-}
-
-fn reject_orphan_checkout_dirty_worktree(repo: &GitRepo, _store: &LooseObjectStore) -> Result<()> {
-    let index = read_repo_index(repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(repo);
-    let head_index =
-        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
-    let mut paths = diff_indexes(&head_index, &index)?
-        .into_iter()
-        .map(|entry| entry.path.to_vec())
-        .collect::<BTreeSet<_>>();
-    for (path, _) in worktree_status(repo, &index)? {
-        paths.insert(path.into());
-    }
-    if paths.is_empty() {
-        return Ok(());
-    }
-    let mut text = String::from(
-        "error: Your local changes to the following files would be overwritten by checkout:\n",
-    );
-    for path in paths {
-        text.push('\t');
-        text.push_str(&String::from_utf8_lossy(&path));
-        text.push('\n');
-    }
-    text.push_str(
-        "Please commit your changes or stash them before you switch branches.\nAborting\n",
-    );
-    Err(CliError::Stderr { code: 1, text })
 }
 
 #[derive(Clone, Copy)]
@@ -11296,11 +15974,12 @@ fn checkout_existing_with_message(
     print_messages: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
 
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-    let refs = RefStore::new(common_git_dir, GitHashAlgorithm::Sha1);
-    let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(common_git_dir, algorithm);
+    let head_refs = RefStore::new(&repo.git_dir, algorithm);
     let target_branch_ref = branch_checkout_ref(&refs, target)?;
     let target_id = if let Some(ref_name) = target_branch_ref.as_deref() {
         refs.resolve(ref_name)?
@@ -11308,24 +15987,43 @@ fn checkout_existing_with_message(
         resolve_commitish(&repo, &store, target)?
     };
     let current_id = head_refs.resolve("HEAD").ok();
+    let index_exists = repo.index_path.exists();
     let force_transition = matches!(
         branch_message,
         CheckoutBranchMessage::ResetBranch | CheckoutBranchMessage::SwitchResetBranch
     );
-    if force_transition || current_id.as_ref() != Some(&target_id) {
+    if force || force_transition || current_id.as_ref() != Some(&target_id) || !index_exists {
         let checkout_metadata = WorktreeCheckoutMetadata {
             ref_name: target_branch_ref.clone(),
             treeish: Some(target_id.clone()),
         };
         if force {
-            checkout_worktree_with_metadata(&repo, &store, &target_id, &checkout_metadata)?;
+            checkout_worktree_with_metadata(&repo, &store, &target_id, &checkout_metadata)
+                .map_err(|error| map_promisor_checkout_error(&repo, error))?;
+        } else if force_transition {
+            checkout_clean_missing_index_transition_with_metadata(
+                &repo,
+                &store,
+                &target_id,
+                &checkout_metadata,
+            )
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
+        } else if !index_exists {
+            checkout_clean_worktree_replacement_with_metadata(
+                &repo,
+                &store,
+                &target_id,
+                &checkout_metadata,
+            )
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
         } else {
             checkout_clean_worktree_transition_with_metadata(
                 &repo,
                 &store,
                 &target_id,
                 &checkout_metadata,
-            )?;
+            )
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
         }
     }
 
@@ -11361,10 +16059,7 @@ fn checkout_existing_with_message(
             }
         }
     } else {
-        let reflog_message = format!(
-            "checkout: moving from {source} to {}",
-            short_object_id(&target_id)
-        );
+        let reflog_message = format!("checkout: moving from {source} to {}", target_id.to_hex());
         if print_messages {
             print_detached_checkout_notice(
                 &repo,
@@ -11396,9 +16091,11 @@ fn checkout_detached(
         message: format!("invalid reference: {target}"),
     })?;
     if force {
-        checkout_worktree(&repo, &store, &target_id)?;
+        checkout_worktree(&repo, &store, &target_id)
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
     } else {
-        checkout_clean_worktree_transition(&repo, &store, &target_id)?;
+        checkout_clean_worktree_transition(&repo, &store, &target_id)
+            .map_err(|error| map_promisor_checkout_error(&repo, error))?;
     }
     let source = current_head_reflog_name(&refs)?;
     let mode = if operation == "checkout" {
@@ -11409,10 +16106,7 @@ fn checkout_detached(
     if print_messages {
         print_detached_checkout_notice(&repo, &store, &refs, &target_id, target, mode)?;
     }
-    let reflog_message = format!(
-        "checkout: moving from {source} to {}",
-        short_object_id(&target_id)
-    );
+    let reflog_message = format!("checkout: moving from {source} to {}", target_id.to_hex());
     write_head_direct_with_reflog(&repo, &refs, &target_id, &reflog_message)?;
     Ok(())
 }
@@ -11575,7 +16269,7 @@ fn commit_summary_for_checkout(store: &LooseObjectStore, id: &ObjectId) -> Resul
 fn current_head_reflog_name(refs: &RefStore) -> Result<String> {
     match refs.read_head()? {
         RefTarget::Symbolic(target) => Ok(branch_display_name(&target)),
-        RefTarget::Direct(id) => Ok(short_object_id(&id)),
+        RefTarget::Direct(id) => Ok(id.to_hex()),
     }
 }
 
@@ -11671,12 +16365,19 @@ pub(crate) fn switch(
         );
     }
 
-    let Some(target) = target else {
+    let Some(mut target) = target else {
         return Err(CliError::Fatal {
             code: 129,
             message: "`switch` requires a branch, -c <branch>, or --detach <commit>".into(),
         });
     };
+    if target == "-" {
+        target =
+            resolve_previous_checkout_name(&repo, "@{-1}")?.ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "invalid reference: -".into(),
+            })?;
+    }
     if detach {
         return checkout_detached(force, &target, "checkout", !quiet);
     }

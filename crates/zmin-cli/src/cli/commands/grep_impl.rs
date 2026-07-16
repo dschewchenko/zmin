@@ -54,6 +54,18 @@ pub(crate) fn grep(
     pattern: Option<String>,
     args: Vec<String>,
 ) -> Result<()> {
+    if no_index
+        && (global_attr_source_option().is_some() || std::env::var_os("GIT_ATTR_SOURCE").is_some())
+    {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: cannot use --attr-source or GIT_ATTR_SOURCE without repo\n".into(),
+        });
+    }
+    if no_filename && pattern.is_none() && patterns.is_empty() && pattern_files.is_empty() {
+        write_grep_missing_pattern_usage()?;
+        return Err(CliError::Exit(129));
+    }
     let max_depth = threads_last_value(&max_depth);
     let _threads = threads_last_value(&threads);
     if no_index {
@@ -137,7 +149,6 @@ pub(crate) fn grep(
     let after_context = threads_last_value(&after_context).unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
     let _accepted_parser_only = (
-        recurse_submodules,
         basic_regexp,
         extended_regexp,
         perl_regexp,
@@ -187,7 +198,7 @@ pub(crate) fn grep(
                     Err(error) => return Err(CliError::Io(error)),
                 }
             }
-            GrepSource::Index => read_index_entry_content(&store, entry)?,
+            GrepSource::Index => read_grep_index_entry_content(&repo, &store, entry)?,
         };
         let outcome = grep_file(
             &expression,
@@ -229,6 +240,109 @@ pub(crate) fn grep(
         };
         if outcome.printed {
             printed_group = true;
+        }
+    }
+
+    if recurse_submodules {
+        for gitlink in grep_input
+            .index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
+        {
+            let submodule_root = repo
+                .root
+                .join(String::from_utf8_lossy(&gitlink.path).as_ref());
+            let Ok(submodule_repo) = find_repo_at(&submodule_root) else {
+                continue;
+            };
+            let submodule_store = LooseObjectStore::new(
+                submodule_repo.objects_dir.clone(),
+                repo_hash_algorithm_from_config(&submodule_repo)?,
+            );
+            let submodule_index = if matches!(grep_input.source, GrepSource::Index)
+                && grep_input.output_prefix.is_some()
+            {
+                let commit = CommitObjectCache::new(&submodule_store).read_commit(&gitlink.id)?;
+                TreeObjectCache::new(&submodule_store).read_tree_to_index(&commit.tree)?
+            } else {
+                read_repo_index(&submodule_repo)?
+            };
+            for entry in submodule_index
+                .entries()
+                .iter()
+                .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Gitlink)
+            {
+                let mut combined_path = gitlink.path.clone();
+                combined_path.push(b'/');
+                combined_path.extend_from_slice(&entry.path);
+                if !pathspec_matches(&combined_path, &pathspecs)
+                    || !grep_path_within_depth(
+                        &combined_path,
+                        &cwd_prefix,
+                        recursive_enabled,
+                        max_depth,
+                    )
+                {
+                    continue;
+                }
+                let content = match grep_input.source {
+                    GrepSource::Worktree => {
+                        let path = submodule_repo
+                            .root
+                            .join(String::from_utf8_lossy(&entry.path).as_ref());
+                        match fs::read(path) {
+                            Ok(content) => content,
+                            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                            Err(error) => return Err(CliError::Io(error)),
+                        }
+                    }
+                    GrepSource::Index => {
+                        read_grep_index_entry_content(&submodule_repo, &submodule_store, entry)?
+                    }
+                };
+                let outcome = grep_file(
+                    &expression,
+                    grep_input.output_prefix.as_deref(),
+                    &combined_path,
+                    &cwd_prefix,
+                    &content,
+                    invert_match,
+                    line_number,
+                    files_with_matches,
+                    files_without_match,
+                    count,
+                    all_match,
+                    max_count,
+                    before_context,
+                    after_context,
+                    with_filename,
+                    no_filename,
+                    ignore_binary,
+                    open_files_in_pager.as_deref(),
+                    text || textconv || no_textconv,
+                    null_terminated,
+                    full_name,
+                    heading,
+                    break_groups,
+                    show_function,
+                    function_context,
+                    quiet,
+                    color_mode,
+                    word_regexp,
+                    column,
+                    only_matching,
+                    printed_group,
+                )?;
+                selected_any |= if files_without_match {
+                    outcome.printed
+                } else {
+                    outcome.matched
+                };
+                if outcome.printed {
+                    printed_group = true;
+                }
+            }
         }
     }
 
@@ -296,6 +410,35 @@ pub(crate) fn grep(
     } else {
         Err(CliError::Exit(1))
     }
+}
+
+fn read_grep_index_entry_content(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    entry: &IndexEntry,
+) -> Result<Vec<u8>> {
+    match read_index_entry_content(store, entry) {
+        Ok(content) => Ok(content),
+        Err(error) => {
+            if admin_commands::backfill_promisor_objects(repo, std::slice::from_ref(&entry.id))? {
+                read_index_entry_content(store, entry)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn write_grep_missing_pattern_usage() -> Result<()> {
+    let mut root = crate::runtime::command_definition();
+    let grep = root
+        .find_subcommand_mut("grep")
+        .cloned()
+        .ok_or_else(|| CliError::Message("missing grep command definition".into()))?;
+    let mut grep = grep;
+    grep.set_bin_name("git grep");
+    print!("{}", grep.render_long_help());
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -541,7 +684,7 @@ fn parse_grep_input(
     cached: bool,
     args: Vec<String>,
 ) -> Result<GrepInput> {
-    let (treeish, paths) = split_grep_treeish_and_paths(repo, store, args)?;
+    let (treeish, paths) = split_grep_treeish_and_paths(repo, store, index, args)?;
     if cached && treeish.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -572,6 +715,7 @@ fn parse_grep_input(
 fn split_grep_treeish_and_paths(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    index: &GitIndex,
     args: Vec<String>,
 ) -> Result<(Option<String>, Vec<String>)> {
     let Some(first) = args.first() else {
@@ -588,7 +732,14 @@ fn split_grep_treeish_and_paths(
         }
         return Ok((Some(treeish), paths));
     }
-    if !repo.root.join(std::path::Path::new(first)).exists() {
+    let relative = path_arg_to_repo_relative_lexical(repo, std::path::Path::new(first))?;
+    let pathspecs = [relative];
+    if !repo.root.join(std::path::Path::new(first)).exists()
+        && !index
+            .entries()
+            .iter()
+            .any(|entry| pathspec_matches(&entry.path, &pathspecs))
+    {
         return Err(ambiguous_revision_error(first));
     }
     Ok((None, args))
@@ -837,7 +988,7 @@ fn grep_file(
     let display_path = grep_display_path(path, cwd_prefix, full_name);
     let display_path = String::from_utf8_lossy(&display_path);
     let filename_prefix = !no_filename && (with_filename || output_prefix.is_some() || !heading);
-    let lines = grep_lines(content).collect::<Vec<_>>();
+    let lines = grep_lines(content);
     let is_binary = content.contains(&b'\0');
     let mut line_ranges = Vec::with_capacity(lines.len());
     let mut matching_lines = Vec::new();
@@ -1333,17 +1484,19 @@ fn print_grep_payload(
     Ok(())
 }
 
-fn grep_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
-    content
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty() || !content.ends_with(b"\n"))
-        .map(|line| {
-            if let Some(line) = line.strip_suffix(b"\r") {
-                line
-            } else {
-                line
+fn grep_lines(content: &[u8]) -> Vec<&[u8]> {
+    let segments = content.split(|byte| *byte == b'\n').collect::<Vec<_>>();
+    let last_index = segments.len().saturating_sub(1);
+    segments
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            if content.ends_with(b"\n") && index == last_index && line.is_empty() {
+                return None;
             }
+            Some(line.strip_suffix(b"\r").unwrap_or(line))
         })
+        .collect()
 }
 
 fn grep_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Vec<u8> {

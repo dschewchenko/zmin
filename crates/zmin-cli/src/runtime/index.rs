@@ -1,10 +1,11 @@
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use zmin_git_core::{GitIndex, IndexEntry, IndexMode};
 
 use super::{
-    CliError, GitRepo, Result, absolute_path_from_arg, normalize_git_path, pathspec_matches,
-    repo_relative_path,
+    CliError, GitRepo, Result, absolute_path_from_arg, global_work_tree_option, normalize_git_path,
+    pathspec_matches, repo_relative_path, repo_relative_path_lexical,
 };
 
 pub(crate) fn parse_index_mode(mode: &str) -> Result<IndexMode> {
@@ -37,10 +38,23 @@ pub(crate) fn path_arg_to_repo_relative_allow_root(repo: &GitRepo, path: &Path) 
     path_arg_to_repo_relative_inner(repo, path, true)
 }
 
+pub(crate) fn path_arg_to_repo_relative_lexical(repo: &GitRepo, path: &Path) -> Result<Vec<u8>> {
+    path_arg_to_repo_relative_inner_with_strategy(repo, path, false, true)
+}
+
 fn path_arg_to_repo_relative_inner(
     repo: &GitRepo,
     path: &Path,
     allow_root: bool,
+) -> Result<Vec<u8>> {
+    path_arg_to_repo_relative_inner_with_strategy(repo, path, allow_root, false)
+}
+
+fn path_arg_to_repo_relative_inner_with_strategy(
+    repo: &GitRepo,
+    path: &Path,
+    allow_root: bool,
+    lexical_relative: bool,
 ) -> Result<Vec<u8>> {
     if let Some(relative) = pathspec_arg_to_repo_relative(repo, path, allow_root)? {
         return Ok(relative);
@@ -54,8 +68,12 @@ fn path_arg_to_repo_relative_inner(
         path_for_lookup = PathBuf::from(unescaped.into_owned());
         &path_for_lookup
     };
-    let absolute = lexical_normalize_path(&absolute_path_from_arg(path)?);
-    let mut relative = repo_relative_path(&repo.root, &absolute)?;
+    let absolute = lexical_normalize_path(&path_arg_absolute_for_repo(repo, path)?);
+    let mut relative = if lexical_relative {
+        repo_relative_path_lexical(&repo.root, &absolute)?
+    } else {
+        repo_relative_path(&repo.root, &absolute)?
+    };
     if relative.is_empty() && !allow_root {
         return Err(CliError::Fatal {
             code: 128,
@@ -71,6 +89,42 @@ fn path_arg_to_repo_relative_inner(
         });
     }
     Ok(relative)
+}
+
+pub(crate) fn path_arg_absolute_for_repo(repo: &GitRepo, path: &Path) -> Result<PathBuf> {
+    if path.is_relative()
+        && global_work_tree_option().is_some()
+        && std::env::current_dir()
+            .ok()
+            .is_some_and(|cwd| !cwd.starts_with(&repo.root))
+    {
+        return Ok(lexical_normalize_path(&repo.root.join(path)));
+    }
+    absolute_path_from_arg(path)
+}
+
+pub(crate) fn path_traverses_symlink_ancestor(root: &Path, path: &Path) -> io::Result<bool> {
+    let relative = match path.strip_prefix(root) {
+        Ok(relative) => relative,
+        Err(_) => return Ok(false),
+    };
+    let mut current = root.to_path_buf();
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            break;
+        }
+        current.push(component.as_os_str());
+        let metadata = match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn lexical_normalize_path(path: &Path) -> PathBuf {

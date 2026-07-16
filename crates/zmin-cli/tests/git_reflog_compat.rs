@@ -144,6 +144,70 @@ fn reflog_show_passes_pathspec_after_double_dash() {
 }
 
 #[test]
+fn reflog_grep_reflog_and_max_count_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["checkout", "feature"]);
+
+    for args in [
+        [
+            "reflog",
+            "--max-count",
+            "50",
+            "--grep-reflog",
+            "checkout:",
+            "--",
+        ]
+        .as_slice(),
+        ["reflog", "-n2", "--grep-reflog=checkout:", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn reflog_date_selectors_in_revision_arguments_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "two"]);
+
+    for args in [
+        ["log", "-1", "--format=%s", "@{0}"].as_slice(),
+        ["log", "-1", "--format=%s", "@{1}"].as_slice(),
+        ["log", "-1", "--format=%s", "@{now}"].as_slice(),
+        ["log", "-1", "--format=%s", "@{2001-09-17}"].as_slice(),
+        ["log", "-1", "--format=%s", "@{3.hot.dogs.on.2001-09-17}"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["log", "-1", "--format=%s", "@{usptream}"].as_slice(),
+        ["log", "-1", "--format=%s", "@{utter.bogosity}"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn reset_hard_records_branch_and_head_reflog() {
     let repo = git_init();
     configure_identity(repo.path());

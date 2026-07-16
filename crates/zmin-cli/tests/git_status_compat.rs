@@ -2,11 +2,16 @@ mod common;
 
 use std::fs;
 
+#[cfg(unix)]
+use std::process::Command;
+
 #[cfg(not(windows))]
 use common::write_file;
 use common::{
-    configure_identity, git, git_args, git_failure_output, git_init, git_with_env, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_with_env,
+    configure_identity, corrupt_first_index_entry_ctime, corrupt_first_index_entry_extended_stat,
+    first_index_entry_device, git, git_args, git_failure_output, git_init, git_with_env, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_with_env, set_first_index_entry_device,
+    zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -14,6 +19,7 @@ use tempfile::TempDir;
 fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
     let repo = git_init();
     configure_identity(repo.path());
+    git(repo.path(), ["config", "commit.gpgsign", "false"]);
     fs::write(repo.path().join("a.txt"), b"hello\n").expect("write tracked");
     git(repo.path(), ["add", "a.txt"]);
     git_with_env(repo.path(), ["commit", "-m", "initial"]);
@@ -47,8 +53,16 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
         git(repo.path(), ["status", "--porcelain=v2", "--branch"])
     );
     assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=2", "--branch"]),
+        git(repo.path(), ["status", "--porcelain=2", "--branch"])
+    );
+    assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v2", "-z", "--branch"]),
         git(repo.path(), ["status", "--porcelain=v2", "-z", "--branch"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=2", "-z", "--branch"]),
+        git(repo.path(), ["status", "--porcelain=2", "-z", "--branch"])
     );
 
     fs::write(repo.path().join("a.txt"), b"changed\n").expect("modify tracked");
@@ -76,8 +90,16 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
         git(repo.path(), ["status", "--porcelain=v2", "--branch"])
     );
     assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=2", "--branch"]),
+        git(repo.path(), ["status", "--porcelain=2", "--branch"])
+    );
+    assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v2", "-z", "--branch"]),
         git(repo.path(), ["status", "--porcelain=v2", "-z", "--branch"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=2", "-z", "--branch"]),
+        git(repo.path(), ["status", "--porcelain=2", "-z", "--branch"])
     );
     assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v2", "--short"]),
@@ -150,6 +172,84 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
 }
 
 #[test]
+fn status_content_conversion_preserves_attribute_source_precedence() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "commit.gpgsign", "false"]);
+    fs::create_dir_all(repo.path().join("nested")).expect("create nested directory");
+    fs::create_dir_all(repo.path().join("other")).expect("create other directory");
+    fs::write(repo.path().join(".gitattributes"), b"other/*.txt -text\n")
+        .expect("write root attributes");
+    fs::write(repo.path().join("nested/.gitattributes"), b"*.txt -text\n")
+        .expect("write nested attributes");
+    fs::write(repo.path().join("nested/a.txt"), b"one\r\n").expect("write nested file");
+    fs::write(repo.path().join("other/b.txt"), b"two\r\n").expect("write other file");
+
+    let global_attributes = repo.path().join(".git/global-attributes");
+    fs::write(&global_attributes, b"*.txt -text\n").expect("write global attributes");
+    fs::write(
+        repo.path().join(".git/info/attributes"),
+        b"nested/a.txt text\nother/b.txt text\n",
+    )
+    .expect("write info attributes");
+    let attributes_config = format!("core.attributesFile={}", global_attributes.display());
+    git_args(
+        repo.path(),
+        &["-c", attributes_config.as_str(), "add", "-A"],
+    );
+    git_with_env(
+        repo.path(),
+        ["-c", attributes_config.as_str(), "commit", "-m", "initial"],
+    );
+
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2);
+    for path in ["nested/a.txt", "other/b.txt"] {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(repo.path().join(path))
+            .expect("open tracked file")
+            .set_modified(future)
+            .expect("force tracked file stat mismatch");
+    }
+    let args = [
+        "-c",
+        attributes_config.as_str(),
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+    ];
+    let stock_clean = git_args(repo.path(), &args);
+    assert!(stock_clean.is_empty(), "stock status: {stock_clean}");
+    assert_eq!(run_zmin_args(repo.path(), &args), stock_clean);
+
+    fs::write(repo.path().join(".git/info/attributes"), b"").expect("clear info attributes");
+    let stock_modified = git_args(repo.path(), &args);
+    assert!(
+        stock_modified.contains("nested/a.txt") && stock_modified.contains("other/b.txt"),
+        "stock status: {stock_modified}"
+    );
+    assert_eq!(run_zmin_args(repo.path(), &args), stock_modified);
+}
+
+#[test]
+fn status_size_change_is_modified_before_content_conversion_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "commit.gpgsign", "false"]);
+    git(repo.path(), ["config", "core.autocrlf", "input"]);
+    fs::write(repo.path().join("tracked.txt"), b"one\ntwo\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    fs::write(repo.path().join("tracked.txt"), b"one\r\ntwo\r\n")
+        .expect("change only worktree line endings");
+    let args = ["status", "--porcelain=v1", "--untracked-files=no"];
+    let stock = git(repo.path(), args);
+    assert_eq!(stock, " M tracked.txt");
+    assert_eq!(run_zmin(repo.path(), args), stock);
+}
+
+#[test]
 fn status_porcelain_v2_matches_stock_git_for_staged_states() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -218,6 +318,166 @@ fn status_detects_same_size_same_mtime_content_change_like_stock_git() {
         run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
         git(git_repo.path(), ["status", "--porcelain=v1"])
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn status_accepts_stock_git_index_with_different_device_without_rehashing() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    let recorded_device = first_index_entry_device(repo.path());
+    set_first_index_entry_device(repo.path(), recorded_device.wrapping_add(1));
+    let detail = run_status_with_trace(
+        repo.path(),
+        &["status", "--porcelain=v1", "--untracked-files=no"],
+        "device",
+    );
+
+    assert!(detail.contains("\tstat_safe=1\t"), "trace: {detail}");
+    assert!(detail.contains("\tcontent_hashes=0\t"), "trace: {detail}");
+}
+
+#[test]
+#[cfg(unix)]
+fn status_honors_core_checkstat_minimal() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    corrupt_first_index_entry_extended_stat(repo.path());
+
+    let default_detail = run_status_with_trace(
+        repo.path(),
+        &["status", "--porcelain=v1", "--untracked-files=no"],
+        "default-stat",
+    );
+    assert!(
+        default_detail.contains("\tcontent_hashes=1\t"),
+        "trace: {default_detail}"
+    );
+
+    let minimal_detail = run_status_with_trace(
+        repo.path(),
+        &[
+            "-c",
+            "core.checkStat=minimal",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+        ],
+        "minimal-stat",
+    );
+    assert!(
+        minimal_detail.contains("\tstat_safe=1\t"),
+        "trace: {minimal_detail}"
+    );
+    assert!(
+        minimal_detail.contains("\tcontent_hashes=0\t"),
+        "trace: {minimal_detail}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn status_honors_core_trustctime_false() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    corrupt_first_index_entry_ctime(repo.path());
+
+    let default_detail = run_status_with_trace(
+        repo.path(),
+        &["status", "--porcelain=v1", "--untracked-files=no"],
+        "default-ctime",
+    );
+    assert!(
+        default_detail.contains("\tcontent_hashes=1\t"),
+        "trace: {default_detail}"
+    );
+
+    let relaxed_detail = run_status_with_trace(
+        repo.path(),
+        &[
+            "-c",
+            "core.trustctime=false",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+        ],
+        "relaxed-ctime",
+    );
+    assert!(
+        relaxed_detail.contains("\tstat_safe=1\t"),
+        "trace: {relaxed_detail}"
+    );
+    assert!(
+        relaxed_detail.contains("\tcontent_hashes=0\t"),
+        "trace: {relaxed_detail}"
+    );
+}
+
+#[test]
+fn status_index_stat_config_errors_match_stock_git() {
+    let repo = git_init();
+    for args in [
+        ["-c", "core.checkStat=fast", "status", "--porcelain"].as_slice(),
+        ["-c", "core.checkStat", "status", "--porcelain"].as_slice(),
+        ["-c", "core.trustctime=garbage", "status", "--porcelain"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn status_index_stat_file_config_error_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["config", "core.checkStat", "fast"]);
+    let args = ["status", "--porcelain"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[cfg(unix)]
+fn run_status_with_trace(repo: &std::path::Path, args: &[&str], trace_name: &str) -> String {
+    let trace_path = repo.join(format!(".git/zmin-status-{trace_name}.trace"));
+    let output = Command::new(common::test_command_program(zmin_bin()))
+        .args(args)
+        .current_dir(repo)
+        .env("ZMIN_PHASE_TRACE", "1")
+        .env("ZMIN_PHASE_TRACE_FILE", &trace_path)
+        .output()
+        .expect("run zmin status");
+
+    assert!(
+        output.status.success(),
+        "zmin status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "clean status must be empty: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let trace = fs::read_to_string(trace_path).expect("read status phase trace");
+    trace
+        .lines()
+        .find(|line| line.contains("status.worktree_status.detail"))
+        .expect("status detail trace")
+        .to_owned()
 }
 
 #[test]
@@ -446,6 +706,137 @@ fn status_pathspec_modes_match_stock_git() {
 }
 
 #[test]
+fn status_webstorm_index_query_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::write(repo.path().join("dir/file.txt"), b"base\n").expect("write tracked");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "status base"]);
+
+    fs::write(repo.path().join("dir/file.txt"), b"changed\n").expect("modify tracked");
+
+    let args = [
+        "status",
+        "--porcelain",
+        "-z",
+        "--untracked-files=no",
+        "--ignored=no",
+        "--",
+        ".",
+    ];
+    assert_eq!(
+        run_zmin_args(repo.path(), &args),
+        git_args(repo.path(), &args),
+        "webstorm-style status args: {args:?}"
+    );
+}
+
+#[test]
+fn status_observed_client_command_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::write(repo.path().join("dir/file.txt"), b"base\n").expect("write tracked");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "status base"]);
+
+    fs::write(repo.path().join("dir/file.txt"), b"changed\n").expect("modify tracked");
+    fs::write(repo.path().join("dir/untracked.txt"), b"new\n").expect("write untracked");
+    fs::write(repo.path().join(".gitignore"), b"ignored.log\n").expect("write ignore");
+    fs::write(repo.path().join("ignored.log"), b"ignored\n").expect("write ignored");
+
+    for args in [
+        [
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=no",
+            "--ignored=no",
+            "--",
+            ".",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+            "status",
+            "--porcelain",
+            "-z",
+            "--no-renames",
+            "--untracked-files=all",
+            "--ignored=matching",
+            "--",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=no",
+            "--ignored=no",
+            "--",
+            "dir/file.txt",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "observed client status args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn status_reports_an_untracked_nested_worktree_as_an_opaque_directory() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    let nested = repo.path().join("nested");
+    fs::create_dir(&nested).expect("create nested worktree");
+    git(&nested, ["init"]);
+    fs::write(nested.join("untracked.txt"), b"nested\n").expect("write nested file");
+
+    for args in [
+        ["status", "--porcelain"].as_slice(),
+        ["status", "--porcelain", "--untracked-files=all"].as_slice(),
+        [
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "nested worktree status args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -481,6 +872,37 @@ fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
             ["status", "--porcelain=v1", "--branch", "--no-ahead-behind"]
         )
     );
+}
+
+#[test]
+fn status_exclude_standard_matches_stock_git_with_nested_gitignores_inside_ignored_dirs() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join(".gitignore"), b"build/\n.idea/\n").expect("write root ignore");
+    fs::create_dir_all(repo.path().join(".idea")).expect("create tracked ignored dir");
+    fs::write(repo.path().join(".idea/tracked.xml"), b"<tracked />\n").expect("write tracked");
+    git(repo.path(), ["add", ".gitignore"]);
+    git(repo.path(), ["add", "-f", ".idea/tracked.xml"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    fs::create_dir_all(repo.path().join("build/deep/nested")).expect("create ignored tree");
+    fs::write(repo.path().join("build/.gitignore"), b"!keep.txt\n").expect("write nested ignore");
+    fs::write(repo.path().join("build/deep/nested/file.txt"), b"ignored\n").expect("write ignored");
+    fs::write(repo.path().join("build/keep.txt"), b"still ignored\n").expect("write keep");
+    fs::write(repo.path().join(".idea/.gitignore"), b"workspace.xml\n").expect("write idea ignore");
+    fs::write(repo.path().join(".idea/workspace.xml"), b"<workspace />\n").expect("write idea");
+
+    for args in [
+        ["status", "--porcelain=v1", "-z"].as_slice(),
+        ["status", "--porcelain=v1", "-z", "--ignored=matching"].as_slice(),
+        ["status", "--short", "--ignored=matching"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
 }
 
 #[test]
@@ -641,7 +1063,50 @@ fn status_cache_index_toggles_are_not_stock_git_options() {
         let git_output = git_failure_output(repo.path(), args);
         let zmin_output = run_zmin_failure_output(repo.path(), args);
         assert_eq!(git_output.0, 129, "stock Git args: {args:?}");
-        assert_eq!(zmin_output.0, 129, "Zmin args: {args:?}");
+        assert_eq!(zmin_output, git_output, "Zmin args: {args:?}");
+    }
+}
+
+#[test]
+fn status_unknown_long_option_matches_stock_git() {
+    let repo = committed_repo();
+    for args in [
+        ["status", "--frobnicate"].as_slice(),
+        ["status", "--frobnicate=value"].as_slice(),
+        ["status", "-Q"].as_slice(),
+        ["status", "-sQ"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn status_negated_long_options_match_stock_git() {
+    let repo = committed_repo();
+    fs::write(repo.path().join("untracked.txt"), b"untracked\n").expect("write untracked");
+    for args in [
+        ["status", "--porcelain", "--no-porcelain"].as_slice(),
+        ["status", "--short", "--no-short"].as_slice(),
+        ["status", "--porcelain", "--null", "--no-null"].as_slice(),
+        ["status", "--ignored", "--no-ignored", "--porcelain"].as_slice(),
+        [
+            "status",
+            "--ignore-submodules=all",
+            "--no-ignore-submodules",
+            "--porcelain",
+        ]
+        .as_slice(),
+        ["status", "--no-untracked-files", "--porcelain"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
     }
 }
 
@@ -717,6 +1182,18 @@ fn status_invalid_object_format_config_matches_stock_git() {
 }
 
 #[test]
+fn status_unsupported_repository_format_version_matches_stock_git() {
+    let repo = committed_repo();
+    git(repo.path(), ["config", "core.repositoryformatversion", "2"]);
+    let args = ["status", "--porcelain"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn status_rename_modes_match_stock_git() {
     let repo = committed_repo();
     run_zmin(repo.path(), ["mv", "a.txt", "renamed.txt"]);
@@ -763,6 +1240,7 @@ fn status_ignore_submodules_modes_match_stock_git() {
             "sub",
         ],
     );
+    configure_identity(&super_repo.join("sub"));
     git_with_env(&super_repo, ["commit", "-m", "add submodule"]);
 
     fs::write(super_repo.join("sub/file.txt"), b"base\ndirty\n").expect("dirty submodule");

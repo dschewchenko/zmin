@@ -3,40 +3,57 @@ use std::path::PathBuf;
 
 pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
     match command {
-        runtime::Command::LsFiles {
+        runtime::Command::LsFiles(runtime::LsFilesCommandArgs {
             cached,
+            no_cached: _,
             zero,
             full_name,
             error_unmatch,
+            no_error_unmatch: _,
             tagged,
             lowercase_assume_valid,
             fsmonitor_clean,
             deduplicate,
+            no_deduplicate: _,
             sparse,
+            no_sparse: _,
             recurse_submodules,
             no_recurse_submodules,
             debug,
+            no_debug: _,
             abbrev,
+            no_abbrev: _,
             eol,
+            no_eol: _,
             format,
             with_tree,
+            no_with_tree: _,
             resolve_undo,
+            no_resolve_undo: _,
             stage,
+            no_stage: _,
             unmerged,
+            no_unmerged: _,
             deleted,
+            no_deleted: _,
             modified,
+            no_modified: _,
             others,
+            no_others: _,
             killed,
+            no_killed: _,
             directory,
+            no_directory: _,
             empty_directory,
             no_empty_directory,
             ignored,
+            no_ignored: _,
             excludes,
             exclude_from,
             exclude_per_directory,
             exclude_standard,
             paths,
-        } => run_ls_files(runtime::LsFilesOptions {
+        }) => run_ls_files(runtime::LsFilesOptions {
             cached,
             stage,
             unmerged,
@@ -72,7 +89,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         runtime::Command::Add {
             all,
-            ignore_removal: _,
+            ignore_removal,
             no_ignore_removal,
             force,
             update,
@@ -86,10 +103,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             verbose,
             no_verbose: _,
             ignore_errors,
-            no_ignore_errors: _,
+            no_ignore_errors,
             ignore_missing,
             no_ignore_missing: _,
-            sparse: _,
+            sparse,
             no_sparse: _,
             no_warn_embedded_repo,
             interactive,
@@ -107,7 +124,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }
         | runtime::Command::Stage {
             all,
-            ignore_removal: _,
+            ignore_removal,
             no_ignore_removal,
             force,
             update,
@@ -121,10 +138,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             verbose,
             no_verbose: _,
             ignore_errors,
-            no_ignore_errors: _,
+            no_ignore_errors,
             ignore_missing,
             no_ignore_missing: _,
-            sparse: _,
+            sparse,
             no_sparse: _,
             no_warn_embedded_repo,
             interactive,
@@ -141,12 +158,16 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             paths,
         } => run_add(
             all > 0 || no_ignore_removal > 0,
+            ignore_removal > 0,
+            sparse > 0,
             force > 0,
-            update > 0 || renormalize > 0,
+            update > 0,
+            renormalize > 0,
             intent_to_add > 0,
             refresh > 0,
             verbose > 0,
             ignore_errors > 0,
+            no_ignore_errors > 0,
             ignore_missing > 0,
             no_warn_embedded_repo > 0,
             interactive > 0,
@@ -196,12 +217,20 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             verbose,
             no_verbose: _,
             skip_errors,
-            sparse: _,
+            sparse,
             no_sparse: _,
             paths,
-        } => run_mv(force > 0, dry_run > 0, verbose > 0, skip_errors > 0, paths),
-        runtime::Command::Status {
+        } => run_mv(
+            force > 0,
+            dry_run > 0,
+            verbose > 0,
+            skip_errors > 0,
+            sparse > 0,
+            paths,
+        ),
+        runtime::Command::Status(runtime::StatusCommandArgs {
             porcelain,
+            no_porcelain,
             branch,
             no_branch,
             ahead_behind: _,
@@ -218,16 +247,21 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_renames,
             find_renames: _,
             ignore_submodules,
+            no_ignore_submodules,
             untracked_cache,
             no_untracked_cache,
             split_index,
             no_split_index,
             short,
+            no_short,
             null,
+            no_null,
             ignored,
+            no_ignored,
             untracked_files,
+            no_untracked_files,
             paths,
-        } => {
+        }) => {
             for (enabled, option) in [
                 (untracked_cache, "untracked-cache"),
                 (no_untracked_cache, "no-untracked-cache"),
@@ -242,7 +276,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 }
             }
             run_status(
-                porcelain,
+                if no_porcelain { None } else { porcelain },
                 branch && !no_branch,
                 !no_ahead_behind,
                 show_stash && !no_show_stash,
@@ -250,11 +284,23 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 column,
                 no_column,
                 !no_renames,
-                ignore_submodules,
-                short,
-                null,
-                ignored,
-                untracked_files,
+                if no_ignore_submodules {
+                    None
+                } else {
+                    ignore_submodules
+                },
+                short && !no_short,
+                null && !no_null,
+                if no_ignored {
+                    Some("no".to_owned())
+                } else {
+                    ignored
+                },
+                if no_untracked_files {
+                    None
+                } else {
+                    untracked_files
+                },
                 paths,
             )
         }
@@ -271,6 +317,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             quiet,
             index_output,
             prefix,
+            exclude_per_directory,
+            super_prefix,
             recurse_submodules,
             no_recurse_submodules,
             no_sparse_checkout,
@@ -288,6 +336,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             quiet,
             index_output.last().cloned(),
             prefix,
+            exclude_per_directory,
+            super_prefix,
             recurse_submodules > 0,
             no_recurse_submodules > 0,
             no_sparse_checkout > 0,
@@ -511,12 +561,16 @@ pub(crate) fn run_ls_files(
 
 pub(crate) fn run_add(
     all: bool,
+    ignore_removal: bool,
+    sparse: bool,
     force: bool,
     update: bool,
+    renormalize: bool,
     intent_to_add: bool,
     refresh: bool,
     verbose: bool,
     ignore_errors: bool,
+    no_ignore_errors: bool,
     ignore_missing: bool,
     no_warn_embedded_repo: bool,
     interactive: bool,
@@ -530,12 +584,16 @@ pub(crate) fn run_add(
 ) -> std::result::Result<(), runtime::CliError> {
     super::worktree_commands::add_with_embedded_repo_warning(
         all,
+        ignore_removal,
+        sparse,
         force,
         update,
+        renormalize,
         intent_to_add,
         refresh,
         verbose,
         ignore_errors,
+        no_ignore_errors,
         ignore_missing,
         no_warn_embedded_repo,
         interactive,
@@ -558,9 +616,10 @@ pub(crate) fn run_mv(
     dry_run: bool,
     verbose: bool,
     skip_errors: bool,
+    sparse: bool,
     paths: Vec<PathBuf>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::mv(force, dry_run, verbose, skip_errors, paths)
+    super::worktree_commands::mv(force, dry_run, verbose, skip_errors, sparse, paths)
 }
 
 pub(crate) fn run_status(
@@ -610,10 +669,12 @@ pub(crate) fn run_read_tree(
     quiet: u8,
     index_output: Option<PathBuf>,
     prefix: Option<String>,
+    exclude_per_directory: Option<String>,
+    super_prefix: Option<String>,
     recurse_submodules: bool,
     no_recurse_submodules: bool,
     no_sparse_checkout: bool,
-    treeish: Option<String>,
+    treeish: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
     super::worktree_commands::read_tree_command(super::worktree_commands::ReadTreeCommandOptions {
         empty,
@@ -628,6 +689,8 @@ pub(crate) fn run_read_tree(
         quiet: quiet > 0,
         index_output,
         prefix,
+        exclude_per_directory,
+        super_prefix,
         recurse_submodules,
         no_recurse_submodules,
         no_sparse_checkout,

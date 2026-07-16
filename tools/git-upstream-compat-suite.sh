@@ -3,21 +3,40 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: tools/git-upstream-compat-suite.sh [quick|standard|exhaustive]
+usage: tools/git-upstream-compat-suite.sh [quick|standard|exhaustive|all-nondeprecated|all-top-level]
 
 Runs selected upstream Git t-suite tests against zmin (or ZMIN_BIN).
 
 Environment:
   ZMIN_BIN                    Path to zmin. Builds release when omitted.
-  ZMIN_UPSTREAM_GIT_TAG       Git tag to test against. Default: v2.54.0.
+  ZMIN_UPSTREAM_GIT_TAG       Git tag to test against. Default: v2.55.0.
   ZMIN_UPSTREAM_GIT_CACHE     Cache dir for upstream Git source/build.
-  ZMIN_UPSTREAM_TEST_LIST     Test allowlist TSV. Default: tools/git-upstream-compat-tests.txt.
+  ZMIN_UPSTREAM_TEST_LIST     Test manifest TSV override. Defaults:
+                              quick/standard -> tools/git-upstream-compat-tests-core.txt
+                              exhaustive     -> auto-generated full upstream
+                                                shell suite minus explicit
+                                                legacy/external excludes
+                              all-nondeprecated
+                                              -> auto-generated full upstream
+                                                 top-level shell suite minus
+                                                 only whole-file deprecated
+                                                 excludes
+                              all-top-level   -> auto-generated complete
+                                                 upstream top-level shell
+                                                 suite
   ZMIN_UPSTREAM_OUT_DIR       Output dir for logs and summary.
   ZMIN_UPSTREAM_CARGO_PROFILE Cargo profile used when ZMIN_BIN is omitted.
                               Default: release. Use compat for faster
                               behavior-only iteration.
+  ZMIN_UPSTREAM_MANIFEST_OFFSET
+                              Skip this many selected top-level upstream shell
+                              tests after mode resolution.
+  ZMIN_UPSTREAM_MANIFEST_LIMIT
+                              Run at most this many selected top-level
+                              upstream shell tests after mode resolution.
   ZMIN_UPSTREAM_ALLOW_FAILURES=1  Report failures but exit 0.
   ZMIN_UPSTREAM_TEST_FLAGS    Flags passed to each upstream test. Default: -q.
+  ZMIN_UPSTREAM_TEST_TIMEOUT  Per-file timeout in seconds. Default: 0 (disabled).
   ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1
                               Run the selected upstream tests against stock git
                               from PATH instead of a zmin shim.
@@ -34,7 +53,7 @@ EOF
 
 mode="${1:-quick}"
 case "$mode" in
-  quick|standard|exhaustive) ;;
+  quick|standard|exhaustive|all-nondeprecated|all-top-level) ;;
   -h|--help)
     usage
     exit 0
@@ -46,28 +65,54 @@ case "$mode" in
 esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-tag="${ZMIN_UPSTREAM_GIT_TAG:-v2.54.0}"
+tag="${ZMIN_UPSTREAM_GIT_TAG:-v2.55.0}"
 cache_root="${ZMIN_UPSTREAM_GIT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zmin/git-upstream}"
-source_dir="$cache_root/git-$tag"
-test_list="${ZMIN_UPSTREAM_TEST_LIST:-$repo_root/tools/git-upstream-compat-tests.txt}"
+pristine_source_dir="$cache_root/git-$tag"
+harness_fingerprint="$(shasum -a 256 "${BASH_SOURCE[0]}" | awk '{ print substr($1, 1, 12) }')"
+source_dir="$cache_root/harness-$tag-$harness_fingerprint"
+default_core_test_list="$repo_root/tools/git-upstream-compat-tests-core.txt"
+test_list="${ZMIN_UPSTREAM_TEST_LIST:-}"
 out_dir="${ZMIN_UPSTREAM_OUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/zmin-upstream-compat.XXXXXX")}"
 jobs="${ZMIN_UPSTREAM_JOBS:-4}"
 test_flags="${ZMIN_UPSTREAM_TEST_FLAGS:--q}"
+test_timeout="${ZMIN_UPSTREAM_TEST_TIMEOUT:-0}"
 stock_git_control="${ZMIN_UPSTREAM_STOCK_GIT_CONTROL:-0}"
 bounded_run="${ZMIN_UPSTREAM_BOUNDED_RUN:-0}"
 cargo_profile="${ZMIN_UPSTREAM_CARGO_PROFILE:-release}"
+manifest_offset="${ZMIN_UPSTREAM_MANIFEST_OFFSET:-0}"
+manifest_limit="${ZMIN_UPSTREAM_MANIFEST_LIMIT:-0}"
+resolved_test_list=""
+
+resolve_cargo_target_dir() {
+  if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+    printf '%s\n' "$CARGO_TARGET_DIR"
+    return
+  fi
+
+  local metadata_json target_dir
+  metadata_json="$(
+    rustup run stable cargo metadata \
+      --manifest-path "$repo_root/Cargo.toml" \
+      --format-version 1 \
+      --no-deps 2>/dev/null | tr -d '\n'
+  )"
+  target_dir="$(printf '%s' "$metadata_json" | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+  target_dir="${target_dir//\\\\/\\}"
+
+  if [[ -n "$target_dir" ]]; then
+    printf '%s\n' "$target_dir"
+    return
+  fi
+
+  printf '%s\n' "$repo_root/target"
+}
 
 mkdir -p "$cache_root" "$out_dir"
 
 zmin_bin="${ZMIN_BIN:-}"
-if [[ "$stock_git_control" == "1" ]]; then
-  stock_git="$(command -v git || true)"
-  if [[ -z "$stock_git" ]]; then
-    echo "missing stock git for ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1" >&2
-    exit 2
-  fi
-  zmin_bin="$stock_git"
-elif [[ -z "$zmin_bin" ]]; then
+stock_git=""
+if [[ "$stock_git_control" != "1" && -z "$zmin_bin" ]]; then
+  cargo_target_dir="$(resolve_cargo_target_dir)"
   cargo_args=(build --manifest-path "$repo_root/Cargo.toml" -p zmin-cli --bin zmin)
   if [[ "$cargo_profile" == "release" ]]; then
     cargo_args+=(--release)
@@ -75,24 +120,68 @@ elif [[ -z "$zmin_bin" ]]; then
     cargo_args+=(--profile "$cargo_profile")
   fi
   rustup run stable cargo "${cargo_args[@]}" >/dev/null
-  zmin_bin="$repo_root/target/$cargo_profile/zmin"
-elif [[ "$zmin_bin" != /* && "$zmin_bin" != [A-Za-z]:* ]]; then
+  zmin_bin="$cargo_target_dir/$cargo_profile/zmin"
+elif [[ "$stock_git_control" != "1" && "$zmin_bin" != /* && "$zmin_bin" != [A-Za-z]:* ]]; then
   zmin_bin="$(cd "$repo_root" && pwd)/$zmin_bin"
 fi
 
-if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
-  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
-    zmin_bin="${zmin_bin}.exe"
-  fi
-else
-  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
-    zmin_bin="${zmin_bin}.exe"
+if [[ "$stock_git_control" != "1" ]]; then
+  if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
+    if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+      zmin_bin="${zmin_bin}.exe"
+    fi
+  else
+    if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+      zmin_bin="${zmin_bin}.exe"
+    fi
   fi
 fi
 
-if [[ ! -x "$zmin_bin" ]]; then
+if [[ "$stock_git_control" != "1" && ! -x "$zmin_bin" ]]; then
   echo "missing executable ZMIN_BIN: $zmin_bin" >&2
   exit 2
+fi
+
+resolve_zmin_remote_http_helper() {
+  local helper_dir helper_name helper_path cargo_args
+  helper_dir="$(dirname "$zmin_bin")"
+  if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
+    helper_name="zmin-git-remote-http.exe"
+  else
+    helper_name="zmin-git-remote-http"
+  fi
+  helper_path="$helper_dir/$helper_name"
+  if [[ -x "$helper_path" ]]; then
+    printf '%s\n' "$helper_path"
+    return
+  fi
+
+  cargo_args=(
+    build
+    --manifest-path "$repo_root/Cargo.toml"
+    -p zmin-git-remote-http
+  )
+  if [[ "$cargo_profile" == "release" ]]; then
+    cargo_args+=(--release)
+  else
+    cargo_args+=(--profile "$cargo_profile")
+  fi
+  rustup run stable cargo "${cargo_args[@]}" >/dev/null
+
+  if [[ -x "$helper_path" ]]; then
+    printf '%s\n' "$helper_path"
+    return
+  fi
+
+  echo "missing zmin remote HTTP helper after build: $helper_path" >&2
+  exit 2
+}
+
+zmin_remote_http_helper=""
+zmin_remote_http_helper_name=""
+if [[ "$stock_git_control" != "1" ]]; then
+  zmin_remote_http_helper="$(resolve_zmin_remote_http_helper)"
+  zmin_remote_http_helper_name="$(basename "$zmin_remote_http_helper")"
 fi
 
 ensure_git_http_backend() {
@@ -117,18 +206,49 @@ EOF
 
 download_upstream() {
   local archive="$cache_root/$tag.tar.gz"
+  local archive_sha marker pristine_valid=0
+  if [[ ! -s "$archive" ]] || ! tar -tzf "$archive" >/dev/null 2>&1; then
+    rm -f "$archive.tmp"
+    curl -fsSL "https://github.com/git/git/archive/refs/tags/${tag}.tar.gz" -o "$archive.tmp"
+    tar -tzf "$archive.tmp" >/dev/null
+    mv "$archive.tmp" "$archive"
+  fi
+  archive_sha="$(shasum -a 256 "$archive" | awk '{ print $1 }')"
+  marker="$pristine_source_dir/.zmin-pristine-source.sha256"
+  if [[ -d "$pristine_source_dir" && -f "$marker" ]] && [[ "$(cat "$marker")" == "$archive_sha" ]]; then
+    pristine_valid=1
+  fi
+  if [[ "$pristine_valid" != "1" ]]; then
+    rm -rf "$pristine_source_dir"
+    rm -rf "$pristine_source_dir.tmp"
+    mkdir -p "$pristine_source_dir.tmp"
+    tar -xzf "$archive" -C "$pristine_source_dir.tmp" --strip-components=1
+    printf '%s\n' "$archive_sha" >"$pristine_source_dir.tmp/.zmin-pristine-source.sha256"
+    chmod -R a-w "$pristine_source_dir.tmp"
+    mv "$pristine_source_dir.tmp" "$pristine_source_dir"
+  fi
   if [[ ! -d "$source_dir" ]]; then
     rm -rf "$source_dir.tmp"
     mkdir -p "$source_dir.tmp"
-    if [[ ! -s "$archive" ]]; then
-      curl -fsSL "https://github.com/git/git/archive/refs/tags/${tag}.tar.gz" -o "$archive"
-    fi
-    tar -xzf "$archive" -C "$source_dir.tmp" --strip-components=1
+    cp -R "$pristine_source_dir/." "$source_dir.tmp/"
+    chmod -R u+w "$source_dir.tmp"
     mv "$source_dir.tmp" "$source_dir"
   fi
 }
 
 prepare_upstream_harness() {
+  local prepare_lock="${source_dir}.prepare.lock"
+  while ! mkdir "$prepare_lock" 2>/dev/null; do
+    if [[ -f "$prepare_lock/pid" ]] &&
+      ! kill -0 "$(cat "$prepare_lock/pid")" 2>/dev/null
+    then
+      rm -rf "$prepare_lock"
+      continue
+    fi
+    sleep 0.1
+  done
+  printf '%s\n' "$$" >"$prepare_lock/pid"
+  trap 'rm -rf "$prepare_lock"' EXIT
   download_upstream
   (
     cd "$source_dir"
@@ -138,12 +258,25 @@ prepare_upstream_harness() {
       perl -0pi -e 's/GIT_TEST_CMP="\$DIFF -u"/GIT_TEST_CMP="diff -u"/g' t/test-lib.sh
       perl -0pi -e 's/GIT_TEST_CMP=" +-u"/GIT_TEST_CMP="diff -u"/g' t/test-lib.sh
     fi
-    if command -v make >/dev/null 2>&1 && [[ ! -f GIT-BUILD-OPTIONS || ! -x t/helper/test-tool ]]; then
-      make -j"$jobs" NO_GETTEXT=1 GIT-BUILD-OPTIONS t/helper/test-tool templates
+    if command -v make >/dev/null 2>&1; then
+      local build_stock_git=0
+      if [[ "$stock_git_control" == "1" && ! -x git && ! -x git.exe ]]; then
+        build_stock_git=1
+      fi
+      if [[ ! -f GIT-BUILD-OPTIONS || ! -x t/helper/test-tool || "$build_stock_git" == "1" ]]; then
+        local make_targets=(NO_GETTEXT=1 GIT-BUILD-OPTIONS t/helper/test-tool)
+        if [[ "$stock_git_control" == "1" ]]; then
+          make_targets+=(git git-http-backend git-sh-i18n git-sh-setup)
+        fi
+        make -j"$jobs" "${make_targets[@]}"
+      fi
     fi
-    if [[ ! -d templates/blt ]]; then
-      mkdir -p templates/blt
-      cp -R templates/hooks templates/info templates/blt/
+    if [[ ! -d templates/blt/hooks || ! -d templates/blt/info ]]; then
+      make -C templates
+    fi
+    if [[ ! -d perl/build/lib ]]; then
+      mkdir -p perl/build
+      ln -sfn ../ perl/build/lib
     fi
     if [[ ! -f GIT-BUILD-OPTIONS ]]; then
       local shell_path perl_path x_suffix
@@ -657,8 +790,7 @@ then
   test -f "$gitdir/logs/$ref"
   exit $?
 fi
-if test "$1" = "ref-store" && test "${2-}" != "${2#worktree:}" &&
-  test "${3-}" = "for-each-reflog-ent"
+if test "$1" = "ref-store" && test "${3-}" = "for-each-reflog-ent"
 then
   gitdir="$(ref_store_gitdir "$2")" || exit 1
   ref="${4-}"
@@ -675,6 +807,22 @@ EOF
       chmod +x t/helper/test-tool
       cp t/helper/test-tool t/helper/test-tool.exe 2>/dev/null || true
       chmod +x t/helper/test-tool.exe 2>/dev/null || true
+    fi
+    if [[ ! "${RUNNER_OS:-}" == "Windows" && ! "${OS:-}" == "Windows_NT" ]]; then
+      if [[ ! -f t/helper/test-tool-real && -x t/helper/test-tool ]]; then
+        mv t/helper/test-tool t/helper/test-tool-real
+      fi
+      if [[ -x t/helper/test-tool-real ]]; then
+        cat >t/helper/test-tool <<EOF
+#!/usr/bin/env sh
+if test "\${ZMIN_UPSTREAM_TEST_TOOL_TRACE2:-0}" = "1" && test "\${1-}" = "trace2"
+then
+  exec "$zmin_bin" test-tool "\$@"
+fi
+exec "$source_dir/t/helper/test-tool-real" "\$@"
+EOF
+        chmod +x t/helper/test-tool
+      fi
     fi
     if [[ -s "$cache_root/$tag.tar.gz" ]]; then
       tar -xOzf "$cache_root/$tag.tar.gz" "git-${tag#v}/t/t5510-fetch.sh" >t/t5510-fetch.sh
@@ -706,6 +854,8 @@ EOF
       ' t/t5510-fetch.sh
     fi
   )
+  rm -rf "$prepare_lock"
+  trap - EXIT
 }
 
 mode_rank() {
@@ -713,6 +863,8 @@ mode_rank() {
     quick) echo 1 ;;
     standard) echo 2 ;;
     exhaustive) echo 3 ;;
+    all-nondeprecated) echo 4 ;;
+    all-top-level) echo 5 ;;
     *) echo 99 ;;
   esac
 }
@@ -720,15 +872,48 @@ mode_rank() {
 selected_tests() {
   local max_rank
   max_rank="$(mode_rank "$mode")"
-  awk -F '\t' -v max_rank="$max_rank" '
+  awk -F '\t' -v max_rank="$max_rank" -v offset="$manifest_offset" -v limit="$manifest_limit" '
     /^#/ || NF < 2 { next }
     {
-      rank = ($1 == "quick" ? 1 : ($1 == "standard" ? 2 : ($1 == "exhaustive" ? 3 : 99)))
+      rank = ($1 == "quick" ? 1 : ($1 == "standard" ? 2 : ($1 == "exhaustive" || $1 == "full-core" ? 3 : ($1 == "all-nondeprecated" ? 4 : ($1 == "all-top-level" ? 5 : 99)))))
       if (rank <= max_rank) {
+        selected += 1
+        if (selected <= offset) {
+          next
+        }
+        emitted += 1
+        if (limit > 0 && emitted > limit) {
+          exit
+        }
         print $2 "\t" $1 "\t" $3
       }
     }
-  ' "$test_list"
+  ' "$resolved_test_list"
+}
+
+resolve_test_list() {
+  if [[ -n "$test_list" ]]; then
+    resolved_test_list="$test_list"
+    return
+  fi
+
+  case "$mode" in
+    exhaustive)
+      resolved_test_list="$out_dir/exhaustive-full-core.tsv"
+      "$repo_root/tools/git-upstream-compat-manifest.sh" full-core >"$resolved_test_list"
+      ;;
+    all-nondeprecated)
+      resolved_test_list="$out_dir/all-nondeprecated.tsv"
+      "$repo_root/tools/git-upstream-compat-manifest.sh" all-nondeprecated >"$resolved_test_list"
+      ;;
+    all-top-level)
+      resolved_test_list="$out_dir/all-top-level.tsv"
+      "$repo_root/tools/git-upstream-compat-manifest.sh" all-top-level >"$resolved_test_list"
+      ;;
+    *)
+      resolved_test_list="$default_core_test_list"
+      ;;
+  esac
 }
 
 run_list_from_flags() {
@@ -784,17 +969,93 @@ max_numeric_run_selector() {
   '
 }
 
+todo_breakage_vanished_only() {
+  local log="$1"
+  [[ -f "$log" ]] || return 1
+  if ! grep -q 'known breakage(s) vanished' "$log"; then
+    return 1
+  fi
+  if grep -q '^not ok ' "$log"; then
+    return 1
+  fi
+  return 0
+}
+
+run_test_with_timeout() {
+  if [[ "$test_timeout" == "0" ]]; then
+    "$@"
+    return
+  fi
+  perl -e '
+    use strict;
+    use warnings;
+    use POSIX qw(setpgid);
+
+    my $timeout = shift @ARGV;
+    die "invalid test timeout: $timeout\n" unless $timeout =~ /^[1-9][0-9]*$/;
+    my $pid = fork();
+    die "fork failed: $!\n" unless defined $pid;
+    if ($pid == 0) {
+      setpgid(0, 0) or die "setpgid failed: $!\n";
+      exec @ARGV;
+      die "exec failed: $!\n";
+    }
+    setpgid($pid, $pid);
+    $SIG{ALRM} = sub {
+      print STDERR "upstream test timed out after ${timeout}s\n";
+      kill "TERM", -$pid;
+      select undef, undef, undef, 0.25;
+      kill "KILL", -$pid;
+      waitpid($pid, 0);
+      exit 124;
+    };
+    alarm $timeout;
+    waitpid($pid, 0);
+    alarm 0;
+    my $status = $?;
+    exit(($status & 127) ? 128 + ($status & 127) : $status >> 8);
+  ' "$test_timeout" "$@"
+}
+
 make_git_shim() {
   local shim_dir="$1"
+  local shim_helper
   mkdir -p "$shim_dir"
+  shim_helper="$shim_dir/$zmin_remote_http_helper_name"
   if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
     cp "$zmin_bin" "$shim_dir/git.exe"
+    cp "$zmin_bin" "$shim_dir/git-http-backend.exe"
+    cp "$zmin_bin" "$shim_dir/git-sh-i18n.exe"
+    cp "$zmin_bin" "$shim_dir/git-sh-setup.exe"
+    cp "$zmin_remote_http_helper" "$shim_helper"
   else
-    cat >"$shim_dir/git" <<EOF
+    ln -sf "$zmin_bin" "$shim_dir/git"
+    ln -sf "$zmin_bin" "$shim_dir/git-http-backend"
+    ln -sf "$zmin_remote_http_helper" "$shim_helper"
+    cat >"$shim_dir/test-tool" <<EOF
 #!/usr/bin/env sh
-exec "$zmin_bin" "\$@"
+if test "\${1-}" = "trace2"
+then
+  exec "$zmin_bin" test-tool "\$@"
+fi
+exec "$source_dir/t/helper/test-tool" "\$@"
 EOF
-    chmod +x "$shim_dir/git"
+    chmod +x "$shim_dir/test-tool"
+    perl \
+      -0pe 's/\@\@LOCALEDIR\@\@/$ENV{ZMIN_UPSTREAM_LOCALEDIR}/g; s/\@\@USE_GETTEXT_SCHEME\@\@/fallthrough/g; s/git sh-i18n--envsubst/"\$(git --exec-path)\/git-sh-i18n--envsubst"/g' \
+      "$source_dir/git-sh-i18n.sh" >"$shim_dir/git-sh-i18n"
+    chmod +x "$shim_dir/git-sh-i18n"
+    perl \
+      -0pe 's/# \@BROKEN_PATH_FIX\@/:/g; s/\@PAGER_ENV\@//g; s/\@DIFF\@/diff/g' \
+      "$source_dir/git-sh-setup.sh" >"$shim_dir/git-sh-setup"
+    chmod +x "$shim_dir/git-sh-setup"
+    if stock_exec_path="$(git --exec-path 2>/dev/null)" && [[ -x "$stock_exec_path/git-sh-i18n--envsubst" ]]; then
+      cat >"$shim_dir/git-sh-i18n--envsubst" <<EOF
+#!/usr/bin/env sh
+exec "$stock_exec_path/git-sh-i18n--envsubst" "\$@"
+EOF
+      chmod +x "$shim_dir/git-sh-i18n--envsubst"
+    fi
   fi
 }
 
@@ -802,13 +1063,26 @@ if [[ "$stock_git_control" != "1" ]]; then
   ensure_git_http_backend
 fi
 prepare_upstream_harness
+resolve_test_list
 
 if [[ "$stock_git_control" == "1" ]]; then
-  shim_dir="$(dirname "$zmin_bin")"
+  if [[ -x "$source_dir/git" ]]; then
+    stock_git="$source_dir/git"
+  elif [[ -x "$source_dir/git.exe" ]]; then
+    stock_git="$source_dir/git.exe"
+  else
+    stock_git="$(command -v git || true)"
+  fi
+  if [[ -z "$stock_git" ]]; then
+    echo "missing stock git for ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1" >&2
+    exit 2
+  fi
+  zmin_bin="$stock_git"
+  shim_dir="$(dirname "$stock_git")"
 else
   shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-upstream-git-shim.XXXXXX")"
   trap 'rm -rf "$shim_dir"' EXIT
-  make_git_shim "$shim_dir"
+  ZMIN_UPSTREAM_LOCALEDIR="$source_dir/po/build/locale" make_git_shim "$shim_dir"
 fi
 
 summary="$out_dir/summary.tsv"
@@ -826,8 +1100,11 @@ if [[ "$bounded_run" == "1" ]]; then
     exit 2
   }
   bounded_stop_after="$(max_numeric_run_selector "$run_list")"
-  printf 'bounded_run_stop_after=%s\n' "$bounded_stop_after"
+printf 'bounded_run_stop_after=%s\n' "$bounded_stop_after"
 fi
+
+printf 'manifest_offset=%s\n' "$manifest_offset"
+printf 'manifest_limit=%s\n' "$manifest_limit"
 
 while IFS=$'\t' read -r test_name test_mode reason; do
   [[ -n "$test_name" ]] || continue
@@ -847,18 +1124,22 @@ while IFS=$'\t' read -r test_name test_mode reason; do
     (
       cd "$source_dir/t"
       ZMIN_UPSTREAM_STOP_AFTER_TEST="$bounded_stop_after" \
+      ZMIN_UPSTREAM_TEST_TOOL_TRACE2="$([[ "$stock_git_control" == "1" ]] && printf 0 || printf 1)" \
+      ZMIN_GIT_REMOTE_HTTP="$shim_dir/$zmin_remote_http_helper_name" \
       GIT_TEST_DEFAULT_HASH=sha1 \
       GIT_TEST_INSTALLED="$shim_dir" \
-      sh "$test_name" $test_flags
+      run_test_with_timeout sh "$test_name" $test_flags
     ) >"$log" 2>&1
     rc=$?
   else
   (
     cd "$source_dir/t"
     ZMIN_UPSTREAM_STOP_AFTER_TEST="$bounded_stop_after" \
+    ZMIN_UPSTREAM_TEST_TOOL_TRACE2="$([[ "$stock_git_control" == "1" ]] && printf 0 || printf 1)" \
+    ZMIN_GIT_REMOTE_HTTP="$shim_dir/$zmin_remote_http_helper_name" \
     GIT_TEST_DEFAULT_HASH=sha1 \
     GIT_TEST_INSTALLED="$shim_dir" \
-    sh "$test_name" $test_flags
+    run_test_with_timeout sh "$test_name" $test_flags
   ) >"$log" 2>&1
   rc=$?
   fi
@@ -866,6 +1147,10 @@ while IFS=$'\t' read -r test_name test_mode reason; do
   if [[ "$rc" == "0" ]]; then
     passed=$((passed + 1))
     printf '%s\t%s\tpass\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "$log" >>"$summary"
+  elif todo_breakage_vanished_only "$log"; then
+    passed=$((passed + 1))
+    printf '%s\t%s\tpass\t%s (upstream TODO breakage vanished only)\t%s\n' \
+      "$test_mode" "$test_name" "$reason" "$log" >>"$summary"
   else
     failed=$((failed + 1))
     printf '%s\t%s\tfail\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "$log" >>"$summary"

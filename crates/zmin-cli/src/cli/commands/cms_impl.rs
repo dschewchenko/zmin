@@ -204,12 +204,25 @@ fn path_has_staged_changes(lines: &[String], path: &Path) -> bool {
             return false;
         }
         let index_status = line.as_bytes()[0] as char;
-        index_status != ' ' && !line.starts_with("??") && status_line_path(line) == path
+        index_status != ' '
+            && !line.starts_with("??")
+            && status_line_paths(line)
+                .iter()
+                .any(|candidate| *candidate == path)
     })
 }
 
 fn status_line_path(line: &str) -> &str {
     line.get(3..).unwrap_or("").trim()
+}
+
+fn status_line_paths(line: &str) -> Vec<&str> {
+    let path = status_line_path(line);
+    if let Some((old_path, new_path)) = path.split_once(" -> ") {
+        vec![old_path.trim(), new_path.trim()]
+    } else {
+        vec![path]
+    }
 }
 
 struct CmsOperation {

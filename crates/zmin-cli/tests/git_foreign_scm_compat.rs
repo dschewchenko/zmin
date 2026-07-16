@@ -4,8 +4,9 @@ use std::fs;
 use std::process::Command;
 
 use common::{
-    configure_identity, git, git_failure_output, git_init, git_with_env, run_zmin,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_stdin, stock_git_bin, zmin_bin,
+    command_output_with_env, configure_identity, git, git_failure_output, git_init, git_with_env,
+    run_zmin, run_zmin_failure_output, run_zmin_status, run_zmin_with_stdin, stock_git_bin,
+    zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -125,8 +126,8 @@ fn cvsexportcommit_option_family_matches_stock_git() {
         );
         let stock_log = fs::read_to_string(dir.path().join(format!("{label}-stock.log")))
             .expect("read stock cvs log");
-        let zmin_log =
-            fs::read_to_string(dir.path().join(format!("{label}-zmin.log"))).expect("read zmin cvs log");
+        let zmin_log = fs::read_to_string(dir.path().join(format!("{label}-zmin.log")))
+            .expect("read zmin cvs log");
         assert_eq!(
             normalize_cvs_log(&stock_log),
             normalize_cvs_log(&zmin_log),
@@ -187,8 +188,8 @@ fn cvsexportcommit_keyword_reverse_failure_matches_stock_git() {
         visible_non_git_file_contents(&stock_cvs),
         visible_non_git_file_contents(&zmin_cvs)
     );
-    let stock_log = fs::read_to_string(dir.path().join("reverse-stock.log"))
-        .expect("read stock cvs log");
+    let stock_log =
+        fs::read_to_string(dir.path().join("reverse-stock.log")).expect("read stock cvs log");
     let zmin_log =
         fs::read_to_string(dir.path().join("reverse-zmin.log")).expect("read zmin cvs log");
     assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
@@ -204,7 +205,8 @@ fn cvsexportcommit_force_parent_matches_stock_git() {
     let stock_bin = dir.path().join("stock-bin");
     let zmin_bin_dir = dir.path().join("zmin-bin");
     let source = dir.path().join("source");
-    let base_commit = setup_cvsexportcommit_force_parent_fixture(&base, &source, &stock_cvs, &zmin_cvs);
+    let base_commit =
+        setup_cvsexportcommit_force_parent_fixture(&base, &source, &stock_cvs, &zmin_cvs);
     write_fake_cvs(&stock_bin, &dir.path().join("force-parent-stock.log"));
     write_fake_cvs(&zmin_bin_dir, &dir.path().join("force-parent-zmin.log"));
 
@@ -292,10 +294,10 @@ fn cvsexportcommit_same_worktree_matches_stock_git() {
         visible_non_git_file_contents(&stock_source),
         visible_non_git_file_contents(&zmin_source)
     );
-    let stock_log = fs::read_to_string(dir.path().join("same-worktree-stock.log"))
-        .expect("read stock cvs log");
-    let zmin_log = fs::read_to_string(dir.path().join("same-worktree-zmin.log"))
-        .expect("read zmin cvs log");
+    let stock_log =
+        fs::read_to_string(dir.path().join("same-worktree-stock.log")).expect("read stock cvs log");
+    let zmin_log =
+        fs::read_to_string(dir.path().join("same-worktree-zmin.log")).expect("read zmin cvs log");
     assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
 }
 
@@ -445,7 +447,6 @@ fn cvsimport_help_option_family_matches_stock_git() {
     }
 }
 
-
 #[cfg(unix)]
 #[test]
 fn p4_clone_imports_head_revision_into_git_refs_and_worktree() {
@@ -528,6 +529,73 @@ fn p4_clone_imports_head_revision_into_git_refs_and_worktree() {
     assert!(log.contains("-G files //depot/project/...#head"));
     assert!(log.contains("-G describe -s 2"));
     assert!(log.contains("-G -x - print"));
+}
+
+#[cfg(unix)]
+#[test]
+fn p4_clone_uses_global_init_default_branch_without_runtime_git_dependency() {
+    let dir = TempDir::new().expect("temp dir");
+    let bin = dir.path().join("bin");
+    let target = dir.path().join("zmin-project");
+    let home = dir.path().join("home");
+    let trap_log = dir.path().join("git-trap.log");
+    let changesfile = dir.path().join("changes.txt");
+    fs::create_dir_all(&home).expect("create home");
+    fs::create_dir_all(&bin).expect("create fake bin");
+    fs::write(&changesfile, b"2\n").expect("write changes file");
+    fs::write(home.join(".gitconfig"), "[init]\n\tdefaultBranch = trunk\n")
+        .expect("write global config");
+
+    let fake_git = bin.join("git");
+    fs::write(
+        &fake_git,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexit 97\n",
+            trap_log.display()
+        ),
+    )
+    .expect("write fake git");
+    make_executable(&fake_git);
+
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone()).chain(std::env::split_paths(&current_path)),
+    )
+    .expect("join PATH");
+    let output = Command::new(zmin_bin())
+        .args([
+            "p4",
+            "clone",
+            "--changesfile",
+            changesfile.to_str().expect("changesfile path"),
+            "--branch",
+            "master",
+            "//depot/project",
+            target.to_str().expect("target path"),
+        ])
+        .current_dir(dir.path())
+        .env("PATH", path)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME")
+        .output()
+        .expect("run zmin p4 clone");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(git(&target, ["symbolic-ref", "--short", "HEAD"]), "trunk");
+    assert!(
+        !trap_log.exists()
+            || fs::read_to_string(&trap_log)
+                .expect("read trap log")
+                .trim()
+                .is_empty(),
+        "unexpected runtime git call: {}",
+        fs::read_to_string(&trap_log).unwrap_or_default()
+    );
 }
 
 #[test]
@@ -732,12 +800,7 @@ fn p4_clone_helper_sensitive_failure_option_family_matches_stock_git() {
         zmin_args.extend_from_slice(extra_args);
         zmin_args.push("//depot/project");
         zmin_args.push(zmin_target.to_str().expect("zmin target path"));
-        let zmin = run_command_with_path(
-            zmin_bin(),
-            dir.path(),
-            &bin,
-            &zmin_args,
-        );
+        let zmin = run_command_with_path(zmin_bin(), dir.path(), &bin, &zmin_args);
         assert_ne!(zmin.0, 0, "zmin unexpectedly succeeded");
 
         assert_eq!(zmin.0, stock.0);
@@ -868,12 +931,7 @@ fn p4_clone_failure_tail_option_family_matches_stock_git() {
         zmin_args.extend_from_slice(extra_args);
         zmin_args.push("//depot/project");
         zmin_args.push(zmin_target.to_str().expect("zmin target path"));
-        let zmin = run_command_with_path(
-            zmin_bin(),
-            dir.path(),
-            &bin,
-            &zmin_args,
-        );
+        let zmin = run_command_with_path(zmin_bin(), dir.path(), &bin, &zmin_args);
         assert_ne!(zmin.0, 0, "zmin clone unexpectedly succeeded");
 
         assert_eq!(zmin.0, stock.0);
@@ -938,12 +996,7 @@ fn p4_clone_repo_shape_option_family_matches_stock_git() {
         }
         zmin_args.push("//depot/project");
         zmin_args.push(zmin_target.to_str().expect("zmin target path"));
-        let zmin = run_command_with_path(
-            zmin_bin(),
-            dir.path(),
-            &bin,
-            &zmin_args,
-        );
+        let zmin = run_command_with_path(zmin_bin(), dir.path(), &bin, &zmin_args);
         assert_eq!(zmin.0, 0, "zmin clone stderr: {}", zmin.2);
 
         assert_eq!(
@@ -958,8 +1011,14 @@ fn p4_clone_repo_shape_option_family_matches_stock_git() {
         if extra_args[0] == "--changesfile" {
             assert!(stock_target.join(".git").is_dir());
             assert!(zmin_target.join(".git").is_dir());
-            assert_eq!(git_maybe(&stock_target, ["show-ref"]), git_maybe(&zmin_target, ["show-ref"]));
-            assert_eq!(git(&stock_target, ["status", "--short"]), git(&zmin_target, ["status", "--short"]));
+            assert_eq!(
+                git_maybe(&stock_target, ["show-ref"]),
+                git_maybe(&zmin_target, ["show-ref"])
+            );
+            assert_eq!(
+                git(&stock_target, ["status", "--short"]),
+                git(&zmin_target, ["status", "--short"])
+            );
             assert_eq!(list_dir_names(&stock_target), list_dir_names(&zmin_target));
         } else {
             assert!(!stock_target.join(".git").exists());
@@ -975,7 +1034,10 @@ fn p4_clone_repo_shape_option_family_matches_stock_git() {
                 git(&stock_target, ["ls-tree", "-r", "--name-only", "HEAD"]),
                 git(&zmin_target, ["ls-tree", "-r", "--name-only", "HEAD"])
             );
-            assert_eq!(git_maybe(&stock_target, ["status", "--short"]), git_maybe(&zmin_target, ["status", "--short"]));
+            assert_eq!(
+                git_maybe(&stock_target, ["status", "--short"]),
+                git_maybe(&zmin_target, ["status", "--short"])
+            );
             assert_eq!(list_dir_names(&stock_target), list_dir_names(&zmin_target));
         }
     }
@@ -1097,7 +1159,10 @@ fn p4_submit_noop_option_family_matches_stock_git() {
             zmin_bin(),
             dir.path(),
             &bin,
-            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[(
+                "P4_LOG_PATH",
+                seed_log_path.to_str().expect("seed log path"),
+            )],
             &[
                 "p4",
                 "clone",
@@ -1183,7 +1248,10 @@ fn p4_submit_disable_followup_option_family_matches_stock_git() {
             zmin_bin(),
             dir.path(),
             &bin,
-            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[(
+                "P4_LOG_PATH",
+                seed_log_path.to_str().expect("seed log path"),
+            )],
             &[
                 "p4",
                 "clone",
@@ -1219,12 +1287,7 @@ fn p4_submit_disable_followup_option_family_matches_stock_git() {
 
         let mut zmin_args = vec!["p4", "submit"];
         zmin_args.extend_from_slice(extra_args);
-        let zmin = run_command_with_path(
-            zmin_bin(),
-            &zmin_target,
-            &bin,
-            &zmin_args,
-        );
+        let zmin = run_command_with_path(zmin_bin(), &zmin_target, &bin, &zmin_args);
         assert_eq!(zmin.0, 0, "zmin submit stderr: {}", zmin.2);
 
         assert_eq!(
@@ -1254,7 +1317,10 @@ fn p4_submit_preserve_user_failure_matches_stock_git() {
         zmin_bin(),
         dir.path(),
         &bin,
-        &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+        &[(
+            "P4_LOG_PATH",
+            seed_log_path.to_str().expect("seed log path"),
+        )],
         &[
             "p4",
             "clone",
@@ -1320,7 +1386,10 @@ fn p4_submit_dry_run_option_family_matches_stock_git() {
             zmin_bin(),
             dir.path(),
             &bin,
-            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[(
+                "P4_LOG_PATH",
+                seed_log_path.to_str().expect("seed log path"),
+            )],
             &[
                 "p4",
                 "clone",
@@ -1429,7 +1498,10 @@ fn p4_submit_prepare_p4_only_matches_stock_git() {
         zmin_bin(),
         dir.path(),
         &bin,
-        &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+        &[(
+            "P4_LOG_PATH",
+            seed_log_path.to_str().expect("seed log path"),
+        )],
         &[
             "p4",
             "clone",
@@ -1516,7 +1588,10 @@ fn p4_submit_shelve_option_family_matches_stock_git() {
             zmin_bin(),
             dir.path(),
             &bin,
-            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[(
+                "P4_LOG_PATH",
+                seed_log_path.to_str().expect("seed log path"),
+            )],
             &[
                 "p4",
                 "clone",
@@ -1598,7 +1673,10 @@ fn p4_submit_export_labels_failure_matches_stock_git() {
         zmin_bin(),
         dir.path(),
         &bin,
-        &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+        &[(
+            "P4_LOG_PATH",
+            seed_log_path.to_str().expect("seed log path"),
+        )],
         &[
             "p4",
             "clone",
@@ -1773,14 +1851,28 @@ fn svn_clone_revision_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", "-r", "2", &trunk_url, stock_target.to_str().expect("stock target")],
+        &[
+            "svn",
+            "clone",
+            "-r",
+            "2",
+            &trunk_url,
+            stock_target.to_str().expect("stock target"),
+        ],
     );
     let zmin = run_command_with_path_and_env(
         zmin_bin(),
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", "-r", "2", &trunk_url, zmin_target.to_str().expect("zmin target")],
+        &[
+            "svn",
+            "clone",
+            "-r",
+            "2",
+            &trunk_url,
+            zmin_target.to_str().expect("zmin target"),
+        ],
     );
     assert_eq!(stock.0, 0, "stock stderr: {}", stock.2);
     assert_eq!(zmin.0, 0, "zmin stderr: {}", zmin.2);
@@ -1797,8 +1889,14 @@ fn svn_clone_revision_option_family_matches_stock_git() {
         git(&zmin_target, ["config", "--get", "svn-remote.svn.url"])
     );
     assert_eq!(
-        git(&stock_target, ["cat-file", "-p", "refs/remotes/git-svn:a.txt"]),
-        git(&zmin_target, ["cat-file", "-p", "refs/remotes/git-svn:a.txt"])
+        git(
+            &stock_target,
+            ["cat-file", "-p", "refs/remotes/git-svn:a.txt"]
+        ),
+        git(
+            &zmin_target,
+            ["cat-file", "-p", "refs/remotes/git-svn:a.txt"]
+        )
     );
     assert_eq!(
         fs::read_to_string(stock_target.join("a.txt")).expect("read stock a"),
@@ -1864,7 +1962,12 @@ fn svn_dcommit_dry_run_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            stock_target.to_str().expect("stock target"),
+        ],
     );
     assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
     let zmin_clone = run_command_with_path_and_env(
@@ -1872,7 +1975,12 @@ fn svn_dcommit_dry_run_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            zmin_target.to_str().expect("zmin target"),
+        ],
     );
     assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
 
@@ -1999,7 +2107,12 @@ fn svn_dcommit_noop_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            stock_target.to_str().expect("stock target"),
+        ],
     );
     assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
     let zmin_clone = run_command_with_path_and_env(
@@ -2007,7 +2120,12 @@ fn svn_dcommit_noop_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            zmin_target.to_str().expect("zmin target"),
+        ],
     );
     assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
 
@@ -2034,12 +2152,18 @@ fn svn_dcommit_noop_option_family_matches_stock_git() {
         ),
         ("merge_short", &["svn", "dcommit", "-n", "-m"]),
         ("merge_long", &["svn", "dcommit", "--dry-run", "--merge"]),
-        ("strategy_short", &["svn", "dcommit", "-n", "-s", "recursive"]),
+        (
+            "strategy_short",
+            &["svn", "dcommit", "-n", "-s", "recursive"],
+        ),
         (
             "strategy_long",
             &["svn", "dcommit", "--dry-run", "--strategy", "recursive"],
         ),
-        ("use_log_author", &["svn", "dcommit", "--dry-run", "--use-log-author"]),
+        (
+            "use_log_author",
+            &["svn", "dcommit", "--dry-run", "--use-log-author"],
+        ),
         (
             "add_author_from",
             &["svn", "dcommit", "--dry-run", "--add-author-from"],
@@ -2050,11 +2174,23 @@ fn svn_dcommit_noop_option_family_matches_stock_git() {
         ),
         (
             "authors_file_long",
-            &["svn", "dcommit", "--dry-run", "--authors-file", authors_file_path],
+            &[
+                "svn",
+                "dcommit",
+                "--dry-run",
+                "--authors-file",
+                authors_file_path,
+            ],
         ),
         (
             "authors_prog",
-            &["svn", "dcommit", "--dry-run", "--authors-prog", authors_prog_path],
+            &[
+                "svn",
+                "dcommit",
+                "--dry-run",
+                "--authors-prog",
+                authors_prog_path,
+            ],
         ),
     ];
 
@@ -2084,8 +2220,11 @@ fn svn_init_option_family_matches_stock_git() {
     let template = dir.path().join("template");
     fs::create_dir_all(template.join("hooks")).expect("create template hooks");
     fs::write(template.join("hooks/ignored.sample"), b"#!/bin/sh\n").expect("write template hook");
-    fs::write(template.join("config"), b"[custom]\n\tvalue = from-template\n")
-        .expect("write template config");
+    fs::write(
+        template.join("config"),
+        b"[custom]\n\tvalue = from-template\n",
+    )
+    .expect("write template config");
     let url = "file:///tmp/zmin-svn-init";
 
     for (label, stock_args, zmin_args) in [
@@ -2140,9 +2279,8 @@ fn svn_init_option_family_matches_stock_git() {
             ],
         ),
     ] {
-        let stock_target = std::path::PathBuf::from(
-            stock_args.last().expect("stock target").clone(),
-        );
+        let stock_target =
+            std::path::PathBuf::from(stock_args.last().expect("stock target").clone());
         let zmin_target = std::path::PathBuf::from(zmin_args.last().expect("zmin target").clone());
         let stock_arg_refs = stock_args.iter().map(String::as_str).collect::<Vec<_>>();
         let zmin_arg_refs = zmin_args.iter().map(String::as_str).collect::<Vec<_>>();
@@ -2205,7 +2343,12 @@ fn svn_dcommit_rebase_merges_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            stock_target.to_str().expect("stock target"),
+        ],
     );
     assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
     let zmin_clone = run_command_with_path_and_env(
@@ -2213,7 +2356,12 @@ fn svn_dcommit_rebase_merges_option_family_matches_stock_git() {
         dir.path(),
         dir.path(),
         &envs,
-        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+        &[
+            "svn",
+            "clone",
+            &trunk_url,
+            zmin_target.to_str().expect("zmin target"),
+        ],
     );
     assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
 
@@ -2460,13 +2608,21 @@ fn archimport_old_style_branch_name_matches_stock_git_invalid_input() {
         stock_git_bin().to_str().expect("stock git path"),
         dir.path(),
         dir.path(),
-        &["archimport", "-o", "archive@example.test/project--main--1--base-0:master"],
+        &[
+            "archimport",
+            "-o",
+            "archive@example.test/project--main--1--base-0:master",
+        ],
     );
     let zmin = run_command_with_path(
         zmin_bin(),
         dir.path(),
         dir.path(),
-        &["archimport", "-o", "archive@example.test/project--main--1--base-0:master"],
+        &[
+            "archimport",
+            "-o",
+            "archive@example.test/project--main--1--base-0:master",
+        ],
     );
     assert_eq!(stock.0, zmin.0);
     assert_eq!(stock.1, zmin.1);
@@ -2590,6 +2746,52 @@ fn cvsserver_valid_requests_match_git_232_protocol_start() {
         run_zmin_with_stdin(repo.path(), ["cvsserver", "server"], "noop\n"),
         "ok"
     );
+}
+
+#[test]
+fn cvsserver_version_does_not_depend_on_stock_git_runtime() {
+    let repo = git_init();
+    let output = command_output_with_env(
+        zmin_bin(),
+        repo.path(),
+        &["cvsserver", "--version"],
+        &[
+            ("ZMIN_STOCK_GIT", "/definitely/missing/git"),
+            ("GIT_BIN", "/definitely/missing/git"),
+        ],
+        "zmin cvsserver version",
+    );
+    assert_eq!(output.0, 0);
+    assert_eq!(output.1, "git-cvsserver version 2.47.1.zmin");
+    assert!(output.2.is_empty(), "unexpected stderr: {}", output.2);
+}
+
+#[test]
+fn cvsserver_help_does_not_depend_on_stock_git_runtime() {
+    let repo = git_init();
+    let output = command_output_with_env(
+        zmin_bin(),
+        repo.path(),
+        &["cvsserver", "--help"],
+        &[
+            ("ZMIN_STOCK_GIT", "/definitely/missing/git"),
+            ("GIT_BIN", "/definitely/missing/git"),
+        ],
+        "zmin cvsserver help",
+    );
+    assert_eq!(output.0, 0);
+    assert!(
+        output.1.starts_with("GIT-CVSSERVER(1)"),
+        "unexpected stdout prefix: {}",
+        output.1.lines().next().unwrap_or("")
+    );
+    assert!(
+        output
+            .1
+            .contains("git-cvsserver - A CVS server emulator for Git"),
+        "missing expected help body"
+    );
+    assert!(output.2.is_empty(), "unexpected stderr: {}", output.2);
 }
 
 fn run_zmin_with_path<const N: usize>(
@@ -2795,10 +2997,7 @@ fn collect_visible_non_git_file_contents(
 }
 
 fn normalize_cvs_log(log: &str) -> Vec<String> {
-    let mut lines = log
-        .lines()
-        .map(normalize_cvs_log_line)
-        .collect::<Vec<_>>();
+    let mut lines = log.lines().map(normalize_cvs_log_line).collect::<Vec<_>>();
     lines.sort();
     lines
 }
@@ -2826,10 +3025,7 @@ fn normalize_cvs_log_line(line: &str) -> String {
         return line.to_owned();
     }
     let command = parts.remove(0);
-    let mut normalized = prefix
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let mut normalized = prefix.into_iter().map(str::to_owned).collect::<Vec<_>>();
     normalized.push(command.to_owned());
     match command {
         "status" | "update" => {
@@ -3022,21 +3218,19 @@ fn normalize_p4_submit_stdout(stdout: &str) -> String {
             }
             if line.contains("tmp") && line.contains("git p4") {
                 return line
+                    .replace(line.split('"').nth(1).unwrap_or_default(), "<template>")
                     .replace(
-                        line.split('"').nth(1).unwrap_or_default(),
-                        "<template>",
-                    )
-                    .replace(
-                        line.split('<').nth(1).and_then(|rest| rest.split('>').next()).unwrap_or_default(),
+                        line.split('<')
+                            .nth(1)
+                            .and_then(|rest| rest.split('>').next())
+                            .unwrap_or_default(),
                         "<template>",
                     );
             }
-            if line.starts_with("You can delete the file ") || line.starts_with("the submit template file ") {
-                return line
-                    .replace(
-                        line.split('"').nth(1).unwrap_or_default(),
-                        "<template>",
-                    );
+            if line.starts_with("You can delete the file ")
+                || line.starts_with("the submit template file ")
+            {
+                return line.replace(line.split('"').nth(1).unwrap_or_default(), "<template>");
             }
             if line.starts_with("TryPatch: git diff-tree --full-index -p \"")
                 && line.ends_with("\" | git apply --check -")
@@ -3297,7 +3491,12 @@ fn create_local_svn_trunk_history(root: &std::path::Path) -> (String, String) {
         .expect("run svn add");
     assert!(status.success(), "svn add failed");
     let status = Command::new("svn")
-        .args(["commit", wc.to_str().expect("wc path"), "-m", "initial import"])
+        .args([
+            "commit",
+            wc.to_str().expect("wc path"),
+            "-m",
+            "initial import",
+        ])
         .status()
         .expect("run svn commit");
     assert!(status.success(), "svn commit failed");
@@ -3309,7 +3508,12 @@ fn create_local_svn_trunk_history(root: &std::path::Path) -> (String, String) {
     assert!(status.success(), "svn checkout 2 failed");
     fs::write(wc2.join("a.txt"), b"alpha\nsecond\n").expect("write second");
     let status = Command::new("svn")
-        .args(["commit", wc2.to_str().expect("wc2 path"), "-m", "second import"])
+        .args([
+            "commit",
+            wc2.to_str().expect("wc2 path"),
+            "-m",
+            "second import",
+        ])
         .status()
         .expect("run svn commit 2");
     assert!(status.success(), "svn commit 2 failed");

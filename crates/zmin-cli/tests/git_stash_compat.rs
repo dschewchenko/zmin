@@ -21,6 +21,29 @@ fn stash_fixture_repo() -> TempDir {
     repo
 }
 
+fn empty_tree_oid() -> &'static str {
+    "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+}
+
+fn create_fake_commit(repo: &std::path::Path, args: &[&str]) -> String {
+    command_output_with_env("git", repo, args, &[], "git commit-tree").1
+}
+
+#[test]
+fn stash_show_include_untracked_reports_third_parent_paths() {
+    let repo = stash_fixture_repo();
+    write_file(repo.path(), "a.txt", "one\nchange\n");
+    write_file(repo.path(), "untracked", "untracked\n");
+    run_zmin_with_env(repo.path(), ["stash", "push", "--include-untracked"]);
+    assert!(!repo.path().join("untracked").exists());
+
+    let included = run_zmin(repo.path(), ["stash", "show", "--include-untracked"]);
+    assert!(included.contains("untracked"), "{included}");
+    let only = run_zmin(repo.path(), ["stash", "show", "--only-untracked"]);
+    assert!(only.contains("untracked"), "{only}");
+    assert!(!only.contains("a.txt"), "{only}");
+}
+
 #[test]
 fn stash_show_pickaxe_matches_stock_git() {
     let repo = stash_fixture_repo();
@@ -83,6 +106,82 @@ fn stash_show_skip_and_rotate_match_stock_git() {
             "args: {args:?}"
         );
     }
+}
+
+#[test]
+fn stash_import_invalid_exported_commit_contract_matches_upstream_t3903() {
+    let repo = stash_fixture_repo();
+    write_file(repo.path(), "b.txt", "base2\n");
+    run_zmin(repo.path(), ["add", "b.txt"]);
+    run_zmin_with_env(repo.path(), ["commit", "-m", "second"]);
+    write_file(repo.path(), "a.txt", "one\ntwo\n");
+    run_zmin_with_env(repo.path(), ["stash", "push", "-m", "save"]);
+
+    let exported = run_zmin(repo.path(), ["stash", "export", "--print", "stash@{0}"]);
+    run_zmin(repo.path(), ["stash", "import", &exported]);
+
+    let base_head = git(repo.path(), ["rev-parse", "HEAD"]);
+    let base_head_parent = git(repo.path(), ["rev-parse", "HEAD^"]);
+    let stash_before = git(repo.path(), ["rev-parse", "stash@{0}"]);
+
+    let invalid_head = run_zmin_failure_output(repo.path(), &["stash", "import", "HEAD"]);
+    assert_eq!(invalid_head.0, 1);
+    assert!(
+        invalid_head
+            .2
+            .contains(&format!("{base_head} is not a valid exported stash commit")),
+        "stderr: {}",
+        invalid_head.2
+    );
+    assert_eq!(git(repo.path(), ["rev-parse", "stash@{0}"]), stash_before);
+
+    git(repo.path(), ["checkout", "--orphan", "orphan"]);
+    let fake_non_prefix = create_fake_commit(
+        repo.path(),
+        &[
+            "commit-tree",
+            empty_tree_oid(),
+            "-p",
+            &base_head,
+            "-p",
+            &base_head_parent,
+            "-m",
+            "",
+        ],
+    );
+    git(
+        repo.path(),
+        ["update-ref", "refs/heads/orphan", &fake_non_prefix],
+    );
+    let orphan_oid = git(repo.path(), ["rev-parse", "HEAD"]);
+    let invalid_prefix = run_zmin_failure_output(repo.path(), &["stash", "import", "orphan"]);
+    assert_eq!(invalid_prefix.0, 1);
+    assert!(
+        invalid_prefix.2.contains(&format!(
+            "found stash commit {orphan_oid} without expected prefix"
+        )),
+        "stderr: {}",
+        invalid_prefix.2
+    );
+    assert_eq!(git(repo.path(), ["rev-parse", "stash@{0}"]), stash_before);
+
+    git(repo.path(), ["checkout", "--orphan", "orphan2"]);
+    let fake_root = create_fake_commit(repo.path(), &["commit-tree", empty_tree_oid(), "-m", ""]);
+    git(
+        repo.path(),
+        ["update-ref", "refs/heads/orphan2", &fake_root],
+    );
+    let orphan2_oid = git(repo.path(), ["rev-parse", "HEAD"]);
+    let invalid_root = run_zmin_failure_output(repo.path(), &["stash", "import", "orphan2"]);
+    assert_eq!(invalid_root.0, 1);
+    assert!(
+        invalid_root.2.contains(&format!(
+            "found root commit {orphan2_oid} with invalid data"
+        )),
+        "stderr: {}",
+        invalid_root.2
+    );
+    assert_eq!(git(repo.path(), ["rev-parse", "stash@{0}"]), stash_before);
 }
 
 #[test]
@@ -2831,12 +2930,7 @@ fn stash_create_reports_locked_index_like_stock_git() {
         output.2.contains("error: could not write index"),
         "stderr should report index write failure: {output:?}"
     );
-    assert!(
-        output.2.contains("error: Unable to create")
-            && output.2.contains("index.lock")
-            && output.2.contains("File exists"),
-        "stderr should report index.lock creation failure: {output:?}"
-    );
+    assert_eq!(output.2, "error: could not write index");
 }
 
 #[test]
@@ -2852,12 +2946,7 @@ fn stash_push_reports_locked_index_like_stock_git() {
         output.2.contains("error: could not write index"),
         "stderr should report index write failure: {output:?}"
     );
-    assert!(
-        output.2.contains("error: Unable to create")
-            && output.2.contains("index.lock")
-            && output.2.contains("File exists"),
-        "stderr should report index.lock creation failure: {output:?}"
-    );
+    assert_eq!(output.2, "error: could not write index");
 }
 
 #[test]
@@ -2874,12 +2963,7 @@ fn stash_apply_reports_locked_index_like_stock_git() {
         output.2.contains("error: could not write index"),
         "stderr should report index write failure: {output:?}"
     );
-    assert!(
-        output.2.contains("error: Unable to create")
-            && output.2.contains("index.lock")
-            && output.2.contains("File exists"),
-        "stderr should report index.lock creation failure: {output:?}"
-    );
+    assert_eq!(output.2, "error: could not write index");
 }
 
 #[test]

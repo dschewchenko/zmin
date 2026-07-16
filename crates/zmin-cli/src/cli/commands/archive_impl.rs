@@ -67,6 +67,7 @@ pub(crate) fn parse_archive_args(args: Vec<String>) -> Result<ArchiveOptions> {
             "--" => positional_only = true,
             "-l" | "--list" => options.list = true,
             "-v" | "--verbose" => options.verbose = true,
+            "-0" | "-1" | "-2" | "-3" | "-4" | "-5" | "-6" | "-7" | "-8" | "-9" => {}
             "--worktree-attributes" => options.worktree_attributes = true,
             "--format" => {
                 cursor += 1;
@@ -662,7 +663,7 @@ fn archive_entry(
                 eprintln!("{archive_path}");
             }
             let object = context.store.read_object(&entry.id)?;
-            let content = smudge_worktree_filter_content_with_attributes(
+            let content = smudge_worktree_content_with_attributes(
                 context.repo,
                 context.attributes,
                 path.as_bytes(),
@@ -739,7 +740,7 @@ fn archive_entry_zip(
                 eprintln!("{archive_path}");
             }
             let object = context.store.read_object(&entry.id)?;
-            let content = smudge_worktree_filter_content_with_attributes(
+            let content = smudge_worktree_content_with_attributes(
                 context.repo,
                 context.attributes,
                 path.as_bytes(),

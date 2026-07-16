@@ -3,18 +3,23 @@ use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 
-use crate::object::{GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object};
-use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint};
-use crate::pack::PackedObjectStore;
+use crate::object::{
+    GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_literal_object, hash_object,
+    object_hex_common_prefix_len_bytes, update_unique_abbrev_len_for_candidate,
+};
+use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint, PrefixOrFullObject};
+use crate::pack::{PackedObjectOrdinalLookup, PackedObjectStore};
 use crate::tree::{TreeObjectRef, decode_tree_object_refs};
 
 static TEMP_OBJECT_COUNTER: AtomicU64 = AtomicU64::new(0);
+static SHA1_EMPTY_TREE_ID: OnceLock<ObjectId> = OnceLock::new();
+static SHA256_EMPTY_TREE_ID: OnceLock<ObjectId> = OnceLock::new();
 const STREAM_LOOSE_BLOB_WRITE_MIN_BYTES: usize = 1024 * 1024;
 const OBJECT_ID_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const LOOSE_OBJECT_ID_GROWTH_CAPACITY_LIMIT: usize = 8192;
@@ -23,6 +28,8 @@ const ALTERNATES_FILE_BUFFER_CAPACITY: usize = 64 * 1024;
 const ALTERNATE_LINE_INITIAL_CAPACITY: usize = 256;
 const OBJECT_FANOUT_DIRS: usize = 256;
 
+type ObjectDirectoryVisitSet = HashSet<Arc<PathBuf>>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LooseObject {
     pub id: ObjectId,
@@ -30,13 +37,21 @@ pub struct LooseObject {
     pub content: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LooseObjectHeader {
+    pub kind: Vec<u8>,
+    pub size: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct LooseObjectStore {
     objects_dir: PathBuf,
     algorithm: GitHashAlgorithm,
     max_object_bytes: usize,
+    packed_objects_first: bool,
     packed_store: PackedObjectStore,
     alternates_cache: Arc<Mutex<Option<Arc<Vec<PathBuf>>>>>,
+    canonical_objects_dir: Arc<OnceLock<Arc<PathBuf>>>,
     objects_dir_ready: Arc<AtomicBool>,
     fanout_dirs_ready: Arc<[AtomicBool; OBJECT_FANOUT_DIRS]>,
 }
@@ -65,7 +80,9 @@ impl LooseObjectStore {
             objects_dir,
             algorithm,
             max_object_bytes: 512 * 1024 * 1024,
+            packed_objects_first: false,
             alternates_cache: Arc::new(Mutex::new(None)),
+            canonical_objects_dir: Arc::new(OnceLock::new()),
             objects_dir_ready: Arc::new(AtomicBool::new(false)),
             fanout_dirs_ready: Arc::new(std::array::from_fn(|_| AtomicBool::new(false))),
         }
@@ -77,8 +94,83 @@ impl LooseObjectStore {
         self
     }
 
+    pub fn with_stable_pack_snapshot(mut self) -> Self {
+        self.packed_store = self.packed_store.with_stable_pack_snapshot();
+        self
+    }
+
+    pub fn with_packed_objects_first(mut self) -> Self {
+        self.packed_objects_first = true;
+        self
+    }
+
+    pub fn with_transient_packed_object_reads(mut self) -> Self {
+        self.packed_store = self.packed_store.with_transient_object_reads();
+        self
+    }
+
+    pub fn with_trusted_packed_object_reads(mut self) -> Self {
+        self.packed_store = self.packed_store.with_trusted_object_reads();
+        self
+    }
+
+    pub fn with_buffered_pack_reads(mut self) -> Self {
+        self.packed_store = self.packed_store.with_buffered_pack_reads();
+        self
+    }
+
+    pub fn with_packed_file_reader_buffer_capacity(mut self, capacity: usize) -> Self {
+        self.packed_store = self
+            .packed_store
+            .with_pack_file_reader_buffer_capacity(capacity);
+        self
+    }
+
+    pub fn with_packed_object_read_cache_byte_limit(mut self, byte_limit: usize) -> Self {
+        self.packed_store = self
+            .packed_store
+            .with_object_read_cache_byte_limit(byte_limit);
+        self
+    }
+
+    pub fn packed_object_read_cache_usage(&self) -> io::Result<(usize, usize)> {
+        self.packed_store.object_read_cache_usage()
+    }
+
+    pub fn single_pack_object_ordinals(&self) -> io::Result<Option<PackedObjectOrdinalLookup>> {
+        self.packed_store.single_pack_object_ordinals()
+    }
+
+    pub fn fork_for_parallel_reads(&self) -> Self {
+        Self {
+            objects_dir: self.objects_dir.clone(),
+            algorithm: self.algorithm,
+            max_object_bytes: self.max_object_bytes,
+            packed_objects_first: self.packed_objects_first,
+            packed_store: self.packed_store.fork_for_parallel_reads(),
+            alternates_cache: self.alternates_cache.clone(),
+            canonical_objects_dir: self.canonical_objects_dir.clone(),
+            objects_dir_ready: self.objects_dir_ready.clone(),
+            fanout_dirs_ready: self.fanout_dirs_ready.clone(),
+        }
+    }
+
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
+    }
+
+    pub const fn algorithm(&self) -> GitHashAlgorithm {
+        self.algorithm
+    }
+
+    pub const fn max_object_bytes(&self) -> usize {
+        self.max_object_bytes
+    }
+
+    fn canonical_objects_dir(&self) -> Arc<PathBuf> {
+        self.canonical_objects_dir
+            .get_or_init(|| Arc::new(canonical_or_original(&self.objects_dir)))
+            .clone()
     }
 
     fn ensure_objects_dir(&self) -> io::Result<()> {
@@ -128,12 +220,63 @@ impl LooseObjectStore {
         Ok(id)
     }
 
+    pub fn write_literal_object(&self, kind: &[u8], content: &[u8]) -> io::Result<ObjectId> {
+        let id = hash_literal_object(self.algorithm, kind, content)?;
+        let path = self.object_path(&id)?;
+        if path.exists() {
+            return Ok(id);
+        }
+        let compressed = encode_literal_loose_object(kind, content)?;
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "loose object path has no parent",
+            )
+        })?;
+        self.ensure_object_parent_dir(&id, parent)?;
+        let tmp_path = temp_object_path(parent, &id);
+        write_temp_object(&tmp_path, &compressed)?;
+        install_temp_object_file(&tmp_path, &path)?;
+        Ok(id)
+    }
+
     pub fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
         self.read_object_inner(id, &mut HashSet::new())
     }
 
     pub fn contains_object(&self, id: &ObjectId) -> io::Result<bool> {
         self.contains_object_inner(id, &mut HashSet::new())
+    }
+
+    pub fn verify_loose_object(&self, id: &ObjectId) -> io::Result<bool> {
+        if id.algorithm() != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match store",
+            ));
+        }
+        let file = match fs::File::open(self.object_path(id)?) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        verify_loose_object_kind(file, self.max_object_bytes, id)?;
+        Ok(true)
+    }
+
+    pub fn missing_objects(&self, ids: &[ObjectId]) -> io::Result<HashSet<ObjectId>> {
+        let mut missing = HashSet::with_capacity(ids.len().min(OBJECT_ID_INITIAL_CAPACITY_LIMIT));
+        for id in ids {
+            if id.algorithm() != self.algorithm {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "object id algorithm does not match store",
+                ));
+            }
+            missing.insert(id.clone());
+        }
+        self.retain_missing_objects_inner(&mut missing, &mut HashSet::new())?;
+        Ok(missing)
     }
 
     pub fn object_kind_hint(&self, id: &ObjectId) -> io::Result<Option<GitObjectKind>> {
@@ -177,6 +320,44 @@ impl LooseObjectStore {
         Ok(Some(prefix))
     }
 
+    pub fn loose_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        if id.algorithm() != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match store",
+            ));
+        }
+        if self.is_implicit_empty_tree(id) {
+            return Ok(Some(self.implicit_empty_tree(id)));
+        }
+        let path = self.object_path(id)?;
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut decoder = ZlibDecoder::new(file);
+        let (kind, size) = read_loose_object_header(&mut decoder)?;
+        if size > self.max_object_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "loose git object exceeds configured size limit",
+            ));
+        }
+        let prefix_len = size.min(max_bytes);
+        let mut content = vec![0_u8; prefix_len];
+        decoder.read_exact(&mut content)?;
+        Ok(Some(LooseObject {
+            id: id.clone(),
+            kind,
+            content,
+        }))
+    }
+
     pub fn loose_object_header_hint(
         &self,
         id: &ObjectId,
@@ -186,6 +367,9 @@ impl LooseObjectStore {
                 io::ErrorKind::InvalidInput,
                 "object id algorithm does not match store",
             ));
+        }
+        if self.is_implicit_empty_tree(id) {
+            return Ok(Some((GitObjectKind::Tree, 0)));
         }
         let path = self.object_path(id)?;
         let file = match fs::File::open(path) {
@@ -202,6 +386,32 @@ impl LooseObjectStore {
             ));
         }
         Ok(Some((kind, size)))
+    }
+
+    pub fn literal_object_header_hint(
+        &self,
+        id: &ObjectId,
+    ) -> io::Result<Option<LooseObjectHeader>> {
+        if id.algorithm() != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match store",
+            ));
+        }
+        let file = match fs::File::open(self.object_path(id)?) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut decoder = ZlibDecoder::new(file);
+        let header = read_literal_loose_object_header(&mut decoder)?;
+        if header.size > self.max_object_bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "loose git object exceeds configured size limit",
+            ));
+        }
+        Ok(Some(header))
     }
 
     pub fn delta_base_hint(&self, id: &ObjectId) -> io::Result<Option<ObjectId>> {
@@ -483,7 +693,7 @@ impl LooseObjectStore {
     fn read_object_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<LooseObject> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -491,17 +701,30 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        if self.is_implicit_empty_tree(id) {
+            return Ok(self.implicit_empty_tree(id));
+        }
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "git object not found in alternates",
             ));
         }
+        if self.packed_objects_first {
+            match self.packed_store.read_object(id) {
+                Ok(object) => return Ok(object),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
         let path = self.object_path(id)?;
         let file = match fs::File::open(path) {
             Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                if self.packed_objects_first {
+                    return self.read_object_from_alternates(id, visited);
+                }
                 match self.packed_store.read_object(id) {
                     Ok(object) => return Ok(object),
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -525,7 +748,7 @@ impl LooseObjectStore {
     fn contains_object_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<bool> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -533,23 +756,71 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        if self.is_implicit_empty_tree(id) {
+            return Ok(true);
+        }
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(false);
+        }
+        if self.packed_objects_first && self.packed_store.contains_object(id)? {
+            return Ok(true);
         }
         if self.object_path(id)?.is_file() {
             return Ok(true);
         }
-        if self.packed_store.contains_object(id)? {
+        if !self.packed_objects_first && self.packed_store.contains_object(id)? {
             return Ok(true);
         }
         self.contains_object_in_alternates(id, visited)
     }
 
+    fn retain_missing_objects_inner(
+        &self,
+        missing: &mut HashSet<ObjectId>,
+        visited: &mut ObjectDirectoryVisitSet,
+    ) -> io::Result<()> {
+        missing.retain(|id| !self.is_implicit_empty_tree(id));
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let key = self.canonical_objects_dir();
+        if !visited.insert(key) {
+            return Ok(());
+        }
+        let present_loose = missing
+            .iter()
+            .filter_map(|id| match self.object_path(id) {
+                Ok(path) if path.is_file() => Some(Ok(id.clone())),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        for id in present_loose {
+            missing.remove(&id);
+        }
+        if missing.is_empty() {
+            return Ok(());
+        }
+        self.packed_store.retain_missing_objects(missing)?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+        for alternate in self.alternate_object_dirs()?.iter().cloned() {
+            Self::new(alternate, self.algorithm)
+                .with_max_object_bytes(self.max_object_bytes)
+                .retain_missing_objects_inner(missing, visited)?;
+            if missing.is_empty() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     fn object_kind_hint_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<GitObjectKind>> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -557,9 +828,17 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        if self.is_implicit_empty_tree(id) {
+            return Ok(Some(GitObjectKind::Tree));
+        }
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(None);
+        }
+        if self.packed_objects_first
+            && let Some(kind) = self.packed_store.object_kind_hint(id)?
+        {
+            return Ok(Some(kind));
         }
         match fs::File::open(self.object_path(id)?) {
             Ok(file) => {
@@ -574,6 +853,9 @@ impl LooseObjectStore {
                 Ok(Some(kind))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if self.packed_objects_first {
+                    return self.object_kind_hint_from_alternates(id, visited);
+                }
                 match self.packed_store.object_kind_hint(id)? {
                     Some(kind) => Ok(Some(kind)),
                     None => self.object_kind_hint_from_alternates(id, visited),
@@ -586,7 +868,7 @@ impl LooseObjectStore {
     fn read_tree_refs_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Vec<TreeObjectRef>> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -594,12 +876,22 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        if self.is_implicit_empty_tree(id) {
+            return Ok(Vec::new());
+        }
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "git object not found in alternates",
             ));
+        }
+        if self.packed_objects_first {
+            match self.packed_store.read_tree_refs(id) {
+                Ok(entries) => return Ok(entries),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
         }
         match fs::File::open(self.object_path(id)?) {
             Ok(file) => {
@@ -618,6 +910,9 @@ impl LooseObjectStore {
                 decode_tree_object_refs(id.algorithm(), &content)
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if self.packed_objects_first {
+                    return self.read_tree_refs_from_alternates(id, visited);
+                }
                 match self.packed_store.read_tree_refs(id) {
                     Ok(entries) => Ok(entries),
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -633,7 +928,7 @@ impl LooseObjectStore {
     fn delta_base_hint_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<ObjectId>> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -641,7 +936,7 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(None);
         }
@@ -658,7 +953,7 @@ impl LooseObjectStore {
     fn object_disk_size_hint_inner(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<u64>> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -666,7 +961,7 @@ impl LooseObjectStore {
                 "object id algorithm does not match store",
             ));
         }
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(None);
         }
@@ -700,6 +995,111 @@ impl LooseObjectStore {
         ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
         Ok(ids)
+    }
+
+    pub fn minimum_unique_abbrev_len_for_ids(
+        &self,
+        ids: &[ObjectId],
+        minimum: usize,
+    ) -> io::Result<usize> {
+        let full_len = self.algorithm.digest_len() * 2;
+        if minimum >= full_len {
+            return Ok(full_len);
+        }
+        let mut targets = ids.to_vec();
+        for id in &targets {
+            if id.algorithm() != self.algorithm {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "object id algorithm does not match store",
+                ));
+            }
+        }
+        targets.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        targets.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
+        if targets.is_empty() {
+            return Ok(minimum);
+        }
+        let mut required = minimum;
+        for pair in targets.windows(2) {
+            let [left, right] = pair else {
+                continue;
+            };
+            required = required
+                .max(object_hex_common_prefix_len_bytes(left.as_bytes(), right.as_bytes()) + 1);
+        }
+        self.update_unique_abbrev_len_for_ids_inner(&targets, &mut required, &mut HashSet::new())?;
+        Ok(required.min(full_len))
+    }
+
+    fn update_unique_abbrev_len_for_ids_inner(
+        &self,
+        sorted_targets: &[ObjectId],
+        required: &mut usize,
+        visited: &mut ObjectDirectoryVisitSet,
+    ) -> io::Result<()> {
+        let key = self.canonical_objects_dir();
+        if !visited.insert(key) {
+            return Ok(());
+        }
+        self.packed_store
+            .update_unique_abbrev_len_for_ids(sorted_targets, required)?;
+        let mut start = 0_usize;
+        while start < sorted_targets.len() {
+            let fanout = sorted_targets[start].as_bytes()[0];
+            let mut end = start + 1;
+            while end < sorted_targets.len() && sorted_targets[end].as_bytes()[0] == fanout {
+                end += 1;
+            }
+            self.update_unique_abbrev_len_from_loose_fanout(
+                fanout,
+                &sorted_targets[start..end],
+                required,
+            )?;
+            start = end;
+        }
+        for alternate in self.alternate_object_dirs()?.iter().cloned() {
+            Self::new(alternate, self.algorithm)
+                .with_max_object_bytes(self.max_object_bytes)
+                .update_unique_abbrev_len_for_ids_inner(sorted_targets, required, visited)?;
+        }
+        Ok(())
+    }
+
+    fn update_unique_abbrev_len_from_loose_fanout(
+        &self,
+        fanout: u8,
+        sorted_targets: &[ObjectId],
+        required: &mut usize,
+    ) -> io::Result<()> {
+        let dir_name = format!("{fanout:02x}");
+        let entries = match fs::read_dir(self.objects_dir.join(&dir_name)) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let suffix_len = self.algorithm.digest_len() * 2 - 2;
+        for entry in entries {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+            if file_name.len() != suffix_len
+                || !file_name.as_bytes().iter().all(u8::is_ascii_hexdigit)
+            {
+                continue;
+            }
+            if !sorted_targets.iter().any(|target| {
+                loose_object_suffix_matches_prefix(file_name.as_bytes(), target, *required)
+            }) || !entry.file_type()?.is_file()
+            {
+                continue;
+            }
+            let candidate = loose_object_id_from_parts(self.algorithm, &dir_name, file_name)?;
+            update_unique_abbrev_len_for_candidate(sorted_targets, candidate.as_bytes(), required);
+        }
+        Ok(())
     }
 
     pub fn disk_object_ids(&self) -> io::Result<Vec<ObjectId>> {
@@ -794,9 +1194,9 @@ impl LooseObjectStore {
         &self,
         hex_prefix: &str,
         resolved: &mut Option<ObjectId>,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<()> {
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(());
         }
@@ -869,9 +1269,9 @@ impl LooseObjectStore {
     fn collect_object_ids_inner(
         &self,
         ids: &mut Vec<ObjectId>,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<()> {
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(());
         }
@@ -891,9 +1291,9 @@ impl LooseObjectStore {
     fn collect_disk_object_entries_inner(
         &self,
         entries: &mut Vec<(ObjectId, u64)>,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<()> {
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(());
         }
@@ -915,8 +1315,11 @@ impl LooseObjectStore {
         Ok(())
     }
 
-    fn object_id_capacity_hint_inner(&self, visited: &mut HashSet<PathBuf>) -> io::Result<usize> {
-        let key = canonical_or_original(&self.objects_dir);
+    fn object_id_capacity_hint_inner(
+        &self,
+        visited: &mut ObjectDirectoryVisitSet,
+    ) -> io::Result<usize> {
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(0);
         }
@@ -942,10 +1345,10 @@ impl LooseObjectStore {
     fn for_each_object_id_inner(
         &self,
         for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
         emitted: &mut HashSet<ObjectId>,
     ) -> io::Result<()> {
-        let key = canonical_or_original(&self.objects_dir);
+        let key = self.canonical_objects_dir();
         if !visited.insert(key) {
             return Ok(());
         }
@@ -990,7 +1393,7 @@ impl LooseObjectStore {
     fn read_object_from_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<LooseObject> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             match Self::new(alternate, self.algorithm)
@@ -1011,7 +1414,7 @@ impl LooseObjectStore {
     fn read_tree_refs_from_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Vec<TreeObjectRef>> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             match Self::new(alternate, self.algorithm)
@@ -1032,7 +1435,7 @@ impl LooseObjectStore {
     fn contains_object_in_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<bool> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             if Self::new(alternate, self.algorithm)
@@ -1048,7 +1451,7 @@ impl LooseObjectStore {
     fn object_kind_hint_from_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<GitObjectKind>> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             match Self::new(alternate, self.algorithm)
@@ -1067,7 +1470,7 @@ impl LooseObjectStore {
     fn delta_base_hint_from_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<ObjectId>> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             match Self::new(alternate, self.algorithm)
@@ -1086,7 +1489,7 @@ impl LooseObjectStore {
     fn object_disk_size_hint_from_alternates(
         &self,
         id: &ObjectId,
-        visited: &mut HashSet<PathBuf>,
+        visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<Option<u64>> {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             match Self::new(alternate, self.algorithm)
@@ -1161,6 +1564,27 @@ impl LooseObjectStore {
         let hex = object_id_hex_bytes(id, &mut hex)?;
         Ok(self.objects_dir.join(&hex[..2]).join(&hex[2..]))
     }
+
+    fn is_implicit_empty_tree(&self, id: &ObjectId) -> bool {
+        if id.algorithm() != self.algorithm {
+            return false;
+        }
+        let expected = match self.algorithm {
+            GitHashAlgorithm::Sha1 => SHA1_EMPTY_TREE_ID
+                .get_or_init(|| hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Tree, &[])),
+            GitHashAlgorithm::Sha256 => SHA256_EMPTY_TREE_ID
+                .get_or_init(|| hash_object(GitHashAlgorithm::Sha256, GitObjectKind::Tree, &[])),
+        };
+        id == expected
+    }
+
+    fn implicit_empty_tree(&self, id: &ObjectId) -> LooseObject {
+        LooseObject {
+            id: id.clone(),
+            kind: GitObjectKind::Tree,
+            content: Vec::new(),
+        }
+    }
 }
 
 fn alternates_file_reader(file: fs::File) -> io::BufReader<fs::File> {
@@ -1231,6 +1655,47 @@ impl<W: Write> Write for LooseBlobContentWriter<W> {
 impl GitObjectStore for LooseObjectStore {
     fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
         Self::read_object(self, id)
+    }
+
+    fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        match self.loose_object_prefix(id, max_bytes)? {
+            Some(object) => Ok(Some(object)),
+            None => self.packed_store.read_object_prefix(id, max_bytes),
+        }
+    }
+
+    fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        if let Some((_, size)) = self.loose_object_header_hint(id)? {
+            if size <= max_bytes {
+                return Ok(PrefixOrFullObject {
+                    object: self.read_object(id)?,
+                    is_complete: true,
+                });
+            }
+            if let Some(object) = self.loose_object_prefix(id, max_bytes)? {
+                return Ok(PrefixOrFullObject {
+                    object,
+                    is_complete: false,
+                });
+            }
+        }
+
+        match self.packed_store.read_object_prefix_or_full(id, max_bytes) {
+            Ok(result) => Ok(result),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(PrefixOrFullObject {
+                object: self.read_object(id)?,
+                is_complete: true,
+            }),
+            Err(error) => Err(error),
+        }
     }
 
     fn object_id_capacity_hint(&self) -> io::Result<usize> {
@@ -1343,6 +1808,52 @@ impl GitObjectStore for LooseObjectStore {
 impl GitObjectStore for PackedFirstObjectStore<'_> {
     fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
         self.inner.read_object_packed_first(id)
+    }
+
+    fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        match self.inner.packed_store.read_object_prefix(id, max_bytes)? {
+            Some(object) => Ok(Some(object)),
+            None => self.inner.loose_object_prefix(id, max_bytes),
+        }
+    }
+
+    fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        match self
+            .inner
+            .packed_store
+            .read_object_prefix_or_full(id, max_bytes)
+        {
+            Ok(result) => Ok(result),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if let Some((_, size)) = self.inner.loose_object_header_hint(id)? {
+                    if size <= max_bytes {
+                        return Ok(PrefixOrFullObject {
+                            object: self.inner.read_object(id)?,
+                            is_complete: true,
+                        });
+                    }
+                }
+                if let Some(object) = self.inner.loose_object_prefix(id, max_bytes)? {
+                    return Ok(PrefixOrFullObject {
+                        object,
+                        is_complete: false,
+                    });
+                }
+                Ok(PrefixOrFullObject {
+                    object: self.inner.read_object(id)?,
+                    is_complete: true,
+                })
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn object_id_capacity_hint(&self) -> io::Result<usize> {
@@ -1496,6 +2007,22 @@ impl GitObjectStore for PackedFirstObjectStore<'_> {
     }
 }
 
+impl PackedFirstObjectStore<'_> {
+    pub fn read_object_transient(&self, id: &ObjectId) -> io::Result<LooseObject> {
+        if id.algorithm() != self.inner.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "object id algorithm does not match store",
+            ));
+        }
+        match self.inner.packed_store.read_object_transient(id) {
+            Ok(object) => Ok(object),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => self.inner.read_object(id),
+            Err(error) => Err(error),
+        }
+    }
+}
+
 impl GitObjectSink for PackedFirstObjectStore<'_> {
     fn write_object(&self, kind: GitObjectKind, content: &[u8]) -> io::Result<ObjectId> {
         self.inner.write_object(kind, content)
@@ -1559,6 +2086,19 @@ fn canonical_or_original(path: &Path) -> PathBuf {
 }
 
 fn read_loose_object_header(reader: &mut impl Read) -> io::Result<(GitObjectKind, usize)> {
+    let header = read_literal_loose_object_header(reader)?;
+    if header.kind.len() > 32 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object type header too long",
+        ));
+    }
+    let kind = GitObjectKind::parse(&header.kind)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid object type"))?;
+    Ok((kind, header.size))
+}
+
+fn read_literal_loose_object_header(reader: &mut impl Read) -> io::Result<LooseObjectHeader> {
     const MAX_HEADER_LEN: usize = 128;
     let mut header = Vec::with_capacity(32);
     let mut byte = [0_u8; 1];
@@ -1590,16 +2130,11 @@ fn read_loose_object_header(reader: &mut impl Read) -> io::Result<(GitObjectKind
                 "loose git object header is malformed",
             )
         })?;
-    if space > 32 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "object type header too long",
-        ));
-    }
-    let kind = GitObjectKind::parse(&header[..space])
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid object type"))?;
     let size = parse_loose_object_size(&header[space + 1..])?;
-    Ok((kind, size))
+    Ok(LooseObjectHeader {
+        kind: header[..space].to_vec(),
+        size,
+    })
 }
 
 fn verify_loose_object_copy<R: Read>(
@@ -1719,6 +2254,19 @@ fn write_temp_object(path: &Path, bytes: &[u8]) -> io::Result<()> {
 pub fn encode_loose_object(kind: GitObjectKind, content: &[u8]) -> io::Result<Vec<u8>> {
     let mut encoder = ZlibEncoder::new(Vec::new(), loose_object_compression());
     write_loose_object_header(&mut encoder, kind, content.len())?;
+    encoder.write_all(content)?;
+    encoder.finish()
+}
+
+pub fn encode_literal_loose_object(kind: &[u8], content: &[u8]) -> io::Result<Vec<u8>> {
+    hash_literal_object(GitHashAlgorithm::Sha1, kind, content)?;
+    let mut encoder = ZlibEncoder::new(Vec::new(), loose_object_compression());
+    encoder.write_all(kind)?;
+    encoder.write_all(b" ")?;
+    let mut size = [0_u8; 20];
+    let size_len = write_decimal_usize(&mut size, content.len());
+    encoder.write_all(&size[..size_len])?;
+    encoder.write_all(b"\0")?;
     encoder.write_all(content)?;
     encoder.finish()
 }
@@ -1938,13 +2486,62 @@ fn loose_object_id_from_parts(
     ObjectId::from_hex_bytes(algorithm, &hex_id[..hex_len])
 }
 
+fn loose_object_suffix_matches_prefix(suffix: &[u8], target: &ObjectId, prefix_len: usize) -> bool {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    for hex_index in 2..prefix_len.min(target.hex_len()) {
+        let byte = target.as_bytes()[hex_index / 2];
+        let nibble = if hex_index % 2 == 0 {
+            byte >> 4
+        } else {
+            byte & 0x0f
+        };
+        if suffix.get(hex_index - 2).map(u8::to_ascii_lowercase) != Some(HEX[nibble as usize]) {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
+
+    fn write_fake_loose_object_id(objects_dir: &Path, hex: &str) -> ObjectId {
+        let dir = objects_dir.join(&hex[..2]);
+        fs::create_dir_all(&dir).expect("create loose fanout");
+        fs::write(dir.join(&hex[2..]), b"").expect("write fake loose object");
+        ObjectId::from_hex(GitHashAlgorithm::Sha1, hex).expect("parse fake object id")
+    }
+
+    #[test]
+    fn target_abbrev_len_uses_nearby_fanouts_and_ignores_unrelated_collisions() {
+        let dir = TempDir::new().expect("temp object dir");
+        let target =
+            write_fake_loose_object_id(dir.path(), "1234567000000000000000000000000000000000");
+        write_fake_loose_object_id(dir.path(), "1234567100000000000000000000000000000000");
+        let unrelated_target =
+            write_fake_loose_object_id(dir.path(), "abc0000000000000000000000000000000000000");
+        write_fake_loose_object_id(dir.path(), "def0000000000000000000000000000000000000");
+        write_fake_loose_object_id(dir.path(), "def0000100000000000000000000000000000000");
+        let store = LooseObjectStore::new(dir.path(), GitHashAlgorithm::Sha1);
+
+        assert_eq!(
+            store
+                .minimum_unique_abbrev_len_for_ids(&[target], 7)
+                .expect("target abbrev"),
+            8
+        );
+        assert_eq!(
+            store
+                .minimum_unique_abbrev_len_for_ids(&[unrelated_target], 7)
+                .expect("unrelated target abbrev"),
+            7
+        );
+    }
 
     #[test]
     fn writes_loose_blob_readable_by_stock_git() {
@@ -2388,89 +2985,48 @@ mod tests {
         assert_eq!(line.capacity(), ALTERNATE_LINE_INITIAL_CAPACITY);
     }
 
-    fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
-            .arg("init")
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+    #[test]
+    fn literal_object_write_and_header_inspection_support_unknown_types() {
+        let repo = git_init();
+        let store = LooseObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+
+        let id = store
+            .write_literal_object(b"bogus", b"bogus")
+            .expect("write literal object");
+        let header = store
+            .literal_object_header_hint(&id)
+            .expect("read literal header")
+            .expect("literal header exists");
+
+        assert_eq!(id.to_hex(), "fa415cf73efce21a4e53886b402092a1d883d42b");
+        assert_eq!(header.kind, b"bogus");
+        assert_eq!(header.size, 5);
+        assert_eq!(
+            store
+                .read_object(&id)
+                .expect_err("unknown object type")
+                .to_string(),
+            "invalid object type"
         );
-        repo
+    }
+
+    fn git_init() -> TempDir {
+        stock_git_support::git_init()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        String::from_utf8(git_raw(repo, args))
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 
     fn git_raw<const N: usize>(repo: &TempDir, args: [&str; N]) -> Vec<u8> {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
+        stock_git_support::git_raw(repo, &args)
     }
 
     fn git_env<const N: usize>(repo: &TempDir, args: [&str; N]) {
-        let output = Command::new("git")
-            .args(["-c", "commit.gpgsign=false"])
-            .args(args)
-            .current_dir(repo.path())
-            .env("GIT_AUTHOR_NAME", "Zmin")
-            .env("GIT_AUTHOR_EMAIL", "zmin@example.com")
-            .env("GIT_AUTHOR_DATE", "1700000000 +0000")
-            .env("GIT_COMMITTER_NAME", "Zmin")
-            .env("GIT_COMMITTER_EMAIL", "zmin@example.com")
-            .env("GIT_COMMITTER_DATE", "1700000000 +0000")
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        stock_git_support::git_env(repo, &args);
     }
 
     fn git_hash_object_write(repo: &TempDir, content: &[u8]) -> String {
-        use std::io::Write as _;
-        use std::process::Stdio;
-
-        let mut child = Command::new("git")
-            .args(["hash-object", "-w", "--stdin"])
-            .current_dir(repo.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("spawn git hash-object");
-        child
-            .stdin
-            .as_mut()
-            .expect("git stdin")
-            .write_all(content)
-            .expect("write git stdin");
-        let output = child.wait_with_output().expect("wait git hash-object");
-        assert!(
-            output.status.success(),
-            "git hash-object failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git stdout utf8")
-            .trim()
-            .to_owned()
+        stock_git_support::git_hash_object_write(repo, content)
     }
 }

@@ -33,6 +33,19 @@ fn two_commit_repo() -> TempDir {
     repo
 }
 
+fn two_commit_repo_with_zmin() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"one\n").expect("write first");
+    run_zmin(repo.path(), ["add", "-A"]);
+    run_zmin_with_env(repo.path(), ["commit", "-m", "first"]);
+    fs::write(repo.path().join("a.txt"), b"two\n").expect("write second");
+    fs::write(repo.path().join("b.txt"), b"two\n").expect("write added");
+    run_zmin(repo.path(), ["add", "-A"]);
+    run_zmin_with_env(repo.path(), ["commit", "-m", "second"]);
+    repo
+}
+
 fn checkout_index_fixture_repo() -> TempDir {
     let repo = git_init();
     fs::create_dir_all(repo.path().join("docs")).expect("create docs");
@@ -68,6 +81,11 @@ fn checkout_index_conflict_fixture_repo() -> TempDir {
     git(repo.path(), ["commit", "-am", "main"]);
     git_failure_output(repo.path(), &["merge", "side"]);
     repo
+}
+
+fn case_insensitive_filesystem(root: &std::path::Path) -> bool {
+    fs::write(root.join("CamelCase"), b"probe\n").expect("write case probe");
+    root.join("camelcase").exists()
 }
 
 fn parse_checkout_index_temp_row(stdout: &str) -> (Vec<String>, String) {
@@ -119,6 +137,76 @@ fn switch_outputs_match_stock_git(args: &[&str]) {
         git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
         git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
         "switch status mismatch for {args:?}"
+    );
+}
+
+#[test]
+fn checkout_orphan_again_after_attaching_current_orphan_branch_matches_stock_git() {
+    let git_repo = two_commit_repo();
+    let zmin_repo = two_commit_repo_with_zmin();
+
+    let git_head = git(git_repo.path(), ["rev-parse", "HEAD"]);
+    let git_parent = git(git_repo.path(), ["rev-parse", "HEAD^"]);
+    let zmin_head = git(zmin_repo.path(), ["rev-parse", "HEAD"]);
+    let zmin_parent = git(zmin_repo.path(), ["rev-parse", "HEAD^"]);
+
+    git(git_repo.path(), ["checkout", "--orphan", "orphan1"]);
+    run_zmin(zmin_repo.path(), ["checkout", "--orphan", "orphan1"]);
+
+    let git_fake = command_output(
+        "git",
+        git_repo.path(),
+        &[
+            "commit-tree",
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+            "-p",
+            &git_head,
+            "-p",
+            &git_parent,
+            "-m",
+            "",
+        ],
+        "git commit-tree",
+    )
+    .1;
+    let zmin_fake = command_output(
+        "git",
+        zmin_repo.path(),
+        &[
+            "commit-tree",
+            "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+            "-p",
+            &zmin_head,
+            "-p",
+            &zmin_parent,
+            "-m",
+            "",
+        ],
+        "git commit-tree",
+    )
+    .1;
+    git(
+        git_repo.path(),
+        ["update-ref", "refs/heads/orphan1", &git_fake],
+    );
+    git(
+        zmin_repo.path(),
+        ["update-ref", "refs/heads/orphan1", &zmin_fake],
+    );
+
+    let args = ["checkout", "--orphan", "orphan2"];
+    assert_eq!(
+        command_any_output("git", git_repo.path(), &args, "git checkout orphan again"),
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &args,
+            "zmin checkout orphan again"
+        ),
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--short"]),
+        git(git_repo.path(), ["status", "--short"])
     );
 }
 
@@ -860,6 +948,53 @@ fn checkout_force_head_restores_missing_worktree_file_like_stock_git() {
 }
 
 #[test]
+fn checkout_head_populates_a_missing_index_like_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::remove_file(repo.join(".git/index")).expect("remove index");
+        fs::remove_file(repo.join("a.txt")).expect("remove tracked file");
+    }
+
+    let git_run = command_any_output(
+        "git",
+        git_repo.path(),
+        &["checkout", "HEAD"],
+        "git checkout",
+    );
+    let zmin_run = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["checkout", "HEAD"],
+        "zmin checkout",
+    );
+
+    assert_eq!(zmin_run, git_run);
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.txt")).expect("read zmin file"),
+        fs::read(git_repo.path().join("a.txt")).expect("read git file")
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+}
+
+#[test]
+fn checkout_head_with_a_missing_index_protects_untracked_files_like_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::remove_file(repo.join(".git/index")).expect("remove index");
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(zmin_repo.path(), &["checkout", "HEAD"]),
+        git_failure_output(git_repo.path(), &["checkout", "HEAD"])
+    );
+}
+
+#[test]
 fn checkout_reset_branch_allows_unborn_head_like_stock_git() {
     let repo = git_init();
     run_zmin(repo.path(), ["checkout", "-B", "main"]);
@@ -871,6 +1006,45 @@ fn checkout_reset_branch_allows_unborn_head_like_stock_git() {
         !repo.path().join(".git/refs/heads/main").exists(),
         "unborn checkout should not create a branch ref before the first commit"
     );
+}
+
+#[test]
+fn reset_hard_on_unborn_orphan_allows_case_conflicting_checkout_like_stock_git() {
+    let probe = TempDir::new().expect("temp probe");
+    if !case_insensitive_filesystem(probe.path()) {
+        return;
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join("Gitweb"), b"").expect("write initial Gitweb");
+        git(repo, ["add", "Gitweb"]);
+        git_with_env(repo, ["commit", "-m", "add Gitweb"]);
+    }
+
+    git(git_repo.path(), ["checkout", "--orphan", "todo"]);
+    run_zmin(zmin_repo.path(), ["checkout", "--orphan", "todo"]);
+    git(git_repo.path(), ["reset", "--hard"]);
+    run_zmin(zmin_repo.path(), ["reset", "--hard"]);
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::create_dir_all(repo.join("gitweb/subdir")).expect("create gitweb dir");
+        fs::write(repo.join("gitweb/subdir/file"), b"").expect("write nested file");
+        git(repo, ["add", "gitweb"]);
+        git_with_env(repo, ["commit", "-m", "add gitweb/subdir/file"]);
+    }
+
+    git(git_repo.path(), ["checkout", "main"]);
+    run_zmin(zmin_repo.path(), ["checkout", "main"]);
+
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+    );
+    assert!(zmin_repo.path().join("Gitweb").is_file());
+    assert!(!zmin_repo.path().join("gitweb").is_dir());
 }
 
 #[test]
@@ -1918,6 +2092,53 @@ fn checkout_new_branch_from_head_preserves_dirty_state_like_stock_git() {
 }
 
 #[test]
+fn checkout_existing_branch_preserves_non_conflicting_staged_change_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join("a.txt"), b"base a\n").expect("write base a");
+        fs::write(repo.join("b.txt"), b"base b\n").expect("write base b");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "base"]);
+        git(repo, ["switch", "-c", "feature"]);
+        fs::write(repo.join("b.txt"), b"feature b\n").expect("write feature b");
+        git(repo, ["add", "b.txt"]);
+        git_with_env(repo, ["commit", "-m", "feature"]);
+        git(repo, ["switch", "main"]);
+        fs::write(repo.join("a.txt"), b"staged a\n").expect("write staged a");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+
+    let git_output = command_any_output("git", git_repo.path(), &["checkout", "feature"], "git");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["checkout", "feature"],
+        "zmin",
+    );
+
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v2"]),
+        git(git_repo.path(), ["status", "--porcelain=v2"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["diff", "--cached", "--raw"]),
+        git(git_repo.path(), ["diff", "--cached", "--raw"])
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.txt")).expect("read zmin staged file"),
+        fs::read(git_repo.path().join("a.txt")).expect("read git staged file")
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("b.txt")).expect("read zmin target file"),
+        fs::read(git_repo.path().join("b.txt")).expect("read git target file")
+    );
+}
+
+#[test]
 fn reset_paths_match_stock_git_state() {
     let git_repo = two_commit_repo();
     let zmin_repo = two_commit_repo();
@@ -1950,6 +2171,58 @@ fn reset_paths_match_stock_git_state() {
     assert_eq!(
         git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
         git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+    );
+}
+
+#[test]
+fn reset_patch_selectively_unstages_hunks_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(
+            repo.join("a.txt"),
+            b"one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n",
+        )
+        .expect("write base");
+        git(repo, ["add", "a.txt"]);
+        git_with_env(repo, ["commit", "-m", "base"]);
+        fs::write(
+            repo.join("a.txt"),
+            b"ONE\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nTEN\n",
+        )
+        .expect("write staged hunks");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+
+    let git_output = command_any_output_with_stdin(
+        "git",
+        git_repo.path(),
+        &["reset", "--patch", "--", "a.txt"],
+        "y\nn\n",
+        "git reset patch",
+    );
+    let zmin_output = command_any_output_with_stdin(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["reset", "--patch", "--", "a.txt"],
+        "y\nn\n",
+        "zmin reset patch",
+    );
+    assert_eq!(zmin_output, git_output);
+
+    assert_eq!(
+        git(zmin_repo.path(), ["diff", "--cached", "--", "a.txt"]),
+        git(git_repo.path(), ["diff", "--cached", "--", "a.txt"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["diff", "--", "a.txt"]),
+        git(git_repo.path(), ["diff", "--", "a.txt"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["rev-parse", "HEAD"]),
+        git(git_repo.path(), ["rev-parse", "HEAD"])
     );
 }
 

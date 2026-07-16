@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use std::{fs, path::Path, path::PathBuf};
 
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 static REMOTE_HTTP_HELPER: OnceLock<PathBuf> = OnceLock::new();
 static STOCK_GIT: OnceLock<PathBuf> = OnceLock::new();
@@ -179,6 +180,67 @@ pub fn write_file(repo: &Path, path: &str, content: &str) {
         fs::create_dir_all(parent).expect("create parent dirs");
     }
     fs::write(path, content).expect("write file");
+}
+
+pub fn first_index_entry_device(repo: &Path) -> u32 {
+    let index = fs::read(repo.join(".git/index")).expect("read index");
+    let device_offset = 12 + 16;
+    u32::from_be_bytes(
+        index[device_offset..device_offset + 4]
+            .try_into()
+            .expect("first index entry device"),
+    )
+}
+
+pub fn set_first_index_entry_device(repo: &Path, device: u32) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    let device_offset = 12 + 16;
+    index[device_offset..device_offset + 4].copy_from_slice(&device.to_be_bytes());
+    rewrite_sha1_index_checksum(&mut index);
+    fs::write(index_path, index).expect("write index");
+}
+
+pub fn corrupt_first_index_entry_extended_stat(repo: &Path) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    let entry_offset = 12;
+    for field_offset in [0, 4, 12, 20, 28, 32] {
+        let offset = entry_offset + field_offset;
+        let value = u32::from_be_bytes(
+            index[offset..offset + 4]
+                .try_into()
+                .expect("index stat field"),
+        );
+        index[offset..offset + 4].copy_from_slice(&value.wrapping_add(1).to_be_bytes());
+    }
+    rewrite_sha1_index_checksum(&mut index);
+    fs::write(index_path, index).expect("write index");
+}
+
+pub fn corrupt_first_index_entry_ctime(repo: &Path) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    let entry_offset = 12;
+    for field_offset in [0, 4] {
+        let offset = entry_offset + field_offset;
+        let value = u32::from_be_bytes(
+            index[offset..offset + 4]
+                .try_into()
+                .expect("index ctime field"),
+        );
+        index[offset..offset + 4].copy_from_slice(&value.wrapping_add(1).to_be_bytes());
+    }
+    rewrite_sha1_index_checksum(&mut index);
+    fs::write(index_path, index).expect("write index");
+}
+
+fn rewrite_sha1_index_checksum(index: &mut [u8]) {
+    let checksum_offset = index.len() - GitHashAlgorithm::Sha1.digest_len();
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&index[..checksum_offset]);
+    let checksum = hasher.finalize();
+    index[checksum_offset..].copy_from_slice(checksum.as_bytes());
 }
 
 pub fn run_zmin<const N: usize>(cwd: &std::path::Path, args: [&str; N]) -> String {
@@ -478,6 +540,28 @@ pub fn command_output_with_env(
             .expect("stderr utf8")
             .trim_end_matches('\n')
             .to_owned(),
+    )
+}
+
+pub fn command_output_with_identity_env(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    label: &str,
+) -> (i32, String, String) {
+    command_output_with_env(
+        command,
+        cwd,
+        args,
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+        label,
     )
 }
 

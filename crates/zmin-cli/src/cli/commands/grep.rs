@@ -61,6 +61,7 @@ pub(crate) fn dispatch(
         } => {
             let (pattern, open_files_in_pager, args) =
                 normalize_open_files_in_pager_pattern(pattern, args, open_files_in_pager, raw_args);
+            let args = preserve_grep_path_separator(args, raw_args);
             super::grep_commands::grep(
                 cached,
                 untracked,
@@ -118,6 +119,19 @@ pub(crate) fn dispatch(
         }
         _ => unreachable!("non-grep command dispatched to grep"),
     }
+}
+
+fn preserve_grep_path_separator(mut args: Vec<String>, raw_args: &[String]) -> Vec<String> {
+    let Some(separator) = raw_args.iter().position(|arg| arg == "--") else {
+        return args;
+    };
+    if args.iter().any(|arg| arg == "--") {
+        return args;
+    }
+    let tail = &raw_args[separator + 1..];
+    let insertion = args.len().saturating_sub(tail.len());
+    args.insert(insertion, "--".to_owned());
+    args
 }
 
 fn normalize_open_files_in_pager_pattern(

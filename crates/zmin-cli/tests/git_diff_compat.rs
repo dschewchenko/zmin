@@ -6,9 +6,10 @@ use std::{fs, path::Path};
 use tempfile::TempDir;
 
 use common::{
-    command_any_output_with_stdin, configure_identity, git, git_args, git_failure_output, git_init,
-    git_status, git_with_env, git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, write_file, zmin_bin,
+    command_any_output_with_stdin, command_output_with_env, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, git_with_stdin, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
+    run_zmin_with_stdin, write_file, zmin_bin,
 };
 
 fn command_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, String) {
@@ -77,6 +78,27 @@ fn diff_bare_unified_option_keeps_following_rev_operand() {
         run_zmin(repo.path(), recursive_args),
         git(repo.path(), recursive_args)
     );
+}
+
+#[test]
+fn diff_explicit_path_separator_keeps_missing_paths_out_of_revision_parsing() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "tracked.txt", "tracked\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    fs::remove_file(repo.path().join("tracked.txt")).expect("remove tracked file");
+
+    for args in [
+        ["diff", "--cached", "--", "tracked.txt"].as_slice(),
+        ["diff", "HEAD", "--", "missing.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}",
+        );
+    }
 }
 
 #[test]
@@ -157,7 +179,13 @@ fn diff_dirstat_family_matches_stock_git_for_porcelain_and_plumbing() {
         ["diff-tree", "--dirstat=files", "HEAD~1", "HEAD"].as_slice(),
         ["diff-tree", "--dirstat=files,10", "HEAD~1", "HEAD"].as_slice(),
         ["diff-tree", "--dirstat=cumulative", "HEAD~1", "HEAD"].as_slice(),
-        ["diff-tree", "--dirstat-by-file=10,cumulative", "HEAD~1", "HEAD"].as_slice(),
+        [
+            "diff-tree",
+            "--dirstat-by-file=10,cumulative",
+            "HEAD~1",
+            "HEAD",
+        ]
+        .as_slice(),
         ["diff-tree", "--cumulative", "HEAD~1", "HEAD"].as_slice(),
         ["diff-tree", "--dirstat", "--cumulative", "HEAD~1", "HEAD"].as_slice(),
     ] {
@@ -186,6 +214,135 @@ fn diff_blob_to_blob_operands_match_stock_git() {
             "blob-to-blob diff should match stock Git for {args:?}",
         );
     }
+}
+
+#[test]
+fn diff_same_tree_pairs_match_stock_git_for_machine_formats() {
+    let repo = two_commit_repo();
+    let head_tree = git(repo.path(), ["rev-parse", "HEAD^{tree}"]);
+
+    for args in [
+        ["diff", "--raw", head_tree.as_str(), head_tree.as_str()].as_slice(),
+        [
+            "diff",
+            "-z",
+            "--raw",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--name-status",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "-z",
+            "--name-status",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        ["diff", "--numstat", head_tree.as_str(), head_tree.as_str()].as_slice(),
+        [
+            "diff",
+            "-z",
+            "--numstat",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "-M",
+            "--raw",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "-M",
+            "--name-status",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "-M",
+            "--numstat",
+            head_tree.as_str(),
+            head_tree.as_str(),
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "same-tree diff should match stock Git for {args:?}",
+        );
+    }
+}
+
+#[test]
+fn diff_cached_raw_z_uses_stock_git_default_abbrev() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    write_file(repo.path(), "b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "a.txt", "one changed\n");
+    write_file(repo.path(), "c.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+
+    for args in [
+        ["diff", "--cached", "--raw"].as_slice(),
+        ["diff", "--cached", "--raw", "-z"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "cached raw diff should match stock Git for {args:?}",
+        );
+    }
+}
+
+#[test]
+fn diff_stat_scales_graph_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    let big = (0..643).map(|i| format!("big-{i}\n")).collect::<String>();
+    let mid = (0..460).map(|i| format!("mid-{i}\n")).collect::<String>();
+    write_file(repo.path(), "big.txt", "");
+    write_file(repo.path(), "mid.txt", "");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "big.txt", &big);
+    write_file(repo.path(), "mid.txt", &mid);
+    git(repo.path(), ["add", "-A"]);
+
+    for args in [["diff", "--cached", "--stat"].as_slice()] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "stat graph scaling should match stock Git for {args:?}",
+        );
+    }
+
+    git_with_env(repo.path(), ["commit", "-m", "scaled stat"]);
+    let show_args = ["show", "HEAD", "--format=raw", "--stat"];
+    assert_eq!(
+        run_zmin_args(repo.path(), &show_args),
+        git_args(repo.path(), &show_args),
+        "stat graph scaling should match stock Git for {show_args:?}",
+    );
 }
 
 #[test]
@@ -748,6 +905,22 @@ fn log_decorate_and_notes_match_stock_git() {
 }
 
 #[test]
+fn log_decorate_full_orders_same_target_local_branches_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"base\n").expect("write base");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["branch", "oldbase"]);
+    git(repo.path(), ["branch", "keep-base"]);
+
+    assert_eq!(
+        run_zmin_args(repo.path(), &["log", "--decorate=full", "--all"]),
+        common::git_args(repo.path(), &["log", "--decorate=full", "--all"])
+    );
+}
+
+#[test]
 fn diff_tree_pretty_notes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -854,6 +1027,22 @@ fn show_patch_with_stat_matches_stock_git() {
         ["show", "--patch-with-stat", "HEAD"].as_slice(),
         ["show", "--patch-with-stat", "--summary", "HEAD"].as_slice(),
         ["show", "--patch-with-raw", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn show_raw_abbrev_controls_match_stock_git() {
+    let repo = two_commit_repo();
+
+    for args in [
+        ["show", "--raw", "--abbrev=7", "HEAD"].as_slice(),
+        ["show", "--raw", "--no-abbrev", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1328,6 +1517,49 @@ fn diff_name_status_matches_stock_git_for_cached_and_worktree() {
         run_zmin_status(repo.path(), ["diff", "--cached", "--quiet"]),
         git_status(repo.path(), ["diff", "--cached", "--quiet"])
     );
+}
+
+#[test]
+fn diff_name_only_and_name_status_match_stock_git_for_cached_and_worktree() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"old\n").expect("write a");
+    fs::write(repo.path().join("b.txt"), b"remove\n").expect("write b");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    fs::write(repo.path().join("a.txt"), b"staged\n").expect("stage modify a");
+    fs::write(repo.path().join("c.txt"), b"added\n").expect("stage add c");
+    fs::remove_file(repo.path().join("b.txt")).expect("remove b");
+    git(repo.path(), ["add", "-A"]);
+
+    for args in [
+        ["diff", "--cached", "--name-status"].as_slice(),
+        ["diff", "--cached", "--name-only"].as_slice(),
+        ["diff", "--cached", "--name-status", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    fs::write(repo.path().join("a.txt"), b"unstaged\n").expect("unstaged modify a");
+    fs::remove_file(repo.path().join("c.txt")).expect("unstaged remove c");
+    fs::write(repo.path().join("untracked.txt"), b"ignored by diff\n").expect("write untracked");
+
+    for args in [
+        ["diff", "--name-status"].as_slice(),
+        ["diff", "--name-only"].as_slice(),
+        ["diff", "--name-status", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]
@@ -1989,6 +2221,23 @@ fn diff_find_renames_exact_matches_stock_git_for_cached_formats() {
             "args: {args:?}"
         );
     }
+}
+
+#[test]
+fn diff_tree_rename_similarity_ignores_crlf_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "sample", "one\ntwo\nthree\n");
+    git(repo.path(), ["add", "sample"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    fs::write(repo.path().join("elpmas"), b"one\r\ntwo\r\nthree\r\n").expect("write crlf copy");
+    git(repo.path(), ["add", "elpmas"]);
+    fs::remove_file(repo.path().join("sample")).expect("remove sample");
+    git_with_env(repo.path(), ["commit", "-a", "-m", "rename with crlf"]);
+
+    let args = ["diff-tree", "-M", "-r", "--name-status", "HEAD^", "HEAD"];
+    assert_eq!(run_zmin(repo.path(), args), git(repo.path(), args));
 }
 
 #[test]
@@ -2767,6 +3016,30 @@ fn difftool_additional_documented_options_match_stock_git() {
 
 #[test]
 #[cfg(not(windows))]
+fn difftool_tool_help_does_not_depend_on_stock_git_runtime() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "old\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["config", "difftool.zmintest.cmd", "printf x"]);
+
+    let expected = command_output("git", repo.path(), &["difftool", "--tool-help"]);
+    let actual = command_output_with_env(
+        zmin_bin(),
+        repo.path(),
+        &["difftool", "--tool-help"],
+        &[
+            ("ZMIN_STOCK_GIT", "/definitely/missing/git"),
+            ("GIT_BIN", "/definitely/missing/git"),
+        ],
+        "zmin difftool --tool-help",
+    );
+    assert_eq!(actual, expected);
+}
+
+#[test]
+#[cfg(not(windows))]
 fn difftool_dir_diff_and_symlink_modes_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -3487,6 +3760,30 @@ fn diff_patch_matches_stock_git_for_yaml_hunk_headers() {
 }
 
 #[test]
+fn diff_patch_matches_stock_git_for_extensionless_hunk_headers() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(
+        repo.path().join("plain"),
+        concat!("A\n", "B\n", "C\n", "D\n", "E\n", "F\n"),
+    )
+    .expect("write plain");
+    git(repo.path(), ["add", "plain"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    fs::write(
+        repo.path().join("plain"),
+        concat!("A\n", "B\n", "C\n", "changed\n", "E\n", "F\n", "G\n", "H\n"),
+    )
+    .expect("rewrite plain");
+
+    assert_eq!(
+        run_zmin(repo.path(), ["diff", "plain"]),
+        git(repo.path(), ["diff", "plain"])
+    );
+}
+
+#[test]
 fn diff_patch_matches_stock_git_for_json_and_repeated_blank_alignment() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -3566,5 +3863,42 @@ fn diff_stat_binary_rows_align_like_stock_git() {
     assert_eq!(
         run_zmin(repo.path(), ["diff", "--stat"]),
         git(repo.path(), ["diff", "--stat"])
+    );
+}
+
+#[test]
+fn t1050_diff_big_file_threshold_marks_text_as_binary_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("large.txt"), b"old text\n").expect("write fixture");
+    git(repo.path(), ["add", "large.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    fs::write(repo.path().join("large.txt"), b"old text\nnew text\n").expect("rewrite fixture");
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.bigFileThreshold=1",
+                "diff",
+                "--",
+                "large.txt",
+            ]
+        ),
+        git(
+            repo.path(),
+            [
+                "-c",
+                "core.autocrlf=false",
+                "-c",
+                "core.bigFileThreshold=1",
+                "diff",
+                "--",
+                "large.txt",
+            ]
+        )
     );
 }

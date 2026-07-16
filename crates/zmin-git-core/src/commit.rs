@@ -436,14 +436,7 @@ impl<'a, S: GitObjectStore + ?Sized> CommitObjectCache<'a, S> {
         let commit = Arc::new(decode_commit(object_id.algorithm(), &object.content)?);
         self.commits
             .borrow_mut()
-            .insert(object_id.clone(), Arc::clone(&commit));
-        self.commit_links.borrow_mut().insert(
-            object_id,
-            Arc::new(CommitLinks {
-                tree: commit.tree.clone(),
-                parents: commit.parents.clone(),
-            }),
-        );
+            .insert(object_id, Arc::clone(&commit));
         Ok(commit)
     }
 
@@ -547,11 +540,11 @@ fn write_decimal_u64(out: &mut Vec<u8>, mut value: u64) {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::process::Command;
 
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
     use crate::{
         GitHashAlgorithm, GitObjectKind, GitObjectSink, GitObjectStore, InMemoryObjectStore,
         LooseObject, LooseObjectStore, TreeEntry, TreeMode, encode_tree,
@@ -577,7 +570,7 @@ mod tests {
         .len();
 
         assert_eq!(
-            commit_encode_initial_capacity(&tree, &[parent], &author, &committer, message),
+            commit_encode_initial_capacity(&tree, &[parent], &author, &committer, None, message),
             expected
         );
         assert_eq!(decimal_i64_len(0), 1);
@@ -585,7 +578,7 @@ mod tests {
 
         let large_message = vec![b'a'; COMMIT_ENCODE_INITIAL_CAPACITY_LIMIT];
         assert_eq!(
-            commit_encode_initial_capacity(&tree, &[], &author, &committer, &large_message),
+            commit_encode_initial_capacity(&tree, &[], &author, &committer, None, &large_message,),
             COMMIT_ENCODE_INITIAL_CAPACITY_LIMIT
         );
     }
@@ -787,39 +780,14 @@ mod tests {
     }
 
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
-            .arg("init")
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        repo
+        stock_git_support::git_init()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        String::from_utf8(git_raw(repo, args))
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 
     fn git_raw<const N: usize>(repo: &TempDir, args: [&str; N]) -> Vec<u8> {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
+        stock_git_support::git_raw(repo, &args)
     }
 }

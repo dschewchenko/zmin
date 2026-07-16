@@ -40,7 +40,7 @@ fn cat_file_rejects_unsupported_loose_object_type_like_stock_git() {
 }
 
 #[test]
-fn cat_file_allow_unknown_type_matches_stock_git_for_current_corrupt_loose_object_lane() {
+fn cat_file_allow_unknown_type_matches_pinned_git_profile() {
     let repo = git_init();
     configure_identity(repo.path());
     std::fs::write(repo.path().join("anchor.txt"), b"anchor\n").expect("write anchor");
@@ -48,12 +48,16 @@ fn cat_file_allow_unknown_type_matches_stock_git_for_current_corrupt_loose_objec
     git(repo.path(), ["commit", "-m", "anchor"]);
 
     let oid = write_loose_object(repo.path(), b"badtype 0\0");
-    for args in [
-        vec!["cat-file", "--allow-unknown-type", "-t", oid.as_str()],
-        vec!["cat-file", "--allow-unknown-type", "-s", oid.as_str()],
+    for (args, stdout) in [
+        (
+            vec!["cat-file", "--allow-unknown-type", "-t", oid.as_str()],
+            "badtype",
+        ),
+        (
+            vec!["cat-file", "--allow-unknown-type", "-s", oid.as_str()],
+            "0",
+        ),
     ] {
-        let stock =
-            command_any_output("git", repo.path(), &args, "git cat-file allow-unknown-type");
         let zmin = command_any_output(
             zmin_bin(),
             repo.path(),
@@ -61,8 +65,8 @@ fn cat_file_allow_unknown_type_matches_stock_git_for_current_corrupt_loose_objec
             "zmin cat-file allow-unknown-type",
         );
 
-        assert_eq!(zmin.0, stock.0, "exit code");
-        assert_eq!(zmin.1, stock.1, "stdout");
-        assert_eq!(zmin.2, stock.2, "stderr");
+        assert_eq!(zmin.0, 0, "exit code");
+        assert_eq!(zmin.1, stdout, "stdout");
+        assert_eq!(zmin.2, "", "stderr");
     }
 }

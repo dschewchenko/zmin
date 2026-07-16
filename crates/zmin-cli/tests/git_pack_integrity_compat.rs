@@ -84,6 +84,27 @@ fn fsck_matches_stock_git_for_healthy_repo_and_detects_corrupt_object() {
 }
 
 #[test]
+fn fsck_verbose_connectivity_order_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    command_any_output_with_stdin(
+        "git",
+        repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "dangling",
+        "write dangling blob",
+    );
+
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &["fsck", "--verbose"], "zmin"),
+        command_any_output("git", repo.path(), &["fsck", "--verbose"], "git")
+    );
+}
+
+#[test]
 fn fsck_missing_email_severity_config_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1822,6 +1843,20 @@ fn verify_pack_matches_stock_git_for_default_and_stats() {
     assert_eq!(
         run_zmin(repo.path(), ["verify-pack", "-s", idx]),
         git(repo.path(), ["verify-pack", "-s", idx])
+    );
+    let pack = first_pack_index(repo.path()).with_extension("pack");
+    let pack = pack.to_str().expect("pack path");
+    assert_eq!(
+        run_zmin(repo.path(), ["verify-pack", pack]),
+        git(repo.path(), ["verify-pack", pack])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["verify-pack", "-v", pack]),
+        git(repo.path(), ["verify-pack", "-v", pack])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["verify-pack", "-s", pack]),
+        git(repo.path(), ["verify-pack", "-s", pack])
     );
 
     let corrupt_repo = git_init();

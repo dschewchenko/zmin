@@ -91,6 +91,7 @@ pub(crate) struct ApplyUpdate {
     mode: IndexMode,
     deleted: bool,
     intent_to_add: bool,
+    pub(crate) noop: bool,
 }
 
 #[derive(Debug)]
@@ -120,10 +121,24 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
     if effective_options.three_way {
         effective_options.index = true;
     }
-    let repo = find_repo()?;
+    let repo = match find_repo() {
+        Ok(repo) => repo,
+        Err(_error)
+            if !effective_options.cached
+                && !effective_options.index
+                && !effective_options.three_way =>
+        {
+            return apply_outside_repo(&effective_options);
+        }
+        Err(error) => return Err(error),
+    };
+    if effective_options.index || effective_options.cached {
+        validate_repository_format(&repo)?;
+    }
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let store = runtime.object_store_adapter().as_object_store();
-    let mut index = read_repo_index(&repo)?;
+    let raw_index = read_repo_index_raw(&repo)?;
+    let mut index = expand_repo_sparse_index(&repo, &raw_index)?;
     let _accepted_allow_empty = options.allow_empty;
     let _accepted_allow_binary_replacement = options.allow_binary_replacement;
     let _accepted_apply = options.apply;
@@ -154,6 +169,16 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
             .map(remove_patch_additions)
             .collect::<Vec<_>>();
     }
+    let requires_sparse_expansion = (options.cached || effective_options.index)
+        && patches.iter().any(|patch| {
+            patch
+                .old_path
+                .iter()
+                .chain(&patch.new_path)
+                .any(|path| sparse_index_path_requires_expansion(&raw_index, path))
+        });
+    let _sparse_expansion_region =
+        requires_sparse_expansion.then(|| trace2_region("index", "ensure_full_index"));
     if options.stat {
         print_apply_stat(&patches);
         return Ok(());
@@ -227,6 +252,79 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
     Ok(())
 }
 
+fn apply_outside_repo(options: &ApplyOptions) -> Result<()> {
+    let patch_bytes = read_apply_patch_inputs(&options.patches)?;
+    let mut patches = parse_apply_patches(&patch_bytes)?;
+    apply_directory_prefix(&mut patches, options.directory.as_deref());
+    patches.retain(|patch| apply_patch_selected(patch, &options.include, &options.exclude));
+    if options.no_add {
+        patches = patches
+            .into_iter()
+            .map(remove_patch_additions)
+            .collect::<Vec<_>>();
+    }
+    if options.stat {
+        print_apply_stat(&patches);
+        return Ok(());
+    }
+    if options.numstat {
+        print_apply_numstat(&patches);
+        return Ok(());
+    }
+    if options.summary {
+        print_apply_summary(&patches);
+        return Ok(());
+    }
+    let root = std::env::current_dir().map_err(CliError::Io)?;
+    for mut patch in patches {
+        if options.reverse {
+            patch = reverse_apply_patch(patch);
+        }
+        let target = patch
+            .new_path
+            .as_ref()
+            .or(patch.old_path.as_ref())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "patch has no target path".into(),
+            })?;
+        let source = patch.old_path.as_ref().unwrap_or(target);
+        let source_path = root.join(String::from_utf8_lossy(source).as_ref());
+        let target_path = root.join(String::from_utf8_lossy(target).as_ref());
+        let base = if patch.old_path.is_some() {
+            fs::read(&source_path).map_err(CliError::Io)?
+        } else {
+            Vec::new()
+        };
+        let content = if let Some(binary) = &patch.binary {
+            apply_binary_record(&base, &binary.forward, target)?
+        } else {
+            apply_hunks_to_content(&base, &patch.hunks, target)?
+        };
+        if options.check {
+            continue;
+        }
+        if patch.deleted {
+            match fs::remove_file(&target_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(CliError::Io(error)),
+            }
+        } else {
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).map_err(CliError::Io)?;
+            }
+            fs::write(&target_path, content).map_err(CliError::Io)?;
+        }
+        if patch.rename {
+            if source_path != target_path {
+                let _ = fs::remove_file(source_path);
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn parse_apply_patches(input: &[u8]) -> Result<Vec<ApplyFilePatch>> {
     let lines = split_diff_lines(input);
     let mut patches = Vec::new();
@@ -288,13 +386,23 @@ pub(crate) fn apply_file_patch(
         .clone();
     let source_path = patch.old_path.as_ref().unwrap_or(&target_path);
     let index_entry = find_index_entry(index, source_path);
-    let base = if options.cached {
+    let base = if options.cached
+        || (options.index
+            && index_entry.is_some_and(IndexEntry::skip_worktree)
+            && !path_exists(&worktree_path_for_index_entry(&repo.root, source_path)))
+    {
         index_entry
             .map(|entry| read_index_entry_content(store, entry))
             .transpose()?
             .unwrap_or_default()
     } else {
-        read_apply_worktree_content(repo, source_path)?
+        clean_worktree_content_for_comparison_against_index(
+            repo,
+            store,
+            index,
+            source_path,
+            read_apply_worktree_content(repo, source_path, patch.old_path.is_none())?,
+        )?
     };
     if options.index {
         let index_content = index_entry
@@ -316,7 +424,26 @@ pub(crate) fn apply_file_patch(
     } else if patch.hunks.is_empty() {
         base
     } else {
-        apply_hunks_to_content(&base, &patch.hunks, source_path)?
+        match apply_hunks_to_content(&base, &patch.hunks, source_path) {
+            Ok(content) => content,
+            Err(_error)
+                if options.three_way && apply_patch_is_already_present(&base, &patch.hunks) =>
+            {
+                return Ok(ApplyUpdate {
+                    path: target_path,
+                    remove_path: None,
+                    content: base,
+                    mode: patch
+                        .new_mode
+                        .or_else(|| index_entry.map(|entry| entry.mode))
+                        .unwrap_or(IndexMode::File),
+                    deleted: patch.deleted,
+                    intent_to_add: false,
+                    noop: true,
+                });
+            }
+            Err(error) => return Err(error),
+        }
     };
     let mode = patch
         .new_mode
@@ -334,7 +461,30 @@ pub(crate) fn apply_file_patch(
         mode,
         deleted: patch.deleted,
         intent_to_add: options.intent_to_add && !patch.deleted,
+        noop: false,
     })
+}
+
+fn apply_patch_is_already_present(base: &[u8], hunks: &[ApplyHunk]) -> bool {
+    let reverse_hunks = hunks
+        .iter()
+        .map(|hunk| ApplyHunk {
+            old_start: hunk.new_start,
+            old_count: hunk.new_count,
+            new_start: hunk.old_start,
+            new_count: hunk.old_count,
+            lines: hunk
+                .lines
+                .iter()
+                .map(|line| match line {
+                    ApplyHunkLine::Context(bytes) => ApplyHunkLine::Context(bytes.clone()),
+                    ApplyHunkLine::Delete(bytes) => ApplyHunkLine::Insert(bytes.clone()),
+                    ApplyHunkLine::Insert(bytes) => ApplyHunkLine::Delete(bytes.clone()),
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    apply_hunks_to_content(base, &reverse_hunks, b"<reverse-check>").is_ok()
 }
 
 pub(crate) fn apply_hunks_to_content(
@@ -400,6 +550,9 @@ pub(crate) fn write_apply_update(
     update: ApplyUpdate,
     options: &ApplyOptions,
 ) -> Result<()> {
+    if update.noop {
+        return Ok(());
+    }
     if !options.cached {
         if let Some(remove_path) = &update.remove_path {
             let absolute = repo
@@ -424,7 +577,15 @@ pub(crate) fn write_apply_update(
             if let Some(parent) = absolute.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::write(&absolute, &update.content)?;
+            let blob_id = store.write_object(GitObjectKind::Blob, &update.content)?;
+            let worktree_content = smudge_worktree_content(
+                repo,
+                &update.path,
+                &blob_id,
+                &WorktreeCheckoutMetadata::default(),
+                update.content.clone(),
+            )?;
+            fs::write(&absolute, worktree_content)?;
             apply_worktree_mode(&absolute, update.mode)?;
         }
     }
@@ -517,6 +678,7 @@ fn write_fake_ancestor_index(path: &Path, patches: &[ApplyFilePatch]) -> Result<
             .unwrap_or(IndexMode::File);
         index.upsert(IndexEntry::new(entry_path, old_id, mode, 0)?)?;
     }
+    index.clear_cache_tree();
     index.write_to_path(path).map_err(CliError::Io)
 }
 
@@ -653,7 +815,7 @@ pub(crate) fn same_hunk(left: &ApplyHunk, right: &ApplyHunk) -> bool {
         && left.lines == right.lines
 }
 
-fn split_apply_hunk(hunk: &ApplyHunk) -> Vec<ApplyHunk> {
+pub(crate) fn split_apply_hunk(hunk: &ApplyHunk) -> Vec<ApplyHunk> {
     let mut groups = Vec::new();
     let mut cursor = 0usize;
     while cursor < hunk.lines.len() {
@@ -779,14 +941,18 @@ impl PatchAnswers {
     pub(crate) fn read() -> Result<Self> {
         let mut input = String::new();
         io::stdin().read_to_string(&mut input)?;
+        Ok(Self::from_text(&input))
+    }
+
+    pub(crate) fn from_text(input: &str) -> Self {
         let answers = input
             .chars()
             .filter_map(PatchAnswer::from_char)
             .collect::<VecDeque<_>>();
-        Ok(Self {
+        Self {
             answers,
             quit: false,
-        })
+        }
     }
 
     pub(crate) fn next(&mut self) -> PatchAnswer {
@@ -885,11 +1051,13 @@ fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePat
             embedded_old_mode = mode;
         } else if let Some(mode) = line.strip_prefix(b"new file mode ") {
             new_mode = Some(parse_index_mode_bytes(mode)?);
+            old_path = None;
         } else if let Some(mode) = line.strip_prefix(b"new mode ") {
             new_mode = Some(parse_index_mode_bytes(mode)?);
         } else if let Some(mode) = line.strip_prefix(b"deleted file mode ") {
             old_mode = Some(parse_index_mode_bytes(mode)?);
             deleted = true;
+            new_path = None;
         } else if let Some(path) = line.strip_prefix(b"--- ") {
             old_path = parse_apply_header_path(path)?;
         } else if let Some(path) = line.strip_prefix(b"+++ ") {
@@ -990,10 +1158,7 @@ fn parse_apply_index_header(header: &[u8]) -> Result<(Vec<u8>, Option<IndexMode>
         code: 128,
         message: "patch index header is malformed".into(),
     })?;
-    let mode = parts
-        .next()
-        .map(parse_index_mode_bytes)
-        .transpose()?;
+    let mode = parts.next().map(parse_index_mode_bytes).transpose()?;
     let separator = ids
         .windows(2)
         .position(|window| window == b"..")
@@ -1378,11 +1543,22 @@ fn malformed_binary_delta(path: &[u8]) -> CliError {
     }
 }
 
-fn read_apply_worktree_content(repo: &GitRepo, path: &[u8]) -> Result<Vec<u8>> {
+fn read_apply_worktree_content(
+    repo: &GitRepo,
+    path: &[u8],
+    allow_missing: bool,
+) -> Result<Vec<u8>> {
     let absolute = repo.root.join(String::from_utf8_lossy(path).as_ref());
     match fs::read(absolute) {
         Ok(content) => Ok(content),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound && allow_missing => Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: {}: No such file or directory\n",
+                String::from_utf8_lossy(path)
+            ),
+        }),
         Err(error) => Err(CliError::Io(error)),
     }
 }

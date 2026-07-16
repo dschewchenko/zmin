@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::process::Command;
 
 use tempfile::TempDir;
 
@@ -18,6 +19,21 @@ fn committed_repo() -> TempDir {
     run_zmin(repo.path(), ["add", "-A"]);
     run_zmin_with_env(repo.path(), ["commit", "-m", "initial"]);
     repo
+}
+
+fn write_rebase_merge_state(repo: &std::path::Path, head_name: &str, orig_head: &str) {
+    let rebase_dir = repo.join(".git/rebase-merge");
+    fs::create_dir_all(&rebase_dir).expect("create rebase-merge");
+    fs::write(rebase_dir.join("head-name"), format!("{head_name}\n")).expect("write head-name");
+    fs::write(rebase_dir.join("orig-head"), format!("{orig_head}\n")).expect("write orig-head");
+}
+
+fn named_commit(repo: &std::path::Path, name: &str, content: &str) {
+    let path = format!("{name}.txt");
+    write_file(repo, &path, content);
+    git(repo, ["add", &path]);
+    git_with_env(repo, ["commit", "-m", name]);
+    git(repo, ["tag", "-f", name]);
 }
 
 #[test]
@@ -67,6 +83,71 @@ fn update_ref_and_symbolic_ref_match_stock_git_state() {
     assert_eq!(
         run_zmin_status(zmin_repo.path(), ["symbolic-ref", "-q", "HEAD"]),
         git_status(git_repo.path(), ["symbolic-ref", "-q", "HEAD"])
+    );
+}
+
+#[test]
+fn update_ref_delete_rejects_non_ref_git_dir_file() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join(".git/my-private-file"), b"precious\n")
+            .expect("write private git-dir file");
+    }
+    let args = ["update-ref", "-d", "my-private-file"];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin update-ref"),
+        command_any_output("git", git_repo.path(), &args, "git update-ref")
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join(".git/my-private-file")).expect("read zmin private file"),
+        fs::read(git_repo.path().join(".git/my-private-file")).expect("read git private file")
+    );
+}
+
+#[test]
+fn symbolic_ref_and_branch_delete_support_dangling_onelevel_targets() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    let create_args = ["symbolic-ref", "refs/heads/dangling-symref", "nowhere"];
+
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &create_args, "zmin"),
+        command_any_output("git", git_repo.path(), &create_args, "git")
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["symbolic-ref", "--no-recurse", "refs/heads/dangling-symref"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["symbolic-ref", "--no-recurse", "refs/heads/dangling-symref"],
+            "git",
+        )
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["branch", "-d", "dangling-symref"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["branch", "-d", "dangling-symref"],
+            "git",
+        )
+    );
+    assert!(
+        !zmin_repo
+            .path()
+            .join(".git/refs/heads/dangling-symref")
+            .exists()
     );
 }
 
@@ -623,6 +704,30 @@ fn refs_verify_matches_stock_git_for_healthy_repository() {
 }
 
 #[test]
+fn refs_verify_matches_v2_47_loose_ref_basename_rules() {
+    let repo = committed_repo();
+    let git_dir = repo.path().join(".git");
+    let head = fs::read(git_dir.join("refs/heads/main")).expect("read main ref");
+    let nested_tags = git_dir.join("refs/tags/nested");
+    fs::create_dir_all(&nested_tags).expect("create nested tags directory");
+    fs::write(git_dir.join("refs/heads/@"), &head).expect("write invalid branch ref");
+    fs::write(nested_tags.join("@"), &head).expect("write invalid nested tag ref");
+    fs::write(nested_tags.join("transient.lock"), &head).expect("write lockfile");
+
+    let args = ["refs", "verify"];
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &args, "zmin refs verify"),
+        (
+            1,
+            String::new(),
+            "error: refs/heads/@: badRefName: invalid refname format\n\
+error: refs/tags/nested/@: badRefName: invalid refname format"
+                .to_owned(),
+        )
+    );
+}
+
+#[test]
 fn refs_verify_toggle_combinations_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -667,6 +772,47 @@ fn refs_verify_invalid_option_failures_match_stock_git() {
         assert_eq!(
             command_any_output(zmin_bin(), repo.path(), args, "zmin refs verify"),
             command_any_output("git", repo.path(), args, "git refs verify"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn refs_migrate_rejects_linked_worktrees_like_stock_git() {
+    let repo = committed_repo();
+    let linked = repo.path().join("linked");
+    let linked_arg = linked.to_string_lossy().into_owned();
+    git(
+        repo.path(),
+        ["worktree", "add", "-b", "linked", linked_arg.as_str()],
+    );
+    let args = ["refs", "migrate", "--ref-format=reftable", "--dry-run"];
+
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &args, "zmin refs migrate"),
+        command_any_output("git", repo.path(), &args, "git refs migrate")
+    );
+}
+
+#[test]
+fn refs_rejects_non_baseline_subcommands_like_stock_git() {
+    let repo = committed_repo();
+
+    for args in [
+        ["refs", "list"].as_slice(),
+        ["refs", "optimize"].as_slice(),
+        ["refs", "exists", "refs/heads/main"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin refs"),
+            (
+                129,
+                String::new(),
+                format!(
+                    "error: unknown subcommand: `{}'\nusage: git refs migrate --ref-format=<format> [--dry-run]\n   or: git refs verify [--strict] [--verbose]",
+                    args[1]
+                ),
+            ),
             "args: {args:?}"
         );
     }
@@ -1184,6 +1330,53 @@ fn packed_refs_are_resolved_updated_and_deleted_like_stock_git() {
 }
 
 #[test]
+fn update_ref_delete_with_locked_packed_refs_matches_stock_git_failure_and_state() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    let first = git(git_repo.path(), ["rev-parse", "HEAD"]);
+    assert_eq!(git(zmin_repo.path(), ["rev-parse", "HEAD"]), first);
+    let ref_name = "refs/locked-packed-refs/topic";
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["update-ref", ref_name, &first]);
+        git(repo, ["pack-refs", "--all", "--prune"]);
+        write_file(repo, "second.txt", "second\n");
+        git(repo, ["add", "second.txt"]);
+        git_with_env(repo, ["commit", "-m", "second"]);
+        git(repo, ["update-ref", ref_name, "HEAD"]);
+        fs::write(repo.join(".git/packed-refs.lock"), b"").expect("lock packed refs");
+    }
+
+    let git_output = command_any_output(
+        "git",
+        git_repo.path(),
+        &["update-ref", "-d", ref_name],
+        "git update-ref locked packed refs",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["update-ref", "-d", ref_name],
+        "zmin update-ref locked packed refs",
+    );
+    let git_stderr = git_output
+        .2
+        .replace(git_repo.path().to_str().expect("git repo path"), "<REPO>");
+    let zmin_stderr = zmin_output
+        .2
+        .replace(zmin_repo.path().to_str().expect("zmin repo path"), "<REPO>");
+
+    assert_eq!(
+        (zmin_output.0, zmin_output.1, zmin_stderr),
+        (git_output.0, git_output.1, git_stderr)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["for-each-ref", ref_name]),
+        git(git_repo.path(), ["for-each-ref", ref_name])
+    );
+}
+
+#[test]
 fn update_ref_no_deref_modes_match_stock_git_head_storage() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
@@ -1555,6 +1748,141 @@ fn update_ref_stdin_symref_commands_match_stock_git() {
 }
 
 #[test]
+fn upstream_reffiles_directory_and_broken_ref_cases_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    let head = git(git_repo.path(), ["rev-parse", "HEAD"]);
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["update-ref", "refs/heads/packed", &head]);
+        git(repo, ["pack-refs", "--all"]);
+        fs::create_dir_all(repo.join(".git/refs/heads/packed/only/dirs"))
+            .expect("create empty blocking dirs");
+    }
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["rev-parse", "refs/heads/packed"],
+            "zmin rev-parse packed ref through empty dir"
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["rev-parse", "refs/heads/packed"],
+            "git rev-parse packed ref through empty dir"
+        )
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["for-each-ref", "refs/heads/packed"],
+            "zmin for-each-ref packed ref through empty dir"
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["for-each-ref", "refs/heads/packed"],
+            "git for-each-ref packed ref through empty dir"
+        )
+    );
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::create_dir_all(repo.join(".git/refs/heads/block/me")).expect("create non-empty dir");
+        fs::write(repo.join(".git/refs/heads/block/me/file.lock"), b"").expect("write lock file");
+        fs::create_dir_all(repo.join(".git/refs/heads/broken")).expect("create broken ref dir");
+        fs::write(repo.join(".git/refs/heads/broken/ref"), b"gobbledigook\n")
+            .expect("write broken ref");
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/outer", "refs/heads/block/ref"],
+        );
+        git(
+            repo,
+            [
+                "symbolic-ref",
+                "refs/heads/outer-broken",
+                "refs/heads/broken/ref",
+            ],
+        );
+    }
+
+    for stdin in [
+        format!("update refs/heads/block/ref {head}\n"),
+        format!("update refs/heads/block/ref {head} {head}\n"),
+        format!("update refs/heads/broken/ref {head}\n"),
+        format!("update refs/heads/broken/ref {head} {head}\n"),
+        format!("update refs/heads/outer {head}\n"),
+        format!("update refs/heads/outer {head} {head}\n"),
+        format!("update refs/heads/outer-broken {head}\n"),
+        format!("update refs/heads/outer-broken {head} {head}\n"),
+    ] {
+        let zmin = command_any_output_with_stdin(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-ref", "--stdin"],
+            &stdin,
+            "zmin update-ref --stdin directory/broken cases",
+        );
+        let git = command_any_output_with_stdin(
+            "git",
+            git_repo.path(),
+            &["update-ref", "--stdin"],
+            &stdin,
+            "git update-ref --stdin directory/broken cases",
+        );
+        assert_eq!(zmin.0, git.0, "status mismatch for {stdin:?}");
+        assert_eq!(zmin.1, git.1, "stdout mismatch for {stdin:?}");
+        assert_eq!(
+            zmin.2.lines().next(),
+            git.2.lines().next(),
+            "stderr mismatch for {stdin:?}"
+        );
+    }
+}
+
+#[test]
+fn broken_head_log_diagnostics_match_stock_git() {
+    let cases = [
+        ("1234abcd\n", false, false),
+        ("ref: refs/heads/invalid.lock\n", true, true),
+    ];
+
+    for (head_contents, break_head_directly, verify_default_flag) in cases {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            if break_head_directly {
+                fs::write(repo.join(".git/HEAD"), head_contents).expect("write broken HEAD");
+            } else {
+                fs::write(repo.join(".git/refs/heads/main"), head_contents)
+                    .expect("write broken branch ref");
+            }
+        }
+
+        let zmin_log = command_any_output(zmin_bin(), zmin_repo.path(), &["log"], "zmin log");
+        let git_log = command_any_output("git", git_repo.path(), &["log"], "git log");
+        assert_eq!(
+            zmin_log, git_log,
+            "git log mismatch for broken HEAD case {head_contents:?}"
+        );
+
+        if verify_default_flag {
+            let args = ["log", "--default", "totally-bogus"];
+            let zmin_default =
+                command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin log default");
+            let git_default = command_any_output("git", git_repo.path(), &args, "git log default");
+            assert_eq!(
+                zmin_default, git_default,
+                "git log --default mismatch for broken HEAD case {head_contents:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn update_ref_invalid_refname_failures_match_stock_git() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
@@ -1713,6 +2041,227 @@ fn branch_create_list_delete_and_rename_match_stock_git_state() {
 }
 
 #[test]
+fn previous_checkout_syntax_matches_stock_git_for_branch_merge_and_reflog() {
+    const TEST_ENVS: &[(&str, &str)] = &[
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+    ];
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        named_commit(repo, "A", "a\n");
+        git(repo, ["checkout", "-b", "junk"]);
+        git(repo, ["checkout", "-"]);
+    }
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["branch", "-d", "@{-1}"],
+            "zmin branch -d @{-1}"
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["branch", "-d", "@{-1}"],
+            "git branch -d @{-1}"
+        )
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["rev-parse", "--verify", "refs/heads/junk"],
+            "zmin rev-parse deleted branch"
+        )
+        .0,
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["rev-parse", "--verify", "refs/heads/junk"],
+            "git rev-parse deleted branch"
+        )
+        .0
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        named_commit(repo, "A", "a\n");
+        git(repo, ["checkout", "A"]);
+        named_commit(repo, "B", "b\n");
+        git(repo, ["checkout", "A"]);
+        named_commit(repo, "C", "c\n");
+        named_commit(repo, "D", "d\n");
+        git(repo, ["branch", "-f", "main", "B"]);
+        git(repo, ["branch", "-f", "other"]);
+        git(repo, ["checkout", "other"]);
+        git(repo, ["checkout", "main"]);
+    }
+
+    assert_eq!(
+        command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["merge", "@{-1}"],
+            TEST_ENVS,
+            "zmin merge @{-1}"
+        ),
+        command_output_with_env(
+            "git",
+            git_repo.path(),
+            &["merge", "@{-1}"],
+            TEST_ENVS,
+            "git merge @{-1}"
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["log", "-1", "--format=%s"]),
+        git(git_repo.path(), ["log", "-1", "--format=%s"])
+    );
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["checkout", "main"]);
+        git(repo, ["reset", "--hard", "B"]);
+        git(repo, ["checkout", "other"]);
+        git(repo, ["checkout", "main"]);
+    }
+    assert_eq!(
+        command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["merge", "@{-1}~1"],
+            TEST_ENVS,
+            "zmin merge @{-1}~1"
+        ),
+        command_output_with_env(
+            "git",
+            git_repo.path(),
+            &["merge", "@{-1}~1"],
+            TEST_ENVS,
+            "git merge @{-1}~1"
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["log", "-1", "--format=%s"]),
+        git(git_repo.path(), ["log", "-1", "--format=%s"])
+    );
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["checkout", "-b", "last_branch"]);
+        git(repo, ["checkout", "-b", "new_branch"]);
+    }
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["log", "-g", "--format=%gd", "@{-1}"],
+            "zmin log -g @{-1}"
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["log", "-g", "--format=%gd", "@{-1}"],
+            "git log -g @{-1}"
+        )
+    );
+}
+
+#[test]
+fn branch_list_during_rebase_on_branch_matches_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "two\n");
+        git_with_env(repo, ["commit", "-am", "two"]);
+        write_file(repo, "a.txt", "three\n");
+        git_with_env(repo, ["commit", "-am", "three"]);
+        let orig_head = git(repo, ["rev-parse", "HEAD"]);
+        git(repo, ["checkout", "HEAD~2"]);
+        write_rebase_merge_state(repo, "refs/heads/main", &orig_head);
+    }
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["branch", "--list"],
+            "zmin branch"
+        ),
+        command_any_output("git", git_repo.path(), &["branch", "--list"], "git branch")
+    );
+}
+
+#[test]
+fn branch_force_delete_current_submodule_branch_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("repo1");
+    let clone = dir.path().join("repo2");
+    fs::create_dir_all(source.join("sub")).expect("create sub dir");
+
+    git(dir.path(), ["init", "repo1"]);
+    git(&source.join("sub"), ["init"]);
+    configure_identity(&source);
+    configure_identity(&source.join("sub"));
+    write_file(&source.join("sub"), "x.txt", "x\n");
+    git(&source.join("sub"), ["add", "x.txt"]);
+    git_with_env(&source.join("sub"), ["commit", "-m", "x"]);
+    command_any_output(
+        "git",
+        &source,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "./sub",
+        ],
+        "git submodule add",
+    );
+    git_with_env(&source, ["commit", "-m", "adding sub"]);
+
+    let clone_status = Command::new("git")
+        .current_dir(dir.path())
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--recurse-submodules",
+            "repo1",
+            "repo2",
+        ])
+        .status()
+        .expect("clone recurse submodules");
+    assert!(clone_status.success(), "clone recurse submodules failed");
+
+    git(clone.join("sub").as_path(), ["checkout", "-b", "work"]);
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            clone.join("sub").as_path(),
+            &["branch", "-D", "work"],
+            "zmin branch -D",
+        ),
+        command_failure_output_with_env(
+            "git",
+            clone.join("sub").as_path(),
+            &["branch", "-D", "work"],
+            &[],
+            "git branch -D",
+        )
+    );
+}
+
+#[test]
 fn branch_upstream_config_matches_stock_git() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
@@ -1780,6 +2329,47 @@ fn branch_upstream_config_matches_stock_git() {
     assert_eq!(
         git(zmin_repo.path(), ["config", "--get", &merge_key]),
         git(git_repo.path(), ["config", "--get", &merge_key])
+    );
+}
+
+#[test]
+fn branch_option_families_match_stock_git_for_abbrev_column_and_no_track() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for args in [
+        ["branch", "--list", "-v", "--abbrev"].as_slice(),
+        ["branch", "--list", "--column"].as_slice(),
+        ["branch", "--list", "--column=always"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin branch"),
+            command_any_output("git", git_repo.path(), args, "git branch"),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["branch", "--no-track", "topic", "HEAD"],
+            "zmin branch --no-track",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["branch", "--no-track", "topic", "HEAD"],
+            "git branch --no-track",
+        )
+    );
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["config", "--get", "branch.topic.remote"]),
+        git_status(git_repo.path(), ["config", "--get", "branch.topic.remote"])
+    );
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["config", "--get", "branch.topic.merge"]),
+        git_status(git_repo.path(), ["config", "--get", "branch.topic.merge"])
     );
 }
 
@@ -2220,7 +2810,10 @@ fn tag_remaining_documented_flags_match_stock_git() {
             "v-clean",
         ),
         (vec!["tag", "--edit", "v-edit", "-m", "msg"], "v-edit"),
-        (vec!["tag", "--no-sign", "v-nosign", "-m", "msg"], "v-nosign"),
+        (
+            vec!["tag", "--no-sign", "v-nosign", "-m", "msg"],
+            "v-nosign",
+        ),
         (
             vec![
                 "tag",
@@ -2232,7 +2825,10 @@ fn tag_remaining_documented_flags_match_stock_git() {
             ],
             "v-trailer",
         ),
-        (vec!["tag", "-e", "v-edit-short", "-m", "msg"], "v-edit-short"),
+        (
+            vec!["tag", "-e", "v-edit-short", "-m", "msg"],
+            "v-edit-short",
+        ),
     ] {
         assert_eq!(
             command_output_with_env("git", git_repo.path(), &args, &editor_env, "git tag"),
@@ -2240,15 +2836,33 @@ fn tag_remaining_documented_flags_match_stock_git() {
             "tag args should match for {args:?}"
         );
         assert_eq!(
-            git(zmin_repo.path(), ["cat-file", "-p", &format!("refs/tags/{tag_name}")]),
-            git(git_repo.path(), ["cat-file", "-p", &format!("refs/tags/{tag_name}")]),
+            git(
+                zmin_repo.path(),
+                ["cat-file", "-p", &format!("refs/tags/{tag_name}")]
+            ),
+            git(
+                git_repo.path(),
+                ["cat-file", "-p", &format!("refs/tags/{tag_name}")]
+            ),
             "tag object payload should match for {args:?}"
         );
     }
 
     assert_eq!(
-        command_output_with_env("git", git_repo.path(), &["tag", "-n"], &editor_env, "git tag -n"),
-        command_output_with_env(zmin_bin(), zmin_repo.path(), &["tag", "-n"], &editor_env, "zmin tag -n"),
+        command_output_with_env(
+            "git",
+            git_repo.path(),
+            &["tag", "-n"],
+            &editor_env,
+            "git tag -n"
+        ),
+        command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["tag", "-n"],
+            &editor_env,
+            "zmin tag -n"
+        ),
         "tag -n output should match stock Git"
     );
 
@@ -2300,8 +2914,21 @@ fn tag_remaining_documented_flags_match_stock_git() {
     for args in [
         vec!["tag", "--sign", "v-sign", "-m", "msg"],
         vec!["tag", "-s", "v-sign-short", "-m", "msg"],
-        vec!["tag", "--local-user=test@example.com", "v-local-user", "-m", "msg"],
-        vec!["tag", "-u", "test@example.com", "v-local-user-short", "-m", "msg"],
+        vec![
+            "tag",
+            "--local-user=test@example.com",
+            "v-local-user",
+            "-m",
+            "msg",
+        ],
+        vec![
+            "tag",
+            "-u",
+            "test@example.com",
+            "v-local-user-short",
+            "-m",
+            "msg",
+        ],
     ] {
         assert_eq!(
             command_failure_output_with_env("git", git_repo.path(), &args, &git_gpg_env, "git tag"),
@@ -2319,11 +2946,19 @@ fn tag_remaining_documented_flags_match_stock_git() {
     assert_eq!(
         git(
             zmin_repo.path(),
-            ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"],
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(objecttype)",
+                "refs/tags"
+            ],
         ),
         git(
             git_repo.path(),
-            ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"],
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(objecttype)",
+                "refs/tags"
+            ],
         ),
         "tag refs should match after remaining documented flag coverage"
     );

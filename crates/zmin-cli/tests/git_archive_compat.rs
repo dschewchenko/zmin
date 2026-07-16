@@ -258,6 +258,91 @@ fn archive_matches_stock_git_for_zip_and_tgz_formats() {
 }
 
 #[test]
+fn t1050_archive_zip_store_level_matches_stock_git_contents() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("large.txt"), vec![b'a'; 128 * 1024]).expect("write fixture");
+    git(repo.path(), ["add", "large.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "archive store fixture"]);
+
+    run_zmin(
+        repo.path(),
+        [
+            "archive",
+            "--format=zip",
+            "-0",
+            "-o",
+            "zmin-store.zip",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "archive",
+            "--format=zip",
+            "-0",
+            "-o",
+            "git-store.zip",
+            "HEAD",
+        ],
+    );
+
+    assert_eq!(
+        zip_listing(repo.path(), "zmin-store.zip"),
+        zip_listing(repo.path(), "git-store.zip")
+    );
+    assert_eq!(
+        command_stdout_bytes("unzip", repo.path(), &["-p", "zmin-store.zip", "large.txt"]),
+        command_stdout_bytes("unzip", repo.path(), &["-p", "git-store.zip", "large.txt"])
+    );
+}
+
+#[test]
+fn archive_respects_core_autocrlf_like_stock_git_for_tar_and_zip() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "core.autocrlf", "true"]);
+    fs::write(
+        repo.path().join("sample"),
+        b"CRLF line ending\r\nAnd another\r\n",
+    )
+    .expect("write crlf fixture");
+    git(repo.path(), ["add", "sample"]);
+    git_with_env(repo.path(), ["commit", "-m", "archive crlf fixture"]);
+
+    run_zmin(
+        repo.path(),
+        ["archive", "--format=tar", "-o", "zmin-crlf.tar", "HEAD"],
+    );
+    git(
+        repo.path(),
+        ["archive", "--format=tar", "-o", "git-crlf.tar", "HEAD"],
+    );
+    fs::create_dir(repo.path().join("zmin-crlf-tar")).expect("create zmin tar extract");
+    fs::create_dir(repo.path().join("git-crlf-tar")).expect("create git tar extract");
+    extract_tar(repo.path(), "zmin-crlf.tar", "zmin-crlf-tar");
+    extract_tar(repo.path(), "git-crlf.tar", "git-crlf-tar");
+    assert_eq!(
+        fs::read(repo.path().join("zmin-crlf-tar/sample")).expect("read zmin tar sample"),
+        fs::read(repo.path().join("git-crlf-tar/sample")).expect("read git tar sample")
+    );
+
+    run_zmin(
+        repo.path(),
+        ["archive", "--format=zip", "-o", "zmin-crlf.zip", "HEAD"],
+    );
+    git(
+        repo.path(),
+        ["archive", "--format=zip", "-o", "git-crlf.zip", "HEAD"],
+    );
+    assert_eq!(
+        command_stdout_bytes("unzip", repo.path(), &["-p", "zmin-crlf.zip", "sample"]),
+        command_stdout_bytes("unzip", repo.path(), &["-p", "git-crlf.zip", "sample"])
+    );
+}
+
+#[test]
 fn archive_mtime_parsing_matches_stock_git_for_common_formats() {
     let repo = common::git_init();
     configure_identity(repo.path());

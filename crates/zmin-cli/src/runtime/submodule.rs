@@ -6,6 +6,7 @@ use crate::cli::commands::transport_commands::{
 use crate::cli::commands::{
     merge_commands::{MergeOptions, merge},
     sequencer_commands::rebase,
+    worktree_commands::standard_repo_ignore,
 };
 
 #[derive(Clone, Debug)]
@@ -14,6 +15,12 @@ struct GitmodulesEntry {
     path: String,
     url: String,
     branch: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ReadTreeSubmoduleTarget {
+    module: GitmodulesEntry,
+    id: ObjectId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,6 +85,7 @@ pub(crate) fn clone_submodules(
         let url = resolve_submodule_clone_url(parent_repository, &module.url);
         set_config_value(repo, &format!("submodule.{}.url", module.name), &url)?;
         let destination = repo.root.join(&module.path);
+        crate::cli::commands::register_runtime_services();
         run_clone_service(CloneOptions {
             quiet: false,
             configs: Vec::new(),
@@ -255,6 +263,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
     let mut no_single_branch = false;
     let mut remote = false;
     let mut no_fetch = false;
+    let mut filter = None;
     let mut strategy = SubmoduleUpdateStrategy::Checkout;
     let mut references = Vec::new();
     let mut paths = Vec::new();
@@ -302,6 +311,17 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             depth = Some(value.clone());
         } else if !path_args && arg.starts_with("--depth=") {
             depth = Some(arg["--depth=".len()..].to_owned());
+        } else if !path_args && arg == "--filter" {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "--filter requires a value".into(),
+                });
+            };
+            filter = Some(value.clone());
+        } else if !path_args && arg.starts_with("--filter=") {
+            filter = Some(arg["--filter=".len()..].to_owned());
         } else if !path_args
             && matches!(
                 arg.as_str(),
@@ -350,6 +370,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
         if exact_repo_at(&path).is_none() {
             let url = read_config_value(&repo, &format!("submodule.{}.url", module.name))?
                 .unwrap_or_else(|| resolve_submodule_clone_url(&parent_repository, &module.url));
+            crate::cli::commands::register_runtime_services();
             run_clone_service(CloneOptions {
                 quiet,
                 configs: Vec::new(),
@@ -382,7 +403,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 branch: None,
                 server_options: Vec::new(),
                 upload_pack: None,
-                filter: None,
+                filter: filter.clone(),
                 also_filter_submodules: false,
                 bundle_uri: None,
                 ref_format: None,
@@ -397,7 +418,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             entry.id.clone()
         };
         update_submodule_checkout(&path, &checkout_id, strategy)?;
-        absorb_submodule_gitdir(&repo, &module.path)?;
+        absorb_submodule_gitdir(&repo, &module.path, &module.name)?;
         if !quiet {
             println!(
                 "Submodule path '{}': checked out '{}'",
@@ -824,7 +845,7 @@ pub(crate) fn absorb_submodule_gitdirs(args: &[String]) -> Result<()> {
     let repo = find_repo()?;
     let (_, paths) = parse_submodule_quiet_paths(args);
     for module in selected_gitmodules(&repo, &paths)? {
-        absorb_submodule_gitdir(&repo, &module.path)?;
+        absorb_submodule_gitdir(&repo, &module.path, &module.name)?;
     }
     Ok(())
 }
@@ -873,7 +894,7 @@ fn selected_gitmodules(repo: &GitRepo, paths: &[String]) -> Result<Vec<Gitmodule
     Ok(modules)
 }
 
-fn submodule_parent_repository(repo: &GitRepo) -> String {
+pub(crate) fn submodule_parent_repository(repo: &GitRepo) -> String {
     read_config_value(repo, "remote.origin.url")
         .ok()
         .flatten()
@@ -906,7 +927,21 @@ fn nested_submodule_specs(path: &str, active_specs: &[String]) -> Vec<String> {
 }
 
 fn read_gitmodules(repo: &GitRepo) -> Result<Vec<GitmodulesEntry>> {
-    let entries = read_config_file(&repo.root.join(".gitmodules"))?;
+    parse_gitmodules_config_entries(read_config_file(&repo.root.join(".gitmodules"))?)
+}
+
+fn read_gitmodules_from_index(repo: &GitRepo, index: &GitIndex) -> Result<Vec<GitmodulesEntry>> {
+    let Some(entry) = index.entries().iter().find(|entry| {
+        entry.stage == 0
+            && entry.path.as_slice() == b".gitmodules"
+            && entry.mode != IndexMode::Gitlink
+    }) else {
+        return Ok(Vec::new());
+    };
+    parse_gitmodules_config_entries(parse_config_blob_entries(repo, &entry.id.to_hex(), false)?)
+}
+
+fn parse_gitmodules_config_entries(entries: Vec<ConfigEntry>) -> Result<Vec<GitmodulesEntry>> {
     let mut by_name = BTreeMap::<String, (Option<String>, Option<String>, Option<String>)>::new();
     for entry in entries {
         if entry.section != "submodule" || entry.subsection.is_empty() {
@@ -933,19 +968,14 @@ fn read_gitmodules(repo: &GitRepo) -> Result<Vec<GitmodulesEntry>> {
         .collect())
 }
 
-fn resolve_submodule_clone_url(parent_repository: &str, url: &str) -> String {
+pub(crate) fn resolve_submodule_clone_url(parent_repository: &str, url: &str) -> String {
     if !(url.starts_with("./") || url.starts_with("../")) {
         return url.to_owned();
     }
     let Ok(Some(parent)) = local_repository_path_from_location(parent_repository) else {
         return url.to_owned();
     };
-    let base = if url.starts_with("./") {
-        parent.as_path()
-    } else {
-        parent.parent().unwrap_or(parent.as_path())
-    };
-    let resolved = canonical_or_absolute(base.join(url));
+    let resolved = canonical_or_absolute(parent.join(url));
     #[cfg(windows)]
     {
         return resolved.to_string_lossy().replace('\\', "/");
@@ -960,11 +990,280 @@ fn checkout_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<(
     let repo = find_repo_at(path)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    if refs.resolve("HEAD").is_ok_and(|head| head == *id) {
-        return Ok(());
-    }
     checkout_worktree(&repo, &store, id)?;
     refs.write_head_direct(id)?;
+    Ok(())
+}
+
+pub(crate) fn validate_read_tree_submodule_targets(
+    repo: &GitRepo,
+    index: &GitIndex,
+    recurse: bool,
+) -> Result<()> {
+    if !recurse {
+        return Ok(());
+    }
+    for target in read_tree_submodule_targets(repo, index, true)? {
+        let admin_dir = read_tree_submodule_admin_dir(repo, &target.module)?;
+        let store = LooseObjectStore::new(admin_dir.join("objects"), GitHashAlgorithm::Sha1);
+        let object = store.read_object(&target.id).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "submodule '{}' does not have commit {}",
+                        target.module.path,
+                        target.id.to_hex()
+                    ),
+                }
+            } else {
+                CliError::Io(error)
+            }
+        })?;
+        if object.kind != GitObjectKind::Commit {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "submodule '{}' object {} is not a commit",
+                    target.module.path,
+                    target.id.to_hex()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn checkout_read_tree_submodules(
+    repo: &GitRepo,
+    original_index: &GitIndex,
+    index: &GitIndex,
+    recurse: bool,
+    force: bool,
+) -> Result<()> {
+    let targets = read_tree_submodule_targets(repo, index, recurse)?;
+    for target in targets {
+        let worktree = repo.root.join(&target.module.path);
+        prepare_read_tree_submodule_worktree(repo, original_index, &target.module, force)?;
+        if !recurse {
+            if !path_exists(&worktree) {
+                fs::create_dir_all(&worktree)?;
+            }
+            continue;
+        }
+        connect_read_tree_submodule_worktree(repo, &target.module, &worktree)?;
+        checkout_submodule_gitlink(&worktree, &target.id)?;
+
+        let submodule_repo = find_repo_at(&worktree)?;
+        let submodule_index = read_repo_index(&submodule_repo)?;
+        validate_read_tree_submodule_targets(&submodule_repo, &submodule_index, true)?;
+        checkout_read_tree_submodules(
+            &submodule_repo,
+            &submodule_index,
+            &submodule_index,
+            true,
+            force,
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_read_tree_submodules(
+    repo: &GitRepo,
+    original_index: &GitIndex,
+    result_index: &GitIndex,
+    recurse: bool,
+) -> Result<()> {
+    if !recurse {
+        return Ok(());
+    }
+    let modules = read_gitmodules_from_index(repo, original_index)?;
+    for entry in original_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
+    {
+        if find_index_entry(result_index, &entry.path)
+            .is_some_and(|target| target.mode == IndexMode::Gitlink)
+        {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let module = modules
+            .iter()
+            .find(|module| module.path == path)
+            .cloned()
+            .unwrap_or(GitmodulesEntry {
+                name: path.clone(),
+                path: path.clone(),
+                url: String::new(),
+                branch: None,
+            });
+        let worktree = repo.root.join(&path);
+        let git_path = worktree.join(".git");
+        if git_path.is_dir() {
+            absorb_submodule_gitdir(repo, &module.path, &module.name)?;
+        }
+        let admin_dir = read_tree_submodule_admin_dir(repo, &module)?;
+        if worktree.is_dir() {
+            fs::remove_dir_all(&worktree)?;
+        } else if path_exists(&worktree) {
+            fs::remove_file(&worktree)?;
+        }
+        clear_read_tree_submodule_worktrees(&admin_dir)?;
+    }
+    Ok(())
+}
+
+fn clear_read_tree_submodule_worktrees(admin_dir: &Path) -> Result<()> {
+    if !admin_dir.is_dir() {
+        return Ok(());
+    }
+    let config = admin_dir.join("config");
+    if config.is_file() {
+        let _ = unset_config_value_in_file(&config, "core.worktree");
+    }
+    clear_nested_read_tree_submodule_worktrees(&admin_dir.join("modules"))
+}
+
+fn clear_nested_read_tree_submodule_worktrees(directory: &Path) -> Result<()> {
+    if !directory.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if path.join("config").is_file() {
+            clear_read_tree_submodule_worktrees(&path)?;
+        } else {
+            clear_nested_read_tree_submodule_worktrees(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn prepare_read_tree_submodule_worktree(
+    repo: &GitRepo,
+    original_index: &GitIndex,
+    module: &GitmodulesEntry,
+    force: bool,
+) -> Result<()> {
+    let worktree = repo.root.join(&module.path);
+    let Ok(metadata) = fs::symlink_metadata(&worktree) else {
+        return Ok(());
+    };
+    if metadata.is_dir() {
+        return Ok(());
+    }
+    let tracked_non_gitlink = find_index_entry(original_index, module.path.as_bytes())
+        .is_some_and(|entry| entry.mode != IndexMode::Gitlink);
+    let ignore = standard_repo_ignore(repo)?;
+    let ignored = ignore.is_ignored(module.path.as_bytes(), false)
+        || ignore.is_ignored(module.path.as_bytes(), true);
+    if tracked_non_gitlink || force || ignored {
+        fs::remove_file(&worktree)?;
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!(
+            "Untracked working tree file '{}' would be overwritten by merge.",
+            module.path
+        ),
+    })
+}
+
+fn read_tree_submodule_targets(
+    repo: &GitRepo,
+    index: &GitIndex,
+    active_only: bool,
+) -> Result<Vec<ReadTreeSubmoduleTarget>> {
+    let modules = read_gitmodules_from_index(repo, index)?;
+    let mut targets = Vec::new();
+    for entry in index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
+    {
+        let path = String::from_utf8_lossy(&entry.path);
+        let Some(module) = modules.iter().find(|module| module.path == path) else {
+            continue;
+        };
+        if !active_only || read_tree_submodule_is_active(repo, module)? {
+            targets.push(ReadTreeSubmoduleTarget {
+                module: module.clone(),
+                id: entry.id.clone(),
+            });
+        }
+    }
+    Ok(targets)
+}
+
+fn read_tree_submodule_is_active(repo: &GitRepo, module: &GitmodulesEntry) -> Result<bool> {
+    let active_key = format!("submodule.{}.active", module.name);
+    if let Some(value) = read_config_value(repo, &active_key)? {
+        return Ok(parse_git_bool(&value).unwrap_or(false));
+    }
+    if read_config_value(repo, &format!("submodule.{}.url", module.name))?.is_some() {
+        return Ok(true);
+    }
+    Ok(read_config_entries(repo)?.iter().any(|entry| {
+        entry.section == "submodule"
+            && entry.subsection.is_empty()
+            && entry.key == "active"
+            && (entry.value == "."
+                || pathspec_matches(module.path.as_bytes(), &[entry.value.as_bytes().to_vec()]))
+    }))
+}
+
+fn read_tree_submodule_admin_dir(repo: &GitRepo, module: &GitmodulesEntry) -> Result<PathBuf> {
+    Ok(read_common_git_dir(&repo.git_dir)?
+        .join("modules")
+        .join(&module.name))
+}
+
+fn connect_read_tree_submodule_worktree(
+    repo: &GitRepo,
+    module: &GitmodulesEntry,
+    worktree: &Path,
+) -> Result<()> {
+    if exact_repo_at(worktree).is_some() {
+        return Ok(());
+    }
+    let admin_dir = read_tree_submodule_admin_dir(repo, module)?;
+    if !admin_dir.join("objects").is_dir() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("could not find submodule repository for '{}'", module.path),
+        });
+    }
+    if !path_exists(worktree) {
+        fs::create_dir_all(worktree)?;
+    } else if !worktree.join(".git").is_file() && !directory_tree_contains_no_files(worktree)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "cannot checkout submodule '{}': worktree is not empty",
+                module.path
+            ),
+        });
+    }
+
+    let git_dir = relative_path_between(worktree, &admin_dir).unwrap_or(admin_dir.clone());
+    fs::write(
+        worktree.join(".git"),
+        format!("gitdir: {}\n", git_dir.display()),
+    )?;
+    let worktree_path =
+        relative_path_between(&admin_dir, worktree).unwrap_or_else(|| worktree.to_path_buf());
+    set_config_value_in_file(
+        &admin_dir.join("config"),
+        "core.worktree",
+        &worktree_path.display().to_string(),
+    )?;
     Ok(())
 }
 
@@ -1067,7 +1366,9 @@ fn update_submodule_remote_head(
     let mut source_refs = None;
     if !no_fetch {
         let remote_url = submodule_remote_url(repo, &submodule_repo, module, parent_repository)?;
-        let Some(remote_path) = local_repository_path_from_location(&remote_url)? else {
+        let Some(remote_path) =
+            crate::runtime::local_repository_path_from_base(&repo.root, &remote_url)?
+        else {
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!(
@@ -1126,7 +1427,9 @@ fn fetch_submodule_target(
         return Ok(());
     }
     let remote_url = submodule_remote_url(repo, &submodule_repo, module, parent_repository)?;
-    if let Some(remote_path) = local_repository_path_from_location(&remote_url)? {
+    if let Some(remote_path) =
+        crate::runtime::local_repository_path_from_base(&repo.root, &remote_url)?
+    {
         fetch_local_submodule_target(
             repo,
             module,
@@ -1318,13 +1621,13 @@ fn default_submodule_remote_tracking_branch(refs: &RefStore) -> Result<String> {
     }
 }
 
-fn absorb_submodule_gitdir(repo: &GitRepo, path: &str) -> Result<()> {
+pub(crate) fn absorb_submodule_gitdir(repo: &GitRepo, path: &str, admin_name: &str) -> Result<()> {
     let worktree = repo.root.join(path);
     let git_path = worktree.join(".git");
     if !git_path.exists() || git_path.is_file() {
         return Ok(());
     }
-    let target = repo.git_dir.join("modules").join(path);
+    let target = repo.git_dir.join("modules").join(admin_name);
     if !target.exists() {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -1333,11 +1636,14 @@ fn absorb_submodule_gitdir(repo: &GitRepo, path: &str) -> Result<()> {
     } else {
         fs::remove_dir_all(&git_path)?;
     }
-    fs::write(&git_path, format!("gitdir: {}\n", target.display()))?;
+    let git_dir = relative_path_between(&worktree, &target).unwrap_or(target.clone());
+    fs::write(&git_path, format!("gitdir: {}\n", git_dir.display()))?;
+    let worktree_path =
+        relative_path_between(&target, &worktree).unwrap_or_else(|| worktree.to_path_buf());
     set_config_value_in_file(
         &target.join("config"),
         "core.worktree",
-        &worktree.display().to_string(),
+        &worktree_path.display().to_string(),
     )?;
     Ok(())
 }

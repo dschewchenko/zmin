@@ -7,3 +7,5 @@ tools/state
 /.cargo/.package-cache
 /tools/mock-server/state
 .skron-workspace
+/.upstream-snapshots
+.playwright-mcp

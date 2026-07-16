@@ -378,14 +378,32 @@ fn normalize_bugreport_output(
 
 fn normalize_bugreport_stdout(text: &str) -> String {
     text.lines()
-        .map(|line| {
-            if line.starts_with("Repository root: ") {
-                "Repository root: __REPO__".to_owned()
-            } else if line.starts_with("Available space on '") {
-                "Available space on '__REPO__': __SPACE__ GiB (mount flags 0x0)".to_owned()
-            } else {
-                line.to_owned()
+        .filter_map(|line| {
+            if line.starts_with("git version ")
+                || line.starts_with("cpu: ")
+                || line == "no commit associated with this build"
+                || line.starts_with("sizeof-long: ")
+                || line.starts_with("sizeof-size_t: ")
+                || line.starts_with("shell-path: ")
+                || line.starts_with("feature: ")
+                || line.starts_with("libcurl: ")
+                || line.starts_with("default-ref-format: ")
+                || line.starts_with("zmin-version: ")
+                || line.starts_with("zlib: ")
+                || line.starts_with("SHA-1: ")
+                || line.starts_with("SHA-256: ")
+            {
+                return None;
             }
+            if line.starts_with("Repository root: ") {
+                return Some("Repository root: __REPO__".to_owned());
+            }
+            if line.starts_with("Available space on '") {
+                return Some(
+                    "Available space on '__REPO__': __SPACE__ GiB (mount flags 0x0)".to_owned(),
+                );
+            }
+            Some(line.to_owned())
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -509,6 +527,168 @@ fn for_each_repo_missing_repo_failures_match_stock_git() {
 }
 
 #[test]
+fn for_each_repo_expands_tilde_config_paths_like_stock_git() {
+    let home = TempDir::new().expect("home dir");
+    let one = git_init();
+    let four = home.path().join("four");
+    git(
+        home.path(),
+        [
+            "init",
+            "--initial-branch=four",
+            four.to_str().expect("four path"),
+        ],
+    );
+    configure_identity(one.path());
+    configure_identity(&four);
+    Command::new(common::stock_git_bin())
+        .args([
+            "config",
+            "--global",
+            "--add",
+            "run.key",
+            one.path().to_str().expect("repo path"),
+        ])
+        .env("HOME", home.path())
+        .output()
+        .expect("git config");
+    Command::new(common::stock_git_bin())
+        .args(["config", "--global", "--add", "run.key", "~/four"])
+        .env("HOME", home.path())
+        .output()
+        .expect("git config tilde");
+
+    for repo in [one.path(), &four] {
+        let repo = repo.to_str().expect("repo path");
+        Command::new(common::stock_git_bin())
+            .args(["-C", repo, "commit", "--allow-empty", "-m", "ran"])
+            .env("HOME", home.path())
+            .output()
+            .expect("seed commit");
+    }
+
+    let args = [
+        "for-each-repo",
+        "--config=run.key",
+        "--",
+        "rev-parse",
+        "--is-inside-work-tree",
+    ];
+    assert_eq!(
+        command_with_home(zmin_bin(), home.path(), &args),
+        command_with_home("git", home.path(), &args)
+    );
+}
+
+#[test]
+fn for_each_repo_null_value_error_matches_stock_git() {
+    let home = TempDir::new().expect("home dir");
+    fs::write(home.path().join(".gitconfig"), "[empty]\n\tkey\n").expect("write gitconfig");
+
+    let args = ["for-each-repo", "--config=empty.key"];
+    assert_eq!(
+        command_failure_with_home(zmin_bin(), home.path(), &args),
+        command_failure_with_home("git", home.path(), &args)
+    );
+}
+
+#[test]
+fn for_each_repo_bad_config_keys_match_stock_git() {
+    let home = TempDir::new().expect("home dir");
+    for key in ["a", "a.b.", "'.b"] {
+        let args = ["for-each-repo", &format!("--config={key}")];
+        assert_eq!(
+            command_failure_with_home(zmin_bin(), home.path(), &args),
+            command_failure_with_home("git", home.path(), &args),
+            "config key {key}"
+        );
+    }
+}
+
+#[test]
+fn for_each_repo_respects_env_scoped_config_like_stock_git() {
+    let home = TempDir::new().expect("home dir");
+    let one = git_init();
+    let three = git_init();
+    let four = git_init();
+    for repo in [one.path(), three.path(), four.path()] {
+        configure_identity(repo);
+        git(repo, ["commit", "--allow-empty", "-m", "ran from worktree"]);
+    }
+    fs::write(
+        home.path().join(".gitconfig"),
+        format!(
+            "[run]\n\tkey = {}\n\tkey = {}\n\tkey = {}\n",
+            one.path().display(),
+            three.path().display(),
+            four.path().display()
+        ),
+    )
+    .expect("write gitconfig");
+
+    let args = [
+        "-C",
+        three.path().to_str().expect("three path"),
+        "for-each-repo",
+        "--config=run.key",
+        "--",
+        "log",
+        "--format=%s%d",
+        "-1",
+    ];
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            home.path(),
+            home.path(),
+            &[("GIT_CONFIG_PARAMETERS", "'log.decorate=full'")],
+            &args,
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            home.path(),
+            home.path(),
+            &[("GIT_CONFIG_PARAMETERS", "'log.decorate=full'")],
+            &args,
+        )
+    );
+
+    let global_config = home.path().join("test-config");
+    fs::write(
+        &global_config,
+        format!(
+            "[run]\n\tkey = {}\n\tkey = {}\n\tkey = {}\n[log]\n\tdecorate = full\n",
+            one.path().display(),
+            three.path().display(),
+            four.path().display()
+        ),
+    )
+    .expect("write alternate global config");
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            home.path(),
+            home.path(),
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                global_config.to_str().expect("global config path"),
+            )],
+            &args,
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            home.path(),
+            home.path(),
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                global_config.to_str().expect("global config path"),
+            )],
+            &args,
+        )
+    );
+}
+
+#[test]
 fn repo_command_is_tracked_zmin_only_extension() {
     let repo = git_init();
 
@@ -576,7 +756,125 @@ fn bugreport_creates_report_file_in_output_directory() {
     let report = output.path().join("git-bugreport.txt");
     let content = fs::read_to_string(report).expect("read bugreport");
     assert!(content.contains("[System Info]"));
-    assert!(content.contains("[Repository]"));
+    assert!(content.contains("[Enabled Hooks]"));
+}
+
+#[test]
+fn bugreport_template_and_hooks_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_hook = git_repo.path().join(".git/hooks/applypatch-msg");
+    let zmin_hook = zmin_repo.path().join(".git/hooks/applypatch-msg");
+    write_file(
+        git_repo.path(),
+        ".git/hooks/applypatch-msg",
+        "#!/bin/sh\ntrue\n",
+    );
+    write_file(
+        zmin_repo.path(),
+        ".git/hooks/applypatch-msg",
+        "#!/bin/sh\ntrue\n",
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut git_permissions = fs::metadata(&git_hook)
+            .expect("git hook metadata")
+            .permissions();
+        git_permissions.set_mode(0o755);
+        fs::set_permissions(&git_hook, git_permissions).expect("chmod git hook");
+
+        let mut zmin_permissions = fs::metadata(&zmin_hook)
+            .expect("zmin hook metadata")
+            .permissions();
+        zmin_permissions.set_mode(0o755);
+        fs::set_permissions(&zmin_hook, zmin_permissions).expect("chmod zmin hook");
+    }
+
+    let git_output =
+        command_any_with_git_editor("git", git_repo.path(), &["bugreport", "-s", "hooks"]);
+    let zmin_output =
+        command_any_with_git_editor(zmin_bin(), zmin_repo.path(), &["bugreport", "-s", "hooks"]);
+    assert_eq!(zmin_output.0, git_output.0);
+
+    let git_report = fs::read_to_string(git_repo.path().join("git-bugreport-hooks.txt"))
+        .expect("read git bugreport");
+    let zmin_report = fs::read_to_string(zmin_repo.path().join("git-bugreport-hooks.txt"))
+        .expect("read zmin bugreport");
+
+    let git_prefix = git_report
+        .split("[System Info]\n")
+        .next()
+        .expect("git bugreport prefix");
+    let zmin_prefix = zmin_report
+        .split("[System Info]\n")
+        .next()
+        .expect("zmin bugreport prefix");
+    assert_eq!(zmin_prefix, git_prefix);
+
+    let git_hooks = git_report
+        .split("[Enabled Hooks]\n")
+        .nth(1)
+        .expect("git hooks section");
+    let zmin_hooks = zmin_report
+        .split("[Enabled Hooks]\n")
+        .nth(1)
+        .expect("zmin hooks section");
+    assert_eq!(zmin_hooks, git_hooks);
+}
+
+#[test]
+fn bugreport_invalid_argument_shapes_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    for args in [
+        ["bugreport", "--false"].as_slice(),
+        ["bugreport", "false"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(
+                "git",
+                git_repo.path(),
+                args,
+                "stock git bugreport invalid args"
+            ),
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                args,
+                "zmin bugreport invalid args"
+            ),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn bugreport_duplicate_target_matches_stock_git_failure_shape() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    write_file(git_repo.path(), "git-bugreport-duplicate.txt", "");
+    write_file(zmin_repo.path(), "git-bugreport-duplicate.txt", "");
+
+    let git_result = command_any_output(
+        "git",
+        git_repo.path(),
+        &["bugreport", "--suffix", "duplicate"],
+        "stock git bugreport duplicate",
+    );
+    let zmin_result = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["bugreport", "--suffix", "duplicate"],
+        "zmin bugreport duplicate",
+    );
+
+    assert_eq!(zmin_result.0, git_result.0);
+    assert!(zmin_result.0 != 0);
+    assert_eq!(zmin_result.1, git_result.1);
+    assert_eq!(zmin_result.2, git_result.2);
 }
 
 #[test]
@@ -766,6 +1064,49 @@ fn diagnose_creates_zip_archive_with_stats_files() {
     assert!(text.contains("diagnostics.log"));
     assert!(text.contains("packs-local.txt"));
     assert!(text.contains("objects-local.txt"));
+    assert!(text.contains("git version 2.47.1.zmin"));
+    assert!(text.contains("cpu:"));
+    assert!(text.contains("zmin-version:"));
+}
+
+#[test]
+fn diagnose_does_not_depend_on_stock_git_runtime() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "content\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    let output = TempDir::new().expect("diagnose output");
+
+    let result = command_any_with_git_editor_and_env(
+        zmin_bin(),
+        repo.path(),
+        &[
+            "diagnose",
+            "-o",
+            output.path().to_str().expect("output path"),
+            "--suffix",
+            "poisoned",
+        ],
+        &[
+            ("ZMIN_STOCK_GIT", "/definitely/missing/git"),
+            ("GIT_BIN", "/definitely/missing/git"),
+        ],
+    );
+    assert_eq!(result.0, 0, "stdout: {}\nstderr: {}", result.1, result.2);
+    assert!(result.1.contains("Collecting diagnostic info"));
+    assert!(result.2.contains("Diagnostics complete."));
+
+    let archive = output.path().join("git-diagnostics-poisoned.zip");
+    let bytes = fs::read(archive).expect("read diagnose archive");
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(text.contains("git version 2.47.1.zmin"));
+    for expected in ["cpu:", "sizeof-long:", "shell-path:", "zmin-version:"] {
+        assert!(
+            text.contains(expected),
+            "missing {expected} in diagnostics archive"
+        );
+    }
 }
 
 #[test]
@@ -1476,6 +1817,88 @@ fn managed_hooks_run_staged_list_uses_index_backed_selector() {
             ["hooks", "run", "pre-commit", "--staged", "--list"]
         ),
         "A added.rs\nD delete.txt\nR rename-old.txt -> rename-new.txt\nM tracked.txt"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_hooks_run_staged_type_change_lists_destination_and_executes_only_file_targets() {
+    use std::os::unix::fs::symlink;
+
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "file-to-symlink.txt", "base file\n");
+    write_file(repo.path(), "symlink-target.txt", "target\n");
+    symlink(
+        "symlink-target.txt",
+        repo.path().join("symlink-to-file.txt"),
+    )
+    .expect("create committed symlink");
+    git(
+        repo.path(),
+        [
+            "add",
+            "file-to-symlink.txt",
+            "symlink-target.txt",
+            "symlink-to-file.txt",
+        ],
+    );
+    git(repo.path(), ["commit", "-m", "base"]);
+
+    fs::remove_file(repo.path().join("file-to-symlink.txt")).expect("remove file for type change");
+    symlink(
+        "symlink-target.txt",
+        repo.path().join("file-to-symlink.txt"),
+    )
+    .expect("create staged symlink");
+    fs::remove_file(repo.path().join("symlink-to-file.txt"))
+        .expect("remove symlink for type change");
+    write_file(repo.path(), "symlink-to-file.txt", "now regular file\n");
+    git(
+        repo.path(),
+        ["add", "file-to-symlink.txt", "symlink-to-file.txt"],
+    );
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["hooks", "run", "pre-commit", "--staged", "--list"]
+        ),
+        "M file-to-symlink.txt\nM symlink-to-file.txt"
+    );
+
+    let script = repo.path().join("capture-type-change.sh");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > selected-type-change-paths.txt\n",
+    )
+    .expect("write type-change capture script");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755))
+            .expect("chmod type-change capture script");
+    }
+
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "hooks",
+                "run",
+                "pre-commit",
+                "--staged",
+                "--",
+                "sh",
+                "capture-type-change.sh",
+            ],
+        ),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("selected-type-change-paths.txt"))
+            .expect("read type-change selected paths"),
+        "symlink-to-file.txt\n"
     );
 }
 
@@ -2285,6 +2708,114 @@ fn config_include_hasconfig_matches_stock_git() {
         zmin_forbidden.2, git_forbidden.2,
         "hasconfig include must reject nested remote URLs"
     );
+}
+
+#[test]
+fn config_include_hasconfig_forbids_remote_url_in_target_file_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_home = TempDir::new().expect("git home");
+    let zmin_home = TempDir::new().expect("zmin home");
+
+    fs::write(
+        git_home.path().join(".gitconfig"),
+        "[includeIf \"hasconfig:remote.*.url:foourl\"]\n\tpath = inc.cfg\n",
+    )
+    .expect("write git global config");
+    fs::write(
+        zmin_home.path().join(".gitconfig"),
+        "[includeIf \"hasconfig:remote.*.url:foourl\"]\n\tpath = inc.cfg\n",
+    )
+    .expect("write zmin global config");
+    for home in [git_home.path(), zmin_home.path()] {
+        fs::write(home.join("inc.cfg"), "[remote \"bar\"]\n\turl = barurl\n")
+            .expect("write included config");
+    }
+
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            zmin_home.path(),
+            &[],
+            &["status"],
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            git_repo.path(),
+            git_home.path(),
+            &[],
+            &["status"],
+        ),
+        "hasconfig include should reject remote urls inside target file"
+    );
+}
+
+#[test]
+fn config_include_hasconfig_url_globs_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_home = TempDir::new().expect("git home");
+    let zmin_home = TempDir::new().expect("zmin home");
+
+    for home in [git_home.path(), zmin_home.path()] {
+        fs::write(home.join("double-star-start"), "[user]\ndss = yes\n")
+            .expect("write double-star-start");
+        fs::write(home.join("double-star-end"), "[user]\ndse = yes\n")
+            .expect("write double-star-end");
+        fs::write(home.join("double-star-middle"), "[user]\ndsm = yes\n")
+            .expect("write double-star-middle");
+        fs::write(home.join("single-star-middle"), "[user]\nssm = yes\n")
+            .expect("write single-star-middle");
+        fs::write(home.join("no"), "[user]\nno = no\n").expect("write no");
+        fs::write(
+            home.join(".gitconfig"),
+            "[includeIf \"hasconfig:remote.*.url:**/baz\"]\n\tpath = double-star-start\n\
+[includeIf \"hasconfig:remote.*.url:**/nomatch\"]\n\tpath = no\n\
+[includeIf \"hasconfig:remote.*.url:https:/**\"]\n\tpath = double-star-end\n\
+[includeIf \"hasconfig:remote.*.url:nomatch:/**\"]\n\tpath = no\n\
+[includeIf \"hasconfig:remote.*.url:https:/**/baz\"]\n\tpath = double-star-middle\n\
+[includeIf \"hasconfig:remote.*.url:https:/**/nomatch\"]\n\tpath = no\n\
+[includeIf \"hasconfig:remote.*.url:https://*/bar/baz\"]\n\tpath = single-star-middle\n\
+[includeIf \"hasconfig:remote.*.url:https://*/baz\"]\n\tpath = no\n",
+        )
+        .expect("write global config");
+    }
+
+    git(
+        git_repo.path(),
+        ["config", "remote.origin.url", "https://foo/bar/baz"],
+    );
+    run_zmin(
+        zmin_repo.path(),
+        ["config", "remote.origin.url", "https://foo/bar/baz"],
+    );
+
+    for args in [
+        ["config", "--get", "user.dss"].as_slice(),
+        ["config", "--get", "user.dse"].as_slice(),
+        ["config", "--get", "user.dsm"].as_slice(),
+        ["config", "--get", "user.ssm"].as_slice(),
+        ["config", "--get", "user.no"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_with_isolated_config_and_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                zmin_home.path(),
+                &[],
+                args,
+            ),
+            command_any_with_isolated_config_and_env(
+                "git",
+                git_repo.path(),
+                git_home.path(),
+                &[],
+                args,
+            ),
+            "hasconfig include glob mismatch for {args:?}"
+        );
+    }
 }
 
 #[test]
@@ -3164,6 +3695,93 @@ fn config_type_path_expiry_and_color_match_stock_git() {
 }
 
 #[test]
+fn config_list_type_path_matches_upstream_optional_and_tilde_shape() {
+    let home = TempDir::new().expect("temp dir");
+    let repo = git_init();
+    std::fs::create_dir_all(home.path().join(".config")).expect("create xdg config dir");
+    std::fs::write(
+        repo.path().join(".git/config"),
+        "[section]\nfoo = True\nnumber = 10\nbig = 1M\npath = ~/dir\nred = red\nblue = Blue\ndate = Fri Jun 4 15:46:55 2010\nmissing = :(optional)no-such-path\nexists = :(optional)expect\n",
+    )
+    .expect("write config");
+    std::fs::create_dir_all(repo.path().join("expect")).expect("create optional path target");
+
+    let output = command_with_isolated_config(
+        zmin_bin(),
+        repo.path(),
+        home.path(),
+        &["config", "--list", "--type=path"],
+    );
+
+    assert_eq!(
+        output,
+        format!(
+            "section.foo=True\nsection.number=10\nsection.big=1M\nsection.path={}\nsection.red=red\nsection.blue=Blue\nsection.date=Fri Jun 4 15:46:55 2010\nsection.exists=expect",
+            home.path().join("dir").display()
+        )
+    );
+}
+
+#[test]
+fn config_local_and_worktree_nonrepo_fail_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo_root = dir.path().join("repo");
+    std::fs::create_dir_all(repo_root.join("non-repo")).expect("create non-repo child");
+    git(&repo_root, ["init"]);
+    let cwd = repo_root.join("non-repo");
+    let ceiling = repo_root.to_string_lossy().into_owned();
+
+    for args in [
+        ["config", "--local", "foo.bar"].as_slice(),
+        ["config", "--worktree", "foo.bar"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_with_env_overrides(
+                zmin_bin(),
+                &cwd,
+                args,
+                &[("GIT_CEILING_DIRECTORIES", ceiling.as_str())],
+            ),
+            command_output_with_env_overrides(
+                "git",
+                &cwd,
+                args,
+                &[("GIT_CEILING_DIRECTORIES", ceiling.as_str())],
+            ),
+            "non-repo config failure should match for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn config_replace_all_preserves_stock_slot_selection_for_malformed_inline_keys() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let raw = "[abc]key\n\tkeepSection\n[xyz]\n\tkey = 1\n[abc]\n\tkey = a\n";
+    std::fs::write(git_repo.path().join(".git/config"), raw).expect("write git config");
+    std::fs::write(zmin_repo.path().join(".git/config"), raw).expect("write zmin config");
+
+    git(git_repo.path(), ["config", "--replace-all", "abc.key", "b"]);
+    run_zmin(
+        zmin_repo.path(),
+        ["config", "--replace-all", "abc.key", "b"],
+    );
+    assert_eq!(
+        std::fs::read_to_string(zmin_repo.path().join(".git/config")).expect("read zmin config"),
+        std::fs::read_to_string(git_repo.path().join(".git/config")).expect("read git config")
+    );
+
+    std::fs::write(git_repo.path().join(".git/config"), raw).expect("write git config");
+    std::fs::write(zmin_repo.path().join(".git/config"), raw).expect("write zmin config");
+    git(git_repo.path(), ["config", "set", "--all", "abc.key", "b"]);
+    run_zmin(zmin_repo.path(), ["config", "set", "--all", "abc.key", "b"]);
+    assert_eq!(
+        std::fs::read_to_string(zmin_repo.path().join(".git/config")).expect("read zmin config"),
+        std::fs::read_to_string(git_repo.path().join(".git/config")).expect("read git config")
+    );
+}
+
+#[test]
 fn var_identity_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -3205,6 +3823,7 @@ fn var_list_and_failures_match_stock_git() {
         &["var", "GIT_SHELL_PATH"],
         &["var", "GIT_ATTR_SYSTEM"],
         &["var", "GIT_ATTR_GLOBAL"],
+        &["var", "GIT_CONFIG_SYSTEM"],
         &["var", "GIT_CONFIG_GLOBAL"],
         &["var"],
         &["var", "GIT_UNKNOWN"],
@@ -3228,6 +3847,79 @@ fn var_list_and_failures_match_stock_git() {
             "git var mismatch for {args:?}"
         );
     }
+}
+
+#[test]
+fn var_config_path_overrides_and_homeless_list_match_stock_git() {
+    let home = TempDir::new().expect("home dir");
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+    }
+
+    let system_override = [("GIT_CONFIG_SYSTEM", "/dev/null")];
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            home.path(),
+            &system_override,
+            &["var", "GIT_CONFIG_SYSTEM"],
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            git_repo.path(),
+            home.path(),
+            &system_override,
+            &["var", "GIT_CONFIG_SYSTEM"],
+        )
+    );
+
+    let global_override = [("GIT_CONFIG_GLOBAL", "/dev/null")];
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            home.path(),
+            &global_override,
+            &["var", "GIT_CONFIG_GLOBAL"],
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            git_repo.path(),
+            home.path(),
+            &global_override,
+            &["var", "GIT_CONFIG_GLOBAL"],
+        )
+    );
+
+    let zmin = Command::new(common::test_command_program(zmin_bin()))
+        .args(["var", "-l"])
+        .current_dir(zmin_repo.path())
+        .env_remove("HOME")
+        .env("XDG_CONFIG_HOME", "")
+        .output()
+        .expect("run zmin var -l without HOME");
+    let git = Command::new(common::test_command_program("git"))
+        .args(["var", "-l"])
+        .current_dir(git_repo.path())
+        .env_remove("HOME")
+        .env("XDG_CONFIG_HOME", "")
+        .output()
+        .expect("run git var -l without HOME");
+    assert_eq!(
+        (
+            zmin.status.code().unwrap_or(1),
+            String::from_utf8(zmin.stdout).expect("zmin stdout"),
+            String::from_utf8(zmin.stderr).expect("zmin stderr"),
+        ),
+        (
+            git.status.code().unwrap_or(1),
+            String::from_utf8(git.stdout).expect("git stdout"),
+            String::from_utf8(git.stderr).expect("git stderr"),
+        )
+    );
 }
 
 #[test]

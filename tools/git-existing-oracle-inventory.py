@@ -25,6 +25,7 @@ ZMIN_PATTERNS = (
     "run_zmin",
     "zmin_bin",
     "assert_zmin",
+    "assert_observed_command_matches_stock_git",
     "zmin_repo",
     "Zmin",
 )

@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime::current_unix_timestamp;
+use std::collections::{HashMap, HashSet};
 use std::process::{Command as ProcessCommand, Stdio};
 
 #[derive(Debug, Clone)]
@@ -210,7 +211,7 @@ fn apply_mail_patch(
             parsed.author.name.clone(),
             parsed.author.email.clone(),
             current_unix_timestamp()?,
-            chrono::Local::now().format("%z").to_string(),
+            crate::runtime::local_now().format("%z").to_string(),
         )?
     } else {
         parsed.author.clone()
@@ -324,6 +325,7 @@ fn apply_mail_patch(
         }
         return Ok(());
     }
+    let mut applied_any_change = false;
     for patch in patches {
         if am_options.reject > 0 {
             eprintln!(
@@ -334,22 +336,16 @@ fn apply_mail_patch(
         let update = match patch_commands::apply_file_patch(repo, store, &index, &patch, &options) {
             Ok(update) => update,
             Err(error) if am_patch_conflict_error(&error) => {
-                write_am_session(repo, mail, &patch_text, &subject, &head_id)?;
-                if !am_options.quiet {
-                    println!("Applying: {subject}");
-                    println!("Patch failed at 0001 {subject}");
-                }
-                if am_options.reject > 0 {
-                    write_am_reject_file(repo, &patch)?;
-                }
-                return Err(CliError::Stderr {
-                    code: 128,
-                    text: if am_options.reject > 0 {
-                        am_reject_conflict_stderr(&patch)
-                    } else {
-                        am_patch_conflict_stderr(&patch)
-                    },
-                });
+                return am_enter_conflict_session(
+                    repo,
+                    mail,
+                    &patch_text,
+                    &subject,
+                    &head_id,
+                    &patch,
+                    am_options.quiet,
+                    am_options.reject > 0,
+                );
             }
             Err(error) => return Err(error),
         };
@@ -359,7 +355,33 @@ fn apply_mail_patch(
                 String::from_utf8_lossy(am_patch_display_path(&patch))
             );
         }
-        patch_commands::write_apply_update(repo, store, &mut index, update, &options)?;
+        if !update.noop {
+            applied_any_change = true;
+        }
+        if let Err(error) =
+            patch_commands::write_apply_update(repo, store, &mut index, update, &options)
+        {
+            if am_patch_conflict_error(&error) {
+                return am_enter_conflict_session(
+                    repo,
+                    mail,
+                    &patch_text,
+                    &subject,
+                    &head_id,
+                    &patch,
+                    am_options.quiet,
+                    am_options.reject > 0,
+                );
+            }
+            return Err(error);
+        }
+    }
+    if !applied_any_change {
+        if !am_options.quiet {
+            println!("Applying: {subject}");
+            println!("No changes -- Patch already applied.");
+        }
+        return Ok(());
     }
     index.write_to_path(&repo.index_path)?;
     create_am_commit(
@@ -550,6 +572,19 @@ fn clear_am_session(repo: &GitRepo) -> Result<()> {
     remove_path_if_exists(&am_session_dir(repo))
 }
 
+fn read_am_orig_head(repo: &GitRepo) -> Result<Option<ObjectId>> {
+    let path = repo.git_dir.join("ORIG_HEAD");
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    Ok(Some(ObjectId::from_hex(
+        GitHashAlgorithm::Sha1,
+        contents.trim(),
+    )?))
+}
+
 fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -> Result<()> {
     if let Some(mode) = options.show_current_patch.as_deref() {
         let text = if mode == "diff" {
@@ -560,7 +595,25 @@ fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -
         io::stdout().write_all(text.as_bytes())?;
         return Ok(());
     }
-    if options.abort || options.quit || options.skip {
+    if options.abort {
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        if let Some(orig_head) = read_am_orig_head(repo)? {
+            let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+            update_head_to_commit(&refs, &orig_head)?;
+            checkout_worktree(repo, &store, &orig_head)?;
+        } else {
+            crate::cli::commands::worktree_commands::reset_worktree_to_head(repo, &store)?;
+        }
+        clear_am_session(repo)?;
+        return Ok(());
+    }
+    if options.skip {
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        crate::cli::commands::worktree_commands::reset_worktree_to_head(repo, &store)?;
+        clear_am_session(repo)?;
+        return Ok(());
+    }
+    if options.quit {
         clear_am_session(repo)?;
         return Ok(());
     }
@@ -693,7 +746,38 @@ fn am_patch_conflict_error(error: &CliError) -> bool {
     matches!(
         error,
         CliError::Fatal { code: 1, message } if message.starts_with("patch failed: ")
+    ) || matches!(
+        error,
+        CliError::Io(io_error) if io_error.kind() == io::ErrorKind::NotADirectory
     )
+}
+
+fn am_enter_conflict_session(
+    repo: &GitRepo,
+    mail: &str,
+    patch_text: &str,
+    subject: &str,
+    head_id: &ObjectId,
+    patch: &patch_commands::ApplyFilePatch,
+    quiet: bool,
+    reject: bool,
+) -> Result<()> {
+    write_am_session(repo, mail, patch_text, subject, head_id)?;
+    if !quiet {
+        println!("Applying: {subject}");
+        println!("Patch failed at 0001 {subject}");
+    }
+    if reject {
+        write_am_reject_file(repo, patch)?;
+    }
+    Err(CliError::Stderr {
+        code: 128,
+        text: if reject {
+            am_reject_conflict_stderr(patch)
+        } else {
+            am_patch_conflict_stderr(patch)
+        },
+    })
 }
 
 fn am_patch_conflict_stderr(patch: &patch_commands::ApplyFilePatch) -> String {
@@ -704,7 +788,7 @@ fn am_patch_conflict_stderr(patch: &patch_commands::ApplyFilePatch) -> String {
 
 fn am_patch_conflict_stderr_for_path(path: &str, line: usize) -> String {
     format!(
-        "error: patch failed: {path}:{line}\nerror: {path}: patch does not apply\nhint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n"
+        "error: patch failed: {path}:{line}\nerror: {path}: patch does not apply\nhint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config advice.mergeConflict false\"\n"
     )
 }
 
@@ -730,7 +814,7 @@ fn am_reject_conflict_stderr(patch: &patch_commands::ApplyFilePatch) -> String {
         patch.hunks.len()
     ));
     text.push_str(
-        "hint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
+        "hint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config advice.mergeConflict false\"\n",
     );
     text
 }
@@ -770,7 +854,7 @@ fn am_continue_no_changes_stderr(allow_empty: bool) -> String {
         );
     }
     text.push_str(
-        "hint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
+        "hint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config advice.mergeConflict false\"\n",
     );
     text
 }
@@ -840,8 +924,16 @@ pub(crate) fn format_patch(
     combined_all_paths: bool,
     remerge_diff: bool,
     full_index: bool,
+    unified: Option<&str>,
     nul_terminated: bool,
     no_prefix: bool,
+    default_prefix: bool,
+    relative: Option<&str>,
+    no_relative: bool,
+    find_renames: Option<&str>,
+    find_copies: Option<&str>,
+    find_copies_harder: bool,
+    no_renames: bool,
     reverse: bool,
     submodule: Option<&str>,
     order_file: Option<&Path>,
@@ -851,7 +943,10 @@ pub(crate) fn format_patch(
     color_words: Option<&str>,
     word_diff_regex: Option<&str>,
     attach: bool,
+    attach_boundary: Option<&str>,
     inline: bool,
+    inline_boundary: Option<&str>,
+    no_attach: bool,
     suffix: Option<&str>,
     subject_prefix: Option<&str>,
     keep_subject: bool,
@@ -859,13 +954,22 @@ pub(crate) fn format_patch(
     numbered: bool,
     numbered_files: bool,
     start_number: Option<&str>,
+    commit_list_format: Option<&str>,
     cover_letter: bool,
-    thread: bool,
+    no_cover_letter: bool,
+    no_thread: bool,
+    thread: Option<&str>,
+    notes: Vec<String>,
+    no_notes: bool,
     to: Vec<String>,
+    no_to: bool,
     cc: Vec<String>,
+    no_cc: bool,
     add_header: Vec<String>,
+    no_add_header: bool,
     in_reply_to: Option<&str>,
     from: Option<&str>,
+    no_from: bool,
     force_in_body_from: bool,
     no_force_in_body_from: bool,
     cover_from_description: Option<&str>,
@@ -877,7 +981,9 @@ pub(crate) fn format_patch(
     encode_email_headers: bool,
     no_encode_email_headers: bool,
     reroll_count: Option<&str>,
+    max_count: Option<&str>,
     rfc: Option<&str>,
+    no_rfc: bool,
     base: Option<&str>,
     no_base: bool,
     filename_max_length: Option<&str>,
@@ -887,6 +993,7 @@ pub(crate) fn format_patch(
     creation_factor: Option<&str>,
     zero_commit: bool,
     one: bool,
+    pathspecs: Vec<String>,
     revs: Vec<String>,
 ) -> Result<()> {
     let _trace = phase_trace("format_patch");
@@ -910,7 +1017,7 @@ pub(crate) fn format_patch(
     }
     if let Some(mode) = cover_from_description {
         match mode {
-            "message" | "subject" | "auto" | "none" => {}
+            "default" | "message" | "subject" | "auto" | "none" => {}
             _ => {
                 return Err(CliError::Fatal {
                     code: 128,
@@ -958,26 +1065,46 @@ pub(crate) fn format_patch(
     }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let revs = if revs.is_empty() {
-        vec!["HEAD".to_owned()]
-    } else {
-        revs
-    };
+    let revs = format_patch_effective_revs(revs, one || max_count.is_some());
+    if revs.is_empty() && interdiff.is_none() && range_diff.is_none() && base.is_none() {
+        if let Some(output) = output {
+            let _ = fs::File::create(output)?;
+        }
+        return Ok(());
+    }
     let revs = {
         let _trace = phase_trace("format_patch.collect_revs");
         collect_rev_list_revs(&repo, &store, false, revs)?
     };
     let packed_store = store.packed_first();
     let commit_cache = CommitObjectCache::new(&packed_store);
-    let cover_blurb = description_file
-        .map(fs::read_to_string)
-        .transpose()?
-        .map(|value| value.trim_end_matches(['\r', '\n']).to_owned());
     let mut commits = {
         let _trace = phase_trace("format_patch.collect_commits");
         collect_commit_objects_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?
     };
     commits.retain(|entry| entry.commit.parents.len() <= 1);
+    if ignore_if_in_upstream {
+        commits = format_patch_filter_ignore_if_in_upstream(&repo, &store, &revs, commits)?;
+    }
+    let pathspecs = pathspecs
+        .into_iter()
+        .map(|value| value.into_bytes())
+        .collect::<Vec<_>>();
+    if !pathspecs.is_empty() {
+        commits = format_patch_filter_commits_by_pathspec(
+            &packed_store,
+            &commit_cache,
+            commits,
+            &pathspecs,
+        )?;
+    }
+    if let Some(max_count) = max_count {
+        let max_count = max_count.parse::<usize>().map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid max count: {max_count}"),
+        })?;
+        commits.truncate(max_count);
+    }
     if one {
         commits.truncate(1);
     }
@@ -988,6 +1115,11 @@ pub(crate) fn format_patch(
     } else {
         abbrev_len
     };
+    let unified_context = unified
+        .map(|value| parse_diff_context_value("--unified", value))
+        .transpose()?
+        .unwrap_or(3);
+    let no_prefix = format_patch_effective_no_prefix(&repo, no_prefix, default_prefix)?;
     let dirstat =
         normalize_format_patch_dirstat(dirstat, dirstat_short, cumulative, dirstat_by_file);
     let dirstat_by_file = dirstat
@@ -999,14 +1131,18 @@ pub(crate) fn format_patch(
         .or(word_diff_regex);
     let submodule_format = parse_submodule_diff_format(submodule)?;
     let suffix = suffix.unwrap_or(".patch");
-    let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
-    let mut subject_prefix = subject_prefix
-        .or(configured_subject_prefix.as_deref())
-        .unwrap_or("PATCH")
-        .to_owned();
-    if let Some(rfc) = rfc {
-        subject_prefix = format!("{rfc} {subject_prefix}");
+    if keep_subject && (subject_prefix.is_some() || rfc.is_some()) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--subject-prefix/--rfc' and '-k' cannot be used together".into(),
+        });
     }
+    let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
+    let mut subject_prefix = format_patch_subject_prefix(
+        subject_prefix,
+        configured_subject_prefix.as_deref(),
+        if no_rfc { Some("") } else { rfc },
+    );
     if let Some(reroll_count) = reroll_count {
         subject_prefix = format!("{subject_prefix} v{reroll_count}");
     }
@@ -1019,23 +1155,68 @@ pub(crate) fn format_patch(
         })
         .transpose()?
         .unwrap_or(1);
+    let commit_list_format = format_patch_commit_list_format(&repo, commit_list_format)?;
+    let filename_max_length = format_patch_filename_limit(&repo, filename_max_length)?;
+    let cover_from_description =
+        format_patch_cover_from_description_mode(&repo, cover_from_description)?;
     let signature_text = if no_signature {
         None
     } else if let Some(signature_file) = signature_file {
-        Some(
-            fs::read_to_string(signature_file)?
-                .trim_end_matches(['\r', '\n'])
-                .to_owned(),
-        )
+        Some(fs::read_to_string(signature_file)?)
+    } else if let Some(signature) = signature {
+        (!signature.is_empty()).then(|| signature.to_owned())
     } else {
-        Some(signature.unwrap_or("0.1.0.zmin").to_owned())
+        match format_patch_signature_from_config(&repo)? {
+            Some(signature) if signature.is_empty() => None,
+            Some(signature) => Some(signature),
+            None => Some({
+                let version_line = crate::runtime::git_compatible_version_line();
+                version_line
+                    .strip_prefix("git version ")
+                    .unwrap_or(crate::runtime::GIT_COMPAT_VERSION)
+                    .to_owned()
+            }),
+        }
     };
+    let appendix_requested = interdiff.is_some() || range_diff.is_some();
+    let cover_letter_disabled = format_patch_cover_letter_config_disabled(&repo)?;
+    let cover_letter = if no_cover_letter {
+        false
+    } else {
+        cover_letter
+            || commit_list_format.is_some()
+            || appendix_requested && commits.len() > 1 && !cover_letter_disabled
+            || format_patch_cover_letter_config_enabled(&repo, commits.len())?
+    };
+    if commits.len() > 1 && !cover_letter {
+        if interdiff.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "--interdiff requires --cover-letter or single patch".into(),
+            });
+        }
+        if range_diff.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "--range-diff requires --cover-letter or single patch".into(),
+            });
+        }
+    }
     let base_information = if no_base {
         None
     } else if let Some(base) = base {
-        Some(format_patch_base_information(&repo, &store, base)?)
+        if base == "auto" {
+            format_patch_auto_base_information(&repo, &store, &commits, false)?
+        } else {
+            Some(format_patch_base_information(
+                &repo, &store, &commits, base,
+            )?)
+        }
     } else {
-        None
+        match format_patch_auto_base_mode(&repo)? {
+            Some(force) => format_patch_auto_base_information(&repo, &store, &commits, !force)?,
+            None => None,
+        }
     };
     let appendix = if let Some(previous) = interdiff {
         let head = commits
@@ -1046,20 +1227,41 @@ pub(crate) fn format_patch(
                 message: "no commits to format".into(),
             })?;
         Some(render_format_patch_interdiff(
-            &repo, &store, previous, &head,
+            &repo,
+            &store,
+            previous,
+            &head,
+            reroll_count,
+            !cover_letter,
         )?)
     } else if let Some(previous) = range_diff {
-        let head = commits
-            .last()
-            .map(|entry| entry.id.to_hex())
-            .ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "no commits to format".into(),
-            })?;
-        Some(render_format_patch_range_diff(previous, &head)?)
+        let first = commits.first().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "no commits to format".into(),
+        })?;
+        let last = commits.last().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "no commits to format".into(),
+        })?;
+        let current_range = first
+            .commit
+            .parents
+            .first()
+            .map(|parent| format!("{}..{}", parent.to_hex(), last.id.to_hex()))
+            .unwrap_or_else(|| last.id.to_hex());
+        Some(render_format_patch_range_diff(
+            previous,
+            &current_range,
+            creation_factor,
+        )?)
     } else {
         None
     };
+    let (cover_subject, cover_blurb) =
+        format_patch_cover_description(&repo, description_file, cover_from_description.as_deref())?;
+    let (no_numbered, numbered) =
+        format_patch_numbering_mode(&repo, no_numbered, numbered, cover_letter)?;
+    let thread = format_patch_effective_thread(&repo, thread, no_thread)?;
     let signoff_line = if signoff {
         let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
         Some(format!(
@@ -1069,14 +1271,49 @@ pub(crate) fn format_patch(
     } else {
         None
     };
-    let mut extra_headers = Vec::new();
-    extra_headers.extend(to.into_iter().map(|value| format!("To: {value}")));
-    extra_headers.extend(cc.into_iter().map(|value| format!("Cc: {value}")));
-    extra_headers.extend(add_header);
-    let _accepted_parser_only = (
-        no_force_in_body_from,
+    let encode_email_headers = format_patch_encode_email_headers_enabled(
+        &repo,
         encode_email_headers,
         no_encode_email_headers,
+    )?;
+    let sender_override = format_patch_sender_override(&repo, from, no_from, encode_email_headers)?;
+    let extra_headers = format_patch_effective_headers(
+        &repo,
+        to,
+        no_to,
+        cc,
+        no_cc,
+        add_header,
+        no_add_header,
+        encode_email_headers,
+    )?;
+    let note_refs = format_patch_effective_note_refs(&repo, &notes, no_notes)?;
+    let notes_by_commit = format_patch_notes_by_commit(&repo, &store, &commits, &note_refs)?;
+    let force_in_body_from =
+        format_patch_force_in_body_from_enabled(&repo, force_in_body_from, no_force_in_body_from)?;
+    let relative_prefix = if no_relative {
+        None
+    } else if let Some(relative) = relative {
+        diff_relative_prefix(&repo, Some(relative), false)?
+    } else {
+        match read_config_value(&repo, "diff.relative")? {
+            Some(value) if config_bool_value_enabled(&value) => {
+                diff_relative_prefix(&repo, Some(""), false)?
+            }
+            _ => None,
+        }
+    };
+    let rename_threshold = if no_renames {
+        None
+    } else {
+        parse_find_renames_option(find_renames)?.or(Some(100))
+    };
+    let copy_threshold = if no_renames {
+        None
+    } else {
+        parse_find_copies_option(find_copies)?
+    };
+    let _accepted_parser_only = (
         word_diff_regex,
         separate_merges,
         tree_in_diff,
@@ -1086,10 +1323,29 @@ pub(crate) fn format_patch(
         ignore_if_in_upstream,
         creation_factor,
     );
-    let message_id_timestamp = if thread {
+    let message_id_timestamp = if thread.is_some() {
         Some(current_unix_timestamp()?)
     } else {
         None
+    };
+    let configured_attach = if no_attach {
+        None
+    } else {
+        read_config_value(&repo, "format.attach")?
+    };
+    let effective_attach = attach
+        || configured_attach
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+    let mboxrd = format_patch_mboxrd_enabled(&repo)?;
+    let mime_boundary = if inline {
+        inline_boundary.filter(|value| !value.is_empty())
+    } else if attach {
+        attach_boundary.filter(|value| !value.is_empty())
+    } else {
+        configured_attach
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
     };
     let format_context = FormatPatchContext {
         repo: &repo,
@@ -1101,11 +1357,16 @@ pub(crate) fn format_patch(
         no_numbered,
         numbered,
         numbered_files,
-        attach,
+        attach: effective_attach,
         inline,
         cover_letter,
+        include_mime_headers: !stdout && (effective_attach || inline),
+        mime_boundary,
+        mboxrd,
         suffix,
         subject_prefix: &subject_prefix,
+        reroll_count,
+        commit_list_format: commit_list_format.as_deref(),
         prelude_mode: format_patch_prelude_mode(
             patch_short_alias,
             patch_with_raw,
@@ -1126,24 +1387,30 @@ pub(crate) fn format_patch(
         word_diff,
         word_diff_regex,
         submodule_format,
-        thread,
+        unified_context,
+        thread: thread.as_deref(),
         extra_headers: &extra_headers,
         in_reply_to,
-        sender_override: from,
-        body_from_override: from
-            .map(|_| true)
-            .or(Some(force_in_body_from))
-            .filter(|value| *value)
-            .is_some(),
+        sender_override: sender_override.as_deref(),
+        body_from_override: force_in_body_from,
+        encode_email_headers,
         message_id_timestamp,
+        notes_by_commit: &notes_by_commit,
         keep_subject,
         number_offset: start_number.saturating_sub(1),
+        filename_max_length,
         signoff_line: signoff_line.as_deref(),
         signature: signature_text.as_deref(),
         zero_commit,
+        cover_subject: cover_subject.as_deref(),
         cover_blurb: cover_blurb.as_deref(),
         base_information: base_information.as_deref(),
         appendix: appendix.as_deref(),
+        relative_prefix,
+        pathspecs: &pathspecs,
+        rename_threshold,
+        copy_threshold,
+        find_copies_harder,
     };
     let tree_cache = TreeObjectCache::new(&packed_store);
     let mut blob_cache = FormatPatchBlobCache::new(&store);
@@ -1189,6 +1456,22 @@ pub(crate) fn format_patch(
 
     if let Some(output) = output {
         let mut file = io::BufWriter::new(fs::File::create(output)?);
+        if cover_letter {
+            if let (Some(first), Some(last)) = (commits.first(), commits.last()) {
+                let cover_committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+                let cover_signature = signature_line(&cover_committer);
+                write_format_patch_cover_letter(
+                    &mut file,
+                    &format_context,
+                    &last.id,
+                    cover_signature.as_bytes(),
+                    &commits,
+                    &tree_cache,
+                    format_patch_old_tree(&commit_cache, first.commit.as_ref())?.as_ref(),
+                    &last.commit.tree,
+                )?;
+            }
+        }
         for (idx, entry) in commits.iter().enumerate() {
             let _trace = phase_trace("format_patch.emit_output_file_patch");
             if idx > 0 {
@@ -1211,17 +1494,45 @@ pub(crate) fn format_patch(
         return Ok(());
     }
 
-    let output_directory = output_directory.unwrap_or_else(|| PathBuf::from("."));
+    let configured_output_directory = if output_directory.is_none() && output.is_none() && !stdout {
+        read_config_value(&repo, "format.outputdirectory")?.map(PathBuf::from)
+    } else {
+        None
+    };
+    let output_directory = output_directory
+        .or(configured_output_directory)
+        .unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&output_directory)?;
+    if cover_letter && let (Some(first), Some(last)) = (commits.first(), commits.last()) {
+        let cover_committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+        let cover_signature = signature_line(&cover_committer);
+        let path = output_directory.join(format_patch_output_filename(
+            0,
+            "cover-letter",
+            &format_context,
+        ));
+        let mut file = io::BufWriter::new(fs::File::create(&path)?);
+        write_format_patch_cover_letter(
+            &mut file,
+            &format_context,
+            &last.id,
+            cover_signature.as_bytes(),
+            &commits,
+            &tree_cache,
+            format_patch_old_tree(&commit_cache, first.commit.as_ref())?.as_ref(),
+            &last.commit.tree,
+        )?;
+        println!("{}", git_path_output(&path));
+    }
     for (idx, entry) in commits.iter().enumerate() {
         let _trace = phase_trace("format_patch.emit_file_patch");
         let filename = if numbered_files {
             (idx + 1).to_string()
         } else {
-            format_patch_filename_with_suffix(
+            format_patch_output_filename(
                 idx + 1,
                 &commit_subject(&entry.commit.message),
-                suffix,
+                &format_context,
             )
         };
         let path = output_directory.join(filename);
@@ -1242,6 +1553,771 @@ pub(crate) fn format_patch(
         println!("{}", git_path_output(&path));
     }
     Ok(())
+}
+
+fn format_patch_signature_from_config(repo: &GitRepo) -> Result<Option<String>> {
+    if let Some(signature_file) = read_config_value(repo, "format.signaturefile")? {
+        return Ok(Some(fs::read_to_string(repo.root.join(signature_file))?));
+    }
+    let Some(signature) = read_config_value(repo, "format.signature")? else {
+        return Ok(None);
+    };
+    Ok(Some(signature))
+}
+
+fn format_patch_effective_note_refs(
+    repo: &GitRepo,
+    cli_notes: &[String],
+    no_notes: bool,
+) -> Result<Vec<String>> {
+    let mut refs = Vec::new();
+    if !no_notes {
+        for value in read_multi_config_values("format.notes")? {
+            format_patch_push_note_refs(repo, &mut refs, &value)?;
+        }
+    }
+    for value in cli_notes {
+        if value.is_empty() {
+            refs.push(format_patch_default_notes_ref(repo)?);
+        } else {
+            refs.push(format_patch_normalize_notes_ref(value));
+        }
+    }
+    let mut deduped = Vec::new();
+    for ref_name in refs {
+        if !deduped.contains(&ref_name) {
+            deduped.push(ref_name);
+        }
+    }
+    Ok(deduped)
+}
+
+fn format_patch_push_note_refs(repo: &GitRepo, refs: &mut Vec<String>, value: &str) -> Result<()> {
+    match parse_git_bool(value) {
+        Some(true) => refs.push(format_patch_default_notes_ref(repo)?),
+        Some(false) => refs.clear(),
+        None => refs.push(format_patch_normalize_notes_ref(value)),
+    }
+    Ok(())
+}
+
+fn format_patch_default_notes_ref(repo: &GitRepo) -> Result<String> {
+    Ok(std::env::var("GIT_NOTES_REF")
+        .ok()
+        .or_else(|| read_config_value(repo, "core.notesRef").ok().flatten())
+        .unwrap_or_else(|| "refs/notes/commits".to_owned()))
+}
+
+fn format_patch_normalize_notes_ref(value: &str) -> String {
+    if value.starts_with("refs/notes/") {
+        value.to_owned()
+    } else {
+        format!("refs/notes/{value}")
+    }
+}
+
+fn format_patch_notes_by_commit(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commits: &[CollectedCommit],
+    note_refs: &[String],
+) -> Result<HashMap<ObjectId, Vec<FormatPatchNoteBlock>>> {
+    if note_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let object_store = runtime.object_store_adapter();
+    let refs_store = runtime.refs_store_adapter();
+    let commit_ids = commits
+        .iter()
+        .map(|entry| (entry.id.to_hex(), entry.id.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut rendered = HashMap::new();
+    for ref_name in note_refs {
+        let notes = notes_commands::read_notes_map(&object_store, &refs_store, ref_name)?;
+        for (object_hex, note_id) in notes {
+            let Some(object_id) = commit_ids.get(&object_hex) else {
+                continue;
+            };
+            let note = store.read_object(&note_id)?;
+            if note.kind != GitObjectKind::Blob {
+                continue;
+            }
+            rendered
+                .entry(object_id.clone())
+                .or_insert_with(Vec::new)
+                .push(FormatPatchNoteBlock {
+                    label: format_patch_note_label(ref_name),
+                    text: String::from_utf8_lossy(&note.content).into_owned(),
+                });
+        }
+    }
+    Ok(rendered)
+}
+
+fn format_patch_note_label(ref_name: &str) -> Option<String> {
+    if ref_name == "refs/notes/commits" {
+        None
+    } else if let Some(short) = ref_name.strip_prefix("refs/notes/") {
+        Some(short.to_owned())
+    } else {
+        Some(ref_name.to_owned())
+    }
+}
+
+fn format_patch_effective_revs(revs: Vec<String>, one: bool) -> Vec<String> {
+    if revs.is_empty() {
+        return if one {
+            vec!["HEAD".to_owned()]
+        } else {
+            Vec::new()
+        };
+    }
+    if one || revs.len() != 1 {
+        return revs;
+    }
+    let rev = &revs[0];
+    if format_patch_single_rev_uses_since_semantics(rev) {
+        vec![format!("{rev}..HEAD")]
+    } else {
+        revs
+    }
+}
+
+fn format_patch_filter_commits_by_pathspec<S>(
+    store: &S,
+    commit_cache: &CommitObjectCache<'_, S>,
+    commits: Vec<CollectedCommit>,
+    pathspecs: &[Vec<u8>],
+) -> Result<Vec<CollectedCommit>>
+where
+    S: GitObjectStore + ?Sized,
+{
+    if pathspecs.is_empty() || commits.is_empty() {
+        return Ok(commits);
+    }
+    let tree_cache = TreeObjectCache::new(store);
+    let mut filtered = Vec::new();
+    for entry in commits {
+        let old_index = format_patch_old_tree(commit_cache, entry.commit.as_ref())?
+            .as_ref()
+            .map(|tree| tree_cache.read_tree_to_index(tree))
+            .transpose()?
+            .unwrap_or_else(GitIndex::new);
+        let new_index = tree_cache.read_tree_to_index(&entry.commit.tree)?;
+        let entries = diff_indexes(&old_index, &new_index)?;
+        if entries
+            .iter()
+            .any(|diff_entry| diff_entry_matches_pathspec(diff_entry, pathspecs))
+        {
+            filtered.push(entry);
+        }
+    }
+    Ok(filtered)
+}
+
+fn format_patch_filter_ignore_if_in_upstream(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    commits: Vec<CollectedCommit>,
+) -> Result<Vec<CollectedCommit>> {
+    if revs.exclude.is_empty() || commits.is_empty() {
+        return Ok(commits);
+    }
+    let commit_cache = CommitObjectCache::new(store);
+    let upstream_revs = RevListRevs {
+        include: revs.exclude.clone(),
+        exclude: Vec::new(),
+        extra_objects: Vec::new(),
+        symmetric_diff: None,
+    };
+    let upstream_commits = collect_commit_objects_with_exclusions_cached(
+        repo,
+        store,
+        &commit_cache,
+        &upstream_revs,
+        None,
+    )?;
+    let tree_cache = TreeObjectCache::new(store);
+    let mut upstream_patch_ids = HashSet::new();
+    for entry in upstream_commits {
+        if let Some(patch_id) = reference_commands::commit_patch_id_for_cherry_cached(
+            store,
+            &commit_cache,
+            &tree_cache,
+            &entry.id,
+        )? {
+            upstream_patch_ids.insert(patch_id);
+        }
+    }
+    if upstream_patch_ids.is_empty() {
+        return Ok(commits);
+    }
+    let mut filtered = Vec::with_capacity(commits.len());
+    for entry in commits {
+        let patch_id = reference_commands::commit_patch_id_for_cherry_cached(
+            store,
+            &commit_cache,
+            &tree_cache,
+            &entry.id,
+        )?;
+        if patch_id
+            .as_ref()
+            .is_some_and(|patch_id| upstream_patch_ids.contains(patch_id))
+        {
+            continue;
+        }
+        filtered.push(entry);
+    }
+    Ok(filtered)
+}
+
+fn format_patch_single_rev_uses_since_semantics(rev: &str) -> bool {
+    !rev.starts_with('^')
+        && !rev.contains("..")
+        && !rev.ends_with("^!")
+        && !rev.ends_with("^@")
+        && !rev.ends_with("^-")
+}
+
+fn format_patch_numbering_mode(
+    repo: &GitRepo,
+    no_numbered: bool,
+    numbered: bool,
+    cover_letter: bool,
+) -> Result<(bool, bool)> {
+    if no_numbered {
+        return Ok((true, false));
+    }
+    if numbered {
+        return Ok((false, true));
+    }
+    let configured = read_config_value(repo, "format.numbered")?;
+    let configured = configured
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    let effective_numbered = match configured.as_deref() {
+        Some("true" | "yes" | "on" | "1") => true,
+        Some("auto") => cover_letter,
+        _ => cover_letter,
+    };
+    Ok((false, effective_numbered))
+}
+
+fn format_patch_effective_thread(
+    repo: &GitRepo,
+    thread: Option<&str>,
+    no_thread: bool,
+) -> Result<Option<String>> {
+    if no_thread {
+        return Ok(None);
+    }
+    let configured = thread
+        .map(str::to_owned)
+        .or(read_config_value(repo, "format.thread")?);
+    match configured.as_deref() {
+        None | Some("false") | Some("no") | Some("off") | Some("0") => Ok(None),
+        Some("") | Some("true") | Some("yes") | Some("on") | Some("1") | Some("shallow") => {
+            Ok(Some("shallow".to_owned()))
+        }
+        Some("deep") => Ok(Some("deep".to_owned())),
+        Some(value) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid thread specifier: {value}"),
+        }),
+    }
+}
+
+fn format_patch_effective_no_prefix(
+    repo: &GitRepo,
+    no_prefix: bool,
+    default_prefix: bool,
+) -> Result<bool> {
+    if default_prefix {
+        return Ok(false);
+    }
+    if no_prefix {
+        return Ok(true);
+    }
+    let Some(configured) = read_config_value(repo, "format.noprefix")? else {
+        return Ok(false);
+    };
+    let normalized = configured.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "true" | "yes" | "on" | "1" => Ok(true),
+        "false" | "no" | "off" | "0" => Ok(false),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "bad boolean config value '{}' for 'format.noprefix'\n\
+hint: 'format.noprefix' used to accept any value and treat that as 'true'.\n\
+hint: Now it only accepts boolean values, like what 'diff.noprefix' does.",
+                configured
+            ),
+        }),
+    }
+}
+
+fn format_patch_cover_from_description_mode(
+    repo: &GitRepo,
+    cli_mode: Option<&str>,
+) -> Result<Option<String>> {
+    let configured = cli_mode
+        .map(str::to_owned)
+        .or(read_config_value(repo, "format.coverFromDescription")?);
+    match configured.as_deref() {
+        None => Ok(None),
+        Some("default") => Ok(Some("message".to_owned())),
+        Some("message" | "subject" | "auto" | "none") => Ok(configured),
+        Some(value) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid cover from description mode: {value}"),
+        }),
+    }
+}
+
+fn format_patch_cover_letter_config_enabled(repo: &GitRepo, commit_count: usize) -> Result<bool> {
+    let Some(configured) = read_config_value(repo, "format.coverletter")? else {
+        return Ok(false);
+    };
+    let normalized = configured.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "true" | "yes" | "on" | "1" => Ok(true),
+        "auto" => Ok(commit_count > 1),
+        "false" | "no" | "off" | "0" => Ok(false),
+        _ => Ok(false),
+    }
+}
+
+fn format_patch_cover_letter_config_disabled(repo: &GitRepo) -> Result<bool> {
+    let Some(configured) = read_config_value(repo, "format.coverletter")? else {
+        return Ok(false);
+    };
+    Ok(matches!(
+        configured.trim().to_ascii_lowercase().as_str(),
+        "false" | "no" | "off" | "0"
+    ))
+}
+
+fn format_patch_cover_description(
+    repo: &GitRepo,
+    description_file: Option<&Path>,
+    mode: Option<&str>,
+) -> Result<(Option<String>, Option<String>)> {
+    let description = if let Some(path) = description_file {
+        Some(
+            fs::read_to_string(path)?
+                .trim_end_matches(['\r', '\n'])
+                .to_owned(),
+        )
+    } else {
+        format_patch_current_branch_description(repo)?
+    };
+    let Some(description) = description.filter(|value| !value.trim().is_empty()) else {
+        return Ok((None, None));
+    };
+    let effective_mode = mode.unwrap_or("message");
+    if effective_mode == "none" {
+        return Ok((None, None));
+    }
+    let mut lines = description.lines();
+    let first_line = lines.next().unwrap_or_default().trim().to_owned();
+    let rest = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
+    let auto_subject = !first_line.is_empty() && first_line.chars().count() <= 100;
+    let effective_mode = if effective_mode == "auto" {
+        if auto_subject { "subject" } else { "message" }
+    } else {
+        effective_mode
+    };
+    match effective_mode {
+        "subject" => {
+            let body = if rest.is_empty() { None } else { Some(rest) };
+            Ok((Some(first_line), body))
+        }
+        "message" => Ok((None, Some(description))),
+        _ => Ok((None, None)),
+    }
+}
+
+fn format_patch_subject_prefix(
+    cli_subject_prefix: Option<&str>,
+    configured_subject_prefix: Option<&str>,
+    rfc: Option<&str>,
+) -> String {
+    let base_prefix = cli_subject_prefix
+        .or(configured_subject_prefix)
+        .unwrap_or("PATCH");
+    match rfc {
+        None | Some("") => base_prefix.to_owned(),
+        Some(rfc) if rfc.starts_with('-') => {
+            let suffix = rfc[1..].trim();
+            if suffix.is_empty() {
+                base_prefix.to_owned()
+            } else if base_prefix.is_empty() {
+                suffix.to_owned()
+            } else {
+                format!("{base_prefix} {suffix}")
+            }
+        }
+        Some(rfc) if base_prefix.is_empty() => rfc.to_owned(),
+        Some(rfc) => format!("{rfc} {base_prefix}"),
+    }
+}
+
+fn format_patch_current_branch_description(repo: &GitRepo) -> Result<Option<String>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let Some(branch_ref) = current_branch_ref(&refs)? else {
+        return Ok(None);
+    };
+    let branch = branch_display_name(&branch_ref);
+    Ok(read_config_section_value(
+        repo,
+        "branch",
+        &branch,
+        "description",
+    )?)
+}
+
+fn format_patch_commit_list_format(
+    repo: &GitRepo,
+    commit_list_format: Option<&str>,
+) -> Result<Option<String>> {
+    let configured = read_config_value(repo, "format.commitlistformat")?;
+    let value = commit_list_format
+        .map(str::to_owned)
+        .or(configured)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if let Some(value) = value.as_deref() {
+        validate_format_patch_commit_list_format(value)?;
+    }
+    Ok(value)
+}
+
+fn validate_format_patch_commit_list_format(value: &str) -> Result<()> {
+    if matches!(value, "modern" | "shortlog") || value.starts_with("log:") {
+        return Ok(());
+    }
+    if value.contains("%(count)")
+        || value.contains("%(total)")
+        || value.contains("%s")
+        || value.contains("%an")
+    {
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("'{}' is not a valid format string", value),
+    })
+}
+
+fn format_patch_filename_limit(repo: &GitRepo, cli_limit: Option<&str>) -> Result<Option<usize>> {
+    let configured = read_config_value(repo, "format.filenameMaxLength")?;
+    cli_limit
+        .or(configured.as_deref())
+        .or(Some("64"))
+        .map(|value| {
+            value.parse::<usize>().map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid filename max length: {value}"),
+            })
+        })
+        .transpose()
+}
+
+fn format_patch_effective_headers(
+    repo: &GitRepo,
+    to: Vec<String>,
+    no_to: bool,
+    cc: Vec<String>,
+    no_cc: bool,
+    add_header: Vec<String>,
+    no_add_header: bool,
+    encode_email_headers: bool,
+) -> Result<Vec<String>> {
+    let mut config_to = Vec::new();
+    let mut config_cc = Vec::new();
+    let mut config_headers = Vec::new();
+    for entry in read_config_entries(repo).map_err(CliError::Io)? {
+        if entry.name().eq_ignore_ascii_case("format.to") {
+            config_to.push(entry.value);
+        } else if entry.name().eq_ignore_ascii_case("format.cc") {
+            config_cc.push(entry.value);
+        } else if entry.name().eq_ignore_ascii_case("format.headers") {
+            config_headers.push(entry.value);
+        }
+    }
+
+    let mut merged_to = if no_to { Vec::new() } else { config_to };
+    merged_to.extend(to);
+    let mut merged_cc = if no_cc { Vec::new() } else { config_cc };
+    merged_cc.extend(cc);
+    let mut headers = if no_add_header {
+        Vec::new()
+    } else {
+        config_headers
+    };
+    headers.extend(add_header);
+    format_patch_merge_headers(merged_to, merged_cc, headers, encode_email_headers)
+}
+
+fn format_patch_merge_headers(
+    to: Vec<String>,
+    cc: Vec<String>,
+    headers: Vec<String>,
+    encode_email_headers: bool,
+) -> Result<Vec<String>> {
+    let mut all_to = Vec::new();
+    let mut all_cc = Vec::new();
+    let mut first_to_index = None;
+    let mut first_cc_index = None;
+    for (index, header) in headers.iter().enumerate() {
+        let Some((name, value)) = header.split_once(':') else {
+            continue;
+        };
+        let trimmed_name = name.trim();
+        if trimmed_name.eq_ignore_ascii_case("to") {
+            if first_to_index.is_none() {
+                first_to_index = Some(index);
+            }
+            all_to.push(value.trim().to_owned());
+        } else if trimmed_name.eq_ignore_ascii_case("cc") {
+            if first_cc_index.is_none() {
+                first_cc_index = Some(index);
+            }
+            all_cc.push(value.trim().to_owned());
+        }
+    }
+    all_to.extend(to);
+    all_cc.extend(cc);
+
+    let mut result = Vec::new();
+    for (index, header) in headers.into_iter().enumerate() {
+        let Some((name, _value)) = header.split_once(':') else {
+            result.push(header);
+            continue;
+        };
+        let trimmed_name = name.trim();
+        if trimmed_name.eq_ignore_ascii_case("to") {
+            if first_to_index == Some(index) {
+                result.extend(format_patch_fold_address_header(
+                    "To",
+                    all_to.clone(),
+                    encode_email_headers,
+                ));
+            }
+            continue;
+        }
+        if trimmed_name.eq_ignore_ascii_case("cc") {
+            if first_cc_index == Some(index) {
+                result.extend(format_patch_fold_address_header(
+                    "Cc",
+                    all_cc.clone(),
+                    encode_email_headers,
+                ));
+            }
+            continue;
+        }
+        result.push(header.trim_end_matches(['\r', '\n']).to_owned());
+    }
+    if first_to_index.is_none() && !all_to.is_empty() {
+        result.extend(format_patch_fold_address_header(
+            "To",
+            all_to,
+            encode_email_headers,
+        ));
+    }
+    if first_cc_index.is_none() && !all_cc.is_empty() {
+        result.extend(format_patch_fold_address_header(
+            "Cc",
+            all_cc,
+            encode_email_headers,
+        ));
+    }
+    Ok(result)
+}
+
+fn format_patch_fold_address_header(
+    name: &str,
+    values: Vec<String>,
+    encode_email_headers: bool,
+) -> Vec<String> {
+    let values = values
+        .into_iter()
+        .map(|value| format_patch_address_value(value.trim(), encode_email_headers))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Vec::new();
+    }
+    if values.len() == 1 {
+        return vec![format!("{name}: {}", values[0])];
+    }
+    let mut lines = Vec::with_capacity(values.len());
+    lines.push(format!("{name}: {},", values[0]));
+    for (index, value) in values.iter().enumerate().skip(1) {
+        let suffix = if index + 1 == values.len() { "" } else { "," };
+        lines.push(format!(" {value}{suffix}"));
+    }
+    lines
+}
+
+fn format_patch_address_value(value: &str, encode_email_headers: bool) -> String {
+    let trimmed = value.trim();
+    let Some(start) = trimmed.rfind('<') else {
+        return trimmed.to_owned();
+    };
+    let Some(end_rel) = trimmed[start + 1..].find('>') else {
+        return trimmed.to_owned();
+    };
+    let end = start + 1 + end_rel;
+    let name = trimmed[..start].trim();
+    let email = trimmed[start + 1..end].trim();
+    if email.is_empty() {
+        return trimmed.to_owned();
+    }
+    if name.is_empty() {
+        return format!("<{email}>");
+    }
+    format!(
+        "{} <{email}>",
+        format_patch_address_display_name(name, encode_email_headers)
+    )
+}
+
+fn format_patch_address_display_name(name: &str, encode_email_headers: bool) -> String {
+    let unquoted = name.trim().trim_matches('"');
+    if encode_email_headers && !unquoted.is_ascii() {
+        return format_patch_encode_rfc2047_q(unquoted);
+    }
+    if format_patch_needs_rfc822_quotes(unquoted) {
+        return format!("\"{}\"", format_patch_escape_quoted_string(unquoted));
+    }
+    unquoted.to_owned()
+}
+
+fn format_patch_needs_rfc822_quotes(value: &str) -> bool {
+    value.chars().any(|ch| {
+        !matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | ' ' | '!' | '#'..='\''
+            | '*' | '+' | '-' | '/' | '=' | '?' | '^' | '_' | '`' | '{' | '|' | '}' | '~')
+    })
+}
+
+fn format_patch_escape_quoted_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '"') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+fn format_patch_encode_rfc2047_q(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'!'
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'/'
+            | b'='
+            | b'_'
+            | b'.' => encoded.push(char::from(*byte)),
+            b' ' => encoded.push_str("=20"),
+            _ => {
+                use std::fmt::Write as _;
+                let _ = write!(&mut encoded, "={byte:02X}");
+            }
+        }
+    }
+    format!("=?UTF-8?q?{encoded}?=")
+}
+
+fn format_patch_sender_override(
+    repo: &GitRepo,
+    from: Option<&str>,
+    no_from: bool,
+    encode_email_headers: bool,
+) -> Result<Option<String>> {
+    if no_from {
+        return Ok(None);
+    }
+    if let Some(from) = from {
+        if from.is_empty() {
+            let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+            return Ok(Some(format_patch_address_value(
+                &format!("{} <{}>", committer.name, committer.email),
+                encode_email_headers,
+            )));
+        }
+        if !from.contains('<') || !from.contains('>') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("invalid ident line: {from}"),
+            });
+        }
+        return Ok(Some(format_patch_address_value(from, encode_email_headers)));
+    }
+    let Some(configured) = read_config_value(repo, "format.from")? else {
+        return Ok(None);
+    };
+    let configured = configured.trim();
+    if configured.is_empty() {
+        return Ok(None);
+    }
+    if config_bool_value_enabled(configured) {
+        let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+        return Ok(Some(format_patch_address_value(
+            &format!("{} <{}>", committer.name, committer.email),
+            encode_email_headers,
+        )));
+    }
+    Ok(Some(format_patch_address_value(
+        configured,
+        encode_email_headers,
+    )))
+}
+
+fn format_patch_encode_email_headers_enabled(
+    repo: &GitRepo,
+    encode_email_headers: bool,
+    no_encode_email_headers: bool,
+) -> Result<bool> {
+    if no_encode_email_headers {
+        return Ok(false);
+    }
+    if encode_email_headers {
+        return Ok(true);
+    }
+    let Some(configured) = read_config_value(repo, "format.encodeEmailHeaders")? else {
+        return Ok(true);
+    };
+    Ok(config_bool_value_enabled(configured.trim()))
+}
+
+fn format_patch_force_in_body_from_enabled(
+    repo: &GitRepo,
+    force_in_body_from: bool,
+    no_force_in_body_from: bool,
+) -> Result<bool> {
+    if no_force_in_body_from {
+        return Ok(false);
+    }
+    if force_in_body_from {
+        return Ok(true);
+    }
+    let Some(configured) = read_config_value(repo, "format.forceInBodyFrom")? else {
+        return Ok(false);
+    };
+    Ok(config_bool_value_enabled(configured.trim()))
 }
 
 fn format_patch_prelude_mode(
@@ -1313,12 +2389,13 @@ fn git_path_output(path: &std::path::Path) -> String {
 
 #[cfg(windows)]
 fn git_path_output_string(value: String) -> String {
-    value.replace('\\', "/")
+    let value = value.replace('\\', "/");
+    value.strip_prefix("./").unwrap_or(&value).to_owned()
 }
 
 #[cfg(not(windows))]
 fn git_path_output_string(value: String) -> String {
-    value
+    value.strip_prefix("./").unwrap_or(&value).to_owned()
 }
 
 fn format_patch_old_tree<S>(
@@ -1343,16 +2420,12 @@ where
 fn format_patch_base_information(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    commits: &[CollectedCommit],
     base: &str,
 ) -> Result<String> {
-    if base == "auto" {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
-        });
-    }
     let base_commit = resolve_commitish(repo, store, base)?;
-    Ok(format!("base-commit: {}", base_commit.to_hex()))
+    validate_format_patch_base_commit(repo, store, commits, &base_commit)?;
+    format_patch_base_information_block(repo, store, commits, base_commit)
 }
 
 fn render_format_patch_interdiff(
@@ -1360,6 +2433,8 @@ fn render_format_patch_interdiff(
     store: &LooseObjectStore,
     previous: &str,
     current: &str,
+    reroll_count: Option<&str>,
+    indent: bool,
 ) -> Result<String> {
     let packed_store = store.packed_first();
     let commit_cache = CommitObjectCache::new(&packed_store);
@@ -1381,25 +2456,37 @@ fn render_format_patch_interdiff(
         &mut blob_cache,
     )?;
     let patch = String::from_utf8_lossy(&patch);
-    let mut output = String::from("Interdiff:\n");
+    let mut output = if let Some(previous_version) = reroll_count
+        .and_then(|value| value.parse::<usize>().ok())
+        .and_then(|value| value.checked_sub(1))
+        .filter(|value| *value > 0)
+    {
+        format!("Interdiff against v{previous_version}:\n")
+    } else {
+        String::from("Interdiff:\n")
+    };
     for line in patch.lines() {
-        output.push_str("  ");
+        if indent {
+            output.push_str("  ");
+        }
         output.push_str(line);
         output.push('\n');
     }
     Ok(output)
 }
 
-fn render_format_patch_range_diff(previous: &str, current: &str) -> Result<String> {
-    let ranges = [
-        format!("{previous}..{previous}"),
-        format!("{previous}..{current}"),
-    ];
+fn render_format_patch_range_diff(
+    previous: &str,
+    current_range: &str,
+    creation_factor: Option<&str>,
+) -> Result<String> {
+    let ranges = [previous.to_owned(), current_range.to_owned()];
+    let right_only = !previous.contains("..") && !previous.contains("...");
     let options = super::history_commands::RangeDiffOptions {
         color: false,
-        creation_factor: None,
+        creation_factor: creation_factor.map(str::to_owned),
         left_only: false,
-        right_only: false,
+        right_only,
         notes: false,
         no_notes: false,
     };
@@ -1407,6 +2494,152 @@ fn render_format_patch_range_diff(previous: &str, current: &str) -> Result<Strin
         "Range-diff:\n{}",
         super::history_commands::render_range_diff_output(&ranges, &options)?
     ))
+}
+
+fn format_patch_auto_base_mode(repo: &GitRepo) -> Result<Option<bool>> {
+    let Some(configured) = read_config_value(repo, "format.useAutoBase")? else {
+        return Ok(None);
+    };
+    let normalized = configured.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "true" | "yes" | "on" | "1" => Ok(Some(true)),
+        "whenable" => Ok(Some(false)),
+        "false" | "no" | "off" | "0" => Ok(None),
+        _ => Ok(None),
+    }
+}
+
+fn format_patch_mboxrd_enabled(repo: &GitRepo) -> Result<bool> {
+    if crate::runtime::pending_format_patch_mboxrd_arg() {
+        return Ok(true);
+    }
+    let Some(configured) = read_config_value(repo, "format.mboxrd")? else {
+        return Ok(false);
+    };
+    let trimmed = configured.trim();
+    Ok(trimmed.is_empty() || config_bool_value_enabled(trimmed))
+}
+
+fn format_patch_auto_base_information(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commits: &[CollectedCommit],
+    when_able: bool,
+) -> Result<Option<String>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let Some(current_branch_ref) = current_branch_ref(&refs)? else {
+        if when_able {
+            return Ok(None);
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
+        });
+    };
+    let branch_name = branch_display_name(&current_branch_ref);
+    let Some(upstream) = read_branch_upstream(repo, &branch_name)? else {
+        if when_able {
+            return Ok(None);
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
+        });
+    };
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head = refs.resolve("HEAD")?;
+    let upstream_id = match refs.resolve(&upstream.ref_name) {
+        Ok(id) => id,
+        Err(_) if when_able => return Ok(None),
+        Err(_) => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
+            });
+        }
+    };
+    let commit_cache = CommitObjectCache::new(store);
+    let merge_bases = merge_bases_all_cached(&commit_cache, &head, &upstream_id)?;
+    let Some(base_commit) = merge_bases.first().cloned() else {
+        if when_able {
+            return Ok(None);
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
+        });
+    };
+    if merge_bases.len() > 1 {
+        if when_able {
+            return Ok(None);
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "failed to find exact merge base".into(),
+        });
+    }
+    Ok(Some(format_patch_base_information_block(
+        repo,
+        store,
+        commits,
+        base_commit,
+    )?))
+}
+
+fn validate_format_patch_base_commit(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commits: &[CollectedCommit],
+    base_commit: &ObjectId,
+) -> Result<()> {
+    let commit_cache = CommitObjectCache::new(store);
+    if commits.iter().any(|entry| entry.id == *base_commit) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "base commit should not be in revision list".into(),
+        });
+    }
+    for entry in commits {
+        if !is_ancestor_commit_with_repo_cached(repo, &commit_cache, base_commit, &entry.id)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "base commit should be an ancestor of revision list".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn format_patch_base_information_block(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commits: &[CollectedCommit],
+    base_commit: ObjectId,
+) -> Result<String> {
+    let mut lines = vec![format!("base-commit: {}", base_commit.to_hex())];
+    if let Some(first_commit) = commits.first()
+        && let Some(first_parent) = first_commit.commit.parents.first()
+        && *first_parent != base_commit
+    {
+        let prereq_range = format!("{}..{}", base_commit.to_hex(), first_parent.to_hex());
+        let commit_cache = CommitObjectCache::new(store);
+        let tree_cache = TreeObjectCache::new(store);
+        let revs = collect_rev_list_revs(repo, store, false, vec![prereq_range])?;
+        let mut prerequisite_commits =
+            collect_commit_objects_with_exclusions_cached(repo, store, &commit_cache, &revs, None)?;
+        prerequisite_commits.reverse();
+        for entry in prerequisite_commits {
+            if let Some(patch_id) = reference_commands::commit_patch_id_stable_cached(
+                store,
+                &commit_cache,
+                &tree_cache,
+                &entry.id,
+            )? {
+                lines.push(format!("prerequisite-patch-id: {patch_id}"));
+            }
+        }
+    }
+    Ok(lines.join("\n"))
 }
 
 pub(crate) fn send_email(options: SendEmailCommandOptions) -> Result<()> {
@@ -1531,14 +2764,24 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
                 None
             }
         })
-        .or_else(|| read_config_value(&repo, "sendemail.smtpencryption").ok().flatten());
+        .or_else(|| {
+            read_config_value(&repo, "sendemail.smtpencryption")
+                .ok()
+                .flatten()
+        });
     let transport = if let Some(sendmail_cmd) = options.sendmail_cmd.clone() {
-        SendEmailTransport::Sendmail { command: sendmail_cmd }
+        SendEmailTransport::Sendmail {
+            command: sendmail_cmd,
+        }
     } else {
         let smtp_server = options
             .smtp_server
             .clone()
-            .or_else(|| read_config_value(&repo, "sendemail.smtpserver").ok().flatten())
+            .or_else(|| {
+                read_config_value(&repo, "sendemail.smtpserver")
+                    .ok()
+                    .flatten()
+            })
             .ok_or_else(|| CliError::Fatal {
                 code: 1,
                 message: "sendemail.smtpserver is required for SMTP patch sending".into(),
@@ -1553,11 +2796,7 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
                     .flatten()
                     .and_then(|value| value.parse().ok())
             });
-        let endpoint = parse_smtp_endpoint(
-            &smtp_server,
-            smtp_port,
-            smtp_encryption.as_deref(),
-        )?;
+        let endpoint = parse_smtp_endpoint(&smtp_server, smtp_port, smtp_encryption.as_deref())?;
         SendEmailTransport::Smtp { endpoint }
     };
     let from = options
@@ -1827,7 +3066,7 @@ fn parse_send_email_recipients(values: &[String]) -> Vec<String> {
 }
 
 fn send_email_date_header() -> String {
-    chrono::Local::now().to_rfc2822()
+    crate::runtime::local_now().to_rfc2822()
 }
 
 fn send_email_message_id(from: &str) -> String {
@@ -2149,8 +3388,14 @@ pub(crate) struct ImapSendOptions {
 }
 
 pub(crate) fn imap_send(options: ImapSendOptions) -> Result<()> {
-    let repo = find_repo()?;
-    let folder = options.folder.or(read_config_value(&repo, "imap.folder")?);
+    let repo = find_repo().ok();
+    let config_value = |name: &str| -> Result<Option<String>> {
+        match &repo {
+            Some(repo) => read_config_value(repo, name).map_err(CliError::Io),
+            None => read_global_config_value(name),
+        }
+    };
+    let folder = options.folder.or(config_value("imap.folder")?);
     let Some(folder) = folder else {
         let warning = if options.no_curl {
             "warning: --no-curl not supported in this build\n"
@@ -2162,13 +3407,13 @@ pub(crate) fn imap_send(options: ImapSendOptions) -> Result<()> {
             text: format!("{warning}no imap store specified\n"),
         });
     };
-    let host = read_config_value(&repo, "imap.host")?.ok_or_else(|| CliError::Fatal {
+    let host = config_value("imap.host")?.ok_or_else(|| CliError::Fatal {
         code: 1,
         message: "no imap host specified".into(),
     })?;
-    let user = read_config_value(&repo, "imap.user")?.unwrap_or_default();
-    let pass = read_config_value(&repo, "imap.pass")?.unwrap_or_default();
-    let port = read_config_value(&repo, "imap.port")?.and_then(|value| value.parse::<u16>().ok());
+    let user = config_value("imap.user")?.unwrap_or_default();
+    let pass = config_value("imap.pass")?.unwrap_or_default();
+    let port = config_value("imap.port")?.and_then(|value| value.parse::<u16>().ok());
     let endpoint = parse_imap_endpoint(&host, port)?;
     let _ = (options.verbose, options.curl, options.no_curl);
     if options.list {
@@ -2177,6 +3422,12 @@ pub(crate) fn imap_send(options: ImapSendOptions) -> Result<()> {
 
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
+    if input.is_empty() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "nothing to send\n".into(),
+        });
+    }
     let messages = split_mbox_messages(&input, false)?;
     if !options.quiet {
         eprintln!(
@@ -2741,6 +3992,199 @@ fn trailer_output_lines(entries: &[TrailerEntry], unfold: bool) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[derive(Debug, Default)]
+struct ForEachRefTrailerFormat {
+    only: Option<bool>,
+    unfold: bool,
+    value_only: bool,
+    keys: Vec<String>,
+    separator: String,
+    key_value_separator: String,
+}
+
+pub(crate) fn format_for_each_ref_trailers(message: &str, arguments: &str) -> Result<String> {
+    let format = parse_for_each_ref_trailer_format(arguments)?;
+    let lines = split_text_lines(message);
+    let block_start = for_each_ref_trailer_block_start(&lines);
+    if block_start == lines.len() {
+        return Ok(String::new());
+    }
+    let block = &lines[block_start..];
+    let entries = parse_trailer_entries(block);
+    let mut records = entries
+        .iter()
+        .filter(|entry| {
+            format.keys.is_empty()
+                || format
+                    .keys
+                    .iter()
+                    .any(|key| same_trailer_key(&entry.key, key))
+        })
+        .map(|entry| format_for_each_ref_trailer_entry(entry, &format))
+        .collect::<Vec<_>>();
+
+    let only = format.only.unwrap_or(!format.keys.is_empty());
+    if !only {
+        if format.keys.is_empty() {
+            records = if format.unfold {
+                unfold_for_each_ref_trailer_block(block, &format)
+            } else {
+                block.to_vec()
+            };
+        } else {
+            records.extend(block.iter().filter_map(|line| {
+                (!line.starts_with([' ', '\t']) && split_existing_trailer(line).is_none())
+                    .then(|| line.clone())
+            }));
+        }
+    }
+    if records.is_empty() {
+        return Ok(String::new());
+    }
+    let mut output = records.join(&format.separator);
+    if format.separator == "\n" {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn parse_for_each_ref_trailer_format(arguments: &str) -> Result<ForEachRefTrailerFormat> {
+    let mut format = ForEachRefTrailerFormat {
+        separator: "\n".to_owned(),
+        key_value_separator: ": ".to_owned(),
+        ..ForEachRefTrailerFormat::default()
+    };
+    if arguments.is_empty() {
+        return Ok(format);
+    }
+    for argument in arguments.split(',') {
+        match argument {
+            "only" => format.only = Some(true),
+            "unfold" => format.unfold = true,
+            "valueonly" => format.value_only = true,
+            argument if argument.starts_with("only=") => {
+                format.only = Some(parse_for_each_ref_trailer_bool(&argument[5..])?);
+            }
+            argument if argument.starts_with("key=") => {
+                let key = argument[4..].trim_end_matches(':');
+                if key.is_empty() {
+                    return Err(for_each_ref_trailer_argument_error(argument));
+                }
+                format.keys.push(key.to_owned());
+            }
+            argument if argument.starts_with("separator=") => {
+                format.separator = decode_for_each_ref_trailer_separator(&argument[10..])?;
+            }
+            argument if argument.starts_with("key_value_separator=") => {
+                format.key_value_separator =
+                    decode_for_each_ref_trailer_separator(&argument[20..])?;
+            }
+            "key" => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "expected %(trailers:key=<value>)".into(),
+                });
+            }
+            argument => return Err(for_each_ref_trailer_argument_error(argument)),
+        }
+    }
+    Ok(format)
+}
+
+fn parse_for_each_ref_trailer_bool(value: &str) -> Result<bool> {
+    match value {
+        "true" | "yes" | "on" | "1" => Ok(true),
+        "false" | "no" | "off" | "0" => Ok(false),
+        _ => Err(for_each_ref_trailer_argument_error(value)),
+    }
+}
+
+fn for_each_ref_trailer_argument_error(argument: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("unknown %(trailers) argument: {argument}"),
+    }
+}
+
+fn decode_for_each_ref_trailer_separator(value: &str) -> Result<String> {
+    let mut output = String::new();
+    let mut rest = value;
+    while let Some(index) = rest.find("%x") {
+        output.push_str(&rest[..index]);
+        let hex = rest
+            .get(index + 2..index + 4)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("invalid trailer separator: {value}"),
+            })?;
+        let byte = u8::from_str_radix(hex, 16).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid trailer separator: {value}"),
+        })?;
+        output.push(char::from(byte));
+        rest = &rest[index + 4..];
+    }
+    output.push_str(rest);
+    Ok(output)
+}
+
+fn for_each_ref_trailer_block_start(lines: &[String]) -> usize {
+    let mut end = lines.len();
+    while end > 0 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && !lines[start - 1].trim().is_empty() {
+        start -= 1;
+    }
+    parse_trailer_entries(&lines[start..end])
+        .is_empty()
+        .then_some(lines.len())
+        .unwrap_or(start)
+}
+
+fn format_for_each_ref_trailer_entry(
+    entry: &TrailerEntry,
+    format: &ForEachRefTrailerFormat,
+) -> String {
+    if format.value_only {
+        return entry.value.trim().to_owned();
+    }
+    if format.unfold || format.key_value_separator != ": " {
+        return format!(
+            "{}{}{}",
+            entry.key,
+            format.key_value_separator,
+            entry.value.trim()
+        );
+    }
+    entry.lines.join("\n")
+}
+
+fn unfold_for_each_ref_trailer_block(
+    block: &[String],
+    format: &ForEachRefTrailerFormat,
+) -> Vec<String> {
+    let mut records = Vec::new();
+    let mut index = 0;
+    while index < block.len() {
+        if split_existing_trailer(&block[index]).is_some() {
+            let start = index;
+            index += 1;
+            while index < block.len() && block[index].starts_with([' ', '\t']) {
+                index += 1;
+            }
+            if let Some(entry) = parse_trailer_entries(&block[start..index]).first() {
+                records.push(format_for_each_ref_trailer_entry(entry, format));
+            }
+        } else {
+            records.push(block[index].clone());
+            index += 1;
+        }
+    }
+    records
 }
 
 pub(crate) fn lines_with_final_newline(lines: &[String]) -> String {

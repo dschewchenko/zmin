@@ -14,9 +14,9 @@ coverage numbers in the Git compatibility matrix.
 | Zmin-only options on Git commands | `15` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
 | Zmin-only schema command aliases | `10` | flattened schema entries that belong to Zmin-only command groups |
-| Deferred/non-Git-2.47 schema commands | `1` | schema commands compared to newer/current stock Git but outside the Git `2.47.1` denominator |
-| Stable extensions | `6` | implemented and covered by focused tests |
-| Experimental extensions | `2` | implemented but still preview-only |
+| Deferred/non-Git-2.47 schema commands | `2` | schema commands compared to newer/current stock Git or tracked non-baseline nested surfaces outside the Git `2.47.1` denominator |
+| Stable extensions | `8` | implemented and covered by focused tests |
+| Experimental extensions | `0` | implemented but still preview-only |
 | Planned extensions | `0` | designed backlog, not implemented |
 
 ## Zmin-Only Commands
@@ -28,13 +28,13 @@ coverage numbers in the Git compatibility matrix.
 | `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin last-modified` | stable | `git_history_query_compat::last_modified_reports_latest_commit_per_path` | reports the latest commit that affected each selected path, with recursive and NUL-delimited modes; stock Git has no `git last-modified` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin history` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch`; `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | additive history rewrite workflow with `reword` and `split` dry-run coverage; stock Git `2.47.1` has no `git history` command, so this is tracked outside the compatibility denominator |
-| `zmin save <message>` | experimental | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | CMS-style `add -A` plus `commit -m` wrapper |
-| `zmin changes` | experimental | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | human-readable status wrapper |
-| `zmin publish` | experimental | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe push wrapper |
-| `zmin update` | experimental | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe pull wrapper |
-| `zmin undo` | experimental | `git_cms_porcelain_compat::cms_undo_reverts_last_logged_save_only_when_safe` | operation-log backed undo for the last clean `save` |
-| `zmin timeline` | experimental | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | human-readable history wrapper |
-| `zmin recover` | experimental | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | safe file restore wrapper |
+| `zmin save <message>` | stable | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | CMS-style `add -A` plus `commit -m` wrapper |
+| `zmin changes` | stable | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | human-readable status wrapper |
+| `zmin publish` | stable | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe push wrapper |
+| `zmin update` | stable | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe pull wrapper |
+| `zmin undo` | stable | `git_cms_porcelain_compat::cms_undo_reverts_last_logged_save_only_when_safe`; `git_cms_porcelain_compat::cms_undo_after_first_save_restores_no_history_but_keeps_staged_content` | operation-log backed undo for the last clean `save`, including root-history rollback that restores the no-commits-yet staged state after the first save |
+| `zmin timeline` | stable | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | human-readable history wrapper |
+| `zmin recover` | stable | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases`; `git_cms_porcelain_compat::cms_recover_refuses_staged_rename_targets_and_sources` | safe file restore wrapper, including staged-rename safety on both source and destination paths |
 
 ## Zmin-Only Schema Command Aliases
 
@@ -62,6 +62,7 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | Command | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | `zmin backfill` | deferred | `git_admin_tools_compat::backfill_matches_stock_git_for_complete_repository_noop`; `git_admin_tools_compat::backfill_promisor_remote_recovers_missing_local_objects` | local/current stock Git has `git backfill`, but Git `2.47.1` command-list does not; keep outside the Git `2.47.1` compatibility denominator until a target profile that includes `backfill` is active |
+| `git lfs` | deferred local foundation | `git_lfs_local_compat::lfs_version_and_env_report_builtin_local_foundation_state`; `git_lfs_local_compat::lfs_pull_fetches_from_local_remote_like_stock_git`; `git_lfs_local_compat::lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime`; `git_replacement_dogfood_compat::replacement_shim_routes_lfs_discovery_and_local_hook_takeover_commands_without_stock_git` | Git LFS is not part of the upstream Git `2.47.1` command-list baseline, so the built-in `git lfs` surface stays outside that denominator even though Zmin now ships a covered local foundation for discovery, local hook takeover, pointer checkout, and local/file-based pull lanes. Non-local/authenticated/custom-transfer Git LFS transport parity is still deferred, and the current builtin rejects unsupported pull remotes with `unsupported built-in zmin lfs pull remote: ...` until that broader LFS work is implemented. |
 
 ## Zmin-Only Options
 
@@ -69,8 +70,8 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | --- | --- | --- | --- | --- |
 | `zmin clone` | `--worktree-first` | stable | `git_clone_compat::clone_instant_local_repo_marks_worktree_first_without_changing_git_state`; `git_clone_compat::clone_worktree_first_rejects_non_worktree_or_remote_modes` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
 | `zmin clone` | `--instant` | stable | `git_clone_compat::clone_instant_local_repo_fetch_and_pull_remain_canonical_git_operations`; `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over local repositories, git-daemon, SSH and smart HTTP transport; local instant clones keep later `fetch origin` and `pull --ff-only` as canonical Git operations while preserving `zmin.worktreeFirst=true` |
-| `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after an instant remote clone |
-| `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects` | marks instant remote clones as promisor-backed for missing-object hydration |
+| `zmin clone` | `--background-fetch` | stable | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after a remote worktree-first clone, validated for both the explicit `--worktree-first` spelling and the `--instant` alias across git-daemon, SSH, and smart HTTP |
+| `zmin clone` | `--demand-hydrate` | stable | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_smart_http_demand_hydrate_recovers_missing_head_objects` | marks remote worktree-first clones as promisor-backed for missing-object hydration, validated for both the explicit `--worktree-first` spelling and the `--instant` alias across git-daemon, SSH, and smart HTTP |
 | `zmin cat-file` | `--type` | stable | `manual stock oracle 2026-06-23: git cat-file --type exits 129; zmin cat-file --type maps to -t` | Zmin-only long alias for `cat-file -t`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin cat-file` | `--size` | stable | `manual stock oracle 2026-06-23: git cat-file --size exits 129; zmin cat-file --size maps to -s` | Zmin-only long alias for `cat-file -s`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin cat-file` | `--exists` | stable | `manual stock oracle 2026-06-23: git cat-file --exists exits 129; zmin cat-file --exists maps to -e` | Zmin-only long alias for `cat-file -e`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |

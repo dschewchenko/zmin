@@ -1,5 +1,7 @@
 use super::*;
 
+const UPSTREAM_HISTORY_PACK_OBJECT_CACHE_BYTES: usize = 1024 * 1024;
+
 pub(crate) fn signature_timestamp(signature: &[u8]) -> Option<i64> {
     let mut fields = signature.rsplit(|byte| *byte == b' ');
     fields.next()?;
@@ -33,7 +35,11 @@ pub(crate) fn tag_subject(message: &[u8]) -> String {
 }
 
 pub(crate) fn split_log_message_lines(message: &[u8]) -> Vec<&[u8]> {
-    let message = message.strip_suffix(b"\n").unwrap_or(message);
+    let message = message
+        .iter()
+        .rposition(|byte| *byte != b'\n' && *byte != b'\r')
+        .map(|index| &message[..=index])
+        .unwrap_or_default();
     if message.is_empty() {
         return Vec::new();
     }
@@ -41,23 +47,34 @@ pub(crate) fn split_log_message_lines(message: &[u8]) -> Vec<&[u8]> {
 }
 
 pub(crate) fn signature_name(signature: &[u8]) -> String {
-    let name = signature
-        .windows(2)
-        .position(|window| window == b" <")
-        .map_or(signature, |index| &signature[..index]);
+    let (name, _) = signature_name_email_parts(signature);
     String::from_utf8_lossy(name).into_owned()
 }
 
 pub(crate) fn signature_email(signature: &[u8]) -> String {
+    let (_, email) = signature_name_email_parts(signature);
+    String::from_utf8_lossy(email).into_owned()
+}
+
+pub(crate) fn signature_name_email(signature: &[u8]) -> (String, String) {
+    let (name, email) = signature_name_email_parts(signature);
+    (
+        String::from_utf8_lossy(name).into_owned(),
+        String::from_utf8_lossy(email).into_owned(),
+    )
+}
+
+fn signature_name_email_parts(signature: &[u8]) -> (&[u8], &[u8]) {
     let Some(start) = signature.windows(2).position(|window| window == b" <") else {
-        return String::new();
+        return (signature, b"");
     };
+    let name = &signature[..start];
     let email = &signature[start + 2..];
     let email = email
         .iter()
         .position(|byte| *byte == b'>')
         .map_or(email, |end| &email[..end]);
-    String::from_utf8_lossy(email).into_owned()
+    (name, email)
 }
 
 pub(crate) fn signature_from_commit_bytes(signature: &[u8]) -> Result<Signature> {
@@ -123,7 +140,7 @@ pub(crate) fn signature_mail_date(signature: &[u8]) -> Result<String> {
     })?;
     Ok(utc
         .with_timezone(&offset)
-        .format("%a, %d %b %Y %H:%M:%S %z")
+        .format("%a, %-d %b %Y %H:%M:%S %z")
         .to_string())
 }
 
@@ -255,7 +272,36 @@ pub(crate) fn upstream_counts_from_ref(
     if refs.resolve(upstream_ref).is_err() {
         return Ok(None);
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_transient_packed_object_reads()
+        .with_trusted_packed_object_reads()
+        .with_buffered_pack_reads()
+        .with_packed_object_read_cache_byte_limit(UPSTREAM_HISTORY_PACK_OBJECT_CACHE_BYTES);
+    let local_id = refs.resolve(local_ref)?;
+    let upstream_id = refs.resolve(upstream_ref)?;
+    if local_id == upstream_id {
+        return Ok(Some((0, 0)));
+    }
+    if is_ancestor_commit_uncached(&store, &upstream_id, &local_id)? {
+        let excluded = HashSet::from([upstream_id]);
+        let ahead = count_commits_from_ids_uncached_with_excluded(
+            repo,
+            &store,
+            std::slice::from_ref(&local_id),
+            &excluded,
+        )?;
+        return Ok(Some((ahead, 0)));
+    }
+    if is_ancestor_commit_uncached(&store, &local_id, &upstream_id)? {
+        let excluded = HashSet::from([local_id]);
+        let behind = count_commits_from_ids_uncached_with_excluded(
+            repo,
+            &store,
+            std::slice::from_ref(&upstream_id),
+            &excluded,
+        )?;
+        return Ok(Some((0, behind)));
+    }
     let commit_cache = CommitObjectCache::new(&store);
     let local = collect_commits_cached(repo, &store, &commit_cache, &[local_ref.to_owned()], None)?
         .into_iter()
@@ -304,20 +350,152 @@ pub(crate) fn signature_from_identity(repo: &GitRepo, prefix: &str) -> Result<Si
     Ok(Signature::new(name, email, timestamp, timezone)?)
 }
 
-fn identity_name_email(repo: &GitRepo, prefix: &str) -> Result<(String, String)> {
-    let name = std::env::var(format!("{prefix}_NAME"))
-        .ok()
+pub(crate) fn signature_from_strict_identity(repo: &GitRepo, prefix: &str) -> Result<Signature> {
+    let name = identity_env_value(&format!("{prefix}_NAME"))
         .or_else(|| read_config_value(repo, "user.name").ok().flatten())
         .ok_or_else(|| {
             CliError::Message(format!("{prefix}_NAME or config user.name is required"))
         })?;
-    let email = std::env::var(format!("{prefix}_EMAIL"))
-        .ok()
+    let email = identity_env_value(&format!("{prefix}_EMAIL"))
         .or_else(|| read_config_value(repo, "user.email").ok().flatten())
+        .or_else(|| identity_env_value("EMAIL"))
+        .ok_or_else(|| {
+            CliError::Message(format!("{prefix}_EMAIL or config user.email is required"))
+        })?;
+    let date = std::env::var(format!("{prefix}_DATE")).ok();
+    let (timestamp, timezone) = signature_date(date.as_deref())?;
+    Ok(Signature::new(name, email, timestamp, timezone)?)
+}
+
+fn identity_name_email(repo: &GitRepo, prefix: &str) -> Result<(String, String)> {
+    let use_config_only = read_config_entry(repo, "user.useconfigonly")?
+        .and_then(|entry| entry.bool_value())
+        .unwrap_or(false);
+    let auto = (!use_config_only)
+        .then(auto_detect_identity_name_email)
+        .flatten();
+    let name = identity_env_value(&format!("{prefix}_NAME"))
+        .or_else(|| read_config_value(repo, "user.name").ok().flatten())
+        .or_else(|| auto.as_ref().map(|(name, _)| name.clone()))
+        .ok_or_else(|| {
+            CliError::Message(format!("{prefix}_NAME or config user.name is required"))
+        })?;
+    let email = identity_env_value(&format!("{prefix}_EMAIL"))
+        .or_else(|| read_config_value(repo, "user.email").ok().flatten())
+        .or_else(|| identity_env_value("EMAIL"))
+        .or_else(|| auto.as_ref().map(|(_, email)| email.clone()))
         .ok_or_else(|| {
             CliError::Message(format!("{prefix}_EMAIL or config user.email is required"))
         })?;
     Ok((name, email))
+}
+
+fn identity_env_value(name: &str) -> Option<String> {
+    let value = std::env::var_os(name)?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string_lossy().into_owned())
+}
+
+fn auto_detect_identity_name_email() -> Option<(String, String)> {
+    auto_detect_identity_name().zip(auto_detect_identity_email())
+}
+
+fn auto_detect_identity_name() -> Option<String> {
+    #[cfg(unix)]
+    if let Some(name) = auto_detect_unix_identity_name() {
+        return Some(name);
+    }
+    identity_env_value("GIT_AUTHOR_NAME")
+        .or_else(|| identity_env_value("GIT_COMMITTER_NAME"))
+        .or_else(|| identity_env_value("USER"))
+        .or_else(|| identity_env_value("USERNAME"))
+}
+
+fn auto_detect_identity_email() -> Option<String> {
+    identity_env_value("EMAIL").or_else(auto_detect_email_from_account_host)
+}
+
+fn auto_detect_email_from_account_host() -> Option<String> {
+    let account = auto_detect_account_name()?;
+    let host = auto_detect_host_name()?;
+    Some(format!("{account}@{host}"))
+}
+
+fn auto_detect_account_name() -> Option<String> {
+    #[cfg(unix)]
+    if let Some(account) = auto_detect_unix_account_name() {
+        return Some(account);
+    }
+    identity_env_value("USER").or_else(|| identity_env_value("USERNAME"))
+}
+
+#[cfg(unix)]
+fn auto_detect_unix_identity_name() -> Option<String> {
+    use std::ffi::CStr;
+
+    let passwd = unix_passwd_entry()?;
+    let gecos = unsafe { CStr::from_ptr(passwd.pw_gecos) }
+        .to_string_lossy()
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    gecos.or_else(auto_detect_unix_account_name)
+}
+
+#[cfg(unix)]
+fn auto_detect_unix_account_name() -> Option<String> {
+    use std::ffi::CStr;
+
+    let passwd = unix_passwd_entry()?;
+    let name = unsafe { CStr::from_ptr(passwd.pw_name) }
+        .to_string_lossy()
+        .trim()
+        .to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+#[cfg(unix)]
+fn unix_passwd_entry() -> Option<libc::passwd> {
+    let uid = unsafe { libc::geteuid() };
+    let mut pwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let mut buf = vec![0u8; 4096];
+    let rc = unsafe {
+        libc::getpwuid_r(
+            uid,
+            pwd.as_mut_ptr(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut result,
+        )
+    };
+    if rc != 0 || result.is_null() {
+        return None;
+    }
+    Some(unsafe { pwd.assume_init() })
+}
+
+fn auto_detect_host_name() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut uts = std::mem::MaybeUninit::<libc::utsname>::uninit();
+        let rc = unsafe { libc::uname(uts.as_mut_ptr()) };
+        if rc == 0 {
+            let uts = unsafe { uts.assume_init() };
+            let host = unsafe { std::ffi::CStr::from_ptr(uts.nodename.as_ptr()) }
+                .to_string_lossy()
+                .trim()
+                .to_owned();
+            if !host.is_empty() {
+                return Some(host);
+            }
+        }
+    }
+    identity_env_value("HOSTNAME").or_else(|| identity_env_value("COMPUTERNAME"))
 }
 
 pub(crate) fn signature_date(date: Option<&str>) -> Result<(i64, String)> {
@@ -399,13 +577,23 @@ fn parse_git_absolute_date(value: &str) -> Result<(i64, String)> {
     }
     let timezone = current_timezone_offset();
     let offset_seconds = timezone_offset_seconds(&timezone).unwrap_or(0);
-    let formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"];
+    let formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%b %d %Y %H:%M:%S",
+        "%b %d %Y %H:%M",
+    ];
     for format in formats {
         if let Ok(datetime) = chrono::NaiveDateTime::parse_from_str(value, format) {
             return Ok((datetime.and_utc().timestamp() - offset_seconds, timezone));
         }
     }
     if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        && let Some(datetime) = date.and_hms_opt(0, 0, 0)
+    {
+        return Ok((datetime.and_utc().timestamp() - offset_seconds, timezone));
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%b %d %Y")
         && let Some(datetime) = date.and_hms_opt(0, 0, 0)
     {
         return Ok((datetime.and_utc().timestamp() - offset_seconds, timezone));
@@ -439,13 +627,7 @@ pub(crate) fn current_unix_timestamp() -> Result<i64> {
 }
 
 fn current_timezone_offset() -> String {
-    match std::process::Command::new("date").arg("+%z").output() {
-        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
-            .unwrap_or_else(|_| "+0000\n".to_owned())
-            .trim()
-            .to_owned(),
-        _ => "+0000".to_owned(),
-    }
+    local_now().format("%z").to_string()
 }
 #[derive(Clone, Copy)]
 pub(crate) enum CommitCleanupMode {
@@ -560,11 +742,56 @@ mod tests {
     }
 
     #[test]
+    fn split_log_message_lines_drops_only_trailing_blank_tail() {
+        assert_eq!(
+            split_log_message_lines(b"subject\n\nbody\n\n"),
+            vec![b"subject".as_slice(), b"".as_slice(), b"body".as_slice()]
+        );
+        assert_eq!(
+            split_log_message_lines(b"subject\n\n"),
+            vec![b"subject".as_slice()]
+        );
+        assert!(split_log_message_lines(b"\n\n").is_empty());
+    }
+
+    #[test]
     fn signature_identity_helpers_decode_only_selected_slice() {
         let signature = b"Example User <user@example.com> 1716200000 +0300";
 
         assert_eq!(signature_name(signature), "Example User");
         assert_eq!(signature_email(signature), "user@example.com");
         assert_eq!(signature_email(b"Example User"), "");
+    }
+
+    #[test]
+    fn current_timezone_offset_returns_git_offset_shape() {
+        let timezone = current_timezone_offset();
+
+        assert_eq!(timezone.len(), 5);
+        assert!(matches!(timezone.as_bytes()[0], b'+' | b'-'));
+        assert!(timezone.as_bytes()[1..].iter().all(u8::is_ascii_digit));
+        assert!(parse_timezone_offset(&timezone).is_some());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn identity_env_value_accepts_non_utf8_commit_identity_bytes() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let key = "ZMIN_TEST_NON_UTF8_IDENTITY";
+        let previous = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, OsString::from_vec(vec![0x69, 0x73, 0x6f, 0x2d, 0xff]));
+        }
+
+        let resolved = identity_env_value(key);
+
+        match previous {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+
+        assert_eq!(resolved, Some("iso-\u{fffd}".to_owned()));
     }
 }

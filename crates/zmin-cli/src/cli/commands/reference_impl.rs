@@ -1,7 +1,24 @@
 use super::*;
-use std::io::Read;
+use chrono::TimeZone;
+use std::collections::BTreeMap;
+use std::io::{BufRead, Read, Write};
+use std::path::Component;
+use zmin_git_core::GitObjectStore as CoreGitObjectStore;
 use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::{GitObjectStore, GitPrimitiveRuntime, GitRefsStore};
+
+const HELP_TOPIC_GIT_TEXT: &str = include_str!("../help_fixtures/help_topic_git.txt");
+const HELP_TOPIC_GITEVERYDAY_TEXT: &str =
+    include_str!("../help_fixtures/help_topic_giteveryday.txt");
+const HELP_TOPIC_GITREVISIONS_TEXT: &str =
+    include_str!("../help_fixtures/help_topic_gitrevisions.txt");
+const HELP_TOPIC_GITTUTORIAL_TEXT: &str =
+    include_str!("../help_fixtures/help_topic_gittutorial.txt");
+const HELP_TOPIC_GITTUTORIAL_2_TEXT: &str =
+    include_str!("../help_fixtures/help_topic_gittutorial-2.txt");
+const HELP_TOPIC_GITWORKFLOWS_TEXT: &str =
+    include_str!("../help_fixtures/help_topic_gitworkflows.txt");
+const HELP_TOPIC_GIT_BRANCH_TEXT: &str = include_str!("../help_fixtures/help_topic_git-branch.txt");
 
 pub(crate) fn pack_refs(
     all: bool,
@@ -12,21 +29,56 @@ pub(crate) fn pack_refs(
     no_prune: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let refs = RefStore::new(
-        &read_common_git_dir(&repo.git_dir)?,
-        symbolic_ref_object_format(&repo)?,
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let algorithm = symbolic_ref_object_format(&repo)?;
+    let common_refs = RefStore::new(&common_git_dir, algorithm);
+    let storage_root = if repo.git_dir != common_git_dir
+        && common_refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable
+    {
+        &repo.git_dir
+    } else {
+        &common_git_dir
+    };
+    let refs = RefStore::new_with_storage_root(
+        storage_root,
+        storage_root,
+        algorithm,
+        common_refs.storage_kind()?,
     );
-    refs.pack_refs(PackRefsOptions {
+    let result = refs.pack_refs(PackRefsOptions {
         all,
         prune: prune || !no_prune,
         auto,
         include,
         exclude,
-    })
-    .map_err(|error| CliError::Fatal {
-        code: 128,
-        message: format!("pack refs: {error}"),
-    })?;
+    });
+    if let Err(error) = result {
+        if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+            let message = error.to_string();
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                return Err(CliError::Stderr {
+                    code: 1,
+                    text: "error: unable to compact stack: data is locked\n".to_owned(),
+                });
+            }
+            if message == "reftable entry too large" {
+                return Err(CliError::Stderr {
+                    code: 1,
+                    text: "error: unable to compact stack: entry too large\n".to_owned(),
+                });
+            }
+            if message == "reftable block size cannot exceed 16MB"
+                || message == "reftable block size cannot exceed 65535"
+            {
+                return Err(CliError::Fatal { code: 128, message });
+            }
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("pack refs: {error}"),
+        });
+    }
+    core_commands::refresh_shared_repository_permissions(storage_root)?;
     Ok(())
 }
 
@@ -40,14 +92,19 @@ pub(crate) struct UpdateRefCommandOptions<'a> {
     pub(crate) batch_updates: bool,
     pub(crate) name: Option<&'a str>,
     pub(crate) newvalue: Option<&'a str>,
+    pub(crate) oldvalue: Option<&'a str>,
 }
 
 pub(crate) fn update_ref(options: UpdateRefCommandOptions<'_>) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let refs = runtime.refs_store_adapter();
     if options.stdin {
-        if options.delete || options.name.is_some() || options.newvalue.is_some() {
+        if options.delete
+            || options.name.is_some()
+            || options.newvalue.is_some()
+            || options.oldvalue.is_some()
+        {
             return Err(CliError::Stderr {
                 code: 129,
                 text: update_ref_usage(),
@@ -76,24 +133,33 @@ pub(crate) fn update_ref(options: UpdateRefCommandOptions<'_>) -> Result<()> {
         });
     };
     if options.delete {
-        if options.newvalue.is_some() {
+        if options.oldvalue.is_some() {
             return Err(CliError::Fatal {
                 code: 129,
                 message: "update-ref -d accepts only a ref name".into(),
             });
         }
-        if !update_ref_name_is_valid(name) {
-            return Ok(());
-        }
-        if name == "HEAD" {
-            if options.no_deref {
-                update_ref_delete(&repo, &refs, "HEAD", true)?;
-            } else if let Ok(RefTarget::Symbolic(target)) = refs.read_head() {
-                update_ref_delete(&repo, &refs, &target, true)?;
-            }
-            return Ok(());
-        }
-        update_ref_delete(&repo, &refs, name, true)?;
+        update_ref_validate_delete_name(name)?;
+        let per_name_refs = update_ref_command_ref_store(&repo, name)?;
+        let old_id = options
+            .newvalue
+            .map(|oldvalue| update_ref_parse_stdin_id(&repo, oldvalue))
+            .transpose()?;
+        let ops = [UpdateRefStdinOp::Delete {
+            name: update_ref_command_ref_name(name).to_owned(),
+            old_id,
+            no_deref: options.no_deref,
+        }];
+        update_ref_validate_stdin_ops(&per_name_refs, &ops)
+            .map_err(update_ref_direct_validation_error)?;
+        update_ref_apply_ops(
+            &repo,
+            &per_name_refs,
+            &ops,
+            options.create_reflog,
+            options.message,
+            true,
+        )?;
         return Ok(());
     }
     let Some(newvalue) = options.newvalue else {
@@ -104,16 +170,145 @@ pub(crate) fn update_ref(options: UpdateRefCommandOptions<'_>) -> Result<()> {
     };
     update_ref_validate_cli_name(name)?;
     let id = resolve_objectish(&repo, newvalue).map_err(CliError::Io)?;
-    update_ref_write(
+    let per_name_refs = update_ref_command_ref_store(&repo, name)?;
+    let old_id = options
+        .oldvalue
+        .map(|oldvalue| update_ref_parse_stdin_id(&repo, oldvalue))
+        .transpose()?;
+    let ops = [UpdateRefStdinOp::Update {
+        name: update_ref_command_ref_name(name).to_owned(),
+        new_id: id,
+        old_id,
+        no_deref: options.no_deref,
+    }];
+    update_ref_validate_stdin_ops(&per_name_refs, &ops)
+        .map_err(update_ref_direct_validation_error)?;
+    update_ref_apply_ops(
         &repo,
-        &refs,
-        name,
-        &id,
-        options.no_deref,
+        &per_name_refs,
+        &ops,
         options.create_reflog,
         options.message,
+        true,
     )?;
     Ok(())
+}
+
+fn update_ref_direct_validation_error(message: String) -> CliError {
+    if message.starts_with("multiple updates for '") && message.contains(" via symref '") {
+        CliError::Stderr {
+            code: 1,
+            text: format!("error: {message}\n"),
+        }
+    } else {
+        CliError::Fatal { code: 128, message }
+    }
+}
+
+fn update_ref_command_ref_store(repo: &GitRepo, name: &str) -> Result<RefStore> {
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let git_dir = if let Some(worktree_ref) = name.strip_prefix("worktrees/") {
+        let Some((worktree, _)) = worktree_ref.split_once('/') else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("refusing to update ref with bad name '{name}'"),
+            });
+        };
+        common_git_dir.join("worktrees").join(worktree)
+    } else if name.starts_with("main-worktree/") {
+        common_git_dir
+    } else if is_per_worktree_ref(name) {
+        repo.git_dir.clone()
+    } else {
+        common_git_dir
+    };
+    let common_refs = RefStore::new(
+        read_common_git_dir(&repo.git_dir)?,
+        repo_hash_algorithm_from_config(repo)?,
+    );
+    Ok(RefStore::new_with_storage_root(
+        &git_dir,
+        &git_dir,
+        repo_hash_algorithm_from_config(repo)?,
+        common_refs.storage_kind()?,
+    ))
+}
+
+fn update_ref_command_ref_name(name: &str) -> &str {
+    if let Some(worktree_ref) = name.strip_prefix("worktrees/") {
+        return worktree_ref
+            .split_once('/')
+            .map(|(_, ref_name)| ref_name)
+            .unwrap_or(name);
+    }
+    name.strip_prefix("main-worktree/").unwrap_or(name)
+}
+
+fn update_ref_op_with_name(op: &UpdateRefStdinOp, ref_name: String) -> UpdateRefStdinOp {
+    match op.clone() {
+        UpdateRefStdinOp::Update {
+            new_id,
+            old_id,
+            no_deref,
+            ..
+        } => UpdateRefStdinOp::Update {
+            name: ref_name,
+            new_id,
+            old_id,
+            no_deref,
+        },
+        UpdateRefStdinOp::Create {
+            new_id, no_deref, ..
+        } => UpdateRefStdinOp::Create {
+            name: ref_name,
+            new_id,
+            no_deref,
+        },
+        UpdateRefStdinOp::Delete {
+            old_id, no_deref, ..
+        } => UpdateRefStdinOp::Delete {
+            name: ref_name,
+            old_id,
+            no_deref,
+        },
+        UpdateRefStdinOp::Verify { old_id, .. } => UpdateRefStdinOp::Verify {
+            name: ref_name,
+            old_id,
+        },
+        UpdateRefStdinOp::SymrefUpdate {
+            new_target,
+            old,
+            no_deref,
+            ..
+        } => UpdateRefStdinOp::SymrefUpdate {
+            name: ref_name,
+            new_target,
+            old,
+            no_deref,
+        },
+        UpdateRefStdinOp::SymrefCreate { new_target, .. } => UpdateRefStdinOp::SymrefCreate {
+            name: ref_name,
+            new_target,
+        },
+        UpdateRefStdinOp::SymrefDelete {
+            old_target,
+            no_deref,
+            ..
+        } => UpdateRefStdinOp::SymrefDelete {
+            name: ref_name,
+            old_target,
+            no_deref,
+        },
+        UpdateRefStdinOp::SymrefVerify {
+            old_target,
+            no_deref,
+            ..
+        } => UpdateRefStdinOp::SymrefVerify {
+            name: ref_name,
+            old_target,
+            no_deref,
+        },
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +361,81 @@ enum SymrefOld {
     Oid(ObjectId),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateRefTransactionState {
+    Initial,
+    Started,
+    Prepared,
+    Closed,
+}
+
+struct UpdateRefPreparedLocks {
+    paths: Vec<PathBuf>,
+    refs_root: PathBuf,
+}
+
+impl UpdateRefPreparedLocks {
+    fn acquire(refs: &RefStore, ops: &[UpdateRefStdinOp]) -> Result<Self> {
+        let refs_root = refs.git_dir().join("refs");
+        let mut locks = Self {
+            paths: Vec::new(),
+            refs_root,
+        };
+        let mut seen = BTreeSet::new();
+        for mutation in ops.iter().filter_map(|op| update_ref_mutation(refs, op)) {
+            if !seen.insert(mutation.effective_name.clone()) {
+                continue;
+            }
+            let ref_path = refs.git_dir().join(&mutation.effective_name);
+            let mut lock_name = ref_path.as_os_str().to_os_string();
+            lock_name.push(".lock");
+            let lock_path = PathBuf::from(lock_name);
+            if let Some(parent) = lock_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+                .map_err(|error| {
+                    update_ref_map_write_error(
+                        &mutation.requested_name,
+                        &mutation.effective_name,
+                        error,
+                    )
+                })?;
+            locks.paths.push(lock_path);
+        }
+        Ok(locks)
+    }
+
+    fn release(mut self) {
+        self.cleanup();
+    }
+
+    fn cleanup(&mut self) {
+        for path in self.paths.drain(..).rev() {
+            let _ = fs::remove_file(&path);
+            let mut parent = path.parent();
+            while let Some(directory) = parent {
+                if directory == self.refs_root || !directory.starts_with(&self.refs_root) {
+                    break;
+                }
+                if fs::remove_dir(directory).is_err() {
+                    break;
+                }
+                parent = directory.parent();
+            }
+        }
+    }
+}
+
+impl Drop for UpdateRefPreparedLocks {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 fn update_ref_stdin(
     repo: &GitRepo,
     refs: &RefStore,
@@ -185,26 +455,44 @@ fn update_ref_stdin(
             batch_updates,
         );
     }
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
     let mut ops = Vec::new();
-    let mut in_transaction = false;
-    let mut prepared = false;
+    let mut transaction_state = UpdateRefTransactionState::Initial;
+    let mut prepared_locks = None;
     let mut no_deref = initial_no_deref;
-    for raw_line in input.lines() {
-        let line = raw_line.trim_end();
-        if line.is_empty() {
-            continue;
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+    let mut raw_line = String::new();
+    loop {
+        raw_line.clear();
+        if stdin.read_line(&mut raw_line)? == 0 {
+            break;
         }
+        let line = raw_line.trim_end_matches(['\n', '\r']);
         match line {
             "start" => {
-                in_transaction = true;
-                prepared = false;
-                println!("start: ok");
+                match transaction_state {
+                    UpdateRefTransactionState::Initial if ops.is_empty() => {}
+                    UpdateRefTransactionState::Closed => {}
+                    UpdateRefTransactionState::Prepared => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "prepared transactions can only be closed".into(),
+                        });
+                    }
+                    UpdateRefTransactionState::Initial | UpdateRefTransactionState::Started => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "transaction is already started".into(),
+                        });
+                    }
+                }
+                transaction_state = UpdateRefTransactionState::Started;
+                update_ref_write_status_line("start: ok")?;
             }
             "prepare" => {
+                update_ref_require_open_transaction(transaction_state)?;
                 if batch_updates {
-                    update_ref_validate_stdin_batch_ops(refs, &ops).map_err(|message| {
+                    update_ref_validate_stdin_batch_ops(repo, refs, &ops).map_err(|message| {
                         CliError::Fatal {
                             code: 128,
                             message: format!("prepare: {message}"),
@@ -218,22 +506,27 @@ fn update_ref_stdin(
                         }
                     })?;
                 }
-                prepared = true;
-                println!("prepare: ok");
+                prepared_locks = Some(UpdateRefPreparedLocks::acquire(refs, &ops)?);
+                transaction_state = UpdateRefTransactionState::Prepared;
+                update_ref_write_status_line("prepare: ok")?;
             }
             "commit" => {
+                update_ref_require_open_transaction(transaction_state)?;
+                if let Some(locks) = prepared_locks.take() {
+                    locks.release();
+                }
                 if batch_updates {
-                    if in_transaction && !prepared {
-                        update_ref_validate_stdin_batch_ops(refs, &ops).map_err(|message| {
-                            CliError::Fatal {
+                    if transaction_state != UpdateRefTransactionState::Prepared {
+                        update_ref_validate_stdin_batch_ops(repo, refs, &ops).map_err(
+                            |message| CliError::Fatal {
                                 code: 128,
                                 message: format!("commit: {message}"),
-                            }
-                        })?;
+                            },
+                        )?;
                     }
                     update_ref_apply_stdin_batch_ops(repo, refs, &ops, create_reflog, message)?;
                 } else {
-                    if in_transaction && !prepared {
+                    if transaction_state != UpdateRefTransactionState::Prepared {
                         update_ref_validate_stdin_ops(refs, &ops).map_err(|message| {
                             CliError::Fatal {
                                 code: 128,
@@ -244,17 +537,19 @@ fn update_ref_stdin(
                     update_ref_apply_stdin_ops(repo, refs, &ops, create_reflog, message)?;
                 }
                 ops.clear();
-                prepared = false;
-                in_transaction = false;
-                println!("commit: ok");
+                transaction_state = UpdateRefTransactionState::Closed;
+                update_ref_write_status_line("commit: ok")?;
             }
             "abort" => {
+                update_ref_require_open_transaction(transaction_state)?;
+                prepared_locks.take();
+                update_ref_run_transaction_hook(&repo, refs, "aborted", &ops)?;
                 ops.clear();
-                prepared = false;
-                in_transaction = false;
-                println!("abort: ok");
+                transaction_state = UpdateRefTransactionState::Closed;
+                update_ref_write_status_line("abort: ok")?;
             }
             _ => {
+                update_ref_require_mutable_transaction(transaction_state)?;
                 if let Some(option) = line.strip_prefix("option ") {
                     match option {
                         "no-deref" => no_deref = true,
@@ -272,7 +567,7 @@ fn update_ref_stdin(
             }
         }
     }
-    if !in_transaction && !ops.is_empty() {
+    if transaction_state == UpdateRefTransactionState::Initial && !ops.is_empty() {
         if batch_updates {
             update_ref_apply_stdin_batch_ops(repo, refs, &ops, create_reflog, message)?;
         } else {
@@ -281,6 +576,39 @@ fn update_ref_stdin(
             update_ref_apply_stdin_ops(repo, refs, &ops, create_reflog, message)?;
         }
     }
+    Ok(())
+}
+
+fn update_ref_require_open_transaction(state: UpdateRefTransactionState) -> Result<()> {
+    match state {
+        UpdateRefTransactionState::Prepared
+        | UpdateRefTransactionState::Started
+        | UpdateRefTransactionState::Initial => Ok(()),
+        UpdateRefTransactionState::Closed => Err(CliError::Fatal {
+            code: 128,
+            message: "transaction is closed".into(),
+        }),
+    }
+}
+
+fn update_ref_require_mutable_transaction(state: UpdateRefTransactionState) -> Result<()> {
+    match state {
+        UpdateRefTransactionState::Initial | UpdateRefTransactionState::Started => Ok(()),
+        UpdateRefTransactionState::Prepared => Err(CliError::Fatal {
+            code: 128,
+            message: "prepared transactions can only be closed".into(),
+        }),
+        UpdateRefTransactionState::Closed => Err(CliError::Fatal {
+            code: 128,
+            message: "transaction is closed".into(),
+        }),
+    }
+}
+
+fn update_ref_write_status_line(line: &str) -> Result<()> {
+    let mut stdout = io::stdout().lock();
+    writeln!(stdout, "{line}")?;
+    stdout.flush()?;
     Ok(())
 }
 
@@ -294,11 +622,14 @@ fn update_ref_stdin_z(
 ) -> Result<()> {
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
+    if input.is_empty() {
+        return Ok(());
+    }
     let tokens = input.split(|byte| *byte == 0).collect::<Vec<_>>();
     let mut index = 0usize;
     let mut ops = Vec::new();
-    let mut in_transaction = false;
-    let mut prepared = false;
+    let mut transaction_state = UpdateRefTransactionState::Initial;
+    let mut prepared_locks = None;
     let mut no_deref = initial_no_deref;
     while index < tokens.len() {
         if tokens[index].is_empty() && index + 1 == tokens.len() {
@@ -307,17 +638,46 @@ fn update_ref_stdin_z(
         let token = update_ref_stdin_z_token(tokens[index])?;
         index += 1;
         if token.is_empty() {
-            continue;
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "empty command in input".into(),
+            });
+        }
+        if token
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("whitespace before command: {token}"),
+            });
         }
         match token.as_str() {
             "start" => {
-                in_transaction = true;
-                prepared = false;
-                println!("start: ok");
+                match transaction_state {
+                    UpdateRefTransactionState::Initial if ops.is_empty() => {}
+                    UpdateRefTransactionState::Closed => {}
+                    UpdateRefTransactionState::Prepared => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "prepared transactions can only be closed".into(),
+                        });
+                    }
+                    UpdateRefTransactionState::Initial | UpdateRefTransactionState::Started => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "transaction is already started".into(),
+                        });
+                    }
+                }
+                transaction_state = UpdateRefTransactionState::Started;
+                update_ref_write_status_line("start: ok")?;
             }
             "prepare" => {
+                update_ref_require_open_transaction(transaction_state)?;
                 if batch_updates {
-                    update_ref_validate_stdin_batch_ops(refs, &ops).map_err(|message| {
+                    update_ref_validate_stdin_batch_ops(repo, refs, &ops).map_err(|message| {
                         CliError::Fatal {
                             code: 128,
                             message: format!("prepare: {message}"),
@@ -331,22 +691,27 @@ fn update_ref_stdin_z(
                         }
                     })?;
                 }
-                prepared = true;
-                println!("prepare: ok");
+                prepared_locks = Some(UpdateRefPreparedLocks::acquire(refs, &ops)?);
+                transaction_state = UpdateRefTransactionState::Prepared;
+                update_ref_write_status_line("prepare: ok")?;
             }
             "commit" => {
+                update_ref_require_open_transaction(transaction_state)?;
+                if let Some(locks) = prepared_locks.take() {
+                    locks.release();
+                }
                 if batch_updates {
-                    if in_transaction && !prepared {
-                        update_ref_validate_stdin_batch_ops(refs, &ops).map_err(|message| {
-                            CliError::Fatal {
+                    if transaction_state != UpdateRefTransactionState::Prepared {
+                        update_ref_validate_stdin_batch_ops(repo, refs, &ops).map_err(
+                            |message| CliError::Fatal {
                                 code: 128,
                                 message: format!("commit: {message}"),
-                            }
-                        })?;
+                            },
+                        )?;
                     }
                     update_ref_apply_stdin_batch_ops(repo, refs, &ops, create_reflog, message)?;
                 } else {
-                    if in_transaction && !prepared {
+                    if transaction_state != UpdateRefTransactionState::Prepared {
                         update_ref_validate_stdin_ops(refs, &ops).map_err(|message| {
                             CliError::Fatal {
                                 code: 128,
@@ -357,17 +722,19 @@ fn update_ref_stdin_z(
                     update_ref_apply_stdin_ops(repo, refs, &ops, create_reflog, message)?;
                 }
                 ops.clear();
-                prepared = false;
-                in_transaction = false;
-                println!("commit: ok");
+                transaction_state = UpdateRefTransactionState::Closed;
+                update_ref_write_status_line("commit: ok")?;
             }
             "abort" => {
+                update_ref_require_open_transaction(transaction_state)?;
+                prepared_locks.take();
+                update_ref_run_transaction_hook(repo, refs, "aborted", &ops)?;
                 ops.clear();
-                prepared = false;
-                in_transaction = false;
-                println!("abort: ok");
+                transaction_state = UpdateRefTransactionState::Closed;
+                update_ref_write_status_line("abort: ok")?;
             }
             _ => {
+                update_ref_require_mutable_transaction(transaction_state)?;
                 if let Some(option) = token.strip_prefix("option ") {
                     match option {
                         "no-deref" => no_deref = true,
@@ -387,7 +754,7 @@ fn update_ref_stdin_z(
             }
         }
     }
-    if !in_transaction && !ops.is_empty() {
+    if transaction_state == UpdateRefTransactionState::Initial && !ops.is_empty() {
         if batch_updates {
             update_ref_apply_stdin_batch_ops(repo, refs, &ops, create_reflog, message)?;
         } else {
@@ -413,38 +780,73 @@ fn parse_update_ref_stdin_z_op(
         });
     };
     let name = name.trim_start();
-    let parse_id = |value: String| update_ref_parse_stdin_id(repo, &value);
-    let parse_optional_id = |value: String| {
-        if value.is_empty() {
-            Ok(None)
-        } else {
-            parse_id(value).map(Some)
-        }
-    };
+    if name.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("{verb}: missing <ref>"),
+        });
+    }
+    let command_name = format!("{verb} {name}");
     match verb {
         "update" => {
             let new = update_ref_stdin_z_next(tokens, index, command, "<new-oid>")?;
             let old = update_ref_stdin_z_next(tokens, index, command, "<old-oid>")?;
+            if new.is_empty() {
+                eprintln!("warning: {command_name}: missing <new-oid>, treating as zero");
+            }
+            let new_id = update_ref_parse_stdin_field(repo, &new, &command_name, "new-oid")?;
+            let old_id = (!old.is_empty())
+                .then(|| update_ref_parse_stdin_field(repo, &old, &command_name, "old-oid"))
+                .transpose()?;
+            if update_ref_is_zero(&new_id) {
+                return Ok(UpdateRefStdinOp::Delete {
+                    name: name.to_owned(),
+                    old_id,
+                    no_deref,
+                });
+            }
             Ok(UpdateRefStdinOp::Update {
                 name: name.to_owned(),
-                new_id: parse_id(new)?,
-                old_id: parse_optional_id(old)?,
+                new_id,
+                old_id,
                 no_deref,
             })
         }
         "create" => {
             let new = update_ref_stdin_z_next(tokens, index, command, "<new-oid>")?;
+            if new.is_empty() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("{command_name}: missing <new-oid>"),
+                });
+            }
+            let new_id = update_ref_parse_stdin_field(repo, &new, &command_name, "new-oid")?;
+            if update_ref_is_zero(&new_id) {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("{command_name}: zero <new-oid>"),
+                });
+            }
             Ok(UpdateRefStdinOp::Create {
                 name: name.to_owned(),
-                new_id: parse_id(new)?,
+                new_id,
                 no_deref,
             })
         }
         "delete" => {
             let old = update_ref_stdin_z_next(tokens, index, command, "<old-oid>")?;
+            let old_id = (!old.is_empty())
+                .then(|| update_ref_parse_stdin_field(repo, &old, &command_name, "old-oid"))
+                .transpose()?;
+            if old_id.as_ref().is_some_and(update_ref_is_zero) {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("{command_name}: zero <old-oid>"),
+                });
+            }
             Ok(UpdateRefStdinOp::Delete {
                 name: name.to_owned(),
-                old_id: parse_optional_id(old)?,
+                old_id,
                 no_deref,
             })
         }
@@ -452,30 +854,38 @@ fn parse_update_ref_stdin_z_op(
             let old = update_ref_stdin_z_next(tokens, index, command, "<old-oid>")?;
             Ok(UpdateRefStdinOp::Verify {
                 name: name.to_owned(),
-                old_id: parse_optional_id(old)?,
+                old_id: Some(update_ref_parse_stdin_field(
+                    repo,
+                    &old,
+                    &command_name,
+                    "old-oid",
+                )?),
             })
         }
         "symref-update" => {
             let new_target = update_ref_stdin_z_next(tokens, index, command, "<new-target>")?;
-            let old_kind = update_ref_stdin_z_next(tokens, index, command, "<old-target>")?;
-            let old = match old_kind.as_str() {
-                "" => None,
-                "ref" => Some(SymrefOld::Target(update_ref_stdin_z_next(
+            let old_kind = update_ref_stdin_z_optional_argument(tokens, index)?;
+            let old = match old_kind.as_deref() {
+                None | Some("") => None,
+                Some("ref") => Some(SymrefOld::Target(update_ref_stdin_z_next(
                     tokens,
                     index,
                     command,
                     "<old-target>",
                 )?)),
-                "oid" => Some(SymrefOld::Oid(parse_id(update_ref_stdin_z_next(
-                    tokens,
-                    index,
-                    command,
-                    "<old-oid>",
-                )?)?)),
-                _ => {
+                Some("oid") => {
+                    let old_oid = update_ref_stdin_z_next(tokens, index, command, "<old-oid>")?;
+                    Some(SymrefOld::Oid(
+                        update_ref_parse_stdin_id(repo, &old_oid).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: format!("{command_name}: invalid oid: {old_oid}"),
+                        })?,
+                    ))
+                }
+                Some(old_kind) => {
                     return Err(CliError::Fatal {
                         code: 128,
-                        message: format!("unknown command: {command}"),
+                        message: format!("{command_name}: invalid arg '{old_kind}' for old value"),
                     });
                 }
             };
@@ -494,10 +904,10 @@ fn parse_update_ref_stdin_z_op(
             })
         }
         "symref-delete" => {
-            let old_target = update_ref_stdin_z_next(tokens, index, command, "<old-target>")?;
+            let old_target = update_ref_stdin_z_optional_argument(tokens, index)?;
             Ok(UpdateRefStdinOp::SymrefDelete {
                 name: name.to_owned(),
-                old_target: (!old_target.is_empty()).then_some(old_target),
+                old_target: old_target.filter(|target| !target.is_empty()),
                 no_deref,
             })
         }
@@ -514,6 +924,41 @@ fn parse_update_ref_stdin_z_op(
             message: format!("unknown command: {command}"),
         }),
     }
+}
+
+fn update_ref_stdin_z_optional_argument(
+    tokens: &[&[u8]],
+    index: &mut usize,
+) -> Result<Option<String>> {
+    if *index >= tokens.len() || (*index + 1 == tokens.len() && tokens[*index].is_empty()) {
+        return Ok(None);
+    }
+    let value = update_ref_stdin_z_token(tokens[*index])?;
+    if update_ref_stdin_z_is_command(&value) {
+        return Ok(None);
+    }
+    *index += 1;
+    Ok(Some(value))
+}
+
+fn update_ref_stdin_z_is_command(value: &str) -> bool {
+    let command = value.split_whitespace().next().unwrap_or_default();
+    matches!(
+        command,
+        "start"
+            | "prepare"
+            | "commit"
+            | "abort"
+            | "option"
+            | "update"
+            | "create"
+            | "delete"
+            | "verify"
+            | "symref-update"
+            | "symref-create"
+            | "symref-delete"
+            | "symref-verify"
+    )
 }
 
 fn update_ref_stdin_z_next(
@@ -545,48 +990,104 @@ fn parse_update_ref_stdin_op(
     line: &str,
     no_deref: bool,
 ) -> Result<UpdateRefStdinOp> {
+    if line.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "empty command in input".into(),
+        });
+    }
+    if line.as_bytes().first().is_some_and(u8::is_ascii_whitespace) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("whitespace before command: {line}"),
+        });
+    }
     let parts = parse_update_ref_stdin_line(line)?;
-    let parse_id = |value: &str| update_ref_parse_stdin_id(repo, value);
-    match parts
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .as_slice()
-    {
-        ["update", name, new] => Ok(UpdateRefStdinOp::Update {
-            name: (*name).to_owned(),
-            new_id: parse_id(new)?,
-            old_id: None,
-            no_deref,
-        }),
-        ["update", name, new, old] => Ok(UpdateRefStdinOp::Update {
-            name: (*name).to_owned(),
-            new_id: parse_id(new)?,
-            old_id: Some(parse_id(old)?),
-            no_deref,
-        }),
-        ["create", name, new] => Ok(UpdateRefStdinOp::Create {
-            name: (*name).to_owned(),
-            new_id: parse_id(new)?,
-            no_deref,
-        }),
+    let fields = parts.iter().map(String::as_str).collect::<Vec<_>>();
+    match fields.as_slice() {
+        ["delete", ""] | ["symref-delete", ""] => update_ref_invalid_stdin_command(line, &fields),
+        ["update", name, new] | ["update", name, new, _] => {
+            let command = format!("update {name}");
+            let new_id = update_ref_parse_stdin_field(repo, new, &command, "new-oid")?;
+            let old_id = fields
+                .get(3)
+                .map(|old| update_ref_parse_stdin_field(repo, old, &command, "old-oid"))
+                .transpose()?;
+            if update_ref_is_zero(&new_id) {
+                return Ok(UpdateRefStdinOp::Delete {
+                    name: (*name).to_owned(),
+                    old_id,
+                    no_deref,
+                });
+            }
+            Ok(UpdateRefStdinOp::Update {
+                name: (*name).to_owned(),
+                new_id,
+                old_id,
+                no_deref,
+            })
+        }
+        ["create", name, new] => {
+            let command = format!("create {name}");
+            let new_id = update_ref_parse_stdin_field(repo, new, &command, "new-oid")?;
+            if update_ref_is_zero(&new_id) {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("{command}: zero <new-oid>"),
+                });
+            }
+            Ok(UpdateRefStdinOp::Create {
+                name: (*name).to_owned(),
+                new_id,
+                no_deref,
+            })
+        }
+        ["create", name] if !name.is_empty() && line.ends_with(char::is_whitespace) => {
+            Err(CliError::Fatal {
+                code: 128,
+                message: format!("create {name}: zero <new-oid>"),
+            })
+        }
+        ["delete", name] if !name.is_empty() && line.ends_with(char::is_whitespace) => {
+            Err(CliError::Fatal {
+                code: 128,
+                message: format!("delete {name}: zero <old-oid>"),
+            })
+        }
         ["delete", name] => Ok(UpdateRefStdinOp::Delete {
             name: (*name).to_owned(),
             old_id: None,
             no_deref,
         }),
-        ["delete", name, old] => Ok(UpdateRefStdinOp::Delete {
-            name: (*name).to_owned(),
-            old_id: Some(parse_id(old)?),
-            no_deref,
-        }),
+        ["delete", name, old] => {
+            let command = format!("delete {name}");
+            let old_id = update_ref_parse_stdin_field(repo, old, &command, "old-oid")?;
+            if update_ref_is_zero(&old_id) {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("{command}: zero <old-oid>"),
+                });
+            }
+            Ok(UpdateRefStdinOp::Delete {
+                name: (*name).to_owned(),
+                old_id: Some(old_id),
+                no_deref,
+            })
+        }
         ["verify", name] => Ok(UpdateRefStdinOp::Verify {
             name: (*name).to_owned(),
-            old_id: None,
+            old_id: Some(
+                update_ref_zero_id().map_err(|message| CliError::Fatal { code: 128, message })?,
+            ),
         }),
         ["verify", name, old] => Ok(UpdateRefStdinOp::Verify {
             name: (*name).to_owned(),
-            old_id: Some(parse_id(old)?),
+            old_id: Some(update_ref_parse_stdin_field(
+                repo,
+                old,
+                &format!("verify {name}"),
+                "old-oid",
+            )?),
         }),
         ["symref-update", name, new_target] => Ok(UpdateRefStdinOp::SymrefUpdate {
             name: (*name).to_owned(),
@@ -605,9 +1106,23 @@ fn parse_update_ref_stdin_op(
         ["symref-update", name, new_target, "oid", old_oid] => Ok(UpdateRefStdinOp::SymrefUpdate {
             name: (*name).to_owned(),
             new_target: (*new_target).to_owned(),
-            old: Some(SymrefOld::Oid(parse_id(old_oid)?)),
+            old: Some(SymrefOld::Oid(
+                update_ref_parse_stdin_id(repo, old_oid).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: format!("symref-update {name}: invalid oid: {old_oid}"),
+                })?,
+            )),
             no_deref,
         }),
+        ["symref-update", name, _, invalid, ..] if !matches!(*invalid, "ref" | "oid") => {
+            Err(CliError::Fatal {
+                code: 128,
+                message: format!("symref-update {name}: invalid arg '{invalid}' for old value"),
+            })
+        }
+        ["symref-update", ..] if fields.len() > 5 => {
+            update_ref_invalid_stdin_command(line, &fields)
+        }
         ["symref-create", name, new_target] => Ok(UpdateRefStdinOp::SymrefCreate {
             name: (*name).to_owned(),
             new_target: (*new_target).to_owned(),
@@ -619,7 +1134,7 @@ fn parse_update_ref_stdin_op(
         }),
         ["symref-delete", name, old_target] => Ok(UpdateRefStdinOp::SymrefDelete {
             name: (*name).to_owned(),
-            old_target: Some((*old_target).to_owned()),
+            old_target: (!old_target.is_empty()).then(|| (*old_target).to_owned()),
             no_deref,
         }),
         ["symref-verify", name] => Ok(UpdateRefStdinOp::SymrefVerify {
@@ -629,18 +1144,101 @@ fn parse_update_ref_stdin_op(
         }),
         ["symref-verify", name, old_target] => Ok(UpdateRefStdinOp::SymrefVerify {
             name: (*name).to_owned(),
-            old_target: Some((*old_target).to_owned()),
+            old_target: (!old_target.is_empty()).then(|| (*old_target).to_owned()),
             no_deref,
         }),
-        _ => Err(CliError::Fatal {
+        _ => update_ref_invalid_stdin_command(line, &fields),
+    }
+}
+
+fn update_ref_invalid_stdin_command<T>(line: &str, fields: &[&str]) -> Result<T> {
+    let Some(command) = fields.first().copied() else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "empty command in input".into(),
+        });
+    };
+    if !matches!(
+        command,
+        "create"
+            | "update"
+            | "delete"
+            | "verify"
+            | "symref-create"
+            | "symref-update"
+            | "symref-delete"
+            | "symref-verify"
+    ) {
+        return Err(CliError::Fatal {
             code: 128,
             message: format!("unknown command: {line}"),
-        }),
+        });
     }
+    let name = fields.get(1).copied().filter(|name| !name.is_empty());
+    if name.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("{command}: missing <ref>"),
+        });
+    }
+    let name = name.unwrap_or_default();
+    let minimum = match command {
+        "create" | "update" => 3,
+        "delete" | "verify" => 2,
+        "symref-create" | "symref-update" => 3,
+        "symref-delete" | "symref-verify" => 2,
+        _ => unreachable!(),
+    };
+    if fields.len() < minimum {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "{command} {name}: missing <{}>",
+                if command.starts_with("symref-") {
+                    "new-target"
+                } else {
+                    "new-oid"
+                }
+            ),
+        });
+    }
+    let maximum = match command {
+        "create" | "delete" | "verify" => 3,
+        "update" => 4,
+        "symref-create" | "symref-delete" | "symref-verify" => 3,
+        "symref-update" => 5,
+        _ => unreachable!(),
+    };
+    let extra_index = maximum;
+    let extra = fields.get(extra_index).copied().unwrap_or_default();
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("{command} {name}: extra input:  {extra}"),
+    })
+}
+
+fn update_ref_parse_stdin_field(
+    repo: &GitRepo,
+    value: &str,
+    command: &str,
+    label: &str,
+) -> Result<ObjectId> {
+    if value.is_empty() {
+        return update_ref_zero_id().map_err(|message| CliError::Fatal { code: 128, message });
+    }
+    update_ref_parse_stdin_id(repo, value).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("{command}: invalid <{label}>: {value}"),
+    })
 }
 
 fn parse_update_ref_stdin_line(line: &str) -> Result<Vec<String>> {
     let bytes = line.as_bytes();
+    let trailing_empty_fields = bytes
+        .iter()
+        .rev()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count();
     let mut parts = Vec::new();
     let mut index = 0usize;
     while index < bytes.len() {
@@ -675,8 +1273,14 @@ fn parse_update_ref_stdin_line(line: &str) -> Result<Vec<String>> {
                     }
                 }
             }
-            if !closed || (index < bytes.len() && !bytes[index].is_ascii_whitespace()) {
+            if !closed {
                 return update_ref_badly_quoted(bad_arg);
+            }
+            if index < bytes.len() && !bytes[index].is_ascii_whitespace() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("unexpected character after quoted argument: {bad_arg}"),
+                });
             }
             parts.push(String::from_utf8(token).map_err(|_| CliError::Fatal {
                 code: 128,
@@ -690,6 +1294,7 @@ fn parse_update_ref_stdin_line(line: &str) -> Result<Vec<String>> {
             parts.push(line[start..index].to_owned());
         }
     }
+    parts.extend((0..trailing_empty_fields).map(|_| String::new()));
     Ok(parts)
 }
 
@@ -772,27 +1377,75 @@ fn update_ref_validate_stdin_ops(
     let mut seen = BTreeSet::new();
     for op in ops {
         let name = update_ref_stdin_op_name(op);
-        update_ref_validate_stdin_name(name)?;
+        if matches!(
+            op,
+            UpdateRefStdinOp::Delete { .. } | UpdateRefStdinOp::SymrefDelete { .. }
+        ) && update_ref_delete_name_is_valid(name)
+        {
+        } else {
+            update_ref_validate_stdin_name(name)?;
+        }
         if !seen.insert(name.to_owned()) {
             return Err(format!("multiple updates for ref '{name}' not allowed"));
         }
+    }
+    update_ref_validate_duplicate_referents(refs, ops)?;
+    update_ref_validate_stdin_ref_conflicts(refs, ops)?;
+    for op in ops {
         match op {
-            UpdateRefStdinOp::Update { name, old_id, .. } => {
+            UpdateRefStdinOp::Update {
+                name,
+                old_id,
+                no_deref,
+                ..
+            } => {
                 if let Some(expected) = old_id {
-                    update_ref_verify_current(refs, name, expected)?;
+                    let effective_name = update_ref_effective_name(refs, name, *no_deref);
+                    update_ref_verify_current_for_mode(
+                        refs,
+                        name,
+                        &effective_name,
+                        expected,
+                        *no_deref,
+                    )?;
                 }
             }
-            UpdateRefStdinOp::Create { name, .. } => {
-                if refs.resolve(name).is_ok() {
+            UpdateRefStdinOp::Create { name, .. } => match update_ref_read_raw(refs, name) {
+                Ok(RefTarget::Symbolic(target)) => {
+                    let message = if refs.resolve(&target).is_ok() {
+                        format!("cannot lock ref '{name}': reference already exists")
+                    } else {
+                        format!("cannot lock ref '{name}': a dangling symref already exists")
+                    };
+                    return Err(message);
+                }
+                Ok(RefTarget::Direct(_)) => {
                     return Err(format!(
                         "cannot lock ref '{name}': reference already exists"
                     ));
                 }
-            }
-            UpdateRefStdinOp::Delete { name, old_id, .. }
-            | UpdateRefStdinOp::Verify { name, old_id } => {
+                Err(_) => {}
+            },
+            UpdateRefStdinOp::Delete {
+                name,
+                old_id,
+                no_deref,
+            } => {
                 if let Some(expected) = old_id {
-                    update_ref_verify_current(refs, name, expected)?;
+                    let effective_name = update_ref_effective_name(refs, name, *no_deref);
+                    update_ref_verify_current_for_mode(
+                        refs,
+                        name,
+                        &effective_name,
+                        expected,
+                        *no_deref,
+                    )?;
+                }
+            }
+            UpdateRefStdinOp::Verify { name, old_id } => {
+                if let Some(expected) = old_id {
+                    let effective_name = update_ref_effective_name(refs, name, false);
+                    update_ref_verify_current_named(refs, name, &effective_name, expected)?;
                 }
             }
             UpdateRefStdinOp::SymrefUpdate {
@@ -840,8 +1493,65 @@ fn update_ref_validate_stdin_ops(
                     };
                     return Err(format!("{command}: cannot operate with deref mode"));
                 }
-                update_ref_verify_symref_target(refs, name, old_target.as_deref())?;
+                if matches!(op, UpdateRefStdinOp::SymrefVerify { .. })
+                    && update_ref_read_raw(refs, name).is_err()
+                {
+                    return Err(format!(
+                        "cannot lock ref '{name}': unable to resolve reference '{name}'"
+                    ));
+                }
+                if !matches!(op, UpdateRefStdinOp::SymrefDelete { .. }) || old_target.is_some() {
+                    update_ref_verify_symref_target(refs, name, old_target.as_deref())?;
+                }
             }
+        }
+    }
+    Ok(())
+}
+
+fn update_ref_validate_duplicate_referents(
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+) -> std::result::Result<(), String> {
+    let mut effective_names = BTreeMap::new();
+    for op in ops {
+        let (name, no_deref) = match op {
+            UpdateRefStdinOp::Update { name, no_deref, .. }
+            | UpdateRefStdinOp::Create { name, no_deref, .. }
+            | UpdateRefStdinOp::Delete { name, no_deref, .. } => (name.as_str(), *no_deref),
+            UpdateRefStdinOp::Verify { name, .. } => (name.as_str(), false),
+            _ => continue,
+        };
+        if !no_deref
+            && let Ok(RefTarget::Symbolic(target)) = update_ref_read_raw(refs, name)
+            && target == name
+        {
+            return Err(format!(
+                "multiple updates for '{name}' (including one via symref '{name}') are not allowed"
+            ));
+        }
+        if name == "HEAD"
+            && no_deref
+            && let Ok(RefTarget::Symbolic(target)) = refs.read_head()
+            && effective_names.contains_key(&target)
+        {
+            return Err(format!(
+                "multiple updates for 'HEAD' (including one via its referent '{target}') are not allowed"
+            ));
+        }
+        let effective_name = update_ref_effective_name(refs, name, no_deref);
+        if effective_names
+            .insert(effective_name.clone(), name.to_owned())
+            .is_some()
+        {
+            if name != effective_name {
+                return Err(format!(
+                    "multiple updates for '{effective_name}' (including one via symref '{name}') are not allowed"
+                ));
+            }
+            return Err(format!(
+                "multiple updates for ref '{effective_name}' not allowed"
+            ));
         }
     }
     Ok(())
@@ -856,6 +1566,7 @@ struct UpdateRefBatchRejection {
 }
 
 fn update_ref_validate_stdin_batch_ops(
+    repo: &GitRepo,
     refs: &RefStore,
     ops: &[UpdateRefStdinOp],
 ) -> std::result::Result<(Vec<UpdateRefStdinOp>, Vec<UpdateRefBatchRejection>), String> {
@@ -864,22 +1575,62 @@ fn update_ref_validate_stdin_batch_ops(
     let mut rejected = Vec::new();
     for op in ops {
         let name = update_ref_stdin_op_name(op);
-        update_ref_validate_stdin_name(name)?;
+        if matches!(
+            op,
+            UpdateRefStdinOp::Delete { .. } | UpdateRefStdinOp::SymrefDelete { .. }
+        ) && update_ref_delete_name_is_valid(name)
+        {
+        } else {
+            update_ref_validate_stdin_name(name)?;
+        }
         if !seen.insert(name.to_owned()) {
             return Err(format!("multiple updates for ref '{name}' not allowed"));
         }
+    }
+    let existing_refs = refs.list_refs("refs/").map_err(|error| error.to_string())?;
+    let reject_case_conflicts = repo_ref_format(repo).map_err(|error| format!("{error:?}"))?
+        == "files"
+        && read_config_value(repo, "core.ignorecase")
+            .map_err(|error| format!("{error:?}"))?
+            .as_deref()
+            .and_then(parse_git_bool)
+            .unwrap_or(false);
+    let mut transaction_ref_names = existing_refs.clone();
+    for op in ops {
         match op {
             UpdateRefStdinOp::Update {
                 name,
                 new_id,
                 old_id,
-                ..
+                no_deref,
             } => {
+                if let Some(reason) = update_ref_batch_invalid_new_value(repo, name, new_id) {
+                    rejected.push(UpdateRefBatchRejection {
+                        name: name.clone(),
+                        new_id: Some(new_id.clone()),
+                        old_id: old_id.clone(),
+                        reason,
+                    });
+                    continue;
+                }
+                let effective_name = update_ref_effective_name(refs, name, *no_deref);
+                if existing_refs.iter().any(|existing| {
+                    existing != &effective_name
+                        && update_ref_names_conflict(existing, &effective_name)
+                }) {
+                    rejected.push(UpdateRefBatchRejection {
+                        name: name.clone(),
+                        new_id: Some(new_id.clone()),
+                        old_id: old_id.clone(),
+                        reason: "refname conflict",
+                    });
+                    continue;
+                }
                 if let Some(expected) = old_id {
-                    match update_ref_verify_current_for_batch(refs, name, expected) {
+                    match update_ref_verify_current_for_batch(refs, &effective_name, expected) {
                         Ok(()) => accepted.push(op.clone()),
                         Err(reason) => rejected.push(UpdateRefBatchRejection {
-                            name: name.clone(),
+                            name: effective_name,
                             new_id: Some(new_id.clone()),
                             old_id: Some(expected.clone()),
                             reason,
@@ -889,7 +1640,41 @@ fn update_ref_validate_stdin_batch_ops(
                     accepted.push(op.clone());
                 }
             }
-            UpdateRefStdinOp::Create { name, .. } => {
+            UpdateRefStdinOp::Create { name, new_id, .. } => {
+                if let Some(reason) = update_ref_batch_invalid_new_value(repo, name, new_id) {
+                    rejected.push(UpdateRefBatchRejection {
+                        name: name.clone(),
+                        new_id: Some(new_id.clone()),
+                        old_id: Some(update_ref_zero_id()?),
+                        reason,
+                    });
+                    continue;
+                }
+                if reject_case_conflicts
+                    && transaction_ref_names
+                        .iter()
+                        .any(|existing| existing != name && existing.eq_ignore_ascii_case(name))
+                {
+                    rejected.push(UpdateRefBatchRejection {
+                        name: name.clone(),
+                        new_id: Some(new_id.clone()),
+                        old_id: Some(update_ref_zero_id()?),
+                        reason: "reference conflict due to case-insensitive filesystem",
+                    });
+                    continue;
+                }
+                if existing_refs
+                    .iter()
+                    .any(|existing| existing != name && update_ref_names_conflict(existing, name))
+                {
+                    rejected.push(UpdateRefBatchRejection {
+                        name: name.clone(),
+                        new_id: Some(new_id.clone()),
+                        old_id: Some(update_ref_zero_id()?),
+                        reason: "refname conflict",
+                    });
+                    continue;
+                }
                 if let Ok(current) = refs.resolve(name) {
                     rejected.push(UpdateRefBatchRejection {
                         name: name.clone(),
@@ -899,14 +1684,20 @@ fn update_ref_validate_stdin_batch_ops(
                     });
                 } else {
                     accepted.push(op.clone());
+                    transaction_ref_names.push(name.clone());
                 }
             }
-            UpdateRefStdinOp::Delete { name, old_id, .. } => {
+            UpdateRefStdinOp::Delete {
+                name,
+                old_id,
+                no_deref,
+            } => {
                 if let Some(expected) = old_id {
-                    match update_ref_verify_current_for_batch(refs, name, expected) {
+                    let effective_name = update_ref_effective_name(refs, name, *no_deref);
+                    match update_ref_verify_current_for_batch(refs, &effective_name, expected) {
                         Ok(()) => accepted.push(op.clone()),
                         Err(reason) => rejected.push(UpdateRefBatchRejection {
-                            name: name.clone(),
+                            name: effective_name,
                             new_id: Some(update_ref_zero_id()?),
                             old_id: Some(expected.clone()),
                             reason,
@@ -918,7 +1709,11 @@ fn update_ref_validate_stdin_batch_ops(
             }
             UpdateRefStdinOp::Verify { name, old_id } => {
                 if let Some(expected) = old_id
-                    && let Err(reason) = update_ref_verify_current_for_batch(refs, name, expected)
+                    && let Err(reason) = update_ref_verify_current_for_batch(
+                        refs,
+                        &update_ref_effective_name(refs, name, false),
+                        expected,
+                    )
                 {
                     rejected.push(UpdateRefBatchRejection {
                         name: name.clone(),
@@ -934,21 +1729,30 @@ fn update_ref_validate_stdin_batch_ops(
                 old,
                 no_deref,
             } => {
-                update_ref_validate_stdin_name(new_target)?;
                 if let Some(old) = old {
                     if let SymrefOld::Target(target) = old {
                         update_ref_validate_stdin_name(target)?;
                     }
+                    let regular_ref_as_symref = matches!(old, SymrefOld::Target(_))
+                        && matches!(update_ref_read_raw(refs, name), Ok(RefTarget::Direct(_)));
                     match update_ref_verify_symref_old(refs, name, old, *no_deref) {
-                        Ok(()) => accepted.push(op.clone()),
+                        Ok(()) => {
+                            update_ref_validate_stdin_name(new_target)?;
+                            accepted.push(op.clone());
+                        }
                         Err(_) => rejected.push(UpdateRefBatchRejection {
                             name: name.clone(),
                             new_id: None,
                             old_id: None,
-                            reason: "incorrect old value provided",
+                            reason: if regular_ref_as_symref {
+                                "expected symref but found regular ref"
+                            } else {
+                                "incorrect old value provided"
+                            },
                         }),
                     }
                 } else {
+                    update_ref_validate_stdin_name(new_target)?;
                     accepted.push(op.clone());
                 }
             }
@@ -987,6 +1791,10 @@ fn update_ref_validate_stdin_batch_ops(
                     };
                     return Err(format!("{command}: cannot operate with deref mode"));
                 }
+                if matches!(op, UpdateRefStdinOp::SymrefDelete { .. }) && old_target.is_none() {
+                    accepted.push(op.clone());
+                    continue;
+                }
                 match update_ref_verify_symref_target(refs, name, old_target.as_deref()) {
                     Ok(()) => {
                         if matches!(op, UpdateRefStdinOp::SymrefDelete { .. }) {
@@ -1004,6 +1812,132 @@ fn update_ref_validate_stdin_batch_ops(
         }
     }
     Ok((accepted, rejected))
+}
+
+fn update_ref_batch_invalid_new_value(
+    repo: &GitRepo,
+    name: &str,
+    id: &ObjectId,
+) -> Option<&'static str> {
+    let loose_store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1);
+    let store = loose_store.packed_first();
+    let object = match store.read_object(id) {
+        Ok(object) => object,
+        Err(_) => return Some("invalid new value provided"),
+    };
+    if name.starts_with("refs/heads/") && object.kind != GitObjectKind::Commit {
+        return Some("invalid new value provided");
+    }
+    None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateRefMutationKind {
+    Add,
+    Delete,
+}
+
+struct UpdateRefMutation {
+    requested_name: String,
+    effective_name: String,
+    kind: UpdateRefMutationKind,
+}
+
+fn update_ref_validate_stdin_ref_conflicts(
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+) -> std::result::Result<(), String> {
+    let mutations = ops
+        .iter()
+        .filter_map(|op| update_ref_mutation(refs, op))
+        .collect::<Vec<_>>();
+    for (index, left) in mutations.iter().enumerate() {
+        for right in mutations.iter().skip(index + 1) {
+            if !update_ref_names_conflict(&left.effective_name, &right.effective_name) {
+                continue;
+            }
+            match (left.kind, right.kind) {
+                (UpdateRefMutationKind::Add, UpdateRefMutationKind::Add) => {
+                    return Err(format!(
+                        "cannot process '{}' and '{}' at the same time",
+                        left.effective_name, right.effective_name
+                    ));
+                }
+                (UpdateRefMutationKind::Add, UpdateRefMutationKind::Delete) => {
+                    return Err(update_ref_df_conflict_message(left, right));
+                }
+                (UpdateRefMutationKind::Delete, UpdateRefMutationKind::Add) => {
+                    return Err(update_ref_df_conflict_message(right, left));
+                }
+                (UpdateRefMutationKind::Delete, UpdateRefMutationKind::Delete) => {}
+            }
+        }
+    }
+
+    let existing = refs.list_refs("refs/").map_err(|error| error.to_string())?;
+    for mutation in mutations
+        .iter()
+        .filter(|mutation| mutation.kind == UpdateRefMutationKind::Add)
+    {
+        if let Some(conflict) = existing.iter().find(|existing| {
+            existing.as_str() != mutation.effective_name
+                && update_ref_names_conflict(existing, &mutation.effective_name)
+        }) {
+            return Err(format!(
+                "cannot lock ref '{}': '{}' exists; cannot create '{}'",
+                mutation.requested_name, conflict, mutation.effective_name
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn update_ref_mutation(refs: &RefStore, op: &UpdateRefStdinOp) -> Option<UpdateRefMutation> {
+    let (requested_name, kind, no_deref) = match op {
+        UpdateRefStdinOp::Update { name, no_deref, .. }
+        | UpdateRefStdinOp::Create { name, no_deref, .. } => {
+            (name, UpdateRefMutationKind::Add, *no_deref)
+        }
+        UpdateRefStdinOp::Delete { name, no_deref, .. } => {
+            (name, UpdateRefMutationKind::Delete, *no_deref)
+        }
+        UpdateRefStdinOp::SymrefUpdate { name, .. }
+        | UpdateRefStdinOp::SymrefCreate { name, .. } => {
+            return Some(UpdateRefMutation {
+                requested_name: name.clone(),
+                effective_name: name.clone(),
+                kind: UpdateRefMutationKind::Add,
+            });
+        }
+        UpdateRefStdinOp::SymrefDelete { name, .. } => {
+            return Some(UpdateRefMutation {
+                requested_name: name.clone(),
+                effective_name: name.clone(),
+                kind: UpdateRefMutationKind::Delete,
+            });
+        }
+        UpdateRefStdinOp::Verify { .. } | UpdateRefStdinOp::SymrefVerify { .. } => return None,
+    };
+    Some(UpdateRefMutation {
+        requested_name: requested_name.clone(),
+        effective_name: update_ref_effective_name(refs, requested_name, no_deref),
+        kind,
+    })
+}
+
+fn update_ref_names_conflict(left: &str, right: &str) -> bool {
+    left.strip_prefix(right)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn update_ref_df_conflict_message(add: &UpdateRefMutation, delete: &UpdateRefMutation) -> String {
+    format!(
+        "cannot lock ref '{}': '{}' exists; cannot create '{}'",
+        add.requested_name, delete.effective_name, add.effective_name
+    )
 }
 
 fn update_ref_stdin_op_name(op: &UpdateRefStdinOp) -> &str {
@@ -1032,6 +1966,17 @@ fn update_ref_validate_cli_name(name: &str) -> Result<()> {
     }
 }
 
+fn update_ref_validate_delete_name(name: &str) -> Result<()> {
+    if update_ref_delete_name_is_valid(name) {
+        Ok(())
+    } else {
+        Err(CliError::Stderr {
+            code: 1,
+            text: format!("error: refusing to update ref with bad name '{name}'\n"),
+        })
+    }
+}
+
 fn update_ref_validate_stdin_name(name: &str) -> std::result::Result<(), String> {
     if update_ref_name_is_valid(name) {
         Ok(())
@@ -1044,6 +1989,14 @@ fn update_ref_name_is_valid(name: &str) -> bool {
     name == "HEAD" || update_ref_name_is_pseudoref(name) || check_ref_format(name, false)
 }
 
+fn update_ref_delete_name_is_valid(name: &str) -> bool {
+    update_ref_name_is_valid(name)
+        || (name.starts_with("refs/")
+            && !name
+                .split('/')
+                .any(|component| component.is_empty() || component == "." || component == ".."))
+}
+
 fn update_ref_name_is_pseudoref(name: &str) -> bool {
     is_valid_pseudoref_name(name)
 }
@@ -1053,20 +2006,72 @@ fn update_ref_verify_current(
     name: &str,
     expected: &ObjectId,
 ) -> std::result::Result<(), String> {
-    let current = refs.resolve(name).ok();
+    update_ref_verify_current_named(refs, name, name, expected)
+}
+
+fn update_ref_verify_current_named(
+    refs: &RefStore,
+    name: &str,
+    resolve_name: &str,
+    expected: &ObjectId,
+) -> std::result::Result<(), String> {
     let zero = ObjectId::from_hex(GitHashAlgorithm::Sha1, &"0".repeat(40))
         .map_err(|error| error.to_string())?;
-    match (current, expected == &zero) {
-        (None, true) => Ok(()),
-        (Some(current), false) if &current == expected => Ok(()),
-        (Some(current), _) => Err(format!(
+    match refs.resolve(resolve_name) {
+        Ok(current) if expected != &zero && &current == expected => Ok(()),
+        Ok(_) if expected == &zero => Err(format!(
+            "cannot lock ref '{name}': reference already exists"
+        )),
+        Ok(current) => Err(format!(
             "cannot lock ref '{name}': is at {} but expected {}",
             current.to_hex(),
             expected.to_hex()
         )),
-        (None, false) => Err(format!(
-            "cannot lock ref '{name}': unable to resolve reference '{name}'"
+        Err(error) if error.kind() == io::ErrorKind::NotFound && expected == &zero => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => Err(format!(
+            "cannot lock ref '{name}': unable to resolve reference '{resolve_name}': reference broken"
         )),
+        Err(_) => Err(format!(
+            "cannot lock ref '{name}': unable to resolve reference '{resolve_name}'"
+        )),
+    }
+}
+
+fn update_ref_verify_current_for_mode(
+    refs: &RefStore,
+    name: &str,
+    effective_name: &str,
+    expected: &ObjectId,
+    no_deref: bool,
+) -> std::result::Result<(), String> {
+    if !no_deref {
+        return update_ref_verify_current_named(refs, name, effective_name, expected);
+    }
+    match update_ref_read_raw(refs, name) {
+        Ok(RefTarget::Direct(current)) if &current == expected => Ok(()),
+        Ok(RefTarget::Direct(current)) => Err(format!(
+            "cannot lock ref '{name}': is at {} but expected {}",
+            current.to_hex(),
+            expected.to_hex()
+        )),
+        Ok(RefTarget::Symbolic(_)) => match refs.resolve(name) {
+            Ok(current) if &current == expected => Ok(()),
+            Ok(current) => Err(format!(
+                "cannot lock ref '{name}': is at {} but expected {}",
+                current.to_hex(),
+                expected.to_hex()
+            )),
+            Err(_) if !update_ref_is_zero(expected) => Err(format!(
+                "cannot lock ref '{name}': reference is missing but expected {}",
+                expected.to_hex()
+            )),
+            Err(_) => Ok(()),
+        },
+        Err(_) if !update_ref_is_zero(expected) => Err(format!(
+            "cannot lock ref '{name}': reference is missing but expected {}",
+            expected.to_hex()
+        )),
+        Err(_) => Ok(()),
     }
 }
 
@@ -1079,6 +2084,11 @@ fn update_ref_verify_symref_old(
     match old {
         SymrefOld::Target(target) => update_ref_verify_symref_target(refs, name, Some(target)),
         SymrefOld::Oid(expected) => {
+            if update_ref_is_zero(expected) && update_ref_read_raw(refs, name).is_ok() {
+                return Err(format!(
+                    "cannot lock ref '{name}': reference already exists"
+                ));
+            }
             if no_deref {
                 match update_ref_read_raw(refs, name) {
                     Ok(RefTarget::Direct(current)) if &current == expected => Ok(()),
@@ -1091,6 +2101,9 @@ fn update_ref_verify_symref_old(
                         "cannot lock ref '{name}': expected object id but found symref target '{target}'"
                     )),
                     Err(_) if update_ref_is_zero(expected) => Ok(()),
+                    Err(error) if error.kind() == io::ErrorKind::InvalidData => Err(format!(
+                        "cannot lock ref '{name}': unable to resolve reference '{name}': reference broken"
+                    )),
                     Err(_) => Err(format!(
                         "cannot lock ref '{name}': unable to resolve reference '{name}'"
                     )),
@@ -1129,11 +2142,28 @@ fn update_ref_verify_symref_target(
 }
 
 fn update_ref_read_raw(refs: &RefStore, name: &str) -> io::Result<RefTarget> {
-    if name == "HEAD" {
+    let result = if name == "HEAD" {
         refs.read_head()
     } else {
         refs.read_ref(name)
+    };
+    match result {
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            update_ref_read_symbolic_target_raw(refs, name)
+                .map(RefTarget::Symbolic)
+                .ok_or(error)
+        }
+        other => other,
     }
+}
+
+fn update_ref_read_symbolic_target_raw(refs: &RefStore, name: &str) -> Option<String> {
+    let raw = fs::read_to_string(refs.git_dir().join(name)).ok()?;
+    raw.trim_end()
+        .strip_prefix("ref:")
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .map(str::to_owned)
 }
 
 fn update_ref_is_zero(id: &ObjectId) -> bool {
@@ -1152,7 +2182,8 @@ fn update_ref_verify_current_for_batch(
     match (refs.resolve(name).ok(), update_ref_is_zero(expected)) {
         (None, true) => Ok(()),
         (Some(current), false) if &current == expected => Ok(()),
-        (Some(_), _) => Err("incorrect old value provided"),
+        (Some(_), true) => Err("reference already exists"),
+        (Some(_), false) => Err("incorrect old value provided"),
         (None, false) => Err("reference does not exist"),
     }
 }
@@ -1164,6 +2195,87 @@ fn update_ref_apply_stdin_ops(
     create_reflog: bool,
     message: Option<&str>,
 ) -> Result<()> {
+    let mut routed = BTreeMap::<PathBuf, Vec<UpdateRefStdinOp>>::new();
+    let mut rewrote_name = false;
+    for op in ops {
+        let name = update_ref_stdin_op_name(op);
+        let ref_name = update_ref_command_ref_name(name);
+        rewrote_name |= ref_name != name;
+        let target = update_ref_command_ref_store(repo, name)?;
+        routed
+            .entry(target.git_dir().to_path_buf())
+            .or_default()
+            .push(update_ref_op_with_name(op, ref_name.to_owned()));
+    }
+    if rewrote_name
+        || routed.len() > 1
+        || routed
+            .keys()
+            .next()
+            .is_some_and(|git_dir| git_dir != refs.git_dir())
+    {
+        for (git_dir, routed_ops) in routed {
+            let target = RefStore::new_with_storage_root(
+                &git_dir,
+                &git_dir,
+                repo_hash_algorithm_from_config(repo)?,
+                RefStore::new(
+                    read_common_git_dir(&repo.git_dir)?,
+                    repo_hash_algorithm_from_config(repo)?,
+                )
+                .storage_kind()?,
+            );
+            update_ref_validate_stdin_ops(&target, &routed_ops)
+                .map_err(|message| CliError::Fatal { code: 128, message })?;
+            update_ref_apply_ops(repo, &target, &routed_ops, create_reflog, message, false)?;
+        }
+        return Ok(());
+    }
+    update_ref_apply_ops(repo, refs, ops, create_reflog, message, false)
+}
+
+fn update_ref_apply_ops(
+    repo: &GitRepo,
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+    create_reflog: bool,
+    message: Option<&str>,
+    dereference_hook_names: bool,
+) -> Result<()> {
+    let hook_input = update_ref_transaction_hook_input(refs, ops, dereference_hook_names)?;
+    update_ref_run_files_symref_delete_hook(repo, refs, ops)?;
+    update_ref_run_transaction_hook_with_input(repo, "prepared", &hook_input)?;
+    update_ref_apply_stdin_ops_raw(repo, refs, ops, create_reflog, message)?;
+    let _ = update_ref_run_transaction_hook_with_input(repo, "committed", &hook_input);
+    Ok(())
+}
+
+fn update_ref_run_files_symref_delete_hook(
+    repo: &GitRepo,
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+) -> Result<()> {
+    if refs.storage_kind()? != zmin_git_core::refs::RefStorageKind::Files {
+        return Ok(());
+    }
+    let zero = zero_object_id().to_hex();
+    for op in ops {
+        if let UpdateRefStdinOp::SymrefDelete { name, .. } = op {
+            let input = format!("{zero} {zero} {name}\n");
+            update_ref_run_transaction_hook_with_input(repo, "aborted", &input)?;
+        }
+    }
+    Ok(())
+}
+
+fn update_ref_apply_stdin_ops_raw(
+    repo: &GitRepo,
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+    create_reflog: bool,
+    message: Option<&str>,
+) -> Result<()> {
+    update_ref_validate_new_objects(repo, refs, ops)?;
     for op in ops {
         match op {
             UpdateRefStdinOp::Update {
@@ -1178,19 +2290,236 @@ fn update_ref_apply_stdin_ops(
                 no_deref,
             } => update_ref_write(repo, refs, name, new_id, *no_deref, create_reflog, message)?,
             UpdateRefStdinOp::Delete { name, no_deref, .. } => {
-                update_ref_delete(repo, refs, name, *no_deref)?;
+                update_ref_delete(repo, refs, name, *no_deref, message)?;
             }
             UpdateRefStdinOp::Verify { .. } => {}
             UpdateRefStdinOp::SymrefUpdate {
+                name,
+                new_target,
+                no_deref,
+                ..
+            } => update_ref_write_symref(
+                repo,
+                refs,
+                name,
+                new_target,
+                *no_deref,
+                create_reflog,
+                message,
+            )?,
+            UpdateRefStdinOp::SymrefCreate {
                 name, new_target, ..
+            } => {
+                update_ref_write_symref(repo, refs, name, new_target, true, create_reflog, message)?
             }
-            | UpdateRefStdinOp::SymrefCreate {
-                name, new_target, ..
-            } => refs.write_symbolic_ref(name, new_target)?,
             UpdateRefStdinOp::SymrefDelete { name, no_deref, .. } => {
-                update_ref_delete(repo, refs, name, *no_deref)?;
+                update_ref_delete(repo, refs, name, *no_deref, message)?;
             }
             UpdateRefStdinOp::SymrefVerify { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn update_ref_run_transaction_hook(
+    repo: &GitRepo,
+    refs: &RefStore,
+    state: &str,
+    ops: &[UpdateRefStdinOp],
+) -> Result<()> {
+    update_ref_run_transaction_hook_with_names(repo, refs, state, ops, false)
+}
+
+fn update_ref_run_transaction_hook_with_names(
+    repo: &GitRepo,
+    refs: &RefStore,
+    state: &str,
+    ops: &[UpdateRefStdinOp],
+    dereference_names: bool,
+) -> Result<()> {
+    let stdin = update_ref_transaction_hook_input(refs, ops, dereference_names)?;
+    if stdin.is_empty() {
+        return Ok(());
+    }
+    update_ref_run_transaction_hook_with_input(repo, state, &stdin)
+}
+
+fn update_ref_run_transaction_hook_with_input(
+    repo: &GitRepo,
+    state: &str,
+    stdin: &str,
+) -> Result<()> {
+    if stdin.is_empty() {
+        return Ok(());
+    }
+    transport_commands::run_reference_transaction_hook_with_stdin(
+        repo,
+        state,
+        stdin.as_bytes(),
+    )
+    .map_err(|error| match error {
+        CliError::Exit(_) => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "ref updates aborted by hook: in '{state}' phase, update aborted by the reference-transaction hook"
+            ),
+        },
+        error => error,
+    })
+}
+
+fn update_ref_transaction_hook_input(
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+    dereference_names: bool,
+) -> Result<String> {
+    let mut input = String::new();
+    for op in ops {
+        let row = match op {
+            UpdateRefStdinOp::Update {
+                name,
+                new_id,
+                old_id,
+                no_deref,
+            } => {
+                let hook_name = if dereference_names {
+                    update_ref_effective_name(refs, name, *no_deref)
+                } else {
+                    name.clone()
+                };
+                Some((
+                    old_id
+                        .as_ref()
+                        .map(ObjectId::to_hex)
+                        .unwrap_or_else(|| zero_object_id().to_hex()),
+                    new_id.to_hex(),
+                    hook_name,
+                ))
+            }
+            UpdateRefStdinOp::Create { name, new_id, .. } => {
+                Some((zero_object_id().to_hex(), new_id.to_hex(), name.clone()))
+            }
+            UpdateRefStdinOp::Delete {
+                name,
+                old_id,
+                no_deref,
+            } => {
+                let hook_name = if dereference_names {
+                    update_ref_effective_name(refs, name, *no_deref)
+                } else {
+                    name.clone()
+                };
+                Some((
+                    old_id
+                        .as_ref()
+                        .map(ObjectId::to_hex)
+                        .unwrap_or_else(|| zero_object_id().to_hex()),
+                    zero_object_id().to_hex(),
+                    hook_name,
+                ))
+            }
+            UpdateRefStdinOp::SymrefCreate {
+                name, new_target, ..
+            } => Some((
+                zero_object_id().to_hex(),
+                format!("ref:{new_target}"),
+                name.clone(),
+            )),
+            UpdateRefStdinOp::SymrefUpdate {
+                name, new_target, ..
+            } => Some((
+                update_ref_symbolic_hook_old_value(refs, name),
+                format!("ref:{new_target}"),
+                name.clone(),
+            )),
+            UpdateRefStdinOp::SymrefDelete { name, .. } => Some((
+                update_ref_symbolic_hook_old_value(refs, name),
+                zero_object_id().to_hex(),
+                name.clone(),
+            )),
+            UpdateRefStdinOp::SymrefVerify { name, .. } => Some((
+                update_ref_symbolic_hook_old_value(refs, name),
+                zero_object_id().to_hex(),
+                name.clone(),
+            )),
+            UpdateRefStdinOp::Verify { .. } => None,
+        };
+        if let Some((old, new, name)) = row {
+            input.push_str(&format!("{old} {new} {name}\n"));
+        }
+    }
+    Ok(input)
+}
+
+fn update_ref_symbolic_hook_old_value(refs: &RefStore, name: &str) -> String {
+    match update_ref_read_raw(refs, name) {
+        Ok(RefTarget::Symbolic(target)) => format!("ref:{target}"),
+        Ok(RefTarget::Direct(id)) => id.to_hex(),
+        Err(_) => zero_object_id().to_hex(),
+    }
+}
+
+fn update_ref_write_symref(
+    repo: &GitRepo,
+    refs: &RefStore,
+    name: &str,
+    new_target: &str,
+    no_deref: bool,
+    create_reflog: bool,
+    message: Option<&str>,
+) -> Result<()> {
+    let effective_name = update_ref_effective_name(refs, name, no_deref);
+    let old_id = refs
+        .resolve(&effective_name)
+        .unwrap_or_else(|_| zero_object_id());
+    write_symbolic_ref_with_repo_config(repo, refs, &effective_name, new_target)?;
+    let new_id = refs
+        .resolve(new_target)
+        .unwrap_or_else(|_| zero_object_id());
+    update_ref_record_reflogs(repo, refs, name, &old_id, &new_id, create_reflog, message)
+}
+
+fn update_ref_validate_new_objects(
+    repo: &GitRepo,
+    refs: &RefStore,
+    ops: &[UpdateRefStdinOp],
+) -> Result<()> {
+    let refs_objects = refs.git_dir().join("objects");
+    let objects_dir = if refs_objects.is_dir() {
+        refs_objects
+    } else {
+        repo.objects_dir.clone()
+    };
+    let loose_store = LooseObjectStore::new(objects_dir, GitHashAlgorithm::Sha1);
+    let store = loose_store.packed_first();
+    for op in ops {
+        let (name, id) = match op {
+            UpdateRefStdinOp::Update { name, new_id, .. }
+            | UpdateRefStdinOp::Create { name, new_id, .. } => (name, new_id),
+            _ => continue,
+        };
+        match store.read_object(id) {
+            Ok(object)
+                if name.starts_with("refs/heads/") && object.kind != GitObjectKind::Commit =>
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "trying to write non-commit object {} to branch '{name}'",
+                        id.to_hex()
+                    ),
+                });
+            }
+            Ok(_) => {}
+            Err(_) => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "trying to write ref '{name}' with nonexistent object {}",
+                        id.to_hex()
+                    ),
+                });
+            }
         }
     }
     Ok(())
@@ -1203,11 +2532,10 @@ fn update_ref_apply_stdin_batch_ops(
     create_reflog: bool,
     message: Option<&str>,
 ) -> Result<()> {
-    let (accepted, rejected) = update_ref_validate_stdin_batch_ops(refs, ops)
+    let (accepted, rejected) = update_ref_validate_stdin_batch_ops(repo, refs, ops)
         .map_err(|message| CliError::Fatal { code: 128, message })?;
     update_ref_apply_stdin_ops(repo, refs, &accepted, create_reflog, message)?;
     for rejection in rejected {
-        update_ref_print_batch_rejection_error(&rejection);
         println!(
             "rejected {} {} {} {}",
             rejection.name,
@@ -1221,51 +2549,8 @@ fn update_ref_apply_stdin_batch_ops(
 
 fn update_ref_rejection_id(id: Option<ObjectId>) -> String {
     id.map(|id| id.to_hex())
-        .unwrap_or_else(update_ref_null_rejection_id)
+        .unwrap_or_else(|| "(null)".to_owned())
 }
-
-#[cfg(windows)]
-fn update_ref_null_rejection_id() -> String {
-    "(NULL)".to_owned()
-}
-
-#[cfg(not(windows))]
-fn update_ref_null_rejection_id() -> String {
-    "(null)".to_owned()
-}
-
-#[cfg(windows)]
-fn update_ref_print_batch_rejection_error(rejection: &UpdateRefBatchRejection) {
-    let message = match rejection.reason {
-        "reference already exists" => {
-            format!(
-                "cannot lock ref '{}': reference already exists",
-                rejection.name
-            )
-        }
-        "incorrect old value provided" => match (&rejection.new_id, &rejection.old_id) {
-            (Some(current), Some(expected)) => format!(
-                "cannot lock ref '{}': is at {} but expected {}",
-                rejection.name,
-                current.to_hex(),
-                expected.to_hex()
-            ),
-            _ => format!(
-                "cannot lock ref '{}': incorrect old value provided",
-                rejection.name
-            ),
-        },
-        "reference does not exist" => format!(
-            "cannot lock ref '{}': unable to resolve reference '{}'",
-            rejection.name, rejection.name
-        ),
-        reason => format!("cannot lock ref '{}': {reason}", rejection.name),
-    };
-    eprintln!("error: {message}");
-}
-
-#[cfg(not(windows))]
-fn update_ref_print_batch_rejection_error(_rejection: &UpdateRefBatchRejection) {}
 
 fn update_ref_write(
     repo: &GitRepo,
@@ -1278,20 +2563,58 @@ fn update_ref_write(
 ) -> Result<()> {
     if name == "HEAD" && no_deref {
         let old_id = update_ref_reflog_old_id(refs, name, true)?;
-        refs.write_head_direct(id)?;
+        refs.write_head_direct(id)
+            .map_err(|error| update_ref_map_write_error(name, "HEAD", error))?;
         update_ref_record_reflogs(repo, refs, name, &old_id, id, create_reflog, message)?;
         return Ok(());
     }
-    if name != "HEAD" && update_ref_name_is_pseudoref(name) {
+    if name != "HEAD"
+        && update_ref_name_is_pseudoref(name)
+        && refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Files
+    {
         let old_id = update_ref_reflog_old_id(refs, name, true)?;
-        write_pseudoref(repo, name, id)?;
+        write_pseudoref(repo, name, id).map_err(|error| match error {
+            CliError::Io(error) => update_ref_map_write_error(name, name, error),
+            other => other,
+        })?;
         update_ref_record_reflogs(repo, refs, name, &old_id, id, create_reflog, message)?;
         return Ok(());
     }
     let effective_name = update_ref_effective_name(refs, name, no_deref);
     let old_id = update_ref_reflog_old_id(refs, &effective_name, true)?;
-    refs.write_ref(&effective_name, id)?;
-    if name == "HEAD" && effective_name != "HEAD" && old_id == *id {
+    if name != "HEAD" && refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let mut logs = Vec::new();
+        if update_ref_should_write_reflog(repo, &effective_name, create_reflog)? {
+            logs.push(reftable_log_record(
+                repo,
+                &effective_name,
+                &old_id,
+                id,
+                message.unwrap_or(""),
+            )?);
+        }
+        if update_ref_points_head_at(refs, &effective_name)
+            && update_ref_should_write_reflog(repo, "HEAD", false)?
+        {
+            logs.push(reftable_log_record(
+                repo,
+                "HEAD",
+                &old_id,
+                id,
+                message.unwrap_or(""),
+            )?);
+        }
+        return refs
+            .write_reftable_ref_with_logs(&effective_name, RefTarget::Direct(id.clone()), logs)
+            .map_err(|error| update_ref_map_write_error(name, &effective_name, error));
+    }
+    refs.write_ref(&effective_name, id)
+        .map_err(|error| update_ref_map_write_error(name, &effective_name, error))?;
+    if name == "HEAD"
+        && effective_name != "HEAD"
+        && old_id == *id
+        && update_ref_should_write_reflog(repo, "HEAD", false)?
+    {
         update_ref_append_reflog(repo, "HEAD", &old_id, id, message)?;
         return Ok(());
     }
@@ -1304,13 +2627,93 @@ fn update_ref_write(
         create_reflog,
         message,
     )?;
-    if name == "HEAD" && effective_name != "HEAD" {
+    if name == "HEAD"
+        && effective_name != "HEAD"
+        && update_ref_should_write_reflog(repo, "HEAD", false)?
+    {
         update_ref_append_reflog(repo, "HEAD", &old_id, id, message)?;
     }
     Ok(())
 }
 
-fn update_ref_delete(repo: &GitRepo, refs: &RefStore, name: &str, no_deref: bool) -> Result<()> {
+fn update_ref_map_write_error(name: &str, effective_name: &str, error: io::Error) -> CliError {
+    let error_text = error.to_string();
+    if error_text == "reftable entry too large" {
+        return CliError::Fatal {
+            code: 128,
+            message: format!(
+                "update_ref failed for ref '{name}': reftable: transaction failure: entry too large"
+            ),
+        };
+    }
+    if error_text == "reftable block size cannot exceed 16MB"
+        || error_text == "reftable block size cannot exceed 65535"
+    {
+        return CliError::Fatal {
+            code: 128,
+            message: error_text,
+        };
+    }
+    if error.kind() == io::ErrorKind::AlreadyExists && error_text.contains("packed-refs.lock") {
+        let error_text = error_text
+            .split_once(" (os error")
+            .map_or(error_text.as_str(), |(message, _)| message);
+        return CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: {error_text}.\n\n\
+                 Another git process seems to be running in this repository, e.g.\n\
+                 an editor opened by 'git commit'. Please make sure all processes\n\
+                 are terminated then try again. If it still fails, a git process\n\
+                 may have crashed in this repository earlier:\n\
+                 remove the file manually to continue.\n"
+            ),
+        };
+    }
+    match error.kind() {
+        io::ErrorKind::AlreadyExists if error_text.contains("tables.list.lock") => {
+            CliError::Fatal {
+                code: 128,
+                message: format!("update_ref failed for ref '{name}': cannot lock references"),
+            }
+        }
+        io::ErrorKind::AlreadyExists => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "update_ref failed for ref '{name}': cannot lock ref '{effective_name}': reference already locked"
+            ),
+        },
+        io::ErrorKind::IsADirectory => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "cannot lock ref '{name}': there is a non-empty directory '.git/{effective_name}' blocking reference '{effective_name}'"
+            ),
+        },
+        io::ErrorKind::InvalidData => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "cannot lock ref '{name}': unable to resolve reference '{effective_name}': reference broken"
+            ),
+        },
+        _ => CliError::Io(error),
+    }
+}
+
+fn update_ref_delete(
+    repo: &GitRepo,
+    refs: &RefStore,
+    name: &str,
+    no_deref: bool,
+    message: Option<&str>,
+) -> Result<()> {
+    if !no_deref
+        && matches!(update_ref_read_raw(refs, name), Ok(RefTarget::Symbolic(target)) if target == name)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("cannot lock ref '{name}': reference is self-referential"),
+        });
+    }
     let effective_name = update_ref_effective_name(refs, name, no_deref);
     if name == "HEAD" && no_deref {
         match fs::remove_file(refs.git_dir().join("HEAD")) {
@@ -1322,25 +2725,33 @@ fn update_ref_delete(repo: &GitRepo, refs: &RefStore, name: &str, no_deref: bool
             Err(error) => return Err(CliError::Io(error)),
         }
     }
+    let old_id = update_ref_reflog_old_id(refs, &effective_name, true)?;
+    let update_head_log = name == "HEAD" || update_ref_points_head_at(refs, &effective_name);
     match refs.delete_ref(&effective_name) {
         Ok(()) => {
             remove_reflog(repo, &effective_name)?;
-            if name == "HEAD" || update_ref_points_head_at(refs, &effective_name) {
-                remove_reflog(repo, "HEAD")?;
+            if update_head_log && update_ref_should_write_reflog(repo, "HEAD", false)? {
+                update_ref_append_reflog(repo, "HEAD", &old_id, &zero_object_id(), message)?;
             }
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(CliError::Io(error)),
+        Err(error) => Err(update_ref_map_write_error(name, &effective_name, error)),
     }
 }
 
 fn update_ref_effective_name(refs: &RefStore, name: &str, no_deref: bool) -> String {
-    if name == "HEAD"
-        && !no_deref
-        && let Ok(RefTarget::Symbolic(target)) = refs.read_head()
-    {
-        return target;
+    if !no_deref {
+        if name == "HEAD"
+            && let Ok(RefTarget::Symbolic(target)) = update_ref_read_raw(refs, name)
+        {
+            return target;
+        }
+        if name != "HEAD"
+            && let Ok(RefTarget::Symbolic(target)) = update_ref_read_raw(refs, name)
+        {
+            return target;
+        }
     }
     name.to_owned()
 }
@@ -1362,6 +2773,13 @@ fn update_ref_reflog_old_id(refs: &RefStore, name: &str, no_deref: bool) -> Resu
                 let Some(hex) = raw.split_whitespace().next() else {
                     return Ok(zero_object_id());
                 };
+                if hex == "ref:" {
+                    let target = raw.strip_prefix("ref:").map(str::trim).unwrap_or_default();
+                    return refs
+                        .resolve(target)
+                        .or_else(|_| Ok(zero_object_id()))
+                        .map_err(CliError::Io);
+                }
                 ObjectId::from_hex(GitHashAlgorithm::Sha1, hex).map_err(|error| {
                     CliError::Io(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1375,7 +2793,14 @@ fn update_ref_reflog_old_id(refs: &RefStore, name: &str, no_deref: bool) -> Resu
     }
     match refs.resolve(name) {
         Ok(id) => Ok(id),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(zero_object_id()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::IsADirectory | io::ErrorKind::InvalidData
+            ) =>
+        {
+            Ok(zero_object_id())
+        }
         Err(error) => Err(CliError::Io(error)),
     }
 }
@@ -1389,22 +2814,48 @@ fn update_ref_record_reflogs(
     create_reflog: bool,
     message: Option<&str>,
 ) -> Result<()> {
-    if update_ref_should_write_reflog(name, create_reflog) {
+    if update_ref_should_write_reflog(repo, name, create_reflog)? {
         update_ref_append_reflog(repo, name, old_id, new_id, message)?;
     }
-    if name != "HEAD" && update_ref_points_head_at(refs, name) {
+    if name != "HEAD"
+        && update_ref_points_head_at(refs, name)
+        && update_ref_should_write_reflog(repo, "HEAD", false)?
+    {
         update_ref_append_reflog(repo, "HEAD", old_id, new_id, message)?;
     }
     Ok(())
 }
 
-fn update_ref_should_write_reflog(name: &str, create_reflog: bool) -> bool {
-    create_reflog
-        || name == "HEAD"
-        || name.starts_with("refs/heads/")
-        || name.starts_with("refs/remotes/")
-        || name.starts_with("refs/notes/")
-        || name.starts_with("refs/worktree/")
+fn update_ref_should_write_reflog(repo: &GitRepo, name: &str, create_reflog: bool) -> Result<bool> {
+    if create_reflog || repo.git_dir.join("logs").join(name).is_file() {
+        return Ok(true);
+    }
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let ref_git_dir = if is_per_worktree_ref(name) {
+        repo.git_dir.clone()
+    } else {
+        common_git_dir
+    };
+    let refs = RefStore::new(ref_git_dir, repo_hash_algorithm_from_config(repo)?);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable
+        && refs.reftable_log_exists(name)?
+    {
+        return Ok(true);
+    }
+    let configured = read_config_value(repo, "core.logallrefupdates")?;
+    if configured.as_deref() == Some("always") {
+        return Ok(true);
+    }
+    let enabled = match configured.as_deref() {
+        Some(value) => parse_git_bool(value).unwrap_or(false),
+        None => !repo_is_bare(repo),
+    };
+    Ok(enabled
+        && (name == "HEAD"
+            || name.starts_with("refs/heads/")
+            || name.starts_with("refs/remotes/")
+            || name.starts_with("refs/notes/")
+            || name.starts_with("refs/worktree/")))
 }
 
 fn update_ref_points_head_at(refs: &RefStore, name: &str) -> bool {
@@ -1418,33 +2869,15 @@ fn update_ref_append_reflog(
     new_id: &ObjectId,
     message: Option<&str>,
 ) -> Result<()> {
-    let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
-    let path = repo.git_dir.join("logs").join(name);
-    if path.is_dir() {
-        fs::remove_dir_all(&path)?;
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(
-        file,
-        "{} {} {} <{}> {} {}\t{}",
-        old_id.to_hex(),
-        new_id.to_hex(),
-        committer.name,
-        committer.email,
-        committer.timestamp,
-        committer.timezone,
-        message.unwrap_or("")
-    )?;
-    Ok(())
+    append_reflog(repo, name, old_id, new_id, message.unwrap_or(""))
 }
 
 fn remove_reflog(repo: &GitRepo, name: &str) -> Result<()> {
+    let refs = update_ref_command_ref_store(repo, name)?;
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        refs.delete_reftable_log(name)?;
+        return Ok(());
+    }
     let path = repo.git_dir.join("logs").join(name);
     match fs::remove_file(&path) {
         Ok(()) => prune_empty_reflog_parent_dirs(repo, &path),
@@ -1472,6 +2905,12 @@ pub(crate) fn symbolic_ref(
         });
     }
     if delete {
+        if name == "HEAD" {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "refusing to delete HEAD".to_owned(),
+            });
+        }
         if symbolic_ref_read_raw(&repo, name)?.is_none() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -1485,8 +2924,14 @@ pub(crate) fn symbolic_ref(
     }
     if let Some(target) = target.first() {
         let old_id = symbolic_ref_resolved_id(&repo, name)?;
+        let old_value = symbolic_ref_read_raw(&repo, name)?
+            .map(|target| format!("ref:{target}"))
+            .unwrap_or_else(|| zero_object_id().to_hex());
+        let hook_input = format!("{old_value} ref:{target} {name}\n");
+        update_ref_run_transaction_hook_with_input(&repo, "prepared", &hook_input)?;
         symbolic_ref_write_raw(&repo, name, target)?;
         append_symbolic_ref_reflog(&repo, name, target, old_id, message)?;
+        let _ = update_ref_run_transaction_hook_with_input(&repo, "committed", &hook_input);
         return Ok(());
     }
 
@@ -1515,11 +2960,26 @@ pub(crate) fn symbolic_ref(
         }
     };
     if short {
-        println!("{}", branch_display_name(&target));
+        println!("{}", symbolic_ref_short_name(&target));
     } else {
         println!("{target}");
     }
     Ok(())
+}
+
+fn symbolic_ref_short_name(target: &str) -> &str {
+    if let Some(remote) = target
+        .strip_prefix("refs/remotes/")
+        .and_then(|name| name.strip_suffix("/HEAD"))
+    {
+        return remote;
+    }
+    target
+        .strip_prefix("refs/heads/")
+        .or_else(|| target.strip_prefix("refs/tags/"))
+        .or_else(|| target.strip_prefix("refs/remotes/"))
+        .or_else(|| target.strip_prefix("refs/"))
+        .unwrap_or(target)
 }
 
 fn symbolic_ref_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
@@ -1540,7 +3000,17 @@ fn symbolic_ref_resolved_id(repo: &GitRepo, name: &str) -> Result<Option<ObjectI
     );
     match refs.resolve(name) {
         Ok(id) => Ok(Some(id)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound
+                    | io::ErrorKind::InvalidData
+                    | io::ErrorKind::IsADirectory
+                    | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(CliError::Io(error)),
     }
 }
@@ -1552,11 +3022,14 @@ fn append_symbolic_ref_reflog(
     old_id: Option<ObjectId>,
     message: Option<&str>,
 ) -> Result<()> {
-    let Some(message) = message else {
+    if message.is_none() && !update_ref_should_write_reflog(repo, name, false)? {
         return Ok(());
-    };
-    let Some(new_id) = symbolic_ref_resolved_id(repo, target)? else {
-        return Ok(());
+    }
+    let new_id = match symbolic_ref_resolved_id(repo, target) {
+        Ok(Some(new_id)) => new_id,
+        Ok(None) => return Ok(()),
+        Err(CliError::Io(error)) if error.kind() == io::ErrorKind::InvalidData => return Ok(()),
+        Err(error) => return Err(error),
     };
     let zero = ObjectId::new(
         new_id.algorithm(),
@@ -1567,7 +3040,7 @@ fn append_symbolic_ref_reflog(
         name,
         old_id.as_ref().unwrap_or(&zero),
         &new_id,
-        Some(message),
+        message,
     )
 }
 
@@ -1592,13 +3065,43 @@ fn symbolic_ref_read_recursive(refs: &dyn GitRefsStore, name: &str) -> Result<Op
 }
 
 fn symbolic_ref_read_raw(repo: &GitRepo, name: &str) -> Result<Option<String>> {
-    let path = if name == "HEAD" {
-        repo.git_dir.join("HEAD")
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let ref_git_dir = if is_per_worktree_ref(name) {
+        repo.git_dir.clone()
+    } else {
+        common_git_dir
+    };
+    let refs = RefStore::new(&ref_git_dir, GitHashAlgorithm::Sha1);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let target = if name == "HEAD" {
+            refs.read_head()
+        } else {
+            refs.read_ref(name)
+        };
+        return match target {
+            Ok(RefTarget::Symbolic(target)) => Ok(Some(target)),
+            Ok(RefTarget::Direct(_)) => Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CliError::Io(error)),
+        };
+    }
+    let path = if is_per_worktree_ref(name) {
+        repo.git_dir.join(name)
     } else {
         read_common_git_dir(&repo.git_dir)?.join(name)
     };
-    let raw = match fs::read_to_string(path) {
-        Ok(raw) => raw,
+    let raw = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Ok(fs::read_link(&path)
+                .map_err(CliError::Io)?
+                .to_str()
+                .map(str::to_owned));
+        }
+        Ok(_) => match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(CliError::Io(error)),
+        },
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(CliError::Io(error)),
     };
@@ -1615,26 +3118,24 @@ fn symbolic_ref_write_raw(repo: &GitRepo, name: &str, target: &str) -> Result<()
             message: "ref target contains invalid control character".into(),
         });
     }
-    let path = if name == "HEAD" {
-        repo.git_dir.join("HEAD")
-    } else {
-        if !name.starts_with("refs/") {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: format!("{name} is not a valid ref name"),
-            });
-        }
-        read_common_git_dir(&repo.git_dir)?.join(name)
-    };
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    if !check_ref_format(name, true) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("{name} is not a valid ref name"),
+        });
     }
-    fs::write(path, format!("ref: {target}\n"))?;
-    Ok(())
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    write_symbolic_ref_with_repo_config(repo, &refs, name, target)
 }
 
 pub(crate) fn refs_command(command: RefsCommand) -> Result<()> {
     match command {
+        RefsCommand::Migrate {
+            ref_format,
+            no_reflog,
+            dry_run,
+            arguments,
+        } => refs_migrate(ref_format.as_deref(), &arguments, no_reflog, dry_run),
         RefsCommand::Verify {
             strict,
             no_strict: _,
@@ -1643,6 +3144,334 @@ pub(crate) fn refs_command(command: RefsCommand) -> Result<()> {
             dry_run,
             ref_format,
         } => refs_verify(strict, verbose, dry_run, ref_format.as_deref()),
+    }
+}
+
+fn refs_migrate(
+    ref_format: Option<&str>,
+    arguments: &[String],
+    no_reflog: bool,
+    dry_run: bool,
+) -> Result<()> {
+    if !arguments.is_empty() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "usage: too many arguments\n".to_owned(),
+        });
+    }
+    let Some(ref_format) = ref_format else {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "usage: missing --ref-format=<format>\n".to_owned(),
+        });
+    };
+    let target_kind = match ref_format {
+        "files" => zmin_git_core::refs::RefStorageKind::Files,
+        "reftable" => zmin_git_core::refs::RefStorageKind::Reftable,
+        value => {
+            return Err(CliError::Stderr {
+                code: 1,
+                text: format!("error: unknown ref storage format '{value}'\n"),
+            });
+        }
+    };
+    let repo = find_repo_or_bare()?;
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    let source = RefStore::new(&common_dir, GitHashAlgorithm::Sha1);
+    if source.storage_kind()? == target_kind {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!("error: repository already uses '{ref_format}' format\n"),
+        });
+    }
+    if refs_migration_has_worktrees(&repo, &common_dir)? {
+        return Err(CliError::Stderr {
+            code: 255,
+            text: "error: migrating repositories with worktrees is not supported yet\n".to_owned(),
+        });
+    }
+    let migration_dir = refs_migration_directory(&common_dir)?;
+    fs::create_dir_all(&migration_dir)?;
+    let target = RefStore::new_with_storage_root(
+        &common_dir,
+        &migration_dir,
+        GitHashAlgorithm::Sha1,
+        target_kind,
+    );
+    let mut direct_refs = Vec::new();
+    let mut symbolic_refs = Vec::new();
+    source.for_each_ref_name("refs/", |name| {
+        match source.read_ref(name)? {
+            RefTarget::Direct(id) => direct_refs.push((name.to_owned(), id)),
+            RefTarget::Symbolic(target) => {
+                symbolic_refs.push((name.to_owned(), target));
+            }
+        }
+        Ok::<(), CliError>(())
+    })?;
+    let root_refs = source.list_root_refs()?;
+    for name in &root_refs {
+        match source.read_ref(name)? {
+            RefTarget::Direct(id) => direct_refs.push((name.clone(), id)),
+            RefTarget::Symbolic(target) => symbolic_refs.push((name.clone(), target)),
+        }
+    }
+    match source.read_head()? {
+        RefTarget::Direct(id) => direct_refs.push(("HEAD".to_owned(), id)),
+        RefTarget::Symbolic(target) => symbolic_refs.push(("HEAD".to_owned(), target)),
+    }
+    let source_logs = if no_reflog {
+        Vec::new()
+    } else if source.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        source.reftable_logs()?
+    } else {
+        refs_collect_reftable_logs(&common_dir.join("logs"))?
+    };
+    let target_logs = if target_kind == zmin_git_core::refs::RefStorageKind::Reftable {
+        source_logs.as_slice()
+    } else {
+        &[]
+    };
+    target.write_fresh_refs_with_logs(&direct_refs, &symbolic_refs, target_logs)?;
+    if target_kind == zmin_git_core::refs::RefStorageKind::Files {
+        refs_write_file_logs(&migration_dir, &source_logs)?;
+    }
+    if dry_run {
+        let display = migration_dir
+            .strip_prefix(&repo.root)
+            .unwrap_or(&migration_dir)
+            .to_string_lossy();
+        println!("Finished dry-run migration of refs, the result can be found at '{display}'");
+        return Ok(());
+    }
+    refs_install_migration(&repo, &source, &migration_dir, target_kind, &root_refs)
+}
+
+fn refs_migration_has_worktrees(repo: &GitRepo, common_dir: &Path) -> Result<bool> {
+    if repo.git_dir != common_dir {
+        return Ok(true);
+    }
+    let worktrees = common_dir.join("worktrees");
+    let mut entries = match fs::read_dir(worktrees) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    Ok(entries.next().transpose()?.is_some())
+}
+
+fn refs_collect_reftable_logs(logs_root: &Path) -> Result<Vec<ReftableLogRecord>> {
+    let mut paths = Vec::new();
+    refs_collect_log_paths(logs_root, &mut paths)?;
+    paths.sort();
+    let mut records = Vec::new();
+    for path in paths {
+        let ref_name = path
+            .strip_prefix(logs_root)
+            .map_err(|error| CliError::Io(io::Error::other(error)))?
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        for line in io::BufReader::new(fs::File::open(path)?).lines() {
+            let line = line?;
+            let Some(entry) = history_commands::parse_reflog_entry(&line) else {
+                continue;
+            };
+            let Some((name, email)) = refs_split_reflog_identity(&entry.identity) else {
+                continue;
+            };
+            let Some(timezone_offset) = refs_timezone_offset(&entry.timezone) else {
+                continue;
+            };
+            records.push(ReftableLogRecord {
+                ref_name: ref_name.clone(),
+                update_index: records.len() as u64 + 1,
+                old_id: entry.old_id,
+                new_id: entry.new_id,
+                name,
+                email,
+                timestamp: u64::try_from(entry.timestamp).unwrap_or_default(),
+                timezone_offset,
+                message: entry.message,
+            });
+        }
+    }
+    Ok(records)
+}
+
+fn refs_write_file_logs(root: &Path, records: &[ReftableLogRecord]) -> Result<()> {
+    let mut grouped = BTreeMap::<String, Vec<&ReftableLogRecord>>::new();
+    for record in records {
+        grouped
+            .entry(record.ref_name.clone())
+            .or_default()
+            .push(record);
+    }
+    for (ref_name, mut records) in grouped {
+        records.sort_by_key(|record| record.update_index);
+        let path = root.join("logs").join(ref_name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut writer = io::BufWriter::new(fs::File::create(path)?);
+        for record in records {
+            writeln!(
+                writer,
+                "{} {} {} <{}> {} {:+05}\t{}",
+                record.old_id.to_hex(),
+                record.new_id.to_hex(),
+                record.name,
+                record.email,
+                record.timestamp,
+                record.timezone_offset,
+                record.message.trim_end_matches('\n')
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn refs_collect_log_paths(path: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            refs_collect_log_paths(&entry.path(), paths)?;
+        } else if entry.file_type()?.is_file() {
+            paths.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn refs_split_reflog_identity(identity: &str) -> Option<(String, String)> {
+    let (name, email) = identity.rsplit_once(" <")?;
+    Some((name.to_owned(), email.strip_suffix('>')?.to_owned()))
+}
+
+fn refs_timezone_offset(timezone: &str) -> Option<i16> {
+    let sign = match timezone.as_bytes().first().copied()? {
+        b'+' => 1_i16,
+        b'-' => -1_i16,
+        _ => return None,
+    };
+    if timezone.len() != 5 {
+        return None;
+    }
+    let hours = timezone[1..3].parse::<i16>().ok()?;
+    let minutes = timezone[3..5].parse::<i16>().ok()?;
+    Some(sign * (hours * 100 + minutes))
+}
+
+fn refs_migration_directory(git_dir: &Path) -> Result<PathBuf> {
+    let process = std::process::id();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| CliError::Io(io::Error::other(error)))?
+        .as_nanos();
+    Ok(git_dir.join(format!("ref_migration.{process:x}{timestamp:x}")))
+}
+
+fn refs_install_migration(
+    repo: &GitRepo,
+    source: &RefStore,
+    migration_dir: &Path,
+    target_kind: zmin_git_core::refs::RefStorageKind,
+    root_refs: &[String],
+) -> Result<()> {
+    let storage_root = source.storage_root_path()?.to_path_buf();
+    let external = source.uses_external_storage()?;
+    refs_clear_storage_root(&storage_root, root_refs)?;
+    for entry in fs::read_dir(migration_dir)? {
+        let entry = entry?;
+        fs::rename(entry.path(), storage_root.join(entry.file_name()))?;
+    }
+    fs::remove_dir_all(migration_dir)?;
+    if !external && target_kind == zmin_git_core::refs::RefStorageKind::Reftable {
+        fs::create_dir_all(storage_root.join("refs"))?;
+        fs::write(
+            storage_root.join("refs/heads"),
+            "this repository uses the reftable format\n",
+        )?;
+        fs::write(storage_root.join("HEAD"), "ref: refs/heads/.invalid\n")?;
+    } else if !external && target_kind == zmin_git_core::refs::RefStorageKind::Files {
+        fs::create_dir_all(storage_root.join("refs/heads"))?;
+        fs::create_dir_all(storage_root.join("refs/tags"))?;
+    }
+    let format = match target_kind {
+        zmin_git_core::refs::RefStorageKind::Files => "files",
+        zmin_git_core::refs::RefStorageKind::Reftable => "reftable",
+    };
+    let config_value = if external {
+        format!("{format}://{}", storage_root.display())
+    } else {
+        format.to_owned()
+    };
+    let config_path = repo.git_dir.join("config");
+    if target_kind == zmin_git_core::refs::RefStorageKind::Files && !external {
+        match unset_config_value_in_file(&config_path, "extensions.refStorage") {
+            Ok(()) | Err(CliError::Exit(5)) => {}
+            Err(error) => return Err(error),
+        }
+    } else {
+        set_config_value_in_file(&config_path, "extensions.refStorage", &config_value)?;
+    }
+    let version = if read_config_file(&config_path)?.iter().any(|entry| {
+        entry.section == "extensions" && entry.subsection.is_empty() && entry.key != "noop"
+    }) {
+        "1"
+    } else {
+        "0"
+    };
+    set_config_value_in_file(&config_path, "core.repositoryformatversion", version)?;
+    Ok(())
+}
+
+fn refs_clear_storage_root(storage_root: &Path, root_refs: &[String]) -> Result<()> {
+    for name in ["HEAD", "packed-refs", "refs", "reftable", "logs"] {
+        let path = storage_root.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path)?,
+            Ok(_) => fs::remove_file(path)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    for name in root_refs {
+        let path = storage_root.join(name);
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(())
+}
+
+fn refs_exists(reference: &str) -> Result<()> {
+    let repo = find_repo()?;
+    let root = if reference.starts_with("refs/") {
+        read_common_git_dir(&repo.git_dir)?
+    } else {
+        repo.git_dir
+    };
+    match fs::symlink_metadata(root.join(reference)) {
+        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
+            Ok(())
+        }
+        Ok(_) => Err(refs_exists_missing_error()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(refs_exists_missing_error()),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn refs_exists_missing_error() -> CliError {
+    CliError::Stderr {
+        code: 2,
+        text: "error: reference does not exist\n".to_owned(),
     }
 }
 
@@ -1667,30 +3496,623 @@ fn refs_verify(
         });
     }
     let repo = find_repo()?;
-    let refs = RefStore::new(repo.git_dir, GitHashAlgorithm::Sha1);
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    let refs = RefStore::new(&common_dir, GitHashAlgorithm::Sha1);
     if verbose {
         eprintln!("Checking references consistency");
     }
-    if let Ok(RefTarget::Symbolic(target)) = refs.read_head() {
-        update_ref_validate_stdin_name(&target)
-            .map_err(|message| CliError::Fatal { code: 128, message })?;
+    let findings = refs_verify_collect_findings_with_config(&repo, &common_dir)?;
+    let mut has_error = false;
+    let mut checks = BTreeMap::<String, ()>::new();
+    if verbose {
+        refs.for_each_ref_name("refs/", |name| {
+            checks.insert(name.to_owned(), ());
+            Ok::<(), CliError>(())
+        })?;
     }
-    refs.for_each_resolved_ref("refs/", |name, _| {
-        if verbose {
-            eprintln!("Checking {name}");
+    for finding in &findings {
+        if finding.severity == RefsVerifySeverity::Error {
+            has_error = true;
         }
-        update_ref_validate_stdin_name(&name)
-            .map_err(|message| CliError::Fatal { code: 128, message })?;
-        Ok::<(), CliError>(())
-    })?;
-    #[cfg(windows)]
-    if verbose {
-        eprintln!("Checking HEAD");
     }
     if verbose {
+        for path in checks.keys() {
+            eprintln!("Checking {path}");
+        }
         eprintln!("Checking packed-refs file .git/packed-refs");
     }
+    refs_verify_print_findings(&findings);
+    if has_error {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: String::new(),
+        });
+    }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefsVerifySeverity {
+    Error,
+    Warning,
+    Ignore,
+}
+
+impl RefsVerifySeverity {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Ignore => "ignore",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RefsVerifyFinding {
+    pub(crate) path: String,
+    pub(crate) severity: RefsVerifySeverity,
+    pub(crate) message_id: &'static str,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RefsVerifyMessageConfig {
+    bad_ref_name: RefsVerifySeverity,
+    bad_ref_filetype: RefsVerifySeverity,
+    empty_packed_refs_file: RefsVerifySeverity,
+    bad_packed_ref_header: RefsVerifySeverity,
+    bad_packed_ref_entry: RefsVerifySeverity,
+    packed_ref_unsorted: RefsVerifySeverity,
+}
+
+pub(crate) fn refs_verify_collect_findings(repo: &GitRepo) -> Result<Vec<RefsVerifyFinding>> {
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    refs_verify_collect_findings_with_config(repo, &common_dir)
+}
+
+fn refs_verify_collect_findings_with_config(
+    repo: &GitRepo,
+    common_dir: &Path,
+) -> Result<Vec<RefsVerifyFinding>> {
+    let config = refs_verify_message_config(repo)?;
+    let mut findings = Vec::new();
+    refs_verify_head_file(&repo.git_dir.join("HEAD"), "HEAD", &config, &mut findings)?;
+    refs_verify_collect_dir(&common_dir.join("refs"), "refs", &config, &mut findings)?;
+    let worktrees_dir = common_dir.join("worktrees");
+    if let Ok(entries) = fs::read_dir(&worktrees_dir) {
+        for entry in entries {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let worktree_name = entry.file_name().to_string_lossy().into_owned();
+            let prefix = format!("worktrees/{worktree_name}");
+            refs_verify_head_file(
+                &entry.path().join("HEAD"),
+                &format!("{prefix}/HEAD"),
+                &config,
+                &mut findings,
+            )?;
+            refs_verify_collect_dir(
+                &entry.path().join("refs"),
+                &format!("{prefix}/refs"),
+                &config,
+                &mut findings,
+            )?;
+        }
+    }
+    refs_verify_packed_refs(&common_dir.join("packed-refs"), &config, &mut findings)?;
+    findings.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(findings)
+}
+
+pub(crate) fn refs_verify_print_findings(findings: &[RefsVerifyFinding]) {
+    for finding in findings {
+        eprintln!(
+            "{}: {}: {}: {}",
+            finding.severity.label(),
+            finding.path,
+            finding.message_id,
+            finding.message
+        );
+    }
+}
+
+fn refs_verify_message_config(repo: &GitRepo) -> Result<RefsVerifyMessageConfig> {
+    Ok(RefsVerifyMessageConfig {
+        bad_ref_name: refs_verify_message_severity(repo, "badrefname", RefsVerifySeverity::Error)?,
+        bad_ref_filetype: refs_verify_message_severity(
+            repo,
+            "badreffiletype",
+            RefsVerifySeverity::Error,
+        )?,
+        empty_packed_refs_file: refs_verify_message_severity(
+            repo,
+            "emptypackedrefsfile",
+            RefsVerifySeverity::Warning,
+        )?,
+        bad_packed_ref_header: refs_verify_message_severity(
+            repo,
+            "badpackedrefheader",
+            RefsVerifySeverity::Error,
+        )?,
+        bad_packed_ref_entry: refs_verify_message_severity(
+            repo,
+            "badpackedrefentry",
+            RefsVerifySeverity::Error,
+        )?,
+        packed_ref_unsorted: refs_verify_message_severity(
+            repo,
+            "packedrefunsorted",
+            RefsVerifySeverity::Error,
+        )?,
+    })
+}
+
+fn refs_verify_message_severity(
+    repo: &GitRepo,
+    message_id: &str,
+    default: RefsVerifySeverity,
+) -> Result<RefsVerifySeverity> {
+    let full_key = format!("fsck.{message_id}");
+    match read_config_value(repo, &full_key) {
+        Ok(Some(value)) => return refs_verify_parse_message_severity(&value),
+        Ok(None) => {}
+        Err(error) if error.to_string().contains("reference broken") => {}
+        Err(error) => return Err(CliError::Io(error)),
+    }
+    if let Some(value) = read_protected_config_entries()?
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "fsck"
+                && entry.subsection.is_empty()
+                && entry.key.eq_ignore_ascii_case(message_id)
+        })
+        .map(|entry| entry.value)
+    {
+        return refs_verify_parse_message_severity(&value);
+    }
+    let value = read_config_file(&repo.git_dir.join("config"))?
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == "fsck"
+                && entry.subsection.is_empty()
+                && entry.key.eq_ignore_ascii_case(message_id)
+        })
+        .map(|entry| entry.value);
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    refs_verify_parse_message_severity(&value)
+}
+
+fn refs_verify_parse_message_severity(value: &str) -> Result<RefsVerifySeverity> {
+    match value.to_ascii_lowercase().as_str() {
+        "error" => Ok(RefsVerifySeverity::Error),
+        "warn" => Ok(RefsVerifySeverity::Warning),
+        "ignore" => Ok(RefsVerifySeverity::Ignore),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("Unknown fsck message type: '{value}'"),
+        }),
+    }
+}
+
+fn refs_verify_collect_dir(
+    dir: &Path,
+    prefix: &str,
+    config: &RefsVerifyMessageConfig,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let full_name = format!("{prefix}/{name}");
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            refs_verify_collect_dir(&entry.path(), &full_name, config, findings)?;
+            continue;
+        }
+        if refs_verify_should_ignore_lockfile(&name) {
+            continue;
+        }
+        if file_type.is_symlink() {
+            refs_verify_symlink(&entry.path(), &full_name, findings)?;
+            continue;
+        }
+        // The files backend checks each loose-ref basename independently.
+        // This notably rejects a nested `@` component even though the full
+        // refname (for example `refs/heads/@`) passes check-ref-format.
+        if !check_ref_format(&name, true) {
+            refs_verify_push(
+                findings,
+                config.bad_ref_name,
+                &full_name,
+                "badRefName",
+                "invalid refname format".to_owned(),
+            );
+        }
+        refs_verify_regular_file(&entry.path(), &full_name, config, findings)?;
+    }
+    Ok(())
+}
+
+fn refs_verify_should_ignore_lockfile(name: &str) -> bool {
+    !name.starts_with('.') && name.ends_with(".lock")
+}
+
+fn refs_verify_head_file(
+    path: &Path,
+    display: &str,
+    config: &RefsVerifyMessageConfig,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    if !metadata.file_type().is_file() {
+        if metadata.file_type().is_symlink() {
+            return refs_verify_symlink(path, display, findings);
+        }
+        return Ok(());
+    }
+    refs_verify_regular_file(path, display, config, findings)
+}
+
+fn refs_verify_symlink(
+    path: &Path,
+    display: &str,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    refs_verify_push(
+        findings,
+        RefsVerifySeverity::Warning,
+        display,
+        "symlinkRef",
+        "use deprecated symbolic link for symref".to_owned(),
+    );
+    let target = fs::read_link(path).map_err(CliError::Io)?;
+    let resolved = refs_verify_lexical_join(display, &target);
+    if resolved == "HEAD" {
+        return Ok(());
+    }
+    if !check_ref_format(&resolved, true) {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Error,
+            display,
+            "badReferentName",
+            format!("points to invalid refname '{resolved}'"),
+        );
+        return Ok(());
+    }
+    if !resolved.starts_with("refs/") && !resolved.starts_with("worktrees/") {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Warning,
+            display,
+            "symrefTargetIsNotARef",
+            format!("points to non-ref target '{resolved}'"),
+        );
+    }
+    Ok(())
+}
+
+fn refs_verify_lexical_join(display: &str, target: &Path) -> String {
+    let mut parts = display.split('/').map(str::to_owned).collect::<Vec<_>>();
+    let _ = parts.pop();
+    for component in target.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = parts.pop();
+            }
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::RootDir | Component::Prefix(_) => {
+                parts.clear();
+            }
+        }
+    }
+    parts.join("/")
+}
+
+fn refs_verify_packed_refs(
+    path: &Path,
+    config: &RefsVerifyMessageConfig,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        refs_verify_push(
+            findings,
+            config.bad_ref_filetype,
+            "packed-refs",
+            "badRefFiletype",
+            "not a regular file but a symlink".to_owned(),
+        );
+        return Ok(());
+    }
+    if !file_type.is_file() {
+        refs_verify_push(
+            findings,
+            config.bad_ref_filetype,
+            "packed-refs",
+            "badRefFiletype",
+            "not a regular file".to_owned(),
+        );
+        return Ok(());
+    }
+    let text = fs::read_to_string(path).map_err(CliError::Io)?;
+    if text.is_empty() {
+        refs_verify_push(
+            findings,
+            config.empty_packed_refs_file,
+            "packed-refs",
+            "emptyPackedRefsFile",
+            "file is empty".to_owned(),
+        );
+        return Ok(());
+    }
+    let mut previous_refname: Option<String> = None;
+    let mut sorted = false;
+    for (index, line) in text.lines().enumerate() {
+        let line_no = index + 1;
+        if line_no == 1 && line.starts_with('#') {
+            if !line.starts_with("# pack-refs with: ") {
+                refs_verify_push(
+                    findings,
+                    config.bad_packed_ref_header,
+                    "packed-refs.header",
+                    "badPackedRefHeader",
+                    format!("'{line}' does not start with '# pack-refs with: '"),
+                );
+            } else {
+                sorted = line["# pack-refs with: ".len()..]
+                    .split_ascii_whitespace()
+                    .any(|trait_name| trait_name == "sorted");
+            }
+            continue;
+        }
+        if let Some(peeled) = line.strip_prefix('^') {
+            if peeled.len() < 40 || !peeled[..40].bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                refs_verify_push(
+                    findings,
+                    config.bad_packed_ref_entry,
+                    &format!("packed-refs line {line_no}"),
+                    "badPackedRefEntry",
+                    format!("'{peeled}' has invalid peeled oid"),
+                );
+                continue;
+            }
+            if peeled.len() > 40 {
+                refs_verify_push(
+                    findings,
+                    config.bad_packed_ref_entry,
+                    &format!("packed-refs line {line_no}"),
+                    "badPackedRefEntry",
+                    format!("has trailing garbage after peeled oid '{}'", &peeled[40..]),
+                );
+            }
+            continue;
+        }
+        if line.len() < 40 || !line[..40].bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            refs_verify_push(
+                findings,
+                config.bad_packed_ref_entry,
+                &format!("packed-refs line {line_no}"),
+                "badPackedRefEntry",
+                format!("'{line}' has invalid oid"),
+            );
+            continue;
+        }
+        if line.len() == 40 {
+            refs_verify_push(
+                findings,
+                config.bad_packed_ref_entry,
+                &format!("packed-refs line {line_no}"),
+                "badPackedRefEntry",
+                format!("'{line}' has invalid oid"),
+            );
+            continue;
+        }
+        if line.as_bytes()[40] != b' ' {
+            refs_verify_push(
+                findings,
+                config.bad_packed_ref_entry,
+                &format!("packed-refs line {line_no}"),
+                "badPackedRefEntry",
+                format!(
+                    "has no space after oid '{}' but with '{}'",
+                    &line[..40],
+                    &line[40..]
+                ),
+            );
+            continue;
+        }
+        let refname = &line[41..];
+        if !check_ref_format(refname, false) {
+            refs_verify_push(
+                findings,
+                config.bad_ref_name,
+                &format!("packed-refs line {line_no}"),
+                "badRefName",
+                format!("has bad refname '{refname}'"),
+            );
+            continue;
+        }
+        if sorted
+            && let Some(previous) = previous_refname.as_deref()
+            && refname < previous
+        {
+            refs_verify_push(
+                findings,
+                config.packed_ref_unsorted,
+                &format!("packed-refs line {line_no}"),
+                "packedRefUnsorted",
+                format!("refname '{refname}' is less than previous refname '{previous}'"),
+            );
+        }
+        previous_refname = Some(refname.to_owned());
+    }
+    Ok(())
+}
+
+fn refs_verify_regular_file(
+    path: &Path,
+    display: &str,
+    _config: &RefsVerifyMessageConfig,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    let bytes = fs::read(path).map_err(CliError::Io)?;
+    let has_newline = bytes.last() == Some(&b'\n');
+    let mut content = &bytes[..];
+    if has_newline {
+        content = &content[..content.len().saturating_sub(1)];
+    }
+    if let Some(rest) = content.strip_prefix(b"ref: ") {
+        return refs_verify_symbolic_content(display, rest, has_newline, findings);
+    }
+    refs_verify_direct_content(display, &bytes, has_newline, findings);
+    Ok(())
+}
+
+fn refs_verify_symbolic_content(
+    display: &str,
+    raw_target: &[u8],
+    has_newline: bool,
+    findings: &mut Vec<RefsVerifyFinding>,
+) -> Result<()> {
+    let target = String::from_utf8_lossy(raw_target).into_owned();
+    let trimmed = target.trim_end_matches(|ch: char| ch.is_ascii_whitespace());
+    if !has_newline {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Warning,
+            display,
+            "refMissingNewline",
+            "misses LF at the end".to_owned(),
+        );
+    }
+    if trimmed.len() != target.len() {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Warning,
+            display,
+            "trailingRefContent",
+            "has trailing whitespaces or newlines".to_owned(),
+        );
+    }
+    if trimmed == "HEAD" {
+        return Ok(());
+    }
+    if !check_ref_format(trimmed, true) {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Error,
+            display,
+            "badReferentName",
+            format!("points to invalid refname '{trimmed}'"),
+        );
+        return Ok(());
+    }
+    if !trimmed.starts_with("refs/") && !trimmed.starts_with("worktrees/") {
+        refs_verify_push(
+            findings,
+            RefsVerifySeverity::Warning,
+            display,
+            "symrefTargetIsNotARef",
+            format!("points to non-ref target '{trimmed}'"),
+        );
+    }
+    Ok(())
+}
+
+fn refs_verify_direct_content(
+    display: &str,
+    raw: &[u8],
+    has_newline: bool,
+    findings: &mut Vec<RefsVerifyFinding>,
+) {
+    let text = String::from_utf8_lossy(raw).into_owned();
+    if text.len() >= 40 {
+        let (oid, rest) = text.split_at(40);
+        if oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            if rest.is_empty() || rest == "\n" {
+                if !has_newline {
+                    refs_verify_push(
+                        findings,
+                        RefsVerifySeverity::Warning,
+                        display,
+                        "refMissingNewline",
+                        "misses LF at the end".to_owned(),
+                    );
+                }
+                return;
+            }
+            if rest
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_whitespace())
+            {
+                refs_verify_push(
+                    findings,
+                    RefsVerifySeverity::Warning,
+                    display,
+                    "trailingRefContent",
+                    format!("has trailing garbage: '{rest}'"),
+                );
+                return;
+            }
+        }
+    }
+    let text = if let Some(stripped) = text.strip_suffix('\n') {
+        if stripped.len() == 40 && stripped.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return;
+        }
+        stripped.to_owned()
+    } else {
+        text
+    };
+    refs_verify_push(
+        findings,
+        RefsVerifySeverity::Error,
+        display,
+        "badRefContent",
+        text,
+    );
+}
+
+fn refs_verify_push(
+    findings: &mut Vec<RefsVerifyFinding>,
+    severity: RefsVerifySeverity,
+    path: &str,
+    message_id: &'static str,
+    message: String,
+) {
+    if severity == RefsVerifySeverity::Ignore {
+        return;
+    }
+    findings.push(RefsVerifyFinding {
+        path: path.to_owned(),
+        severity,
+        message_id,
+        message,
+    });
 }
 
 pub(crate) fn repo_command(command: RepoCommand) -> Result<()> {
@@ -1948,7 +4370,26 @@ pub(crate) fn show_ref(
     exclude_existing: Option<&str>,
     patterns: Vec<String>,
 ) -> Result<()> {
-    let repo = find_repo()?;
+    let mut exclusive_modes = Vec::new();
+    if verify {
+        exclusive_modes.push("--verify");
+    }
+    if exists {
+        exclusive_modes.push("--exists");
+    }
+    if exclude_existing.is_some() {
+        exclusive_modes.push("--exclude-existing");
+    }
+    if exclusive_modes.len() > 1 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: format!(
+                "options '{}' cannot be used together",
+                exclusive_modes.join("' and '")
+            ),
+        });
+    }
+    let repo = find_repo_or_bare()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let refs = runtime.refs();
     let format = ShowRefFormat { hash, abbrev };
@@ -1968,18 +4409,7 @@ pub(crate) fn show_ref(
                 message: "--exists requires exactly one reference".into(),
             });
         }
-        let common_dir = read_common_git_dir(&repo.git_dir)?;
-        if common_dir.join(&patterns[0]).is_file() {
-            return Ok(());
-        }
-        return match refs.read_ref(&patterns[0]) {
-            Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(CliError::Stderr {
-                code: 2,
-                text: "error: reference does not exist\n".into(),
-            }),
-            Err(error) => Err(map_primitive_error(error, "read reference")),
-        };
+        return refs_exists(&patterns[0]);
     }
     if verify {
         if patterns.is_empty() {
@@ -1988,25 +4418,21 @@ pub(crate) fn show_ref(
                 message: "--verify requires at least one ref".into(),
             });
         }
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
         for ref_name in patterns {
-            let Some(raw_id) = refs
-                .read_ref(&ref_name)
-                .map_err(|error| map_primitive_error(error, "resolve reference"))?
-            else {
-                if quiet {
-                    return Err(CliError::Exit(1));
-                }
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: format!("'{ref_name}' - not a valid ref"),
-                });
-            };
-            let id = parse_primitive_object_id(&raw_id).map_err(|_| CliError::Fatal {
-                code: 128,
-                message: format!("'{ref_name}' - not a valid ref"),
-            })?;
+            let id = show_ref_verify_object_id(&repo, refs, &ref_name, quiet)?;
+            if !runtime
+                .objects()
+                .object_exists(&id.to_hex())
+                .map_err(|error| map_primitive_error(error, "read object"))?
+            {
+                return Err(CliError::Exit(1));
+            }
             if !quiet {
                 print_show_ref_row(&id, &ref_name, format)?;
+                if dereference && let Some(peeled) = peel_show_ref_tag(&store, &id)? {
+                    print_show_ref_row(&peeled, &format!("{ref_name}^{{}}"), format)?;
+                }
             }
         }
         return Ok(());
@@ -2080,6 +4506,48 @@ pub(crate) fn show_ref(
     Ok(())
 }
 
+fn show_ref_verify_object_id(
+    repo: &GitRepo,
+    refs: &dyn GitRefsStore,
+    ref_name: &str,
+    quiet: bool,
+) -> Result<ObjectId> {
+    if ref_name == "HEAD" {
+        return resolve_objectish(repo, ref_name).map_err(|_| {
+            if quiet {
+                CliError::Exit(1)
+            } else {
+                CliError::Fatal {
+                    code: 128,
+                    message: format!("'{ref_name}' - not a valid ref"),
+                }
+            }
+        });
+    }
+    let raw_id = if update_ref_name_is_pseudoref(ref_name) {
+        fs::read_to_string(repo.git_dir.join(ref_name))
+            .ok()
+            .and_then(|value| value.split_whitespace().next().map(str::to_owned))
+    } else {
+        refs.read_ref(&ref_name.to_owned())
+            .map_err(|error| map_primitive_error(error, "resolve reference"))?
+    };
+    let Some(raw_id) = raw_id else {
+        return Err(if quiet {
+            CliError::Exit(1)
+        } else {
+            CliError::Fatal {
+                code: 128,
+                message: format!("'{ref_name}' - not a valid ref"),
+            }
+        });
+    };
+    parse_primitive_object_id(&raw_id).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("'{ref_name}' - not a valid ref"),
+    })
+}
+
 fn show_ref_exclude_existing(repo: &GitRepo, refs: &dyn GitRefsStore, pattern: &str) -> Result<()> {
     let common_dir = read_common_git_dir(&repo.git_dir)?;
     for line in io::stdin().lock().lines() {
@@ -2090,6 +4558,10 @@ fn show_ref_exclude_existing(repo: &GitRepo, refs: &dyn GitRefsStore, pattern: &
             .last()
             .unwrap_or(candidate);
         if !pattern.is_empty() && !ref_name.starts_with(pattern) {
+            continue;
+        }
+        if !check_ref_format(ref_name, false) {
+            eprintln!("warning: ref '{ref_name}' ignored");
             continue;
         }
         match refs.read_ref(&ref_name.to_owned()) {
@@ -2112,13 +4584,28 @@ fn show_ref_exclude_existing(repo: &GitRepo, refs: &dyn GitRefsStore, pattern: &
 fn peel_show_ref_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<ObjectId>> {
     let mut current = id.clone();
     let mut peeled_any = false;
+    let mut expected_kind = None;
     for _ in 0..8 {
         let object = store.read_object(&current)?;
+        if let Some(expected_kind) = expected_kind
+            && object.kind != expected_kind
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "bad tag pointer: expected {}, got {}",
+                    expected_kind.as_str(),
+                    object.kind.as_str(),
+                ),
+            });
+        }
         if object.kind != GitObjectKind::Tag {
             return Ok(peeled_any.then_some(current));
         }
         peeled_any = true;
-        current = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+        expected_kind = Some(tag.target_kind);
+        current = tag.target;
     }
     Err(CliError::Fatal {
         code: 128,
@@ -2152,14 +4639,30 @@ pub(crate) struct ForEachRefOptions<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ForEachRefQuoteMode {
     None,
-    ShellLike,
+    Shell,
+    Python,
+    Perl,
     Tcl,
 }
 
 pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let _color = &options.color;
-    let _no_color = options.no_color;
+    warn_for_each_ref_invalid_names(&repo)?;
+    if [options.shell, options.python, options.perl, options.tcl]
+        .into_iter()
+        .filter(|enabled| *enabled)
+        .count()
+        > 1
+    {
+        return Err(CliError::Message("more than one quoting style".into()));
+    }
+    let color_enabled = !options.no_color
+        && match options.color.as_deref() {
+            Some("always") => true,
+            Some("never") => false,
+            Some("auto") | None => io::stdout().is_terminal(),
+            Some(_) => true,
+        };
     if options.stdin && !options.patterns.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -2171,6 +4674,17 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         .format
         .unwrap_or("%(objectname) %(objecttype)\t%(refname)");
     let requirements = for_each_ref_requirements(format, &options.sort)?;
+    if for_each_ref_format_atoms(format)?
+        .iter()
+        .any(|atom| atom.starts_with("is-base:"))
+    {
+        warn_for_each_ref_bad_tag_pointers(&repo)?;
+    }
+    let mailmap = if requirements.need_mailmap {
+        core_commands::read_mailmap(&repo, None, None)?
+    } else {
+        Vec::new()
+    };
     let current_head_ref = current_branch_ref_from_head_file(&repo.git_dir)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let filter = for_each_ref_filter(&repo, &store, &options)?;
@@ -2182,9 +4696,15 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let commit_cache = CommitObjectCache::new(&store);
     if options.sort.is_empty()
+        && !options.omit_empty
+        && quote_mode == ForEachRefQuoteMode::None
         && let Some(parts) = simple_for_each_ref_format_parts(format)
     {
-        let refs = OwnedCliRefsStoreAdapter::from_path(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let refs = OwnedCliRefsStoreAdapter::from_paths(
+            &repo.git_dir,
+            read_common_git_dir(&repo.git_dir)?,
+            GitHashAlgorithm::Sha1,
+        );
         print_simple_for_each_ref_rows(
             &repo,
             &refs,
@@ -2200,6 +4720,8 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         )?;
         return Ok(());
     }
+    let short_names = load_for_each_ref_short_name_context(&repo, requirements.need_short_name)?;
+    let symrefs = load_for_each_ref_symrefs(&repo, requirements.need_symref)?;
     if options.sort.is_empty() {
         print_for_each_ref_rows(
             &repo,
@@ -2212,10 +4734,14 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
             filter.as_ref(),
             format,
             &requirements,
+            &mailmap,
+            &symrefs,
+            &short_names,
             current_head_ref.as_deref(),
             options.count,
             options.omit_empty,
             quote_mode,
+            color_enabled,
         )?;
         return Ok(());
     }
@@ -2229,16 +4755,22 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         options.include_root_refs,
         filter.as_ref(),
         &requirements,
+        &mailmap,
+        &symrefs,
+        &short_names,
         current_head_ref.as_deref(),
     )?;
-    apply_for_each_ref_sort(&mut rows, &options.sort)?;
+    apply_for_each_ref_sort_with_case(&mut rows, &options.sort, options.ignore_case)?;
     if let Some(count) = options.count {
         rows.truncate(count);
     }
+    let mut stdout = io::stdout().lock();
     for row in &rows {
-        let rendered = render_for_each_ref_row_with_mode(format, row, quote_mode)?;
+        let rendered =
+            render_for_each_ref_row_bytes_with_mode(format, row, quote_mode, color_enabled)?;
         if !options.omit_empty || !rendered.is_empty() {
-            println!("{rendered}");
+            stdout.write_all(&rendered)?;
+            stdout.write_all(b"\n")?;
         }
     }
     Ok(())
@@ -2247,10 +4779,29 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
 #[derive(Debug, Clone)]
 pub(crate) struct ForEachRefRow {
     pub(crate) ref_name: String,
+    pub(crate) ref_name_short: String,
+    pub(crate) symref: String,
+    pub(crate) symref_short: String,
     pub(crate) object_id: ObjectId,
+    pub(crate) peeled_object_id: Option<ObjectId>,
+    pub(crate) peeled_object_kind: Option<GitObjectKind>,
+    pub(crate) peeled_object_disk_size: Option<u64>,
     pub(crate) object_kind: GitObjectKind,
     pub(crate) object_size: Option<usize>,
+    pub(crate) object_disk_size: Option<u64>,
+    pub(crate) raw: Vec<u8>,
+    pub(crate) peeled_raw: Vec<u8>,
+    pub(crate) tree: String,
+    pub(crate) parents: String,
+    pub(crate) num_parents: Option<usize>,
+    pub(crate) tagged_object: String,
+    pub(crate) tagged_type: String,
+    pub(crate) tag_name: String,
     pub(crate) subject: String,
+    pub(crate) body: String,
+    pub(crate) contents: String,
+    pub(crate) contents_signature: String,
+    pub(crate) author: String,
     pub(crate) author_name: String,
     pub(crate) author_email: String,
     pub(crate) author_timestamp: Option<i64>,
@@ -2260,10 +4811,18 @@ pub(crate) struct ForEachRefRow {
     pub(crate) creator_timezone: Option<String>,
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
+    pub(crate) tagger: String,
     pub(crate) tagger_timestamp: Option<i64>,
     pub(crate) tagger_timezone: Option<String>,
     pub(crate) committer_name: String,
     pub(crate) committer_email: String,
+    pub(crate) committer: String,
+    pub(crate) mapped_author_name: String,
+    pub(crate) mapped_author_email: String,
+    pub(crate) mapped_tagger_name: String,
+    pub(crate) mapped_tagger_email: String,
+    pub(crate) mapped_committer_name: String,
+    pub(crate) mapped_committer_email: String,
     pub(crate) committer_timestamp: Option<i64>,
     pub(crate) committer_timezone: Option<String>,
     pub(crate) is_head: bool,
@@ -2271,10 +4830,26 @@ pub(crate) struct ForEachRefRow {
     pub(crate) upstream_short: String,
     pub(crate) upstream_track: String,
     pub(crate) upstream_track_short: String,
+    pub(crate) upstream_remote_name: String,
+    pub(crate) upstream_remote_ref: String,
+    pub(crate) push_ref: String,
+    pub(crate) push_short: String,
+    pub(crate) push_track: String,
+    pub(crate) push_track_short: String,
+    pub(crate) push_remote_name: String,
+    pub(crate) push_remote_ref: String,
+    pub(crate) descriptions: BTreeMap<String, String>,
+    pub(crate) signature_grade: String,
+    pub(crate) signature_key: String,
+    pub(crate) signature_signer: String,
+    pub(crate) signature_fingerprint: String,
+    pub(crate) signature_primary_key_fingerprint: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct ForEachRefRequirements {
+    need_symref: bool,
+    need_upstream: bool,
     need_object_kind: bool,
     need_object_size: bool,
     need_subject: bool,
@@ -2282,13 +4857,27 @@ struct ForEachRefRequirements {
     need_creator: bool,
     need_tagger: bool,
     need_committer: bool,
+    need_content: bool,
+    need_disk_size: bool,
+    need_mailmap: bool,
+    need_peeled: bool,
+    need_signature: bool,
+    need_short_name: bool,
+    describe_atoms: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SimpleForEachRefFormatPart<'a> {
-    Literal(&'a str),
+#[derive(Debug, Default)]
+struct ForEachRefShortNameContext {
+    strict: bool,
+    ref_names: BTreeSet<String>,
+}
+
+type ForEachRefSymrefs = BTreeMap<String, String>;
+
+#[derive(Debug, Clone)]
+enum SimpleForEachRefFormatPart {
+    Literal(Vec<u8>),
     RefName,
-    RefNameShort,
     RefNameStrip(RefNameStripModifier),
     ObjectName,
     ObjectNameShort(usize),
@@ -2319,8 +4908,14 @@ fn for_each_ref_quote_mode(options: &ForEachRefOptions<'_>) -> ForEachRefQuoteMo
     if options.tcl {
         return ForEachRefQuoteMode::Tcl;
     }
-    if options.shell || options.python || options.perl {
-        return ForEachRefQuoteMode::ShellLike;
+    if options.shell {
+        return ForEachRefQuoteMode::Shell;
+    }
+    if options.python {
+        return ForEachRefQuoteMode::Python;
+    }
+    if options.perl {
+        return ForEachRefQuoteMode::Perl;
     }
     ForEachRefQuoteMode::None
 }
@@ -2494,26 +5089,38 @@ fn collect_for_each_ref_rows(
     include_root_refs: bool,
     filter: Option<&ForEachRefFilter>,
     requirements: &ForEachRefRequirements,
+    mailmap: &[core_commands::MailmapEntry],
+    symrefs: &ForEachRefSymrefs,
+    short_names: &ForEachRefShortNameContext,
     current_head_ref: Option<&str>,
 ) -> Result<Vec<ForEachRefRow>> {
     let mut rows = Vec::new();
-    if include_root_refs
-        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
-        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
-    {
-        rows.push(build_for_each_ref_row(
-            repo,
-            "HEAD",
-            &read_head_direct_ref(&repo.git_dir)?,
-            objects,
-            requirements,
-            current_head_ref,
-        )?);
+    if include_root_refs {
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
+            if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
+                && for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
+            {
+                rows.push(build_for_each_ref_row(
+                    repo,
+                    &ref_name,
+                    &object_id,
+                    objects,
+                    requirements,
+                    mailmap,
+                    symrefs,
+                    short_names,
+                    current_head_ref,
+                )?);
+            }
+        }
     }
     for (ref_name, object_id) in refs
         .list_refs(Some("refs/"))
         .map_err(|error| map_primitive_error(error, "list refs"))?
     {
+        if !for_each_ref_name_is_valid(&ref_name) {
+            continue;
+        }
         if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
             && for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
         {
@@ -2523,6 +5130,9 @@ fn collect_for_each_ref_rows(
                 &object_id,
                 objects,
                 requirements,
+                mailmap,
+                symrefs,
+                short_names,
                 current_head_ref,
             )?);
         }
@@ -2541,42 +5151,64 @@ fn print_for_each_ref_rows(
     filter: Option<&ForEachRefFilter>,
     format: &str,
     requirements: &ForEachRefRequirements,
+    mailmap: &[core_commands::MailmapEntry],
+    symrefs: &ForEachRefSymrefs,
+    short_names: &ForEachRefShortNameContext,
     current_head_ref: Option<&str>,
     count: Option<usize>,
     omit_empty: bool,
     quote_mode: ForEachRefQuoteMode,
+    color_enabled: bool,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
-    let simple_format = simple_for_each_ref_format_parts(format);
+    let simple_format = (quote_mode == ForEachRefQuoteMode::None)
+        .then(|| simple_for_each_ref_format_parts(format))
+        .flatten();
     let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
-    if include_root_refs
-        && remaining > 0
-        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
-        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
-    {
-        let head_id = read_head_direct_ref(&repo.git_dir)?;
-        if let Some(parts) = simple_format.as_deref() {
-            write_simple_for_each_ref_row(&mut stdout, parts, "HEAD", &head_id)?;
-            remaining = remaining.saturating_sub(1);
-        } else {
-            let row = build_for_each_ref_row(
-                repo,
-                "HEAD",
-                &head_id,
-                objects,
-                requirements,
-                current_head_ref,
-            )?;
-            let rendered = render_for_each_ref_row_with_mode(format, &row, quote_mode)?;
-            if !omit_empty || !rendered.is_empty() {
-                writeln!(stdout, "{rendered}")?;
+    if include_root_refs {
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
+            if remaining == 0 {
+                break;
+            }
+            if !for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
+                || !for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
+            {
+                continue;
+            }
+            if let Some(parts) = simple_format.as_deref() {
+                write_simple_for_each_ref_row(&mut stdout, parts, &ref_name, &object_id)?;
+            } else {
+                let row = build_for_each_ref_row(
+                    repo,
+                    &ref_name,
+                    &object_id,
+                    objects,
+                    requirements,
+                    mailmap,
+                    symrefs,
+                    short_names,
+                    current_head_ref,
+                )?;
+                let rendered = render_for_each_ref_row_bytes_with_mode(
+                    format,
+                    &row,
+                    quote_mode,
+                    color_enabled,
+                )?;
+                if !omit_empty || !rendered.is_empty() {
+                    stdout.write_all(&rendered)?;
+                    stdout.write_all(b"\n")?;
+                }
             }
             remaining = remaining.saturating_sub(1);
         }
     }
     refs.visit_refs(Some("refs/"), &mut |ref_name, object_id| {
         if outcome.is_err() || remaining == 0 {
+            return Ok(());
+        }
+        if !for_each_ref_name_is_valid(ref_name) {
             return Ok(());
         }
         if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
@@ -2606,13 +5238,19 @@ fn print_for_each_ref_rows(
             object_id,
             objects,
             requirements,
+            mailmap,
+            symrefs,
+            short_names,
             current_head_ref,
         )
-        .and_then(|row| render_for_each_ref_row_with_mode(format, &row, quote_mode))
-        {
+        .and_then(|row| {
+            render_for_each_ref_row_bytes_with_mode(format, &row, quote_mode, color_enabled)
+        }) {
             Ok(rendered) => {
                 if (!omit_empty || !rendered.is_empty())
-                    && let Err(error) = writeln!(stdout, "{rendered}")
+                    && let Err(error) = stdout
+                        .write_all(&rendered)
+                        .and_then(|()| stdout.write_all(b"\n"))
                 {
                     outcome = Err(CliError::Io(error));
                 } else {
@@ -2637,28 +5275,48 @@ fn print_simple_for_each_ref_rows(
     ignore_case: bool,
     include_root_refs: bool,
     filter: Option<&ForEachRefFilter>,
-    parts: &[SimpleForEachRefFormatPart<'_>],
+    parts: &[SimpleForEachRefFormatPart],
     count: Option<usize>,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
     let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
-    if include_root_refs
-        && remaining > 0
-        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
-        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
-    {
-        write_simple_for_each_ref_row(&mut stdout, parts, "HEAD", &read_head_direct_ref(&repo.git_dir)?)?;
-        remaining = remaining.saturating_sub(1);
+    if include_root_refs {
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
+            if remaining == 0 {
+                break;
+            }
+            if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
+                && for_each_ref_filter_matches_with_store(
+                    store,
+                    commit_cache,
+                    &ref_name,
+                    &object_id,
+                    filter,
+                )?
+            {
+                write_simple_for_each_ref_row(&mut stdout, parts, &ref_name, &object_id)?;
+                remaining = remaining.saturating_sub(1);
+            }
+        }
     }
     refs.visit_refs(Some("refs/"), &mut |ref_name, object_id| {
         if outcome.is_err() || remaining == 0 {
             return Ok(());
         }
+        if !for_each_ref_name_is_valid(ref_name) {
+            return Ok(());
+        }
         if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
             return Ok(());
         }
-        match for_each_ref_filter_matches_with_store(store, commit_cache, ref_name, object_id, filter) {
+        match for_each_ref_filter_matches_with_store(
+            store,
+            commit_cache,
+            ref_name,
+            object_id,
+            filter,
+        ) {
             Ok(true) => {}
             Ok(false) => return Ok(()),
             Err(error) => {
@@ -2677,23 +5335,114 @@ fn print_simple_for_each_ref_rows(
     outcome
 }
 
-fn simple_for_each_ref_format_parts(format: &str) -> Option<Vec<SimpleForEachRefFormatPart<'_>>> {
+fn for_each_ref_name_is_valid(ref_name: &str) -> bool {
+    check_ref_format(ref_name, false)
+}
+
+fn for_each_ref_head_id(repo: &GitRepo) -> Result<String> {
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    if common_dir != repo.git_dir {
+        return read_head_direct_ref(&repo.git_dir);
+    }
+    Ok(RefStore::new(common_dir, GitHashAlgorithm::Sha1)
+        .resolve("HEAD")?
+        .to_hex())
+}
+
+fn load_for_each_ref_symrefs(repo: &GitRepo, required: bool) -> Result<ForEachRefSymrefs> {
+    if !required {
+        return Ok(BTreeMap::new());
+    }
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+    let mut symrefs = BTreeMap::new();
+    for (name, target) in refs.list_ref_targets("refs/")? {
+        if let RefTarget::Symbolic(target) = target {
+            symrefs.insert(name, target);
+        }
+    }
+    for name in refs.list_root_refs()? {
+        if let Ok(RefTarget::Symbolic(target)) = refs.read_ref(&name) {
+            symrefs.insert(name, target);
+        }
+    }
+    if let Ok(RefTarget::Symbolic(target)) = refs.read_head() {
+        symrefs.insert("HEAD".to_owned(), target);
+    }
+    Ok(symrefs)
+}
+
+fn resolved_for_each_ref_root_refs(repo: &GitRepo) -> Result<Vec<(String, String)>> {
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+    let mut rows = Vec::new();
+    for name in refs.list_root_refs()? {
+        if let Ok(id) = refs.resolve(&name) {
+            rows.push((name, id.to_hex()));
+        }
+    }
+    if let Ok(id) = for_each_ref_head_id(repo) {
+        rows.push(("HEAD".to_owned(), id));
+    }
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(rows)
+}
+
+fn warn_for_each_ref_invalid_names(repo: &GitRepo) -> Result<()> {
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+    for ref_name in refs.list_refs("refs/")? {
+        if !for_each_ref_name_is_valid(&ref_name) {
+            eprintln!("warning: ignoring ref with broken name {ref_name}");
+        }
+    }
+    Ok(())
+}
+
+fn warn_for_each_ref_bad_tag_pointers(repo: &GitRepo) -> Result<()> {
+    let refs = RefStore::new(
+        read_common_git_dir(&repo.git_dir)?,
+        symbolic_ref_object_format(repo)?,
+    );
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    refs.for_each_resolved_ref("refs/tags/", |_ref_name, id| {
+        let object = store.read_object(&id)?;
+        if object.kind != GitObjectKind::Tag {
+            return Ok(());
+        }
+        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+        let target = store.read_object(&tag.target)?;
+        if target.kind != tag.target_kind {
+            eprintln!(
+                "error: object {} is a {}, not a {}",
+                tag.target,
+                target.kind.as_str(),
+                tag.target_kind.as_str()
+            );
+            eprintln!("error: bad tag pointer to {}", tag.target);
+        }
+        Ok::<(), CliError>(())
+    })?;
+    Ok(())
+}
+
+fn simple_for_each_ref_format_parts(format: &str) -> Option<Vec<SimpleForEachRefFormatPart>> {
     let mut parts = Vec::new();
     let mut rest = format;
     while let Some(start) = rest.find("%(") {
         if start > 0 {
-            parts.push(SimpleForEachRefFormatPart::Literal(&rest[..start]));
+            parts.push(SimpleForEachRefFormatPart::Literal(
+                decode_for_each_ref_literal(&rest[..start]).ok()?,
+            ));
         }
         let after_start = &rest[start + 2..];
         let end = after_start.find(')')?;
         let atom_name = &after_start[..end];
         let atom = match atom_name {
-            "refname" => SimpleForEachRefFormatPart::RefName,
-            "refname:short" => SimpleForEachRefFormatPart::RefNameShort,
+            "refname" | "refname:" => SimpleForEachRefFormatPart::RefName,
+            "refname:short" => return None,
             atom if for_each_ref_refname_strip_modifier(atom).is_some() => {
                 SimpleForEachRefFormatPart::RefNameStrip(for_each_ref_refname_strip_modifier(atom)?)
             }
             "objectname" => SimpleForEachRefFormatPart::ObjectName,
+            "*objectname" => return None,
             atom if for_each_ref_objectname_short_len(atom).is_some() => {
                 SimpleForEachRefFormatPart::ObjectNameShort(for_each_ref_objectname_short_len(
                     atom,
@@ -2705,24 +5454,23 @@ fn simple_for_each_ref_format_parts(format: &str) -> Option<Vec<SimpleForEachRef
         rest = &after_start[end + 1..];
     }
     if !rest.is_empty() {
-        parts.push(SimpleForEachRefFormatPart::Literal(rest));
+        parts.push(SimpleForEachRefFormatPart::Literal(
+            decode_for_each_ref_literal(rest).ok()?,
+        ));
     }
     Some(parts)
 }
 
 fn write_simple_for_each_ref_row<W: Write>(
     out: &mut W,
-    parts: &[SimpleForEachRefFormatPart<'_>],
+    parts: &[SimpleForEachRefFormatPart],
     ref_name: &str,
     object_id: &str,
 ) -> Result<()> {
     for part in parts {
         match part {
-            SimpleForEachRefFormatPart::Literal(literal) => out.write_all(literal.as_bytes())?,
+            SimpleForEachRefFormatPart::Literal(literal) => out.write_all(literal)?,
             SimpleForEachRefFormatPart::RefName => out.write_all(ref_name.as_bytes())?,
-            SimpleForEachRefFormatPart::RefNameShort => {
-                out.write_all(short_ref_name_str(ref_name).as_bytes())?
-            }
             SimpleForEachRefFormatPart::RefNameStrip(modifier) => {
                 out.write_all(strip_for_each_ref_refname(ref_name, *modifier).as_bytes())?
             }
@@ -2742,21 +5490,127 @@ fn build_for_each_ref_row(
     object_id: &str,
     objects: &dyn GitObjectStore,
     requirements: &ForEachRefRequirements,
+    mailmap: &[core_commands::MailmapEntry],
+    symrefs: &ForEachRefSymrefs,
+    short_names: &ForEachRefShortNameContext,
     current_head_ref: Option<&str>,
 ) -> Result<ForEachRefRow> {
     let object_id = parse_primitive_object_id(object_id)?;
     let object_id_hex = object_id.to_hex();
+    let peeled_object_id = if requirements.need_peeled && ref_name.starts_with("refs/tags/") {
+        peel_show_ref_tag(
+            &LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1),
+            &object_id,
+        )?
+    } else {
+        None
+    };
     let (object_kind, metadata) =
         load_for_each_ref_metadata(ref_name, &object_id_hex, objects, requirements)?;
-    let upstream = for_each_ref_upstream(repo, ref_name)?;
+    let loose_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let peeled_object_kind = peeled_object_id
+        .as_ref()
+        .map(|id| {
+            loose_store
+                .packed_first()
+                .read_object(id)
+                .map(|object| object.kind)
+        })
+        .transpose()?;
+    let peeled_object_disk_size = if requirements.need_disk_size {
+        peeled_object_id
+            .as_ref()
+            .map(|id| loose_store.object_disk_size_hint(id))
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    let object_disk_size = if requirements.need_disk_size {
+        loose_store.object_disk_size_hint(&object_id)?
+    } else {
+        None
+    };
+    let peeled_raw = if requirements.need_content {
+        peeled_object_id
+            .as_ref()
+            .map(|id| {
+                loose_store
+                    .packed_first()
+                    .read_object(id)
+                    .map(|object| object.content)
+            })
+            .transpose()?
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let upstream = if requirements.need_upstream {
+        for_each_ref_upstream(repo, ref_name)?
+    } else {
+        ForEachRefUpstream::default()
+    };
+    let mapped_author =
+        for_each_ref_mapped_identity(mailmap, &metadata.author_name, &metadata.author_email);
+    let mapped_tagger =
+        for_each_ref_mapped_identity(mailmap, &metadata.tagger_name, &metadata.tagger_email);
+    let mapped_committer =
+        for_each_ref_mapped_identity(mailmap, &metadata.committer_name, &metadata.committer_email);
+    let mut descriptions = BTreeMap::new();
+    for atom in &requirements.describe_atoms {
+        let target = if atom.starts_with('*') {
+            peeled_object_id.as_ref()
+        } else {
+            Some(&object_id)
+        };
+        let description = target
+            .map(|target| history_commands::describe_for_each_ref(repo, target, atom))
+            .transpose()?
+            .unwrap_or_default();
+        descriptions.insert(atom.clone(), description);
+    }
+    let signature = if requirements.need_signature && object_kind == GitObjectKind::Commit {
+        pack_commands::inspect_commit_signature(repo, &metadata.raw)?
+    } else {
+        pack_commands::CommitSignatureMetadata::default()
+    };
+    let symref = symrefs.get(ref_name).cloned().unwrap_or_default();
+    let (ref_name_short, symref_short) = if requirements.need_short_name {
+        (
+            for_each_ref_short_name(short_names, ref_name),
+            for_each_ref_short_name(short_names, &symref),
+        )
+    } else {
+        (String::new(), String::new())
+    };
     Ok(ForEachRefRow {
         ref_name: ref_name.to_owned(),
+        ref_name_short,
+        symref_short,
+        symref,
         object_id,
+        peeled_object_id,
+        peeled_object_kind,
+        peeled_object_disk_size,
         object_kind,
         object_size: metadata.object_size,
+        object_disk_size,
+        raw: metadata.raw,
+        peeled_raw,
+        tree: metadata.tree,
+        parents: metadata.parents,
+        num_parents: metadata.num_parents,
+        tagged_object: metadata.tagged_object,
+        tagged_type: metadata.tagged_type,
+        tag_name: metadata.tag_name,
         subject: metadata.subject,
+        body: metadata.body,
+        contents: metadata.contents,
+        contents_signature: metadata.contents_signature,
+        author: metadata.author,
         tagger_name: metadata.tagger_name,
         tagger_email: metadata.tagger_email,
+        tagger: metadata.tagger,
         author_name: metadata.author_name,
         author_email: metadata.author_email,
         author_timestamp: metadata.author_timestamp,
@@ -2768,6 +5622,13 @@ fn build_for_each_ref_row(
         tagger_timezone: metadata.tagger_timezone,
         committer_name: metadata.committer_name,
         committer_email: metadata.committer_email,
+        committer: metadata.committer,
+        mapped_author_name: mapped_author.name,
+        mapped_author_email: mapped_author.email,
+        mapped_tagger_name: mapped_tagger.name,
+        mapped_tagger_email: mapped_tagger.email,
+        mapped_committer_name: mapped_committer.name,
+        mapped_committer_email: mapped_committer.email,
         committer_timestamp: metadata.committer_timestamp,
         committer_timezone: metadata.committer_timezone,
         is_head: current_head_ref == Some(ref_name),
@@ -2775,7 +5636,74 @@ fn build_for_each_ref_row(
         upstream_short: upstream.short_name,
         upstream_track: upstream.track,
         upstream_track_short: upstream.track_short,
+        upstream_remote_name: upstream.remote_name,
+        upstream_remote_ref: upstream.remote_ref,
+        push_ref: upstream.push_ref,
+        push_short: upstream.push_short,
+        push_track: upstream.push_track,
+        push_track_short: upstream.push_track_short,
+        push_remote_name: upstream.push_remote_name,
+        push_remote_ref: upstream.push_remote_ref,
+        descriptions,
+        signature_grade: signature.grade,
+        signature_key: signature.key,
+        signature_signer: signature.signer,
+        signature_fingerprint: signature.fingerprint,
+        signature_primary_key_fingerprint: signature.primary_key_fingerprint,
     })
+}
+
+fn for_each_ref_mapped_identity(
+    mailmap: &[core_commands::MailmapEntry],
+    name: &str,
+    email: &str,
+) -> core_commands::MailmapIdentity {
+    let identity = core_commands::MailmapIdentity {
+        name: name.to_owned(),
+        email: email.to_owned(),
+    };
+    if email.is_empty() {
+        identity
+    } else {
+        core_commands::apply_mailmap(mailmap, &identity)
+    }
+}
+
+fn load_for_each_ref_short_name_context(
+    repo: &GitRepo,
+    required: bool,
+) -> Result<ForEachRefShortNameContext> {
+    if !required {
+        return Ok(ForEachRefShortNameContext::default());
+    }
+    let refs = RefStore::new(
+        read_common_git_dir(&repo.git_dir)?,
+        symbolic_ref_object_format(repo)?,
+    );
+    let strict = read_config_value(repo, "core.warnambiguousrefs")?
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(true);
+    let ref_names = refs.list_refs("refs/")?.into_iter().collect();
+    Ok(ForEachRefShortNameContext { strict, ref_names })
+}
+
+fn for_each_ref_short_name(context: &ForEachRefShortNameContext, ref_name: &str) -> String {
+    if ref_name.is_empty() {
+        return String::new();
+    }
+    if let Some(name) = ref_name.strip_prefix("refs/heads/")
+        && context.ref_names.contains(&format!("refs/tags/{name}"))
+    {
+        return format!("heads/{name}");
+    }
+    if let Some(name) = ref_name.strip_prefix("refs/tags/")
+        && context.strict
+        && context.ref_names.contains(&format!("refs/heads/{name}"))
+    {
+        return format!("tags/{name}");
+    }
+    short_ref_name(ref_name)
 }
 
 #[derive(Default)]
@@ -2784,23 +5712,122 @@ struct ForEachRefUpstream {
     short_name: String,
     track: String,
     track_short: String,
+    remote_name: String,
+    remote_ref: String,
+    push_ref: String,
+    push_short: String,
+    push_track: String,
+    push_track_short: String,
+    push_remote_name: String,
+    push_remote_ref: String,
+}
+
+#[derive(Default)]
+struct ForEachRefPush {
+    ref_name: String,
+    short_name: String,
+    remote_name: String,
+    remote_ref: String,
 }
 
 fn for_each_ref_upstream(repo: &GitRepo, ref_name: &str) -> Result<ForEachRefUpstream> {
     let Some(branch) = ref_name.strip_prefix("refs/heads/") else {
         return Ok(ForEachRefUpstream::default());
     };
+    let push = for_each_ref_push(repo, branch)?;
+    let (push_track, push_track_short) = if push.ref_name.is_empty() {
+        (String::new(), String::new())
+    } else {
+        format_for_each_ref_upstream_track(upstream_counts_from_ref(
+            repo,
+            ref_name,
+            &push.ref_name,
+        )?)
+    };
     let Some(upstream) = read_branch_upstream(repo, branch)? else {
-        return Ok(ForEachRefUpstream::default());
+        return Ok(ForEachRefUpstream {
+            push_ref: push.ref_name,
+            push_short: push.short_name,
+            push_track,
+            push_track_short,
+            push_remote_name: push.remote_name,
+            push_remote_ref: push.remote_ref,
+            ..ForEachRefUpstream::default()
+        });
     };
     let counts = upstream_counts_from_ref(repo, ref_name, &upstream.ref_name)?;
     let (track, track_short) = format_for_each_ref_upstream_track(counts);
+    let remote_name =
+        read_config_value(repo, &format!("branch.{branch}.remote"))?.unwrap_or_default();
+    let remote_ref =
+        read_config_value(repo, &format!("branch.{branch}.merge"))?.unwrap_or_default();
     Ok(ForEachRefUpstream {
         ref_name: upstream.ref_name,
         short_name: upstream.display,
         track,
         track_short,
+        remote_name,
+        remote_ref,
+        push_ref: push.ref_name,
+        push_short: push.short_name,
+        push_track,
+        push_track_short,
+        push_remote_name: push.remote_name,
+        push_remote_ref: push.remote_ref,
     })
+}
+
+fn for_each_ref_push(repo: &GitRepo, branch: &str) -> Result<ForEachRefPush> {
+    let remote = read_config_value(repo, &format!("branch.{branch}.pushRemote"))?
+        .or(read_config_value(repo, "remote.pushDefault")?)
+        .or(read_config_value(repo, &format!("branch.{branch}.remote"))?);
+    let Some(remote) = remote.filter(|remote| !remote.is_empty() && remote != ".") else {
+        return Ok(ForEachRefPush::default());
+    };
+    let source = format!("refs/heads/{branch}");
+    let configured_push = read_config_value(repo, &format!("remote.{remote}.push"))?;
+    let push_default =
+        read_config_value(repo, "push.default")?.unwrap_or_else(|| "simple".to_owned());
+    let upstream_remote = read_config_value(repo, &format!("branch.{branch}.remote"))?;
+    let upstream_merge = read_config_value(repo, &format!("branch.{branch}.merge"))?;
+    if configured_push.is_none()
+        && push_default == "simple"
+        && (upstream_remote.as_deref() != Some(remote.as_str())
+            || upstream_merge.as_deref() != Some(source.as_str()))
+    {
+        return Ok(ForEachRefPush {
+            remote_name: remote,
+            ..ForEachRefPush::default()
+        });
+    }
+    let remote_ref = configured_push
+        .and_then(|refspec| map_for_each_ref_push_refspec(&refspec, &source))
+        .unwrap_or_else(|| source.clone());
+    let tracking_suffix = remote_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&remote_ref);
+    let short_name = format!("{remote}/{tracking_suffix}");
+    Ok(ForEachRefPush {
+        ref_name: format!("refs/remotes/{short_name}"),
+        short_name,
+        remote_name: remote,
+        remote_ref,
+    })
+}
+
+fn map_for_each_ref_push_refspec(refspec: &str, source: &str) -> Option<String> {
+    let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
+    let (from, to) = refspec.split_once(':')?;
+    match (from.split_once('*'), to.split_once('*')) {
+        (Some((from_prefix, from_suffix)), Some((to_prefix, to_suffix))) => {
+            let wildcard = source
+                .strip_prefix(from_prefix)?
+                .strip_suffix(from_suffix)?;
+            Some(format!("{to_prefix}{wildcard}{to_suffix}"))
+        }
+        _ if from == source => Some(to.to_owned()),
+        _ => None,
+    }
 }
 
 fn format_for_each_ref_upstream_track(counts: Option<(usize, usize)>) -> (String, String) {
@@ -2810,6 +5837,33 @@ fn format_for_each_ref_upstream_track(counts: Option<(usize, usize)>) -> (String
         Some((0, behind)) => (format!("[behind {behind}]"), "<".to_owned()),
         Some((ahead, behind)) => (format!("[ahead {ahead}, behind {behind}]"), "<>".to_owned()),
         None => ("[gone]".to_owned(), String::new()),
+    }
+}
+
+fn for_each_ref_tracking_atom(atom: &str, name: &str) -> Option<(bool, bool)> {
+    let arguments = atom.strip_prefix(&format!("{name}:"))?;
+    let mut short = None;
+    let mut no_brackets = false;
+    for argument in arguments.split(',') {
+        match argument {
+            "track" => short = Some(false),
+            "trackshort" => short = Some(true),
+            "nobracket" => no_brackets = true,
+            _ => return None,
+        }
+    }
+    short.map(|short| (short, no_brackets))
+}
+
+fn format_for_each_ref_tracking_atom(value: &str, no_brackets: bool) -> String {
+    if no_brackets {
+        value
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .unwrap_or(value)
+            .to_owned()
+    } else {
+        value.to_owned()
     }
 }
 
@@ -2826,6 +5880,8 @@ fn load_for_each_ref_metadata(
         && !requirements.need_creator
         && !requirements.need_tagger
         && !requirements.need_committer
+        && !requirements.need_content
+        && !requirements.need_disk_size
     {
         return Ok((GitObjectKind::Commit, RefObjectMetadata::default()));
     }
@@ -2841,6 +5897,7 @@ fn load_for_each_ref_metadata(
         && !requirements.need_creator
         && !requirements.need_tagger
         && !requirements.need_committer
+        && !requirements.need_content
     {
         return Ok((kind, RefObjectMetadata::default()));
     }
@@ -2865,6 +5922,10 @@ fn for_each_ref_requirements(format: &str, sort: &[String]) -> Result<ForEachRef
     }
     for key in sort {
         let key = key.strip_prefix('-').unwrap_or(key);
+        let key = key
+            .strip_prefix("version:")
+            .or_else(|| key.strip_prefix("v:"))
+            .unwrap_or(key);
         apply_for_each_ref_atom_requirements(key, &mut requirements)?;
     }
     Ok(requirements)
@@ -2891,9 +5952,62 @@ fn apply_for_each_ref_atom_requirements(
     atom: &str,
     requirements: &mut ForEachRefRequirements,
 ) -> Result<()> {
+    if atom
+        .split_once(':')
+        .is_some_and(|(_, arguments)| arguments.split(',').any(|argument| argument == "mailmap"))
+    {
+        requirements.need_mailmap = true;
+    }
     match atom {
-        "refname" | "refname:short" | "objectname" | "HEAD" => {}
+        "refname" | "refname:" | "objectname" | "HEAD" | "color" | "if" | "then" | "else"
+        | "end" => {}
+        "refname:short" => requirements.need_short_name = true,
+        "*objectname" => requirements.need_peeled = true,
+        atom if atom.starts_with("if:equals=") || atom.starts_with("if:notequals=") => {}
+        atom if atom.starts_with("is-base:") && atom.len() > "is-base:".len() => {}
+        "signature:grade"
+        | "signature:key"
+        | "signature:signer"
+        | "signature:fingerprint"
+        | "signature:primarykeyfingerprint" => {
+            requirements.need_object_kind = true;
+            requirements.need_content = true;
+            requirements.need_signature = true;
+        }
+        atom if atom.starts_with("color:") => {
+            for_each_ref_color(atom, false)?;
+        }
+        atom if atom == "describe"
+            || atom == "*describe"
+            || atom.starts_with("describe:")
+            || atom.starts_with("*describe:") =>
+        {
+            history_commands::validate_for_each_ref_describe_atom(atom)?;
+            if !requirements
+                .describe_atoms
+                .iter()
+                .any(|value| value == atom)
+            {
+                requirements.describe_atoms.push(atom.to_owned());
+            }
+            requirements.need_object_kind = true;
+            requirements.need_peeled |= atom.starts_with('*');
+        }
+        "symref" => requirements.need_symref = true,
+        "symref:short" => {
+            requirements.need_symref = true;
+            requirements.need_short_name = true;
+        }
         atom if for_each_ref_refname_strip_modifier(atom).is_some() => {}
+        atom if for_each_ref_symref_strip_modifier(atom).is_some() => {
+            requirements.need_symref = true;
+        }
+        atom if for_each_ref_upstream_strip_modifier(atom).is_some() => {
+            requirements.need_upstream = true;
+        }
+        atom if for_each_ref_push_strip_modifier(atom).is_some() => {
+            requirements.need_upstream = true;
+        }
         atom if for_each_ref_refname_strip_invalid_value(atom).is_some() => {
             return Err(for_each_ref_refname_strip_value_error(atom));
         }
@@ -2901,17 +6015,74 @@ fn apply_for_each_ref_atom_requirements(
         atom if for_each_ref_objectname_short_invalid_value(atom).is_some() => {
             return Err(for_each_ref_objectname_short_value_error(atom));
         }
-        "upstream" | "upstream:short" | "upstream:track" | "upstream:trackshort" => {}
+        "upstream"
+        | "upstream:short"
+        | "upstream:track"
+        | "upstream:trackshort"
+        | "upstream:remotename"
+        | "upstream:remoteref"
+        | "push"
+        | "push:short"
+        | "push:track"
+        | "push:trackshort"
+        | "push:remotename"
+        | "push:remoteref" => {
+            requirements.need_upstream = true;
+        }
+        atom if for_each_ref_tracking_atom(atom, "upstream").is_some()
+            || for_each_ref_tracking_atom(atom, "push").is_some() =>
+        {
+            requirements.need_upstream = true;
+        }
         "objecttype" => requirements.need_object_kind = true,
         "objectsize" => {
             requirements.need_object_kind = true;
             requirements.need_object_size = true;
         }
-        "subject" | "contents:subject" => {
+        "objectsize:disk" | "*objectsize:disk" => {
+            requirements.need_object_kind = true;
+            requirements.need_disk_size = true;
+            requirements.need_peeled |= atom.starts_with('*');
+        }
+        "deltabase" | "*deltabase" => {
+            requirements.need_object_kind = true;
+            requirements.need_peeled |= atom.starts_with('*');
+        }
+        "raw" | "raw:size" | "*raw" | "*raw:size" | "tree" | "tree:short" | "parent"
+        | "parent:short" | "numparent" | "object" | "type" | "tag" | "author" | "committer"
+        | "tagger" | "body" | "contents:body" | "contents:signature" | "contents"
+        | "contents:size" => {
+            requirements.need_object_kind = true;
+            requirements.need_content = true;
+            requirements.need_peeled |= atom.starts_with('*');
+        }
+        atom if atom.starts_with("tree:short=") || atom.starts_with("parent:short=") => {
+            requirements.need_object_kind = true;
+            requirements.need_content = true;
+        }
+        "*objecttype" => {
+            requirements.need_object_kind = true;
+            requirements.need_content = true;
+            requirements.need_peeled = true;
+        }
+        "subject" | "subject:sanitize" | "contents:subject" => {
             requirements.need_object_kind = true;
             requirements.need_subject = true;
+            requirements.need_content = true;
         }
-        "authorname" | "authoremail" => {
+        atom if atom == "trailers"
+            || atom.starts_with("trailers:")
+            || atom == "contents:trailers"
+            || atom.starts_with("contents:trailers:") =>
+        {
+            requirements.need_object_kind = true;
+            requirements.need_content = true;
+        }
+        atom if atom == "authorname"
+            || atom.starts_with("authorname:")
+            || atom == "authoremail"
+            || atom.starts_with("authoremail:") =>
+        {
             requirements.need_object_kind = true;
             requirements.need_author = true;
         }
@@ -2927,7 +6098,11 @@ fn apply_for_each_ref_atom_requirements(
             requirements.need_object_kind = true;
             requirements.need_creator = true;
         }
-        "taggername" | "taggeremail" => {
+        atom if atom == "taggername"
+            || atom.starts_with("taggername:")
+            || atom == "taggeremail"
+            || atom.starts_with("taggeremail:") =>
+        {
             requirements.need_object_kind = true;
             requirements.need_tagger = true;
         }
@@ -2935,13 +6110,50 @@ fn apply_for_each_ref_atom_requirements(
             requirements.need_object_kind = true;
             requirements.need_tagger = true;
         }
-        "committername" | "committeremail" => {
+        atom if atom == "committername"
+            || atom.starts_with("committername:")
+            || atom == "committeremail"
+            || atom.starts_with("committeremail:") =>
+        {
             requirements.need_object_kind = true;
             requirements.need_committer = true;
         }
         atom if for_each_ref_date_atom_base(atom) == Some("committerdate") => {
             requirements.need_object_kind = true;
             requirements.need_committer = true;
+        }
+        atom if atom.starts_with("HEAD:") => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "%(HEAD) does not take arguments".into(),
+            });
+        }
+        atom if atom.starts_with("subject:") => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "unrecognized %(subject) argument: {}",
+                    atom.strip_prefix("subject:").unwrap_or_default()
+                ),
+            });
+        }
+        atom if atom.starts_with("refname:") => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "unrecognized %(refname) argument: {}",
+                    atom.strip_prefix("refname:").unwrap_or_default()
+                ),
+            });
+        }
+        atom if atom.starts_with("contents:") => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "unrecognized %(contents) argument: {}",
+                    atom.strip_prefix("contents:").unwrap_or_default()
+                ),
+            });
         }
         _ => {
             return Err(CliError::Fatal {
@@ -2982,6 +6194,14 @@ fn map_primitive_error(error: PrimitiveError, context: &str) -> CliError {
 }
 
 pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String]) -> Result<()> {
+    apply_for_each_ref_sort_with_case(rows, sort, false)
+}
+
+fn apply_for_each_ref_sort_with_case(
+    rows: &mut [ForEachRefRow],
+    sort: &[String],
+    ignore_case: bool,
+) -> Result<()> {
     if sort.is_empty() {
         return Ok(());
     }
@@ -2991,7 +6211,10 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             .map(|key| (true, key))
             .unwrap_or((false, key.as_str()));
         let compare = |left: &ForEachRefRow, right: &ForEachRefRow| match key {
-            "refname" => left.ref_name.cmp(&right.ref_name),
+            "refname" => for_each_ref_text_cmp(&left.ref_name, &right.ref_name, ignore_case),
+            "version:refname" | "v:refname" => {
+                for_each_ref_version_cmp(&left.ref_name, &right.ref_name)
+            }
             key if for_each_ref_refname_strip_modifier(key).is_some() => {
                 let modifier = for_each_ref_refname_strip_modifier(key).unwrap();
                 strip_for_each_ref_refname(&left.ref_name, modifier)
@@ -3000,18 +6223,88 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             "objectname" => left.object_id.to_hex().cmp(&right.object_id.to_hex()),
             "objecttype" => left.object_kind.as_str().cmp(right.object_kind.as_str()),
             "objectsize" => left.object_size.cmp(&right.object_size),
-            "subject" => left.subject.cmp(&right.subject),
-            "contents:subject" => left.subject.cmp(&right.subject),
+            "raw:size" => left.object_size.cmp(&right.object_size),
+            "contents:size" => left.contents.len().cmp(&right.contents.len()),
+            "raw" => left.raw.cmp(&right.raw),
+            "subject" | "contents:subject" => {
+                for_each_ref_text_cmp(&left.subject, &right.subject, ignore_case)
+            }
+            "authoremail" => {
+                for_each_ref_text_cmp(&left.author_email, &right.author_email, ignore_case)
+            }
+            "taggeremail" => {
+                for_each_ref_text_cmp(&left.tagger_email, &right.tagger_email, ignore_case)
+            }
+            "committeremail" => {
+                for_each_ref_text_cmp(&left.committer_email, &right.committer_email, ignore_case)
+            }
             "authordate" => left.author_timestamp.cmp(&right.author_timestamp),
             "creatordate" => left.creator_timestamp.cmp(&right.creator_timestamp),
             "taggerdate" => left.tagger_timestamp.cmp(&right.tagger_timestamp),
             "committerdate" => left.committer_timestamp.cmp(&right.committer_timestamp),
+            key if key.starts_with("authordate:format:") => format_for_each_ref_date_atom(
+                key,
+                left.author_timestamp,
+                left.author_timezone.as_deref(),
+            )
+            .unwrap_or_default()
+            .cmp(
+                &format_for_each_ref_date_atom(
+                    key,
+                    right.author_timestamp,
+                    right.author_timezone.as_deref(),
+                )
+                .unwrap_or_default(),
+            ),
+            key if key.starts_with("creatordate:format:") => format_for_each_ref_date_atom(
+                key,
+                left.creator_timestamp,
+                left.creator_timezone.as_deref(),
+            )
+            .unwrap_or_default()
+            .cmp(
+                &format_for_each_ref_date_atom(
+                    key,
+                    right.creator_timestamp,
+                    right.creator_timezone.as_deref(),
+                )
+                .unwrap_or_default(),
+            ),
+            key if key.starts_with("taggerdate:format:") => format_for_each_ref_date_atom(
+                key,
+                left.tagger_timestamp,
+                left.tagger_timezone.as_deref(),
+            )
+            .unwrap_or_default()
+            .cmp(
+                &format_for_each_ref_date_atom(
+                    key,
+                    right.tagger_timestamp,
+                    right.tagger_timezone.as_deref(),
+                )
+                .unwrap_or_default(),
+            ),
+            key if key.starts_with("committerdate:format:") => format_for_each_ref_date_atom(
+                key,
+                left.committer_timestamp,
+                left.committer_timezone.as_deref(),
+            )
+            .unwrap_or_default()
+            .cmp(
+                &format_for_each_ref_date_atom(
+                    key,
+                    right.committer_timestamp,
+                    right.committer_timezone.as_deref(),
+                )
+                .unwrap_or_default(),
+            ),
             _ => std::cmp::Ordering::Equal,
         };
         match key {
-            "refname" | "objectname" | "objecttype" | "objectsize" | "subject"
-            | "contents:subject" | "authordate" | "creatordate" | "taggerdate"
-            | "committerdate" => {
+            "refname" | "version:refname" | "v:refname" | "objectname" | "objecttype"
+            | "objectsize" | "subject" | "contents:subject" | "raw" | "raw:size"
+            | "contents:size" | "authoremail" | "taggeremail" | "committeremail" | "authordate"
+            | "creatordate" | "taggerdate" | "committerdate" => {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -3019,6 +6312,17 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
                 }
             }
             key if for_each_ref_refname_strip_modifier(key).is_some() => {
+                if descending {
+                    rows.sort_by(|left, right| compare(right, left));
+                } else {
+                    rows.sort_by(compare);
+                }
+            }
+            key if key.starts_with("authordate:format:")
+                || key.starts_with("creatordate:format:")
+                || key.starts_with("taggerdate:format:")
+                || key.starts_with("committerdate:format:") =>
+            {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -3039,19 +6343,207 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
     Ok(())
 }
 
-pub(crate) fn render_for_each_ref_row(format: &str, row: &ForEachRefRow) -> Result<String> {
-    render_for_each_ref_row_with_mode(format, row, ForEachRefQuoteMode::None)
+fn for_each_ref_text_cmp(left: &str, right: &str, ignore_case: bool) -> std::cmp::Ordering {
+    if ignore_case {
+        left.to_lowercase().cmp(&right.to_lowercase())
+    } else {
+        left.cmp(right)
+    }
 }
 
-fn render_for_each_ref_row_with_mode(
+fn for_each_ref_version_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    const NORMAL: usize = 0;
+    const INTEGRAL: usize = 3;
+    const FRACTIONAL: usize = 6;
+    const LEADING_ZERO: usize = 9;
+    const COMPARE: i8 = 2;
+    const LENGTH: i8 = 3;
+    const NEXT_STATE: [usize; 12] = [
+        NORMAL,
+        INTEGRAL,
+        LEADING_ZERO,
+        NORMAL,
+        INTEGRAL,
+        INTEGRAL,
+        NORMAL,
+        FRACTIONAL,
+        FRACTIONAL,
+        NORMAL,
+        FRACTIONAL,
+        LEADING_ZERO,
+    ];
+    const RESULT_TYPE: [i8; 36] = [
+        COMPARE, COMPARE, COMPARE, COMPARE, LENGTH, COMPARE, COMPARE, COMPARE, COMPARE, COMPARE,
+        -1, -1, 1, LENGTH, LENGTH, 1, LENGTH, LENGTH, COMPARE, COMPARE, COMPARE, COMPARE, COMPARE,
+        COMPARE, COMPARE, COMPARE, COMPARE, COMPARE, 1, 1, -1, COMPARE, COMPARE, -1, COMPARE,
+        COMPARE,
+    ];
+
+    fn byte_at(value: &[u8], index: usize) -> u8 {
+        value.get(index).copied().unwrap_or(0)
+    }
+
+    fn class(byte: u8) -> usize {
+        usize::from(byte == b'0') + usize::from(byte.is_ascii_digit())
+    }
+
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut index = 0;
+    let mut left_byte = byte_at(left, index);
+    let mut right_byte = byte_at(right, index);
+    let mut state = NORMAL + class(left_byte);
+
+    while left_byte == right_byte {
+        if left_byte == 0 {
+            return std::cmp::Ordering::Equal;
+        }
+        state = NEXT_STATE[state];
+        index += 1;
+        left_byte = byte_at(left, index);
+        right_byte = byte_at(right, index);
+        state += class(left_byte);
+    }
+
+    let difference = i32::from(left_byte) - i32::from(right_byte);
+    match RESULT_TYPE[state * 3 + class(right_byte)] {
+        COMPARE => difference.cmp(&0),
+        LENGTH => {
+            let mut left_index = index + 1;
+            let mut right_index = index + 1;
+            while byte_at(left, left_index).is_ascii_digit() {
+                if !byte_at(right, right_index).is_ascii_digit() {
+                    return std::cmp::Ordering::Greater;
+                }
+                left_index += 1;
+                right_index += 1;
+            }
+            if byte_at(right, right_index).is_ascii_digit() {
+                std::cmp::Ordering::Less
+            } else {
+                difference.cmp(&0)
+            }
+        }
+        result => result.cmp(&0),
+    }
+}
+
+pub(crate) fn render_for_each_ref_row(format: &str, row: &ForEachRefRow) -> Result<String> {
+    Ok(
+        String::from_utf8_lossy(&render_for_each_ref_row_bytes_with_mode(
+            format,
+            row,
+            ForEachRefQuoteMode::None,
+            false,
+        )?)
+        .into_owned(),
+    )
+}
+
+#[derive(Debug)]
+enum ForEachRefFormatToken {
+    Literal(Vec<u8>),
+    Atom(String),
+}
+
+#[derive(Debug)]
+enum ForEachRefCondition {
+    Truthy,
+    Equals(Vec<u8>),
+    NotEquals(Vec<u8>),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ForEachRefConditionPhase {
+    Condition,
+    Then,
+    Else,
+}
+
+#[derive(Debug)]
+struct ForEachRefConditionFrame {
+    condition: ForEachRefCondition,
+    phase: ForEachRefConditionPhase,
+    condition_value: Vec<u8>,
+    then_value: Vec<u8>,
+    else_value: Vec<u8>,
+}
+
+fn render_for_each_ref_row_bytes_with_mode(
     format: &str,
     row: &ForEachRefRow,
     quote_mode: ForEachRefQuoteMode,
-) -> Result<String> {
-    let mut out = String::new();
+    color_enabled: bool,
+) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut frames = Vec::<ForEachRefConditionFrame>::new();
+    for token in parse_for_each_ref_format(format)? {
+        match token {
+            ForEachRefFormatToken::Atom(atom) if atom == "if" || atom.starts_with("if:") => {
+                frames.push(ForEachRefConditionFrame {
+                    condition: parse_for_each_ref_condition(&atom)?,
+                    phase: ForEachRefConditionPhase::Condition,
+                    condition_value: Vec::new(),
+                    then_value: Vec::new(),
+                    else_value: Vec::new(),
+                });
+            }
+            ForEachRefFormatToken::Atom(atom) if atom == "then" => {
+                let frame = frames
+                    .last_mut()
+                    .ok_or_else(for_each_ref_format_stack_error)?;
+                frame.phase = ForEachRefConditionPhase::Then;
+            }
+            ForEachRefFormatToken::Atom(atom) if atom == "else" => {
+                let frame = frames
+                    .last_mut()
+                    .ok_or_else(for_each_ref_format_stack_error)?;
+                frame.phase = ForEachRefConditionPhase::Else;
+            }
+            ForEachRefFormatToken::Atom(atom) if atom == "end" => {
+                let frame = frames.pop().ok_or_else(for_each_ref_format_stack_error)?;
+                let selected = match frame.condition {
+                    ForEachRefCondition::Truthy => frame
+                        .condition_value
+                        .iter()
+                        .any(|byte| !byte.is_ascii_whitespace()),
+                    ForEachRefCondition::Equals(expected) => frame.condition_value == expected,
+                    ForEachRefCondition::NotEquals(expected) => frame.condition_value != expected,
+                };
+                let value = if selected {
+                    frame.then_value
+                } else {
+                    frame.else_value
+                };
+                append_for_each_ref_format_value(&mut output, &mut frames, &value);
+            }
+            ForEachRefFormatToken::Atom(atom) => {
+                let value = for_each_ref_atom_bytes(&atom, row, quote_mode, color_enabled)?;
+                append_for_each_ref_format_value(&mut output, &mut frames, &value);
+            }
+            ForEachRefFormatToken::Literal(value) => {
+                append_for_each_ref_format_value(&mut output, &mut frames, &value);
+            }
+        }
+    }
+    if !frames.is_empty() {
+        return Err(for_each_ref_format_stack_error());
+    }
+    if color_enabled && format.contains("%(color:") && !output.ends_with(b"\x1b[m") {
+        output.extend_from_slice(b"\x1b[m");
+    }
+    Ok(output)
+}
+
+fn parse_for_each_ref_format(format: &str) -> Result<Vec<ForEachRefFormatToken>> {
+    let mut tokens = Vec::new();
     let mut rest = format;
     while let Some(start) = rest.find("%(") {
-        push_for_each_ref_literal(&mut out, &rest[..start])?;
+        if start > 0 {
+            tokens.push(ForEachRefFormatToken::Literal(decode_for_each_ref_literal(
+                &rest[..start],
+            )?));
+        }
         let after_start = &rest[start + 2..];
         let Some(end) = after_start.find(')') else {
             return Err(CliError::Fatal {
@@ -3059,50 +6551,121 @@ fn render_for_each_ref_row_with_mode(
                 message: "unterminated for-each-ref format atom".into(),
             });
         };
-        let atom = &after_start[..end];
-        out.push_str(&for_each_ref_quote(&for_each_ref_atom(atom, row)?, quote_mode));
+        tokens.push(ForEachRefFormatToken::Atom(after_start[..end].to_owned()));
         rest = &after_start[end + 1..];
     }
-    push_for_each_ref_literal(&mut out, rest)?;
-    Ok(out)
+    if !rest.is_empty() {
+        tokens.push(ForEachRefFormatToken::Literal(decode_for_each_ref_literal(
+            rest,
+        )?));
+    }
+    Ok(tokens)
 }
 
-fn push_for_each_ref_literal(out: &mut String, literal: &str) -> Result<()> {
-    let mut chars = literal.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '%' {
-            out.push(ch);
-            continue;
-        }
-        let high = chars.next();
-        let low = chars.next();
-        match (high, low) {
-            (Some(high), Some(low)) if high.is_ascii_hexdigit() && low.is_ascii_hexdigit() => {
-                let hex = format!("{high}{low}");
-                let byte = u8::from_str_radix(&hex, 16).map_err(|_| CliError::Fatal {
+fn decode_for_each_ref_literal(literal: &str) -> Result<Vec<u8>> {
+    let bytes = literal.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = &literal[index + 1..index + 3];
+            if hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                output.push(u8::from_str_radix(hex, 16).map_err(|_| CliError::Fatal {
                     code: 128,
                     message: format!("invalid for-each-ref format escape '%{hex}'"),
-                })?;
-                out.push(char::from(byte));
-            }
-            _ => {
-                out.push('%');
-                if let Some(high) = high {
-                    out.push(high);
-                }
-                if let Some(low) = low {
-                    out.push(low);
-                }
+                })?);
+                index += 3;
+                continue;
             }
         }
+        output.push(bytes[index]);
+        index += 1;
     }
-    Ok(())
+    Ok(output)
 }
 
-fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
+fn parse_for_each_ref_condition(atom: &str) -> Result<ForEachRefCondition> {
+    match atom.strip_prefix("if:") {
+        None => Ok(ForEachRefCondition::Truthy),
+        Some(argument) if argument.starts_with("equals=") => Ok(ForEachRefCondition::Equals(
+            argument[7..].as_bytes().to_vec(),
+        )),
+        Some(argument) if argument.starts_with("notequals=") => Ok(ForEachRefCondition::NotEquals(
+            argument[10..].as_bytes().to_vec(),
+        )),
+        Some(argument) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unrecognized %(if) argument: {argument}"),
+        }),
+    }
+}
+
+fn append_for_each_ref_format_value(
+    output: &mut Vec<u8>,
+    frames: &mut [ForEachRefConditionFrame],
+    value: &[u8],
+) {
+    let Some(frame) = frames.last_mut() else {
+        output.extend_from_slice(value);
+        return;
+    };
+    match frame.phase {
+        ForEachRefConditionPhase::Condition => frame.condition_value.extend_from_slice(value),
+        ForEachRefConditionPhase::Then => frame.then_value.extend_from_slice(value),
+        ForEachRefConditionPhase::Else => frame.else_value.extend_from_slice(value),
+    }
+}
+
+fn for_each_ref_format_stack_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "malformed for-each-ref conditional format".into(),
+    }
+}
+
+fn for_each_ref_atom_bytes(
+    atom: &str,
+    row: &ForEachRefRow,
+    quote_mode: ForEachRefQuoteMode,
+    color_enabled: bool,
+) -> Result<Vec<u8>> {
+    let raw = match atom {
+        "raw" => Some(row.raw.as_slice()),
+        "*raw" => Some(row.peeled_raw.as_slice()),
+        _ => None,
+    };
+    if let Some(raw) = raw {
+        return match quote_mode {
+            ForEachRefQuoteMode::None => Ok(raw.to_vec()),
+            ForEachRefQuoteMode::Perl => Ok(quote_for_each_ref_perl_bytes(raw)),
+            ForEachRefQuoteMode::Shell | ForEachRefQuoteMode::Python | ForEachRefQuoteMode::Tcl => {
+                Err(CliError::Fatal {
+                    code: 128,
+                    message: "raw atom cannot be used with this quoting style".into(),
+                })
+            }
+        };
+    }
+    Ok(for_each_ref_quote(&for_each_ref_atom(atom, row, color_enabled)?, quote_mode).into_bytes())
+}
+
+fn quote_for_each_ref_perl_bytes(value: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(value.len().saturating_add(2));
+    output.push(b'\'');
+    for byte in value {
+        if matches!(byte, b'\'' | b'\\') {
+            output.push(b'\\');
+        }
+        output.push(*byte);
+    }
+    output.push(b'\'');
+    output
+}
+
+fn for_each_ref_atom(atom: &str, row: &ForEachRefRow, color_enabled: bool) -> Result<String> {
     match atom {
-        "refname" => Ok(row.ref_name.clone()),
-        "refname:short" => Ok(short_ref_name(&row.ref_name)),
+        "refname" | "refname:" => Ok(row.ref_name.clone()),
+        "refname:short" => Ok(row.ref_name_short.clone()),
         atom if for_each_ref_refname_strip_modifier(atom).is_some() => {
             Ok(strip_for_each_ref_refname(
                 &row.ref_name,
@@ -3112,7 +6675,26 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
         atom if for_each_ref_refname_strip_invalid_value(atom).is_some() => {
             Err(for_each_ref_refname_strip_value_error(atom))
         }
+        "symref" => Ok(row.symref.clone()),
+        "symref:short" => Ok(row.symref_short.clone()),
+        atom if for_each_ref_symref_strip_modifier(atom).is_some() => {
+            Ok(strip_for_each_ref_refname(
+                &row.symref,
+                for_each_ref_symref_strip_modifier(atom).unwrap(),
+            ))
+        }
+        atom if for_each_ref_upstream_strip_modifier(atom).is_some() => {
+            Ok(strip_for_each_ref_refname(
+                &row.upstream_ref,
+                for_each_ref_upstream_strip_modifier(atom).unwrap(),
+            ))
+        }
+        atom if for_each_ref_push_strip_modifier(atom).is_some() => Ok(strip_for_each_ref_refname(
+            &row.push_ref,
+            for_each_ref_push_strip_modifier(atom).unwrap(),
+        )),
         "objectname" => Ok(row.object_id.to_hex()),
+        "*objectname" => Ok(peeled_for_each_ref_row_object_id(row)),
         atom if for_each_ref_objectname_short_len(atom).is_some() => Ok(short_object_id_len(
             &row.object_id,
             for_each_ref_objectname_short_len(atom).unwrap_or(7),
@@ -3121,37 +6703,172 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
             Err(for_each_ref_objectname_short_value_error(atom))
         }
         "HEAD" => Ok(if row.is_head { "*" } else { " " }.to_owned()),
+        atom if atom.starts_with("is-base:") => Ok(if row.is_head
+            && atom.strip_prefix("is-base:") == Some("HEAD")
+        {
+            "(HEAD)"
+        } else {
+            ""
+        }
+        .to_owned()),
+        "color" => Ok(String::new()),
+        atom if atom.starts_with("color:") => {
+            Ok(for_each_ref_color(atom, color_enabled)?.to_owned())
+        }
         "upstream" => Ok(row.upstream_ref.clone()),
         "upstream:short" => Ok(row.upstream_short.clone()),
         "upstream:track" => Ok(row.upstream_track.clone()),
         "upstream:trackshort" => Ok(row.upstream_track_short.clone()),
+        "upstream:remotename" => Ok(row.upstream_remote_name.clone()),
+        "upstream:remoteref" => Ok(row.upstream_remote_ref.clone()),
+        atom if for_each_ref_tracking_atom(atom, "upstream").is_some() => {
+            let (short, no_brackets) = for_each_ref_tracking_atom(atom, "upstream").unwrap();
+            Ok(format_for_each_ref_tracking_atom(
+                if short {
+                    &row.upstream_track_short
+                } else {
+                    &row.upstream_track
+                },
+                no_brackets,
+            ))
+        }
+        "push" => Ok(row.push_ref.clone()),
+        "push:short" => Ok(row.push_short.clone()),
+        "push:track" => Ok(row.push_track.clone()),
+        "push:trackshort" => Ok(row.push_track_short.clone()),
+        "push:remotename" => Ok(row.push_remote_name.clone()),
+        "push:remoteref" => Ok(row.push_remote_ref.clone()),
+        atom if for_each_ref_tracking_atom(atom, "push").is_some() => {
+            let (short, no_brackets) = for_each_ref_tracking_atom(atom, "push").unwrap();
+            Ok(format_for_each_ref_tracking_atom(
+                if short {
+                    &row.push_track_short
+                } else {
+                    &row.push_track
+                },
+                no_brackets,
+            ))
+        }
         "objecttype" => Ok(row.object_kind.as_str().to_owned()),
+        "*objecttype" => Ok(row
+            .peeled_object_kind
+            .map(|kind| kind.as_str().to_owned())
+            .unwrap_or_default()),
         "objectsize" => Ok(row.object_size.unwrap_or_default().to_string()),
+        "objectsize:disk" => Ok(row.object_disk_size.unwrap_or_default().to_string()),
+        "*objectsize:disk" => Ok(row
+            .peeled_object_disk_size
+            .map(|size| size.to_string())
+            .unwrap_or_default()),
+        "deltabase" | "*deltabase" => Ok("0".repeat(row.object_id.hex_len())),
+        "tree" => Ok(row.tree.clone()),
+        atom if for_each_ref_related_object_short_len(atom, "tree").is_some() => {
+            Ok(short_hex_value(
+                &row.tree,
+                for_each_ref_related_object_short_len(atom, "tree").unwrap(),
+            ))
+        }
+        "parent" => Ok(row.parents.clone()),
+        atom if for_each_ref_related_object_short_len(atom, "parent").is_some() => Ok(row
+            .parents
+            .split_whitespace()
+            .map(|parent| {
+                short_hex_value(
+                    parent,
+                    for_each_ref_related_object_short_len(atom, "parent").unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")),
+        "numparent" => Ok(row
+            .num_parents
+            .map(|count| count.to_string())
+            .unwrap_or_default()),
+        "object" => Ok(row.tagged_object.clone()),
+        "type" => Ok(row.tagged_type.clone()),
+        "tag" => Ok(row.tag_name.clone()),
+        "raw" => Ok(String::from_utf8_lossy(&row.raw).into_owned()),
+        "raw:size" => Ok(row.object_size.unwrap_or_default().to_string()),
+        "*raw" => Ok(String::from_utf8_lossy(&row.peeled_raw).into_owned()),
+        "*raw:size" => Ok(row
+            .peeled_object_id
+            .as_ref()
+            .map(|_| row.peeled_raw.len().to_string())
+            .unwrap_or_default()),
         "subject" => Ok(row.subject.clone()),
+        "subject:sanitize" => Ok(sanitize_for_each_ref_subject(&row.subject)),
         "contents:subject" => Ok(row.subject.clone()),
+        "body" | "contents:body" => Ok(row.body.clone()),
+        "contents:signature" => Ok(row.contents_signature.clone()),
+        "contents" => Ok(row.contents.clone()),
+        "contents:size" => Ok(row.contents.len().to_string()),
+        "signature:grade" => Ok(row.signature_grade.clone()),
+        "signature:key" => Ok(row.signature_key.clone()),
+        "signature:signer" => Ok(row.signature_signer.clone()),
+        "signature:fingerprint" => Ok(row.signature_fingerprint.clone()),
+        "signature:primarykeyfingerprint" => Ok(row.signature_primary_key_fingerprint.clone()),
+        atom if atom == "trailers" || atom.starts_with("trailers:") => {
+            let arguments = atom.strip_prefix("trailers:").unwrap_or("");
+            mail_commands::format_for_each_ref_trailers(&row.contents, arguments)
+        }
+        atom if atom == "contents:trailers" || atom.starts_with("contents:trailers:") => {
+            let arguments = atom.strip_prefix("contents:trailers:").unwrap_or("");
+            mail_commands::format_for_each_ref_trailers(&row.contents, arguments)
+        }
+        atom if atom == "describe"
+            || atom == "*describe"
+            || atom.starts_with("describe:")
+            || atom.starts_with("*describe:") =>
+        {
+            Ok(row.descriptions.get(atom).cloned().unwrap_or_default())
+        }
+        "author" => Ok(row.author.clone()),
         "authorname" => Ok(row.author_name.clone()),
-        "authoremail" => {
-            if row.author_email.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(format!("<{}>", row.author_email))
-            }
+        atom if atom.starts_with("authorname:") => format_for_each_ref_name_atom(
+            atom,
+            "authorname",
+            &row.author_name,
+            &row.mapped_author_name,
+        ),
+        atom if atom == "authoremail" || atom.starts_with("authoremail:") => {
+            format_for_each_ref_email_atom(
+                atom,
+                "authoremail",
+                &row.author_email,
+                &row.mapped_author_email,
+            )
         }
+        "tagger" => Ok(row.tagger.clone()),
         "taggername" => Ok(row.tagger_name.clone()),
-        "taggeremail" => {
-            if row.tagger_email.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(format!("<{}>", row.tagger_email))
-            }
+        atom if atom.starts_with("taggername:") => format_for_each_ref_name_atom(
+            atom,
+            "taggername",
+            &row.tagger_name,
+            &row.mapped_tagger_name,
+        ),
+        atom if atom == "taggeremail" || atom.starts_with("taggeremail:") => {
+            format_for_each_ref_email_atom(
+                atom,
+                "taggeremail",
+                &row.tagger_email,
+                &row.mapped_tagger_email,
+            )
         }
+        "committer" => Ok(row.committer.clone()),
         "committername" => Ok(row.committer_name.clone()),
-        "committeremail" => {
-            if row.committer_email.is_empty() {
-                Ok(String::new())
-            } else {
-                Ok(format!("<{}>", row.committer_email))
-            }
+        atom if atom.starts_with("committername:") => format_for_each_ref_name_atom(
+            atom,
+            "committername",
+            &row.committer_name,
+            &row.mapped_committer_name,
+        ),
+        atom if atom == "committeremail" || atom.starts_with("committeremail:") => {
+            format_for_each_ref_email_atom(
+                atom,
+                "committeremail",
+                &row.committer_email,
+                &row.mapped_committer_email,
+            )
         }
         atom if for_each_ref_date_atom_base(atom) == Some("taggerdate") => {
             format_for_each_ref_date_atom(
@@ -3189,30 +6906,198 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
     }
 }
 
-fn for_each_ref_quote(value: &str, mode: ForEachRefQuoteMode) -> String {
-    match mode {
-        ForEachRefQuoteMode::None => value.to_owned(),
-        ForEachRefQuoteMode::ShellLike => format!("'{}'", value.replace('\'', "'\\''")),
-        ForEachRefQuoteMode::Tcl => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+fn for_each_ref_related_object_short_len(atom: &str, name: &str) -> Option<usize> {
+    if atom == format!("{name}:short") {
+        return Some(7);
+    }
+    atom.strip_prefix(&format!("{name}:short="))?
+        .parse::<usize>()
+        .ok()
+        .filter(|len| *len > 0)
+}
+
+fn short_hex_value(value: &str, len: usize) -> String {
+    value[..value.len().min(len)].to_owned()
+}
+
+fn sanitize_for_each_ref_subject(subject: &str) -> String {
+    let mut sanitized = String::new();
+    let mut separator = false;
+    for ch in subject.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_') {
+            if separator && !sanitized.is_empty() {
+                sanitized.push('-');
+            }
+            separator = false;
+            sanitized.push(ch);
+        } else {
+            separator = true;
+        }
+    }
+    sanitized
+}
+
+fn format_for_each_ref_name_atom(
+    atom: &str,
+    base: &str,
+    name: &str,
+    mapped_name: &str,
+) -> Result<String> {
+    match atom.strip_prefix(&format!("{base}:")) {
+        Some("mailmap") => Ok(mapped_name.to_owned()),
+        Some(argument) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unrecognized %({base}) argument: {argument}"),
+        }),
+        None => Ok(name.to_owned()),
     }
 }
 
+fn format_for_each_ref_email_atom(
+    atom: &str,
+    base: &str,
+    email: &str,
+    mapped_email: &str,
+) -> Result<String> {
+    if email.is_empty() {
+        return Ok(String::new());
+    }
+    let Some(arguments) = atom.strip_prefix(&format!("{base}:")) else {
+        return Ok(format!("<{email}>"));
+    };
+    let mut trim = false;
+    let mut localpart = false;
+    let mut use_mailmap = false;
+    let mut remaining = arguments;
+    while !remaining.is_empty() {
+        let (argument, rest) = ["mailmap", "localpart", "trim"]
+            .into_iter()
+            .find_map(|argument| {
+                remaining
+                    .strip_prefix(argument)
+                    .map(|rest| (argument, rest))
+            })
+            .ok_or_else(|| for_each_ref_email_argument_error(base, remaining))?;
+        match argument {
+            "mailmap" => use_mailmap = true,
+            "trim" => trim = true,
+            "localpart" => localpart = true,
+            _ => unreachable!(),
+        }
+        if rest.is_empty() {
+            break;
+        }
+        remaining = rest
+            .strip_prefix(',')
+            .ok_or_else(|| for_each_ref_email_argument_error(base, rest))?;
+        if remaining.is_empty() {
+            return Err(for_each_ref_email_argument_error(base, remaining));
+        }
+    }
+    let email = if use_mailmap { mapped_email } else { email };
+    let value = if localpart {
+        email
+            .split_once('@')
+            .map(|(local, _)| local)
+            .unwrap_or(email)
+    } else {
+        email
+    };
+    if trim || localpart {
+        Ok(value.to_owned())
+    } else {
+        Ok(format!("<{value}>"))
+    }
+}
+
+fn for_each_ref_email_argument_error(base: &str, argument: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("unrecognized %({base}) argument: {argument}"),
+    }
+}
+
+fn peeled_for_each_ref_row_object_id(row: &ForEachRefRow) -> String {
+    row.peeled_object_id
+        .as_ref()
+        .map(ObjectId::to_hex)
+        .unwrap_or_default()
+}
+
+fn for_each_ref_quote(value: &str, mode: ForEachRefQuoteMode) -> String {
+    match mode {
+        ForEachRefQuoteMode::None => value.to_owned(),
+        ForEachRefQuoteMode::Shell | ForEachRefQuoteMode::Python | ForEachRefQuoteMode::Perl => {
+            format!("'{}'", value.replace('\'', "'\\''"))
+        }
+        ForEachRefQuoteMode::Tcl => {
+            format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+        }
+    }
+}
+
+fn for_each_ref_color(atom: &str, enabled: bool) -> Result<&'static str> {
+    let value = atom.strip_prefix("color:").unwrap_or_default();
+    let escape = match value {
+        "reset" => "\x1b[m",
+        "black" => "\x1b[30m",
+        "red" => "\x1b[31m",
+        "green" => "\x1b[32m",
+        "yellow" => "\x1b[33m",
+        "blue" => "\x1b[34m",
+        "magenta" => "\x1b[35m",
+        "cyan" => "\x1b[36m",
+        "white" => "\x1b[37m",
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unrecognized color: {value}"),
+            });
+        }
+    };
+    Ok(if enabled { escape } else { "" })
+}
+
 fn for_each_ref_refname_strip_modifier(atom: &str) -> Option<RefNameStripModifier> {
+    for_each_ref_named_strip_modifier(atom, "refname")
+}
+
+fn for_each_ref_named_strip_modifier(atom: &str, name: &str) -> Option<RefNameStripModifier> {
+    let lstrip = format!("{name}:lstrip=");
+    let rstrip = format!("{name}:rstrip=");
+    let strip = format!("{name}:strip=");
     let (mode, value) = atom
-        .strip_prefix("refname:lstrip=")
+        .strip_prefix(&lstrip)
         .map(|value| (RefNameStripMode::Lstrip, value))
         .or_else(|| {
-            atom.strip_prefix("refname:rstrip=")
+            atom.strip_prefix(&rstrip)
                 .map(|value| (RefNameStripMode::Rstrip, value))
+        })
+        .or_else(|| {
+            atom.strip_prefix(&strip)
+                .map(|value| (RefNameStripMode::Lstrip, value))
         })?;
     let count = value.parse::<i32>().ok()?;
     Some(RefNameStripModifier { mode, count })
 }
 
+fn for_each_ref_symref_strip_modifier(atom: &str) -> Option<RefNameStripModifier> {
+    for_each_ref_named_strip_modifier(atom, "symref")
+}
+
+fn for_each_ref_upstream_strip_modifier(atom: &str) -> Option<RefNameStripModifier> {
+    for_each_ref_named_strip_modifier(atom, "upstream")
+}
+
+fn for_each_ref_push_strip_modifier(atom: &str) -> Option<RefNameStripModifier> {
+    for_each_ref_named_strip_modifier(atom, "push")
+}
+
 fn for_each_ref_refname_strip_invalid_value(atom: &str) -> Option<&str> {
     let value = atom
         .strip_prefix("refname:lstrip=")
-        .or_else(|| atom.strip_prefix("refname:rstrip="))?;
+        .or_else(|| atom.strip_prefix("refname:rstrip="))
+        .or_else(|| atom.strip_prefix("refname:strip="))?;
     value.parse::<i32>().err()?;
     Some(value)
 }
@@ -3308,23 +7193,63 @@ fn format_for_each_ref_date_atom(
         .split_once(':')
         .map(|(_, mode)| mode)
         .unwrap_or("default");
+    if let Some(format) = mode.strip_prefix("format-local:") {
+        return format_for_each_ref_local_date(timestamp, format, true);
+    }
+    if let Some(format) = mode.strip_prefix("format:") {
+        return format_for_each_ref_offset_date(timestamp, timezone, format);
+    }
     match mode {
         "default" => {
             format_for_each_ref_offset_date(timestamp, timezone, "%a %b %-d %H:%M:%S %Y %z")
         }
         "unix" => Ok(timestamp.to_string()),
         "raw" => Ok(format!("{timestamp} {timezone}")),
-        "iso" => format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d %H:%M:%S %z"),
+        "iso" | "iso8601" => {
+            format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d %H:%M:%S %z")
+        }
         "iso-strict" => for_each_ref_strict_iso_date(timestamp, timezone),
         "rfc" | "rfc2822" => {
-            format_for_each_ref_offset_date(timestamp, timezone, "%a, %d %b %Y %H:%M:%S %z")
+            format_for_each_ref_offset_date(timestamp, timezone, "%a, %-d %b %Y %H:%M:%S %z")
         }
         "short" => format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d"),
+        "default-local" | "local" => {
+            format_for_each_ref_local_date(timestamp, "%a %b %-d %H:%M:%S %Y", false)
+        }
+        "short-local" => format_for_each_ref_local_date(timestamp, "%Y-%m-%d", false),
+        "iso8601-local" => format_for_each_ref_local_date(timestamp, "%Y-%m-%d %H:%M:%S %z", false),
+        "rfc2822-local" => {
+            format_for_each_ref_local_date(timestamp, "%a, %-d %b %Y %H:%M:%S %z", false)
+        }
+        "raw-local" => {
+            let offset = crate::runtime::local_datetime(timestamp)
+                .map(|date| date.format("%z").to_string())
+                .unwrap_or_else(|| "+0000".to_owned());
+            Ok(format!("{timestamp} {offset}"))
+        }
+        "relative" | "relative-local" => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+                .unwrap_or(timestamp);
+            Ok(history_commands::relative_date_from_timestamps(
+                timestamp, now,
+            ))
+        }
         _ => Err(CliError::Fatal {
             code: 128,
             message: format!("unknown field name: {atom}"),
         }),
     }
+}
+
+fn format_for_each_ref_local_date(timestamp: i64, format: &str, _custom: bool) -> Result<String> {
+    crate::runtime::local_datetime(timestamp)
+        .map(|date| date.format(format).to_string())
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "for-each-ref object timestamp is out of range".into(),
+        })
 }
 
 fn format_for_each_ref_offset_date(timestamp: i64, timezone: &str, format: &str) -> Result<String> {
@@ -3351,7 +7276,18 @@ fn for_each_ref_strict_iso_date(timestamp: i64, timezone: &str) -> Result<String
 #[derive(Default)]
 pub(crate) struct RefObjectMetadata {
     pub(crate) object_size: Option<usize>,
+    pub(crate) raw: Vec<u8>,
+    pub(crate) tree: String,
+    pub(crate) parents: String,
+    pub(crate) num_parents: Option<usize>,
+    pub(crate) tagged_object: String,
+    pub(crate) tagged_type: String,
+    pub(crate) tag_name: String,
     pub(crate) subject: String,
+    pub(crate) body: String,
+    pub(crate) contents: String,
+    pub(crate) contents_signature: String,
+    pub(crate) author: String,
     pub(crate) author_name: String,
     pub(crate) author_email: String,
     pub(crate) author_timestamp: Option<i64>,
@@ -3361,10 +7297,12 @@ pub(crate) struct RefObjectMetadata {
     pub(crate) creator_timezone: Option<String>,
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
+    pub(crate) tagger: String,
     pub(crate) tagger_timestamp: Option<i64>,
     pub(crate) tagger_timezone: Option<String>,
     pub(crate) committer_name: String,
     pub(crate) committer_email: String,
+    pub(crate) committer: String,
     pub(crate) committer_timestamp: Option<i64>,
     pub(crate) committer_timezone: Option<String>,
 }
@@ -3415,7 +7353,20 @@ fn object_ref_metadata_parts(
                 .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
                 object_size: Some(content.len()),
+                raw: content.to_vec(),
+                tree: commit.tree.to_hex(),
+                parents: commit
+                    .parents
+                    .iter()
+                    .map(ObjectId::to_hex)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                num_parents: Some(commit.parents.len()),
                 subject: commit_subject(&commit.message),
+                body: for_each_ref_message_body(&commit.message),
+                contents: String::from_utf8_lossy(&commit.message).into_owned(),
+                contents_signature: for_each_ref_message_signature(&commit.message),
+                author: String::from_utf8_lossy(&commit.author).into_owned(),
                 author_name: signature_name(&commit.author),
                 author_email: signature_email(&commit.author),
                 author_timestamp: author_date.as_ref().map(|(timestamp, _)| *timestamp),
@@ -3427,12 +7378,15 @@ fn object_ref_metadata_parts(
                     .map(|(_, timezone)| timezone.clone()),
                 tagger_name: String::new(),
                 tagger_email: String::new(),
+                tagger: String::new(),
                 tagger_timestamp: None,
                 tagger_timezone: None,
                 committer_name: signature_name(&commit.committer),
                 committer_email: signature_email(&commit.committer),
+                committer: String::from_utf8_lossy(&commit.committer).into_owned(),
                 committer_timestamp: committer_date.as_ref().map(|(timestamp, _)| *timestamp),
                 committer_timezone: committer_date.map(|(_, timezone)| timezone),
+                ..RefObjectMetadata::default()
             })
         }
         GitObjectKind::Tag => {
@@ -3441,7 +7395,14 @@ fn object_ref_metadata_parts(
                 .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
                 object_size: Some(content.len()),
+                raw: content.to_vec(),
+                tagged_object: tag.target.to_hex(),
+                tagged_type: tag.target_kind.as_str().to_owned(),
+                tag_name: String::from_utf8_lossy(&tag.name).into_owned(),
                 subject: tag_subject(&tag.message),
+                body: for_each_ref_message_body(&tag.message),
+                contents: String::from_utf8_lossy(&tag.message).into_owned(),
+                contents_signature: for_each_ref_message_signature(&tag.message),
                 author_name: String::new(),
                 author_email: String::new(),
                 author_timestamp: None,
@@ -3451,16 +7412,19 @@ fn object_ref_metadata_parts(
                 creator_timezone: tagger_date.as_ref().map(|(_, timezone)| timezone.clone()),
                 tagger_name: signature_name(&tag.tagger),
                 tagger_email: signature_email(&tag.tagger),
+                tagger: String::from_utf8_lossy(&tag.tagger).into_owned(),
                 tagger_timestamp: tagger_date.as_ref().map(|(timestamp, _)| *timestamp),
                 tagger_timezone: tagger_date.map(|(_, timezone)| timezone),
                 committer_name: String::new(),
                 committer_email: String::new(),
                 committer_timestamp: None,
                 committer_timezone: None,
+                ..RefObjectMetadata::default()
             })
         }
         GitObjectKind::Tree | GitObjectKind::Blob => Ok(RefObjectMetadata {
             object_size: Some(content.len()),
+            raw: content.to_vec(),
             subject: String::new(),
             author_name: String::new(),
             author_email: String::new(),
@@ -3477,8 +7441,31 @@ fn object_ref_metadata_parts(
             committer_email: String::new(),
             committer_timestamp: None,
             committer_timezone: None,
+            ..RefObjectMetadata::default()
         }),
     }
+}
+
+fn for_each_ref_message_signature(message: &[u8]) -> String {
+    let marker = b"-----BEGIN PGP SIGNATURE-----";
+    let Some(start) = message
+        .windows(marker.len())
+        .position(|window| window == marker)
+    else {
+        return String::new();
+    };
+    String::from_utf8_lossy(&message[start..]).into_owned()
+}
+
+fn for_each_ref_message_body(message: &[u8]) -> String {
+    let text = String::from_utf8_lossy(message);
+    let Some((_, body)) = text
+        .split_once("\r\n\r\n")
+        .or_else(|| text.split_once("\n\n"))
+    else {
+        return String::new();
+    };
+    body.to_owned()
 }
 
 pub(crate) fn object_ref_metadata(object: &LooseObject) -> Result<RefObjectMetadata> {
@@ -3896,125 +7883,53 @@ pub(crate) fn commit_patch_id_for_cherry_cached(
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     id: &ObjectId,
 ) -> Result<Option<String>> {
+    commit_patch_id_cached_with_mode(store, commit_cache, tree_cache, id, PatchIdMode::Unstable)
+}
+
+pub(crate) fn commit_patch_id_stable_cached(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    id: &ObjectId,
+) -> Result<Option<String>> {
+    commit_patch_id_cached_with_mode(store, commit_cache, tree_cache, id, PatchIdMode::Stable)
+}
+
+fn commit_patch_id_cached_with_mode(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    id: &ObjectId,
+    mode: PatchIdMode,
+) -> Result<Option<String>> {
     let commit = commit_cache.read_commit(id)?;
     if commit.parents.len() > 1 {
         return Ok(None);
     }
-    let old_index = if let Some(parent) = commit.parents.first() {
-        let parent_commit = commit_cache.read_commit(parent)?;
-        read_commit_tree_index_cached(tree_cache, &parent_commit)?
-    } else {
-        GitIndex::new()
-    };
-    let new_index = read_commit_tree_index_cached(tree_cache, &commit)?;
-    let entries = diff_indexes(&old_index, &new_index)?;
-    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
-    let mut patchlen = 0usize;
-    for entry in entries {
-        let old_entry = find_index_entry(&old_index, &entry.path);
-        let new_entry = find_index_entry(&new_index, &entry.path);
-        patchlen += hash_patch_id_entry(store, &mut hasher, &entry, old_entry, new_entry)?;
-    }
-    if patchlen == 0 {
+    let parent_tree = commit
+        .parents
+        .first()
+        .map(|parent| commit_cache.read_commit(parent))
+        .transpose()?
+        .map(|parent| parent.tree.clone());
+    let repo = find_repo()?;
+    let mut patch = Vec::new();
+    let mut blob_cache = FormatPatchBlobCache::new(store);
+    write_commit_patch_entries_tree_diff_cached(
+        &mut patch,
+        &repo,
+        store,
+        tree_cache,
+        parent_tree.as_ref(),
+        &commit.tree,
+        default_abbrev_len(store)?,
+        &mut blob_cache,
+    )?;
+    let mut patch_ids = patch_id_generate(&patch, mode);
+    let Some((digest, _)) = patch_ids.pop() else {
         return Ok(None);
-    }
-    Ok(Some(hasher.finalize().to_hex()))
-}
-
-fn hash_patch_id_entry(
-    store: &LooseObjectStore,
-    hasher: &mut GitObjectHash,
-    entry: &zmin_git_core::IndexDiffEntry,
-    old_entry: Option<&IndexEntry>,
-    new_entry: Option<&IndexEntry>,
-) -> Result<usize> {
-    let display_path = String::from_utf8_lossy(&entry.path);
-    let mode = new_entry
-        .or(old_entry)
-        .map(|entry| index_mode_octal(entry.mode))
-        .unwrap_or("100644");
-    let mut patchlen = 0usize;
-    patchlen += hash_patch_id_line(
-        hasher,
-        format!("diff --git a/{display_path} b/{display_path}").as_bytes(),
-    );
-    match entry.status {
-        IndexDiffStatus::Added => {
-            patchlen += hash_patch_id_line(hasher, format!("new file mode {mode}").as_bytes());
-        }
-        IndexDiffStatus::Deleted => {
-            patchlen += hash_patch_id_line(hasher, format!("deleted file mode {mode}").as_bytes());
-        }
-        IndexDiffStatus::Modified | IndexDiffStatus::Renamed | IndexDiffStatus::Copied => {}
-    }
-    let old_content = old_entry
-        .map(|entry| read_index_entry_content(store, entry))
-        .transpose()?
-        .unwrap_or_default();
-    let new_content = new_entry
-        .map(|entry| read_index_entry_content(store, entry))
-        .transpose()?
-        .unwrap_or_default();
-    if old_content.is_empty() && new_content.is_empty() {
-        return Ok(patchlen);
-    }
-    if is_binary_content(&old_content) || is_binary_content(&new_content) {
-        return Ok(patchlen);
-    }
-    let old_label = if entry.status == IndexDiffStatus::Added {
-        "/dev/null".to_owned()
-    } else {
-        format!("a/{display_path}")
     };
-    let new_label = if entry.status == IndexDiffStatus::Deleted {
-        "/dev/null".to_owned()
-    } else {
-        format!("b/{display_path}")
-    };
-    patchlen += hash_patch_id_line(hasher, format!("--- {old_label}").as_bytes());
-    patchlen += hash_patch_id_line(hasher, format!("+++ {new_label}").as_bytes());
-    patchlen += hash_patch_id_hunks(hasher, &old_content, &new_content);
-    Ok(patchlen)
-}
-
-fn hash_patch_id_hunks(
-    hasher: &mut GitObjectHash,
-    old_content: &[u8],
-    new_content: &[u8],
-) -> usize {
-    let old_lines = split_diff_lines(old_content);
-    let new_lines = split_diff_lines(new_content);
-    let ops = diff_line_ops(&old_lines, &new_lines);
-    let mut patchlen = 0usize;
-    for (start, end) in unified_hunk_ranges(&ops, 3, 0) {
-        for op in &ops[start..end] {
-            match op {
-                DiffLineOp::Equal(line) => {
-                    patchlen += hash_patch_id_prefixed_line(hasher, b' ', line);
-                }
-                DiffLineOp::Delete(line) => {
-                    patchlen += hash_patch_id_prefixed_line(hasher, b'-', line);
-                }
-                DiffLineOp::Insert(line) => {
-                    patchlen += hash_patch_id_prefixed_line(hasher, b'+', line);
-                }
-            }
-        }
-    }
-    patchlen
-}
-
-fn hash_patch_id_prefixed_line(hasher: &mut GitObjectHash, prefix: u8, line: &[u8]) -> usize {
-    let mut buffer = Vec::with_capacity(line.len() + 1);
-    buffer.push(prefix);
-    buffer.extend_from_slice(line);
-    hash_patch_id_line(hasher, &buffer)
-}
-
-fn hash_patch_id_line(hasher: &mut GitObjectHash, line: &[u8]) -> usize {
-    let normalized = patch_id_normalize_line(line, PatchIdMode::Unstable);
-    hasher.update(&normalized);
-    normalized.len()
+    Ok(Some(encode_hex(&digest)))
 }
 
 pub(crate) fn patch_id(stable: bool, unstable: bool, verbatim: bool) -> Result<()> {
@@ -4757,10 +8672,10 @@ struct BranchOptions {
     no_sort: bool,
     recurse_submodules: bool,
     no_recurse_submodules: bool,
-    contains: Option<String>,
-    no_contains: Option<String>,
-    merged: Option<String>,
-    no_merged: Option<String>,
+    contains: Vec<String>,
+    no_contains: Vec<String>,
+    merged: Vec<String>,
+    no_merged: Vec<String>,
     points_at: Option<String>,
     name: Option<String>,
     start_point: Option<String>,
@@ -4823,31 +8738,42 @@ struct LsTreeRenderOptions<'a> {
     name_only: bool,
     object_only: bool,
     full_name: bool,
+    quote_non_ascii: bool,
     abbrev: Option<usize>,
     format: Option<&'a str>,
 }
 
 fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
-    if options.object_only && (options.name_only || options.name_status) {
+    let output_modes = [
+        options.long,
+        options.name_only,
+        options.name_status,
+        options.object_only,
+    ]
+    .into_iter()
+    .filter(|enabled| *enabled)
+    .count();
+    if output_modes > 1 {
         return Err(CliError::Fatal {
-            code: 128,
-            message:
-                "options '--object-only' and '--name-only/--name-status' cannot be used together"
-                    .into(),
+            code: 129,
+            message: "incompatible output format options".into(),
         });
     }
     if options.format.is_some()
         && (options.long || options.name_only || options.name_status || options.object_only)
     {
         return Err(CliError::Fatal {
-            code: 128,
+            code: 129,
             message:
                 "option '--format' cannot be combined with '--long', '--name-only', '--name-status' or '--object-only'"
                     .into(),
         });
     }
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let tree_id = resolve_treeish_or_invalid_object(&repo, &store, options.treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
     let cwd_prefix = if options.full_tree {
@@ -4861,6 +8787,10 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
         name_only: options.name_only || options.name_status,
         object_only: options.object_only,
         full_name: options.full_name || options.full_tree,
+        quote_non_ascii: read_config_value(&repo, "core.quotePath")?
+            .as_deref()
+            .and_then(parse_git_bool)
+            .unwrap_or(true),
         abbrev: options.abbrev,
         format: options.format,
     };
@@ -4883,7 +8813,17 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
             return Ok(());
         }
     }
-    let effective_paths = ls_tree_effective_paths(&options.paths, &cwd_prefix, options.full_tree)?;
+    let mut effective_paths =
+        ls_tree_effective_paths(&options.paths, &cwd_prefix, options.full_tree)?;
+    effective_paths.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
+    effective_paths.dedup_by(|current, previous| {
+        if current.path != previous.path {
+            return false;
+        }
+        previous.descend_into_tree |= current.descend_into_tree;
+        true
+    });
+    ls_tree_remove_shadowed_prefixes(&mut effective_paths, options.recursive);
     if effective_paths.is_empty() {
         ls_tree_print_entries(
             &store,
@@ -4899,8 +8839,9 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
         return Ok(());
     }
 
+    let mut shown_parent_trees = std::collections::BTreeSet::new();
     for path in effective_paths {
-        if path.is_empty() {
+        if path.path.is_empty() {
             ls_tree_print_entries(
                 &store,
                 &tree_cache,
@@ -4914,19 +8855,52 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
             )?;
             continue;
         }
-        let Some(entry) = find_tree_entry(&store, &tree_id, path.as_bytes())? else {
+        if options.show_trees {
+            ls_tree_print_parent_trees(
+                &store,
+                &tree_id,
+                path.path.as_bytes(),
+                &cwd_prefix,
+                render_options,
+                &mut shown_parent_trees,
+            )?;
+        }
+        let Some(entry) = find_tree_entry(&store, &tree_id, path.path.as_bytes())? else {
             continue;
         };
+        if path.descend_into_tree && entry.mode != TreeMode::Tree {
+            continue;
+        }
+        if path.descend_into_tree && entry.mode == TreeMode::Tree {
+            ls_tree_print_entries(
+                &store,
+                &tree_cache,
+                &entry.id,
+                path.path.into_bytes(),
+                options.recursive,
+                options.show_trees || options.directory_only,
+                options.directory_only,
+                &cwd_prefix,
+                render_options,
+            )?;
+            continue;
+        }
         if options.recursive && entry.mode == TreeMode::Tree {
             if options.show_trees || options.directory_only {
-                ls_tree_print_entry(&store, &entry, path.as_bytes(), &cwd_prefix, render_options)?;
+                ls_tree_print_entry(
+                    &store,
+                    &entry,
+                    path.path.as_bytes(),
+                    &cwd_prefix,
+                    render_options,
+                )?;
             }
             if !options.directory_only {
                 ls_tree_print_entries(
                     &store,
                     &tree_cache,
                     &entry.id,
-                    path.into_bytes(),
+                    path.path.into_bytes(),
                     true,
                     options.show_trees || options.directory_only,
                     options.directory_only,
@@ -4934,9 +8908,75 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
                     render_options,
                 )?;
             }
-        } else if !options.directory_only || entry.mode == TreeMode::Tree {
-            ls_tree_print_entry(&store, &entry, path.as_bytes(), &cwd_prefix, render_options)?;
+        } else if !options.directory_only || ls_tree_is_directory_entry(entry.mode) {
+            ls_tree_print_entry(
+                &store,
+                &entry,
+                path.path.as_bytes(),
+                &cwd_prefix,
+                render_options,
+            )?;
         }
+    }
+    Ok(())
+}
+
+struct LsTreeEffectivePath {
+    path: String,
+    descend_into_tree: bool,
+}
+
+fn ls_tree_remove_shadowed_prefixes(paths: &mut Vec<LsTreeEffectivePath>, recursive: bool) {
+    let shadowed = (0..paths.len())
+        .map(|index| {
+            let shadows_prefix = !paths[index].descend_into_tree
+                && paths[index + 1..].iter().any(|candidate| {
+                    candidate
+                        .path
+                        .strip_prefix(&paths[index].path)
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+                });
+            let covered_by_descending_parent = paths[..index].iter().any(|parent| {
+                if !parent.descend_into_tree {
+                    return false;
+                }
+                paths[index]
+                    .path
+                    .strip_prefix(&parent.path)
+                    .and_then(|suffix| suffix.strip_prefix('/'))
+                    .is_some_and(|suffix| recursive || !suffix.contains('/'))
+            });
+            shadows_prefix || covered_by_descending_parent
+        })
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    paths.retain(|_| {
+        let keep = !shadowed[index];
+        index += 1;
+        keep
+    });
+}
+
+fn ls_tree_print_parent_trees(
+    store: &LooseObjectStore,
+    root_tree_id: &ObjectId,
+    path: &[u8],
+    cwd_prefix: &[u8],
+    render_options: LsTreeRenderOptions<'_>,
+    shown: &mut std::collections::BTreeSet<Vec<u8>>,
+) -> Result<()> {
+    for (separator, _) in path.iter().enumerate().filter(|(_, byte)| **byte == b'/') {
+        let parent_path = &path[..separator];
+        if !shown.insert(parent_path.to_vec()) {
+            continue;
+        }
+        let Some(entry) = find_tree_entry(store, root_tree_id, parent_path)? else {
+            break;
+        };
+        if entry.mode != TreeMode::Tree {
+            break;
+        }
+        ls_tree_print_entry(store, &entry, parent_path, cwd_prefix, render_options)?;
     }
     Ok(())
 }
@@ -4945,29 +8985,69 @@ fn ls_tree_effective_paths(
     paths: &[String],
     cwd_prefix: &[u8],
     full_tree: bool,
-) -> Result<Vec<String>> {
+) -> Result<Vec<LsTreeEffectivePath>> {
     if paths.is_empty() {
         return if cwd_prefix.is_empty() || full_tree {
             Ok(Vec::new())
         } else {
-            Ok(vec![String::from_utf8_lossy(cwd_prefix).into_owned()])
+            Ok(vec![LsTreeEffectivePath {
+                path: String::from_utf8_lossy(cwd_prefix).into_owned(),
+                descend_into_tree: false,
+            }])
         };
     }
 
     paths
         .iter()
         .map(|path| {
-            let normalized = normalize_git_path(path)?;
-            if normalized.is_empty() || cwd_prefix.is_empty() || full_tree {
-                return Ok(normalized);
+            let descend_into_tree = path.ends_with('/') && path.trim_end_matches('/') != ".";
+            let trimmed = path.trim_end_matches('/');
+            if trimmed.is_empty() {
+                return Ok(LsTreeEffectivePath {
+                    path: String::new(),
+                    descend_into_tree: false,
+                });
             }
-            Ok(format!(
-                "{}/{}",
-                String::from_utf8_lossy(cwd_prefix),
-                normalized
-            ))
+            let normalized = normalize_ls_tree_path(trimmed, cwd_prefix, full_tree)?;
+            Ok(LsTreeEffectivePath {
+                path: normalized,
+                descend_into_tree,
+            })
         })
         .collect()
+}
+
+fn normalize_ls_tree_path(path: &str, cwd_prefix: &[u8], full_tree: bool) -> Result<String> {
+    if path.contains('\0') {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "invalid git tree path".into(),
+        });
+    }
+    let mut components = if full_tree {
+        Vec::new()
+    } else {
+        String::from_utf8_lossy(cwd_prefix)
+            .split('/')
+            .filter(|component| !component.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    for component in path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "pathspec is outside repository".into(),
+                    });
+                }
+            }
+            component => components.push(component.to_owned()),
+        }
+    }
+    Ok(components.join("/"))
 }
 
 fn ls_tree_print_entries(
@@ -4994,7 +9074,7 @@ fn ls_tree_print_entries(
         );
     }
     for entry in tree_cache.read_tree(tree_id)?.iter() {
-        if directory_only && entry.mode != TreeMode::Tree {
+        if directory_only && !ls_tree_is_directory_entry(entry.mode) {
             continue;
         }
         let path = tree_entry_path(&prefix, &entry.name);
@@ -5061,20 +9141,22 @@ fn ls_tree_print_entries_recursive(
             if show_trees {
                 ls_tree_print_entry(store, &entry, &path, cwd_prefix, render_options)?;
             }
-            if !directory_only {
-                pending.push(PendingTreePrint {
-                    id: entry.id,
-                    path_len: child_path_len,
-                    entries: None,
-                    next: 0,
-                });
-            }
-        } else if !directory_only {
+            pending.push(PendingTreePrint {
+                id: entry.id,
+                path_len: child_path_len,
+                entries: None,
+                next: 0,
+            });
+        } else if !directory_only || ls_tree_is_directory_entry(entry.mode) {
             ls_tree_print_entry(store, &entry, &path, cwd_prefix, render_options)?;
         }
     }
     path.truncate(initial_path_len);
     Ok(())
+}
+
+fn ls_tree_is_directory_entry(mode: TreeMode) -> bool {
+    matches!(mode, TreeMode::Tree | TreeMode::Gitlink)
 }
 
 fn ls_tree_print_entry(
@@ -5084,7 +9166,10 @@ fn ls_tree_print_entry(
     cwd_prefix: &[u8],
     options: LsTreeRenderOptions<'_>,
 ) -> Result<()> {
-    let display_path = ls_tree_display_path(path, cwd_prefix, options.full_name);
+    let mut display_path = ls_tree_display_path(path, cwd_prefix, options.full_name);
+    if !options.nul_terminated {
+        display_path = quote_git_path(&display_path, options.quote_non_ascii);
+    }
     let record = if let Some(format) = options.format {
         ls_tree_render_format(format, store, entry, &display_path, options.abbrev)?
     } else if options.object_only {
@@ -5117,6 +9202,42 @@ fn ls_tree_print_entry(
     stdout.write_all(&record)?;
     stdout.write_all(&[terminator])?;
     Ok(())
+}
+
+pub(crate) fn quote_git_path(path: &[u8], quote_non_ascii: bool) -> Vec<u8> {
+    let mut quoted = Vec::with_capacity(path.len() + 2);
+    let mut needs_quotes = false;
+    for byte in path {
+        let escape = match *byte {
+            b'\x07' => Some(b"\\a".as_slice()),
+            b'\x08' => Some(b"\\b".as_slice()),
+            b'\t' => Some(b"\\t".as_slice()),
+            b'\n' => Some(b"\\n".as_slice()),
+            b'\x0b' => Some(b"\\v".as_slice()),
+            b'\x0c' => Some(b"\\f".as_slice()),
+            b'\r' => Some(b"\\r".as_slice()),
+            b'"' => Some(b"\\\"".as_slice()),
+            b'\\' => Some(b"\\\\".as_slice()),
+            _ => None,
+        };
+        if let Some(escape) = escape {
+            quoted.extend_from_slice(escape);
+            needs_quotes = true;
+        } else if *byte < 0x20 || *byte == 0x7f || (quote_non_ascii && *byte >= 0x80) {
+            quoted.extend_from_slice(format!("\\{:03o}", byte).as_bytes());
+            needs_quotes = true;
+        } else {
+            quoted.push(*byte);
+        }
+    }
+    if !needs_quotes {
+        return path.to_vec();
+    }
+    let mut output = Vec::with_capacity(quoted.len() + 2);
+    output.push(b'"');
+    output.extend_from_slice(&quoted);
+    output.push(b'"');
+    output
 }
 
 fn ls_tree_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Vec<u8> {
@@ -5301,10 +9422,10 @@ fn branch(options: BranchOptions) -> Result<()> {
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(common_git_dir, GitHashAlgorithm::Sha1);
     validate_branch_autosetuprebase_config(&repo)?;
-    let has_branch_filter = options.contains.is_some()
-        || options.no_contains.is_some()
-        || options.merged.is_some()
-        || options.no_merged.is_some()
+    let has_branch_filter = !options.contains.is_empty()
+        || !options.no_contains.is_empty()
+        || !options.merged.is_empty()
+        || !options.no_merged.is_empty()
         || options.points_at.is_some();
     if options.show_current {
         if options.remotes
@@ -5414,6 +9535,12 @@ fn branch(options: BranchOptions) -> Result<()> {
         return Ok(());
     }
     if options.move_branch || options.force_move || options.copy_branch || options.force_copy {
+        if has_branch_filter {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "branch filters cannot be combined with branch modification".into(),
+            });
+        }
         if (options.move_branch || options.force_move)
             && (options.copy_branch || options.force_copy)
         {
@@ -5452,7 +9579,7 @@ fn branch(options: BranchOptions) -> Result<()> {
         }
         return Ok(());
     }
-    if options.list && (options.delete || options.force_delete) {
+    if (options.list || has_branch_filter) && (options.delete || options.force_delete) {
         return Err(CliError::Fatal {
             code: 129,
             message: "--list cannot be combined with delete".into(),
@@ -5472,7 +9599,7 @@ fn branch(options: BranchOptions) -> Result<()> {
         return branch_delete(&repo, &refs, names, options.force_delete || options.force);
     }
 
-    if options.list {
+    if options.list || has_branch_filter {
         let mut patterns = Vec::new();
         if let Some(name) = &options.name {
             patterns.push(name.clone());
@@ -5480,6 +9607,7 @@ fn branch(options: BranchOptions) -> Result<()> {
         if let Some(start_point) = &options.start_point {
             patterns.push(start_point.clone());
         }
+        patterns.extend(options.extra_args.iter().cloned());
         return branch_list(&repo, &refs, &options, &patterns);
     }
 
@@ -5491,7 +9619,27 @@ fn branch(options: BranchOptions) -> Result<()> {
             });
         }
         let ref_name = branch_ref_name(&name)?;
-        if ref_exists(&refs, &ref_name)? {
+        let branch_exists = match ref_exists(&refs, &ref_name) {
+            Ok(exists) => exists,
+            Err(CliError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::IsADirectory | io::ErrorKind::NotADirectory
+                ) =>
+            {
+                return Err(branch_map_create_ref_error(&refs, &ref_name, error));
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(existing) = branch_refname_conflict_existing(&refs, &ref_name)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "cannot lock ref '{ref_name}': '{existing}' exists; cannot create '{ref_name}'"
+                ),
+            });
+        }
+        if branch_exists {
             if !options.force {
                 return Err(CliError::Fatal {
                     code: 128,
@@ -5550,9 +9698,14 @@ fn branch(options: BranchOptions) -> Result<()> {
                 &ref_name,
                 &id,
                 &format!("branch: Created from {reflog_source}"),
-            )?;
+            )
+            .map_err(|error| match error {
+                CliError::Io(error) => branch_map_create_ref_error(&refs, &ref_name, error),
+                other => other,
+            })?;
         } else {
-            refs.write_ref(&ref_name, &id)?;
+            refs.write_ref(&ref_name, &id)
+                .map_err(|error| branch_map_create_ref_error(&refs, &ref_name, error))?;
         }
         if options.track.is_none() {
             if auto_setup_merge == BranchAutoSetupMerge::Inherit {
@@ -5583,30 +9736,26 @@ fn branch(options: BranchOptions) -> Result<()> {
     branch_list(&repo, &refs, &options, &[])
 }
 
-fn render_git_manual_page(page: &str) -> Result<()> {
-    let man_path = ProcessCommand::new("/usr/bin/git")
-        .arg("--man-path")
-        .output()
-        .map_err(CliError::Io)?;
-    if !man_path.status.success() {
-        return Err(CliError::Fatal {
-            code: man_path.status.code().unwrap_or(1),
-            message: String::from_utf8_lossy(&man_path.stderr).trim().to_owned(),
-        });
-    }
-    let man_path = String::from_utf8_lossy(&man_path.stdout).trim().to_owned();
-    let output = ProcessCommand::new("man")
-        .env("MANPATH", man_path)
-        .arg(page)
-        .output()
-        .map_err(CliError::Io)?;
+pub(crate) fn render_git_manual_page(page: &str) -> Result<()> {
+    let text = match page {
+        "git" => HELP_TOPIC_GIT_TEXT,
+        "giteveryday" => HELP_TOPIC_GITEVERYDAY_TEXT,
+        "gitrevisions" => HELP_TOPIC_GITREVISIONS_TEXT,
+        "gittutorial" => HELP_TOPIC_GITTUTORIAL_TEXT,
+        "gittutorial-2" => HELP_TOPIC_GITTUTORIAL_2_TEXT,
+        "gitworkflows" => HELP_TOPIC_GITWORKFLOWS_TEXT,
+        "git-branch" => HELP_TOPIC_GIT_BRANCH_TEXT,
+        _ => {
+            return Err(CliError::Stderr {
+                code: 1,
+                text: format!("No manual entry for {page}\n"),
+            });
+        }
+    };
     io::stdout()
-        .write_all(&output.stdout)
+        .write_all(text.as_bytes())
         .map_err(CliError::Io)?;
-    io::stderr()
-        .write_all(&output.stderr)
-        .map_err(CliError::Io)?;
-    Err(CliError::Exit(output.status.code().unwrap_or(1)))
+    Err(CliError::Exit(0))
 }
 
 fn branch_short_usage() -> String {
@@ -5723,8 +9872,23 @@ fn branch_list(
     let abbrev_len = branch_list_abbrev_len(repo, options)?;
     let rebase_display = branch_rebase_display(repo, current.as_deref())?;
     let mut entries = Vec::new();
+    if current.is_none()
+        && let Some(display) = rebase_display.clone()
+        && let Ok(id) = head_refs.resolve("HEAD")
+    {
+        entries.push(BranchListEntry {
+            marker: "*",
+            ref_name: None,
+            display,
+            id,
+        });
+    }
     if !options.remotes || options.all {
         refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
+            if !check_ref_format(ref_name, false) {
+                eprintln!("warning: ignoring ref with broken name {ref_name}");
+                return Ok(());
+            }
             if !branch_filter_matches(&commit_cache, id, branch_filter.as_ref())? {
                 return Ok(());
             }
@@ -5752,19 +9916,12 @@ fn branch_list(
             Ok::<(), CliError>(())
         })?;
     }
-    if current.is_none()
-        && let Some(display) = rebase_display
-        && let Ok(id) = head_refs.resolve("HEAD")
-    {
-        entries.push(BranchListEntry {
-            marker: "*",
-            ref_name: None,
-            display,
-            id,
-        });
-    }
     if options.remotes || options.all {
         refs.for_each_resolved_ref("refs/remotes/", |ref_name, id| {
+            if !check_ref_format(ref_name, false) {
+                eprintln!("warning: ignoring ref with broken name {ref_name}");
+                return Ok(());
+            }
             if !branch_filter_matches(&commit_cache, id, branch_filter.as_ref())? {
                 return Ok(());
             }
@@ -5799,7 +9956,9 @@ fn branch_list(
     let name_width = branch_list_name_width(&entries);
     for entry in entries {
         print_branch_list_row(
+            repo,
             entry.marker,
+            entry.ref_name.as_deref(),
             &entry.display,
             &entry.id,
             &commit_cache,
@@ -5841,6 +10000,9 @@ fn apply_branch_list_sort(
         "refname" | "objecttype" => {
             entries.sort_by(|left, right| left.display.cmp(&right.display));
         }
+        "version:refname" | "v:refname" => {
+            entries.sort_by(|left, right| for_each_ref_version_cmp(&left.display, &right.display));
+        }
         "committerdate" => {
             let mut keyed = entries
                 .iter()
@@ -5880,6 +10042,13 @@ fn print_branch_list_format(
     omit_empty: bool,
 ) -> Result<()> {
     let requirements = for_each_ref_requirements(format, &[])?;
+    let symrefs = load_for_each_ref_symrefs(repo, requirements.need_symref)?;
+    let short_names = load_for_each_ref_short_name_context(repo, requirements.need_short_name)?;
+    let mailmap = requirements
+        .need_mailmap
+        .then(|| core_commands::read_mailmap(repo, None, None))
+        .transpose()?
+        .unwrap_or_default();
     let runtime = CliPrimitiveRuntime::new_default(repo);
     for entry in entries {
         let Some(ref_name) = entry.ref_name.as_deref() else {
@@ -5892,6 +10061,9 @@ fn print_branch_list_format(
             &object_id,
             runtime.objects(),
             &requirements,
+            &mailmap,
+            &symrefs,
+            &short_names,
             current,
         )?;
         let rendered = render_for_each_ref_row(format, &row)?;
@@ -5914,6 +10086,15 @@ fn branch_rebase_display(repo: &GitRepo, current: Option<&str>) -> Result<Option
     let rebase_dir = repo.git_dir.join("rebase-merge");
     if !rebase_dir.is_dir() {
         return Ok(None);
+    }
+    if let Ok(head_name) = fs::read_to_string(rebase_dir.join("head-name")) {
+        let head_name = head_name.trim();
+        if head_name.starts_with("refs/heads/") {
+            return Ok(Some(format!(
+                "(no branch, rebasing {})",
+                branch_display_name(head_name)
+            )));
+        }
     }
     if let Some(current) = current {
         return Ok(Some(format!(
@@ -6056,7 +10237,9 @@ fn branch_column_layout(
 }
 
 fn print_branch_list_row(
+    repo: &GitRepo,
     marker: &str,
+    ref_name: Option<&str>,
     display: &str,
     id: &ObjectId,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
@@ -6069,12 +10252,40 @@ fn print_branch_list_row(
         return Ok(());
     }
     let commit = commit_cache.read_commit(id)?;
+    let tracking = ref_name
+        .map(|ref_name| for_each_ref_upstream(repo, ref_name))
+        .transpose()?
+        .map(|upstream| branch_verbose_tracking(&upstream, verbose))
+        .unwrap_or_default();
+    if !tracking.is_empty() {
+        println!(
+            "{marker} {display:<name_width$} {} {tracking} {}",
+            short_object_id_len(id, abbrev_len),
+            branch_commit_subject(&commit.message)
+        );
+        return Ok(());
+    }
     println!(
         "{marker} {display:<name_width$} {} {}",
         short_object_id_len(id, abbrev_len),
         branch_commit_subject(&commit.message)
     );
     Ok(())
+}
+
+fn branch_verbose_tracking(upstream: &ForEachRefUpstream, verbose: u8) -> String {
+    if verbose < 2 || upstream.short_name.is_empty() {
+        return upstream.track.clone();
+    }
+    if upstream.track.is_empty() {
+        return format!("[{}]", upstream.short_name);
+    }
+    let status = upstream
+        .track
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(&upstream.track);
+    format!("[{}: {status}]", upstream.short_name)
 }
 
 fn branch_commit_subject(message: &[u8]) -> String {
@@ -6104,10 +10315,10 @@ fn branch_pattern_matches(ref_name: &str, patterns: &[String], remote: bool) -> 
 
 #[derive(Debug, Clone)]
 struct BranchListFilter {
-    contains: Option<ObjectId>,
-    no_contains: Option<ObjectId>,
-    merged: Option<ObjectId>,
-    no_merged: Option<ObjectId>,
+    contains: Vec<ObjectId>,
+    no_contains: Vec<ObjectId>,
+    merged: Vec<ObjectId>,
+    no_merged: Vec<ObjectId>,
     points_at: Option<ObjectId>,
 }
 
@@ -6116,49 +10327,19 @@ fn branch_list_filter(
     store: &LooseObjectStore,
     options: &BranchOptions,
 ) -> Result<Option<BranchListFilter>> {
-    let contains = options
-        .contains
-        .as_deref()
-        .map(|target| {
-            resolve_commitish(repo, store, target).map_err(|_| CliError::Stderr {
-                code: 129,
-                text: format!("error: malformed object name {target}\n"),
-            })
-        })
-        .transpose()?;
-    let no_contains = options
-        .no_contains
-        .as_deref()
-        .map(|target| {
-            resolve_commitish(repo, store, target).map_err(|_| CliError::Stderr {
-                code: 129,
-                text: format!("error: malformed object name {target}\n"),
-            })
-        })
-        .transpose()?;
-    let merged = options
-        .merged
-        .as_deref()
-        .map(|target| {
-            resolve_commitish(repo, store, target).map_err(|_| branch_merged_filter_error(target))
-        })
-        .transpose()?;
-    let no_merged = options
-        .no_merged
-        .as_deref()
-        .map(|target| {
-            resolve_commitish(repo, store, target).map_err(|_| branch_merged_filter_error(target))
-        })
-        .transpose()?;
+    let contains = branch_contains_filter_targets(repo, store, &options.contains)?;
+    let no_contains = branch_contains_filter_targets(repo, store, &options.no_contains)?;
+    let merged = branch_merged_filter_targets(repo, store, &options.merged)?;
+    let no_merged = branch_merged_filter_targets(repo, store, &options.no_merged)?;
     let points_at = options
         .points_at
         .as_deref()
         .map(|target| resolve_objectish(repo, target))
         .transpose()?;
-    if contains.is_none()
-        && no_contains.is_none()
-        && merged.is_none()
-        && no_merged.is_none()
+    if contains.is_empty()
+        && no_contains.is_empty()
+        && merged.is_empty()
+        && no_merged.is_empty()
         && points_at.is_none()
     {
         return Ok(None);
@@ -6170,6 +10351,35 @@ fn branch_list_filter(
         no_merged,
         points_at,
     }))
+}
+
+fn branch_contains_filter_targets(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    targets: &[String],
+) -> Result<Vec<ObjectId>> {
+    targets
+        .iter()
+        .map(|target| {
+            resolve_commitish(repo, store, target).map_err(|_| CliError::Stderr {
+                code: 129,
+                text: format!("error: malformed object name {target}\n"),
+            })
+        })
+        .collect()
+}
+
+fn branch_merged_filter_targets(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    targets: &[String],
+) -> Result<Vec<ObjectId>> {
+    targets
+        .iter()
+        .map(|target| {
+            resolve_commitish(repo, store, target).map_err(|_| branch_merged_filter_error(target))
+        })
+        .collect()
 }
 
 fn branch_merged_filter_error(target: &str) -> CliError {
@@ -6189,25 +10399,39 @@ fn branch_filter_matches(
     let Some(filter) = filter else {
         return Ok(true);
     };
-    if let Some(target) = &filter.contains
-        && !is_ancestor_commit_cached(commit_cache, target, branch_id)?
-    {
-        return Ok(false);
+    if !filter.contains.is_empty() {
+        let mut matched = false;
+        for target in &filter.contains {
+            if is_ancestor_commit_cached(commit_cache, target, branch_id)? {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return Ok(false);
+        }
     }
-    if let Some(target) = &filter.no_contains
-        && is_ancestor_commit_cached(commit_cache, target, branch_id)?
-    {
-        return Ok(false);
+    for target in &filter.no_contains {
+        if is_ancestor_commit_cached(commit_cache, target, branch_id)? {
+            return Ok(false);
+        }
     }
-    if let Some(target) = &filter.merged
-        && !is_ancestor_commit_cached(commit_cache, branch_id, target)?
-    {
-        return Ok(false);
+    if !filter.merged.is_empty() {
+        let mut matched = false;
+        for target in &filter.merged {
+            if is_ancestor_commit_cached(commit_cache, branch_id, target)? {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return Ok(false);
+        }
     }
-    if let Some(target) = &filter.no_merged
-        && is_ancestor_commit_cached(commit_cache, branch_id, target)?
-    {
-        return Ok(false);
+    for target in &filter.no_merged {
+        if is_ancestor_commit_cached(commit_cache, branch_id, target)? {
+            return Ok(false);
+        }
     }
     if let Some(target) = &filter.points_at
         && branch_id != target
@@ -6250,17 +10474,25 @@ fn branch_delete(
     let commit_cache = store.as_ref().map(CommitObjectCache::new);
 
     for name in names {
-        let ref_name = branch_ref_name(&name)?;
+        let name = resolve_previous_checkout_name(repo, &name)?.unwrap_or(name);
+        let ref_name = existing_branch_ref_name(&name)?;
+        let display_name = branch_display_name(&ref_name);
         if current.as_deref() == Some(ref_name.as_str()) {
+            let current_display_path =
+                if repo.git_dir.join("commondir").is_file() || repo.root.join(".git").is_file() {
+                    repo.git_dir.as_path()
+                } else {
+                    repo.root.as_path()
+                };
             errors.push_str(&format!(
-                "error: cannot delete branch '{name}' used by worktree at '{}'\n",
-                repo.root.display()
+                "error: cannot delete branch '{display_name}' used by worktree at '{}'\n",
+                current_display_path.display()
             ));
             continue;
         }
         if let Some(path) = branch_checked_out_any_worktree(repo, &ref_name)? {
             errors.push_str(&format!(
-                "error: cannot delete branch '{name}' used by worktree at '{}'\n",
+                "error: cannot delete branch '{display_name}' used by worktree at '{}'\n",
                 path.display()
             ));
             continue;
@@ -6270,7 +10502,7 @@ fn branch_delete(
             Ok(id) => Some(id),
             Err(_) if raw_symbolic_target.is_some() => None,
             Err(_) => {
-                errors.push_str(&format!("error: branch '{name}' not found\n"));
+                errors.push_str(&format!("error: branch '{display_name}' not found\n"));
                 continue;
             }
         };
@@ -6282,32 +10514,43 @@ fn branch_delete(
             Err(error) => return Err(CliError::Io(error)),
         };
         if let (Some(commit_cache), Some(branch_id)) = (commit_cache.as_ref(), branch_id.as_ref()) {
-            let safety_id =
-                branch_delete_upstream_id(repo, refs, &name)?.or_else(|| head_id.as_ref().cloned());
+            let safety_id = branch_delete_upstream_id(repo, refs, &display_name)?
+                .or_else(|| head_id.as_ref().cloned());
             let Some(safety_id) = safety_id else {
                 errors.push_str(&format!(
-                    "error: The branch '{name}' is not fully merged.\n\
-                     If you are sure you want to delete it, run 'git branch -D {name}'.\n"
+                    "error: The branch '{display_name}' is not fully merged.\n\
+                     If you are sure you want to delete it, run 'git branch -D {display_name}'.\n"
                 ));
                 continue;
             };
             if !is_ancestor_commit_cached(commit_cache, &branch_id, &safety_id)? {
                 errors.push_str(&format!(
-                    "error: The branch '{name}' is not fully merged.\n\
-                     If you are sure you want to delete it, run 'git branch -D {name}'.\n"
+                    "error: The branch '{display_name}' is not fully merged.\n\
+                     If you are sure you want to delete it, run 'git branch -D {display_name}'.\n"
                 ));
                 continue;
             }
         }
-        refs.delete_ref(&ref_name)?;
-        remove_reflog(repo, &ref_name)?;
-        remove_branch_upstream_config(repo, &name)?;
-        if let Some(target) = delete_display_target {
-            println!("Deleted branch {name} (was {target}).");
-        } else if let Some(id) = branch_id.as_ref() {
-            println!("Deleted branch {name} (was {}).", short_object_id(id));
+        if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+            refs.delete_reftable_ref_with_log(&ref_name)?;
         } else {
-            println!("Deleted branch {name}.");
+            refs.delete_ref(&ref_name)?;
+            remove_reflog(repo, &ref_name)?;
+        }
+        remove_branch_upstream_config(repo, &display_name)?;
+        if let Some(target) = delete_display_target {
+            println!("Deleted branch {display_name} (was {target}).");
+        } else if let Some(id) = branch_id.as_ref() {
+            if check_ref_format(&ref_name, false) {
+                println!(
+                    "Deleted branch {display_name} (was {}).",
+                    short_object_id(id)
+                );
+            } else {
+                println!("Deleted branch {display_name} (was broken).");
+            }
+        } else {
+            println!("Deleted branch {display_name}.");
         }
     }
 
@@ -6422,7 +10665,7 @@ fn branch_rename(
             });
         }
     };
-    let old_ref = branch_ref_name(&old_name)?;
+    let old_ref = branch_rename_source_ref_name(&old_name)?;
     let new_ref = branch_ref_name_rename_target(&new_name)?;
     if old_ref == new_ref {
         return Ok(());
@@ -6481,9 +10724,9 @@ fn branch_rename(
     };
     if nested_under_old || replaces_old_parent {
         refs.delete_ref(&old_ref)?;
-        refs.write_ref(&new_ref, &id)?;
+        branch_write_renamed_ref(refs, &new_ref, &id, "rename")?;
     } else {
-        refs.write_ref(&new_ref, &id)?;
+        branch_write_renamed_ref(refs, &new_ref, &id, "rename")?;
         refs.delete_ref(&old_ref)?;
     }
     if was_current {
@@ -6494,6 +10737,24 @@ fn branch_rename(
     append_branch_rename_reflog(repo, &new_ref, &old_ref, &new_ref, &id, was_current)?;
     rename_branch_config(repo, &old_name, &new_name)?;
     Ok(())
+}
+
+fn branch_write_renamed_ref(
+    refs: &RefStore,
+    ref_name: &str,
+    id: &ObjectId,
+    operation: &str,
+) -> Result<()> {
+    refs.write_ref(ref_name, id).map_err(|error| {
+        if error.kind() == io::ErrorKind::AlreadyExists {
+            CliError::Stderr {
+                code: 128,
+                text: format!("error: {error}\nfatal: branch {operation} failed\n"),
+            }
+        } else {
+            CliError::Io(error)
+        }
+    })
 }
 
 fn branch_ref_name_rename_target(name: &str) -> Result<String> {
@@ -6507,6 +10768,31 @@ fn branch_ref_name_rename_target(name: &str) -> Result<String> {
         },
         other => other,
     })
+}
+
+fn branch_rename_source_ref_name(name: &str) -> Result<String> {
+    if name == "HEAD" {
+        Ok("refs/heads/HEAD".to_owned())
+    } else {
+        branch_ref_name(name)
+    }
+}
+
+fn existing_branch_ref_name(name: &str) -> Result<String> {
+    let ref_name = if name.starts_with("refs/heads/") {
+        name.to_owned()
+    } else if name.starts_with("refs/") || name.is_empty() {
+        return Err(invalid_branch_name_error(name));
+    } else {
+        format!("refs/heads/{name}")
+    };
+    if !ref_name
+        .split('/')
+        .any(|component| component.is_empty() || component == "." || component == "..")
+    {
+        return Ok(ref_name);
+    }
+    Err(invalid_branch_name_error(name))
 }
 
 fn append_branch_rename_reflog(
@@ -6536,6 +10822,72 @@ fn branch_destination_conflicts(refs: &RefStore, ref_name: &str) -> Result<bool>
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(CliError::Io(error)),
     }
+}
+
+fn branch_refname_conflict_existing(refs: &RefStore, ref_name: &str) -> Result<Option<String>> {
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let nested_prefix = format!("{ref_name}/");
+        let mut conflict = None;
+        refs.for_each_ref_name("refs/", |existing| {
+            if conflict.is_none()
+                && existing != ref_name
+                && (ref_name.starts_with(&format!("{existing}/"))
+                    || existing.starts_with(&nested_prefix))
+            {
+                conflict = Some(existing.to_owned());
+            }
+            Ok::<(), CliError>(())
+        })?;
+        return Ok(conflict);
+    }
+    let mut current_path = refs.git_dir().to_path_buf();
+    let parts = ref_name.split('/').collect::<Vec<_>>();
+    let mut current_name = String::new();
+    for (index, part) in parts[..parts.len().saturating_sub(1)].iter().enumerate() {
+        current_path.push(part);
+        if current_name.is_empty() {
+            current_name.push_str(part);
+        } else {
+            current_name.push('/');
+            current_name.push_str(part);
+        }
+        match fs::symlink_metadata(&current_path) {
+            Ok(metadata) if !metadata.file_type().is_dir() => return Ok(Some(current_name)),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if index >= 2 && ref_exists(refs, &current_name)? {
+                    return Ok(Some(current_name));
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    let nested_prefix = format!("{ref_name}/");
+    let mut conflict = None;
+    refs.for_each_ref_name("refs/", |existing| {
+        if conflict.is_none() && existing.starts_with(&nested_prefix) {
+            conflict = Some(existing.to_owned());
+        }
+        Ok::<(), CliError>(())
+    })?;
+    Ok(conflict)
+}
+
+fn branch_map_create_ref_error(refs: &RefStore, ref_name: &str, error: io::Error) -> CliError {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::IsADirectory | io::ErrorKind::NotADirectory
+    ) && let Ok(Some(existing)) = branch_refname_conflict_existing(refs, ref_name)
+    {
+        return CliError::Fatal {
+            code: 128,
+            message: format!(
+                "cannot lock ref '{ref_name}': '{existing}' exists; cannot create '{ref_name}'"
+            ),
+        };
+    }
+    CliError::Io(error)
 }
 
 fn branch_namespace_has_refs_other_than(
@@ -6661,8 +11013,25 @@ fn ref_name_is_parent_of(parent: &str, child: &str) -> bool {
 }
 
 fn rename_reflog(repo: &GitRepo, old_name: &str, new_name: &str) -> Result<()> {
+    let refs = update_ref_command_ref_store(repo, old_name)?;
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        return refs
+            .copy_reftable_log(old_name, new_name, true)
+            .map_err(CliError::Io);
+    }
     let old_path = repo.git_dir.join("logs").join(old_name);
     let new_path = repo.git_dir.join("logs").join(new_name);
+    if fs::symlink_metadata(&old_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "error: reflog for {old_name} is a symlink\nfatal: branch rename failed\n"
+            ),
+        });
+    }
     let contents = match fs::read(&old_path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -6678,6 +11047,12 @@ fn rename_reflog(repo: &GitRepo, old_name: &str, new_name: &str) -> Result<()> {
 }
 
 fn copy_reflog(repo: &GitRepo, old_name: &str, new_name: &str) -> Result<()> {
+    let refs = update_ref_command_ref_store(repo, old_name)?;
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        return refs
+            .copy_reftable_log(old_name, new_name, false)
+            .map_err(CliError::Io);
+    }
     let old_path = repo.git_dir.join("logs").join(old_name);
     let new_path = repo.git_dir.join("logs").join(new_name);
     let contents = match fs::read(&old_path) {
@@ -6760,8 +11135,15 @@ fn branch_copy(
             message: format!("a branch named '{new_name}' already exists"),
         });
     }
-    refs.write_ref(&new_ref, &id)?;
+    branch_write_renamed_ref(refs, &new_ref, &id, "copy")?;
     copy_reflog(repo, &old_ref, &new_ref)?;
+    append_reflog_if_identity_available(
+        repo,
+        &new_ref,
+        &id,
+        &id,
+        &format!("Branch: copied {old_ref} to {new_ref}"),
+    )?;
     copy_branch_config(repo, &old_name, &new_name)?;
     Ok(())
 }
@@ -7248,7 +11630,7 @@ fn branch_missing_upstream_error(upstream: &str) -> String {
          hint: If you are planning to push out a new local branch that\n\
          hint: will track its remote counterpart, you may want to use\n\
          hint: \"git push -u\" to set the upstream config as you push.\n\
-         hint: Disable this message with \"git config set advice.setUpstreamFailure false\"\n"
+         hint: Disable this message with \"git config advice.setUpstreamFailure false\"\n"
     )
 }
 
@@ -7259,7 +11641,8 @@ fn tag(options: TagOptions) -> Result<()> {
     let _no_color = options.no_color;
     let signing_key = tag_signing_key(&options);
     let repo = find_repo()?;
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     let has_list_filter = options.contains.is_some()
         || options.no_contains.is_some()
         || options.merged.is_some()
@@ -7349,7 +11732,7 @@ fn tag(options: TagOptions) -> Result<()> {
                 message: "-a/-m/-F cannot be combined with tag listing".into(),
             });
         }
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
         let commit_cache = CommitObjectCache::new(&store);
         let filter = tag_list_filter(&repo, &store, &options)?;
         let patterns = options.args;
@@ -7368,10 +11751,29 @@ fn tag(options: TagOptions) -> Result<()> {
                 let metadata = reference_commands::object_ref_metadata(&object)?;
                 rows.push(reference_commands::ForEachRefRow {
                     ref_name: ref_name.to_owned(),
+                    ref_name_short: short_ref_name(ref_name),
+                    symref: String::new(),
+                    symref_short: String::new(),
                     object_id: object_id.clone(),
+                    peeled_object_id: reference_commands::peel_show_ref_tag(&store, &object_id)?,
+                    peeled_object_kind: None,
+                    peeled_object_disk_size: None,
                     object_kind: object.kind,
                     object_size: metadata.object_size,
+                    object_disk_size: None,
+                    raw: metadata.raw,
+                    peeled_raw: Vec::new(),
+                    tree: metadata.tree,
+                    parents: metadata.parents,
+                    num_parents: metadata.num_parents,
+                    tagged_object: metadata.tagged_object,
+                    tagged_type: metadata.tagged_type,
+                    tag_name: metadata.tag_name,
                     subject: metadata.subject,
+                    body: metadata.body,
+                    contents: metadata.contents,
+                    contents_signature: metadata.contents_signature,
+                    author: metadata.author,
                     author_name: metadata.author_name,
                     author_email: metadata.author_email,
                     author_timestamp: metadata.author_timestamp,
@@ -7381,10 +11783,18 @@ fn tag(options: TagOptions) -> Result<()> {
                     creator_timezone: metadata.creator_timezone,
                     tagger_name: metadata.tagger_name,
                     tagger_email: metadata.tagger_email,
+                    tagger: metadata.tagger,
                     tagger_timestamp: metadata.tagger_timestamp,
                     tagger_timezone: metadata.tagger_timezone,
                     committer_name: metadata.committer_name,
                     committer_email: metadata.committer_email,
+                    committer: metadata.committer,
+                    mapped_author_name: String::new(),
+                    mapped_author_email: String::new(),
+                    mapped_tagger_name: String::new(),
+                    mapped_tagger_email: String::new(),
+                    mapped_committer_name: String::new(),
+                    mapped_committer_email: String::new(),
                     committer_timestamp: metadata.committer_timestamp,
                     committer_timezone: metadata.committer_timezone,
                     is_head: false,
@@ -7392,6 +11802,20 @@ fn tag(options: TagOptions) -> Result<()> {
                     upstream_short: String::new(),
                     upstream_track: String::new(),
                     upstream_track_short: String::new(),
+                    upstream_remote_name: String::new(),
+                    upstream_remote_ref: String::new(),
+                    push_ref: String::new(),
+                    push_short: String::new(),
+                    push_track: String::new(),
+                    push_track_short: String::new(),
+                    push_remote_name: String::new(),
+                    push_remote_ref: String::new(),
+                    descriptions: BTreeMap::new(),
+                    signature_grade: String::new(),
+                    signature_key: String::new(),
+                    signature_signer: String::new(),
+                    signature_fingerprint: String::new(),
+                    signature_primary_key_fingerprint: String::new(),
                 });
             }
             Ok::<(), CliError>(())
@@ -7446,7 +11870,7 @@ fn tag(options: TagOptions) -> Result<()> {
         if options.messages.is_empty() && options.message_files.is_empty() && !options.edit {
             return Err(editor_required_message_error());
         }
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
         let target_object = store.read_object(&id)?;
         let tagger = signature_from_identity(&repo, "GIT_COMMITTER")?;
         let mut message = tag_message_content(
@@ -7586,11 +12010,7 @@ fn tag_message_content(
     Ok(message)
 }
 
-fn tag_gpg_signature(
-    repo: &GitRepo,
-    payload: &[u8],
-    signing_key: Option<&str>,
-) -> Result<Vec<u8>> {
+fn tag_gpg_signature(repo: &GitRepo, payload: &[u8], signing_key: Option<&str>) -> Result<Vec<u8>> {
     let program = read_config_value(repo, "gpg.program")?.unwrap_or_else(|| "gpg".to_owned());
     let configured_signing_key = if signing_key.is_none() {
         read_config_value(repo, "user.signingkey")?
@@ -7659,15 +12079,17 @@ fn tag_message_preview_lines(
     let object = store.read_object(object_id)?;
     let bytes = match object.kind {
         GitObjectKind::Tag => decode_tag(GitHashAlgorithm::Sha1, &object.content)?.message,
-        GitObjectKind::Commit => {
-            decode_commit(GitHashAlgorithm::Sha1, &object.content)?.message
-        }
+        GitObjectKind::Commit => decode_commit(GitHashAlgorithm::Sha1, &object.content)?.message,
         _ => return Ok(Vec::new()),
     };
     Ok(bytes
         .split(|byte| *byte == b'\n')
         .take(message_lines)
-        .map(|line| String::from_utf8_lossy(line).trim_end_matches('\r').to_owned())
+        .map(|line| {
+            String::from_utf8_lossy(line)
+                .trim_end_matches('\r')
+                .to_owned()
+        })
         .collect())
 }
 
@@ -7975,19 +12397,25 @@ pub(crate) fn branch_command(
     no_sort: bool,
     recurse_submodules: bool,
     no_recurse_submodules: bool,
-    contains: Option<String>,
-    no_contains: Option<String>,
-    merged: Option<String>,
-    no_merged: Option<String>,
+    contains: Vec<String>,
+    no_contains: Vec<String>,
+    merged: Vec<String>,
+    no_merged: Vec<String>,
     points_at: Option<String>,
     name: Option<String>,
     start_point: Option<String>,
     extra_args: Vec<String>,
     raw_args: &[String],
 ) -> Result<()> {
+    let long_help = raw_args.iter().any(|arg| arg == "--help")
+        || (help && !raw_args.iter().any(|arg| arg == "-h"));
+    let contains = branch_filter_values(raw_args, "--contains", contains);
+    let no_contains = branch_filter_values(raw_args, "--no-contains", no_contains);
+    let merged = branch_filter_values(raw_args, "--merged", merged);
+    let no_merged = branch_filter_values(raw_args, "--no-merged", no_merged);
     branch(BranchOptions {
         help,
-        long_help: raw_args.iter().any(|arg| arg == "--help"),
+        long_help,
         remotes,
         all,
         list,
@@ -8032,6 +12460,32 @@ pub(crate) fn branch_command(
         start_point,
         extra_args,
     })
+}
+
+fn branch_filter_values(raw_args: &[String], option: &str, parsed: Vec<String>) -> Vec<String> {
+    let equals_prefix = format!("{option}=");
+    let mut values = Vec::new();
+    let mut index = usize::from(raw_args.first().is_some_and(|arg| arg == "branch"));
+    while index < raw_args.len() {
+        let argument = &raw_args[index];
+        if argument == option {
+            if let Some(value) = raw_args.get(index + 1)
+                && !value.starts_with('-')
+            {
+                values.push(value.clone());
+                index += 2;
+                continue;
+            }
+            values.push("HEAD".to_owned());
+        } else if let Some(value) = argument.strip_prefix(&equals_prefix) {
+            values.push(value.to_owned());
+        }
+        index += 1;
+    }
+    if values.is_empty() {
+        return parsed;
+    }
+    values
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8207,7 +12661,6 @@ impl RevParsePathFormat {
 }
 
 fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
-    let _quiet = options.quiet;
     if options.sq_quote {
         let index = usize::from(raw_args.first().is_some_and(|arg| arg == "rev-parse"));
         if raw_args.get(index).is_some_and(|arg| arg == "--sq-quote") {
@@ -8296,6 +12749,9 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         return Ok(());
     }
     if options.verify && options.revs.len() != 1 {
+        if options.quiet {
+            return Err(CliError::Exit(1));
+        }
         return Err(CliError::Fatal {
             code: 128,
             message: "Needed a single revision".into(),
@@ -8311,6 +12767,9 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
             return Ok(());
         }
         return if options.verify {
+            if options.quiet {
+                return Err(CliError::Exit(1));
+            }
             Err(CliError::Fatal {
                 code: 128,
                 message: "Needed a single revision".into(),
@@ -8322,6 +12781,7 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         };
     };
     let repo = find_repo_or_bare()?;
+    validate_rev_parse_repository_extensions(&repo)?;
     for rev in &options.revs {
         if options.symbolic_full_name {
             if let Some(ref_name) = symbolic_full_ref_name(&repo, rev)? {
@@ -8350,12 +12810,15 @@ fn cached_rev_parse_repo_context(
     cache: &mut Option<RevParseRepoContext>,
 ) -> Result<&RevParseRepoContext> {
     if cache.is_none() {
-        *cache = Some(rev_parse_repo_context()?);
+        let context = rev_parse_repo_context()?;
+        validate_rev_parse_repository_extensions(&context.repo)?;
+        *cache = Some(context);
     }
     Ok(cache.as_ref().expect("rev-parse repo context"))
 }
 
 fn validate_rev_parse_repository_extensions(repo: &GitRepo) -> Result<()> {
+    validate_repository_format(repo)?;
     repo_object_format(repo)?;
     repo_ref_format(repo)?;
     Ok(())
@@ -8829,12 +13292,17 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         outputs.push(rev_parse_prefix_arg(output_options.prefix, rev));
                     }
                 } else {
-                    let arg_kind =
-                        rev_parse_classify_arg(&mut repo_context, rev, options.verify, options)?;
+                    let resolved_rev = rev_parse_prefix_revision(output_options.prefix, rev);
+                    let arg_kind = rev_parse_classify_arg(
+                        &mut repo_context,
+                        &resolved_rev,
+                        options.verify,
+                        options,
+                    )?;
                     rev_parse_emit_arg(
                         &mut repo_context,
                         &mut outputs,
-                        rev,
+                        &resolved_rev,
                         arg_kind,
                         options,
                         &output_options,
@@ -8847,12 +13315,17 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
     if outputs.is_empty()
         && let Some(default_arg) = output_options.default_arg
     {
-        let arg_kind =
-            rev_parse_classify_arg(&mut repo_context, default_arg, options.verify, options)?;
+        let resolved_default = rev_parse_prefix_revision(output_options.prefix, default_arg);
+        let arg_kind = rev_parse_classify_arg(
+            &mut repo_context,
+            &resolved_default,
+            options.verify,
+            options,
+        )?;
         rev_parse_emit_arg(
             &mut repo_context,
             &mut outputs,
-            default_arg,
+            &resolved_default,
             arg_kind,
             options,
             &output_options,
@@ -8962,6 +13435,34 @@ fn rev_parse_prefix_arg(prefix: Option<&str>, arg: &str) -> String {
     format!("{prefix}{arg}")
 }
 
+fn rev_parse_prefix_revision(prefix: Option<&str>, arg: &str) -> String {
+    let Some((revision, path)) = arg.split_once(':') else {
+        return arg.to_owned();
+    };
+    let relative_path = if let Some(path) = path.strip_prefix("./") {
+        Some(path)
+    } else if prefix.is_some() && path.starts_with("../") {
+        Some(path)
+    } else {
+        None
+    };
+    let Some(relative_path) = relative_path else {
+        return arg.to_owned();
+    };
+    let combined = format!("{}{relative_path}", prefix.unwrap_or_default());
+    let mut components = Vec::new();
+    for component in combined.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            component => components.push(component),
+        }
+    }
+    format!("{revision}:{}", components.join("/"))
+}
+
 fn print_rev_parse_outputs(outputs: &[String], sq: bool) {
     if sq {
         print!("{}", shell_quote_join(outputs, false, true));
@@ -9003,10 +13504,20 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 #[derive(Clone)]
+enum RevParseParseOptArg {
+    None,
+    Required(String),
+    Optional(String),
+}
+
+#[derive(Clone)]
 struct RevParseParseOptSpec {
-    short: Option<String>,
+    short: Option<char>,
     long: Option<String>,
-    takes_value: bool,
+    arg: RevParseParseOptArg,
+    noneg: bool,
+    hidden: bool,
+    help: String,
 }
 
 fn print_rev_parse_parseopt(options: &RevParseOptions, raw_args: &[String]) -> Result<()> {
@@ -9022,75 +13533,163 @@ fn print_rev_parse_parseopt(options: &RevParseOptions, raw_args: &[String]) -> R
     std::io::stdin()
         .read_to_string(&mut spec_text)
         .map_err(CliError::Io)?;
-    let specs = parse_rev_parse_parseopt_specs(&spec_text);
-    println!(
-        "{}",
-        rev_parse_parseopt_render(
-            &specs,
-            args,
-            options.keep_dashdash,
-            options.stop_at_non_option,
-            options.stuck_long,
-        )?
-    );
-    Ok(())
+    let (usage, specs) = parse_rev_parse_parseopt_specs(&spec_text)?;
+    rev_parse_parseopt_render(
+        &usage,
+        &specs,
+        args,
+        options.keep_dashdash,
+        options.stop_at_non_option,
+        options.stuck_long,
+    )
 }
 
-fn parse_rev_parse_parseopt_specs(spec_text: &str) -> Vec<RevParseParseOptSpec> {
-    spec_text
-        .lines()
-        .skip_while(|line| line.trim() != "--")
-        .skip(1)
-        .take_while(|line| !line.trim().is_empty())
-        .filter_map(|line| {
-            let token = line.split_whitespace().next()?;
-            let takes_value = token.contains('=');
-            let token = token.trim_end_matches('=');
-            let mut parts = token.split(',');
-            Some(RevParseParseOptSpec {
-                short: parts
-                    .next()
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned),
-                long: parts
-                    .next()
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned),
-                takes_value,
-            })
-        })
-        .collect()
+fn parse_rev_parse_parseopt_specs(
+    spec_text: &str,
+) -> Result<(Vec<String>, Vec<RevParseParseOptSpec>)> {
+    let mut usage = Vec::new();
+    let mut lines = spec_text.lines();
+    loop {
+        let Some(line) = lines.next() else {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "premature end of input".into(),
+            });
+        };
+        if line == "--" {
+            break;
+        }
+        usage.push(line.to_owned());
+    }
+    if usage.is_empty() || usage.iter().all(|line| line.is_empty()) {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "no usage string given before the `--' separator".into(),
+        });
+    }
+
+    let mut specs = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Some(help_start) = line.find(char::is_whitespace) else {
+            specs.push(RevParseParseOptSpec {
+                short: None,
+                long: None,
+                arg: RevParseParseOptArg::None,
+                noneg: true,
+                hidden: false,
+                help: line.trim().to_owned(),
+            });
+            continue;
+        };
+        if help_start == 0 {
+            specs.push(RevParseParseOptSpec {
+                short: None,
+                long: None,
+                arg: RevParseParseOptArg::None,
+                noneg: true,
+                hidden: false,
+                help: line.trim().to_owned(),
+            });
+            continue;
+        }
+        let token = &line[..help_start];
+        let help = line[help_start..].trim_start().to_owned();
+        let flag_start = token
+            .find(['*', '=', '?', '!'])
+            .unwrap_or(token.len());
+        let names = &token[..flag_start];
+        if names.is_empty() {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "missing opt-spec before option flags".into(),
+            });
+        }
+        let flags = &token[flag_start..];
+        let arg_hint_start = flags
+            .find(|ch| !matches!(ch, '*' | '=' | '?' | '!'))
+            .unwrap_or(flags.len());
+        let arg_hint = flags[arg_hint_start..].to_owned();
+        let arg = if flags[..arg_hint_start].contains('=') {
+            RevParseParseOptArg::Required(arg_hint)
+        } else if flags[..arg_hint_start].contains('?') {
+            RevParseParseOptArg::Optional(arg_hint)
+        } else {
+            RevParseParseOptArg::None
+        };
+        let noneg = flags[..arg_hint_start].contains('!');
+        let hidden = flags[..arg_hint_start].contains('*');
+        let mut names = names.splitn(2, ',');
+        let first = names.next().unwrap_or_default();
+        let second = names.next();
+        let (short, long) = match second {
+            Some(long) => (
+                first.chars().next().filter(|_| first.chars().count() == 1),
+                (!long.is_empty()).then(|| long.to_owned()),
+            ),
+            None if first.len() == 1 => (first.chars().next(), None),
+            None => (None, Some(first.to_owned())),
+        };
+        specs.push(RevParseParseOptSpec {
+            short,
+            long,
+            arg,
+            noneg,
+            hidden,
+            help,
+        });
+    }
+    Ok((usage, specs))
 }
 
 fn rev_parse_parseopt_render(
+    usage: &[String],
     specs: &[RevParseParseOptSpec],
     args: &[String],
     keep_dashdash: bool,
     _stop_at_non_option: bool,
     stuck_long: bool,
-) -> Result<String> {
-    let mut out = vec!["set".to_owned(), "--".to_owned()];
+) -> Result<()> {
+    let mut out = vec!["set --".to_owned()];
+    let mut positionals = Vec::new();
     let mut index = 0usize;
     let mut end_of_options = false;
+    let mut stop_after_non_option = false;
     while index < args.len() {
         let arg = &args[index];
         if end_of_options {
-            out.push(shell_single_quote(arg));
+            positionals.push(arg.clone());
             index += 1;
             continue;
         }
         if arg == "--" {
-            out.push("--".to_owned());
             if keep_dashdash {
-                out.push(shell_single_quote(arg));
+                positionals.push(arg.clone());
             }
             end_of_options = true;
             index += 1;
             continue;
         }
         if !arg.starts_with('-') {
-            out.push("--".to_owned());
-            end_of_options = true;
+            positionals.push(arg.clone());
+            if _stop_at_non_option {
+                stop_after_non_option = true;
+                positionals.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            index += 1;
+            continue;
+        }
+        if arg == "-" {
+            positionals.push(arg.clone());
+            if _stop_at_non_option {
+                stop_after_non_option = true;
+                positionals.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            index += 1;
             continue;
         }
         if let Some(name) = arg.strip_prefix("--") {
@@ -9098,44 +13697,397 @@ fn rev_parse_parseopt_render(
                 .split_once('=')
                 .map(|(left, right)| (left, Some(right)))
                 .unwrap_or((name, None));
-            if let Some(spec) = specs
-                .iter()
-                .find(|spec| spec.long.as_deref() == Some(opt_name))
-            {
-                if spec.takes_value {
-                    let value = if let Some(value) = inline_value {
-                        value.to_owned()
+            if opt_name == "help" || opt_name == "help-all" {
+                print_rev_parse_parseopt_help(usage, specs, opt_name == "help-all", false);
+                return Err(CliError::Exit(129));
+            }
+            let Some((spec, negated)) = rev_parse_parseopt_find_long(specs, opt_name)? else {
+                return Err(rev_parse_parseopt_unknown(usage, specs, opt_name));
+            };
+            let value = match &spec.arg {
+                RevParseParseOptArg::None => {
+                    if inline_value.is_some() {
+                        return Err(CliError::Stderr {
+                            code: 129,
+                            text: format!("error: option `{opt_name}` does not take an argument\n"),
+                        });
+                    }
+                    None
+                }
+                RevParseParseOptArg::Required(_) => {
+                    if let Some(value) = inline_value {
+                        Some(value.to_owned())
                     } else {
                         index += 1;
-                        args.get(index).cloned().ok_or_else(|| CliError::Fatal {
+                        Some(args.get(index).cloned().ok_or_else(|| CliError::Fatal {
                             code: 129,
-                            message: format!("option `--{opt_name}` requires a value"),
-                        })?
-                    };
-                    if stuck_long {
-                        out.push(format!("--{opt_name}={}", shell_single_quote(&value)));
-                    } else if let Some(short) = spec.short.as_deref() {
-                        out.push(format!("-{short}"));
-                        out.push(shell_single_quote(&value));
-                    } else {
-                        out.push(format!("--{opt_name}"));
-                        out.push(shell_single_quote(&value));
+                            message: format!("option `{opt_name}` requires a value"),
+                        })?)
                     }
-                } else if stuck_long {
-                    out.push(format!("--{opt_name}"));
-                } else if let Some(short) = spec.short.as_deref() {
-                    out.push(format!("-{short}"));
-                } else {
-                    out.push(format!("--{opt_name}"));
                 }
-                index += 1;
-                continue;
+                RevParseParseOptArg::Optional(_) => inline_value.map(str::to_owned),
+            };
+            out.push(rev_parse_parseopt_render_option(
+                spec,
+                negated,
+                value.as_deref(),
+                stuck_long,
+            ));
+            index += 1;
+            continue;
+        }
+        let mut chars = arg[1..].char_indices().peekable();
+        while let Some((offset, short)) = chars.next() {
+            if short == 'h' {
+                print_rev_parse_parseopt_help(usage, specs, false, false);
+                return Err(CliError::Exit(129));
+            }
+            let Some(spec) = specs.iter().find(|spec| spec.short == Some(short)) else {
+                return Err(rev_parse_parseopt_unknown(usage, specs, &short.to_string()));
+            };
+            let remainder = &arg[1 + offset + short.len_utf8()..];
+            let value = match &spec.arg {
+                RevParseParseOptArg::None => None,
+                RevParseParseOptArg::Required(_) => {
+                    if !remainder.is_empty() {
+                        while chars.next().is_some() {}
+                        Some(remainder.to_owned())
+                    } else {
+                        index += 1;
+                        Some(args.get(index).cloned().ok_or_else(|| CliError::Fatal {
+                            code: 129,
+                            message: format!("option `-{short}` requires a value"),
+                        })?)
+                    }
+                }
+                RevParseParseOptArg::Optional(_) => {
+                    if !remainder.is_empty() {
+                        while chars.next().is_some() {}
+                        Some(remainder.to_owned())
+                    } else {
+                        None
+                    }
+                }
+            };
+            out.push(rev_parse_parseopt_render_option(
+                spec,
+                false,
+                value.as_deref(),
+                stuck_long,
+            ));
+            if value.is_some() {
+                break;
             }
         }
-        out.push(shell_single_quote(arg));
         index += 1;
     }
-    Ok(out.join(" "))
+    let _ = stop_after_non_option;
+    out.push("--".to_owned());
+    out.extend(positionals.into_iter().map(|value| shell_single_quote(&value)));
+    println!("{}", out.join(" "));
+    Ok(())
+}
+
+fn rev_parse_parseopt_find_long<'a>(
+    specs: &'a [RevParseParseOptSpec],
+    name: &str,
+) -> Result<Option<(&'a RevParseParseOptSpec, bool)>> {
+    if name == "no" {
+        let mut candidates = Vec::new();
+        for spec in specs {
+            let Some(long) = spec.long.as_deref() else {
+                continue;
+            };
+            if spec.noneg {
+                continue;
+            }
+            if long.starts_with("no-") {
+                candidates.push((spec, false));
+            } else {
+                if long.starts_with("no") {
+                    candidates.push((spec, false));
+                }
+                candidates.push((spec, true));
+            }
+        }
+        candidates.dedup_by(|a, b| a.0.long == b.0.long && a.1 == b.1);
+        if candidates.len() > 1 {
+            let names = candidates
+                .iter()
+                .map(|(spec, negated)| {
+                    let long = spec.long.as_deref().unwrap_or_default();
+                    if *negated {
+                        format!("--no-{long}")
+                    } else {
+                        format!("--{long}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" or ");
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: ambiguous option: no (could be {names})\n"),
+            });
+        }
+        if let Some(candidate) = candidates.pop() {
+            return Ok(Some(candidate));
+        }
+    }
+    let exact = specs.iter().find_map(|spec| {
+        let long = spec.long.as_deref()?;
+        if long == name {
+            Some((spec, false))
+        } else {
+            let positive_match = long
+                .strip_prefix("no-")
+                .is_some_and(|positive| positive == name && !spec.noneg);
+            let negative_match = name
+                .strip_prefix("no-")
+                .is_some_and(|negative| long == negative && !spec.noneg);
+            (positive_match || negative_match).then_some((spec, true))
+        }
+    });
+    if exact.is_some() {
+        return Ok(exact);
+    }
+    let mut matches = Vec::new();
+    for spec in specs {
+        let Some(long) = spec.long.as_deref() else {
+            continue;
+        };
+        if long.starts_with(name) && !(name.starts_with("no-") && spec.noneg) {
+            matches.push((spec, false));
+        }
+        if !spec.noneg && !long.starts_with("no-") && name.starts_with("no-") {
+            let negative = format!("no-{long}");
+            if negative.starts_with(name) {
+                matches.push((spec, true));
+            }
+        }
+    }
+    matches.sort_by_key(|(spec, negated)| {
+        let long = spec.long.as_deref().unwrap_or_default();
+        (format!("{}{}", if *negated { "no-" } else { "" }, long), *negated)
+    });
+    matches.dedup_by(|a, b| a.0.long == b.0.long && a.1 == b.1);
+    if matches.len() > 1 {
+        let names = matches
+            .iter()
+            .map(|(spec, negated)| {
+                let long = spec.long.as_deref().unwrap_or_default();
+                if *negated {
+                    format!("--no-{long}")
+                } else {
+                    format!("--{long}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" or ");
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!("error: ambiguous option: {name} (could be {names})\n"),
+        });
+    }
+    Ok(matches.pop())
+}
+
+fn rev_parse_parseopt_render_option(
+    spec: &RevParseParseOptSpec,
+    negated: bool,
+    value: Option<&str>,
+    stuck_long: bool,
+) -> String {
+    let mut rendered = if negated {
+        format!("--no-{}", spec.long.as_deref().unwrap_or_default())
+    } else if stuck_long {
+        spec.long
+            .as_deref()
+            .map(|long| format!("--{long}"))
+            .or_else(|| spec.short.map(|short| format!("-{short}")))
+            .unwrap_or_default()
+    } else {
+        spec.short
+            .map(|short| format!("-{short}"))
+            .or_else(|| spec.long.as_deref().map(|long| format!("--{long}")))
+            .unwrap_or_default()
+    };
+    if let Some(value) = value {
+        if stuck_long && spec.long.is_some() {
+            rendered.push('=');
+        } else if !stuck_long {
+            rendered.push(' ');
+        }
+        rendered.push_str(&shell_single_quote(value));
+    }
+    rendered
+}
+
+fn rev_parse_parseopt_unknown(
+    usage: &[String],
+    specs: &[RevParseParseOptSpec],
+    name: &str,
+) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown option `{name}'\n{}",
+            rev_parse_parseopt_usage_body(usage, specs, false)
+        ),
+    }
+}
+
+fn print_rev_parse_parseopt_help(
+    usage: &[String],
+    specs: &[RevParseParseOptSpec],
+    full: bool,
+    _error: bool,
+) {
+    print!("cat <<\\EOF\n{}EOF\n", rev_parse_parseopt_usage_body(usage, specs, full));
+}
+
+fn rev_parse_parseopt_usage_body(
+    usage: &[String],
+    specs: &[RevParseParseOptSpec],
+    full: bool,
+) -> String {
+    let mut output = String::new();
+    let mut saw_empty = false;
+    for (index, line) in usage.iter().enumerate() {
+        if !saw_empty && line.is_empty() {
+            saw_empty = true;
+        }
+        if saw_empty {
+            if line.is_empty() {
+                output.push('\n');
+            } else {
+                output.push_str("    ");
+                output.push_str(line);
+                output.push('\n');
+            }
+        } else if index == 0 {
+            output.push_str("usage: ");
+            output.push_str(line);
+            output.push('\n');
+        } else {
+            output.push_str("   or: ");
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+
+    let mut need_newline = true;
+    for spec in specs {
+        if spec.short.is_none() && spec.long.is_none() {
+            output.push('\n');
+            need_newline = false;
+            if !spec.help.is_empty() {
+                output.push_str(&spec.help);
+                output.push('\n');
+            }
+            continue;
+        }
+        if spec.hidden && !full {
+            continue;
+        }
+        if need_newline {
+            output.push('\n');
+            need_newline = false;
+        }
+        let mut label = String::from("    ");
+        if let Some(short) = spec.short {
+            label.push('-');
+            label.push(short);
+        }
+        if spec.short.is_some() && spec.long.is_some() {
+            label.push_str(", ");
+        }
+        if let Some(long) = spec.long.as_deref() {
+            label.push_str("--");
+            if !spec.noneg && !long.starts_with("no-") {
+                label.push_str("[no-]");
+            }
+            label.push_str(long);
+        }
+        label.push_str(&rev_parse_parseopt_arg_hint(spec));
+        let pos = label.len();
+        if pos < 26 {
+            label.push_str(&" ".repeat(26 - pos));
+        } else {
+            label.push('\n');
+            label.push_str(&" ".repeat(26));
+        }
+        output.push_str(&label);
+        if spec.help.is_empty() {
+            output.push('\n');
+        } else {
+            for (line_index, line) in spec.help.split('\n').enumerate() {
+                if line_index > 0 {
+                    output.push_str(&" ".repeat(26));
+                }
+                output.push_str(line);
+                output.push('\n');
+            }
+        }
+        if let Some(long) = spec.long.as_deref()
+            && !spec.noneg
+            && let Some(positive) = long.strip_prefix("no-")
+            && !specs.iter().any(|other| other.long.as_deref() == Some(positive))
+        {
+            let mut opposite = String::from("    --");
+            opposite.push_str(positive);
+            let pos = opposite.len();
+            if pos < 26 {
+                opposite.push_str(&" ".repeat(26 - pos));
+            } else {
+                opposite.push('\n');
+                opposite.push_str(&" ".repeat(26));
+            }
+            opposite.push_str("opposite of --no-");
+            opposite.push_str(positive);
+            opposite.push('\n');
+            output.push_str(&opposite);
+        }
+    }
+    output.push('\n');
+    output
+}
+
+fn rev_parse_parseopt_arg_hint(spec: &RevParseParseOptSpec) -> String {
+    let (optional, hint) = match &spec.arg {
+        RevParseParseOptArg::None => return String::new(),
+        RevParseParseOptArg::Required(hint) => (false, hint),
+        RevParseParseOptArg::Optional(hint) => (true, hint),
+    };
+    if hint.is_empty() {
+        return if optional {
+            if spec.long.is_some() {
+                "[=...]".into()
+            } else {
+                "[...]".into()
+            }
+        } else {
+            " ...".into()
+        };
+    }
+    let literal = hint.contains(['(', ')', '<', '>', '[', ']', '|']);
+    let shown = hint.as_str();
+    if optional {
+        if spec.long.is_some() {
+            if literal {
+                format!("[={shown}]")
+            } else {
+                format!("[=<{shown}>]")
+            }
+        } else if literal {
+            format!("[{shown}]")
+        } else {
+            format!("[<{shown}>") + "]"
+        }
+    } else if literal {
+        format!(" {shown}")
+    } else {
+        format!(" <{shown}>")
+    }
 }
 
 fn rev_parse_has_glob_magic(value: &str) -> bool {
@@ -9239,22 +14191,25 @@ fn rev_parse_resolve_git_dir_display(
     path_format: RevParsePathFormat,
 ) -> Result<String> {
     let absolute = absolute_path_from_arg(path)?;
-    let valid = if absolute.is_file() {
-        let git_dir = read_gitdir_file(&absolute)?;
-        is_git_dir_or_linked_worktree_git_dir(&git_dir)
+    let from_gitfile = absolute.is_file();
+    let resolved = if from_gitfile {
+        read_gitdir_file(&absolute)?
     } else {
-        is_git_dir_or_linked_worktree_git_dir(&absolute)
+        absolute.clone()
     };
-    if !valid {
+    if !is_git_dir_or_linked_worktree_git_dir(&resolved) {
         return Err(CliError::Fatal {
             code: 128,
             message: format!("not a gitdir '{}'", path.display()),
         });
+    };
+    if from_gitfile {
+        return Ok(git_path_output(&canonical_or_absolute(resolved)));
     }
     match path_format {
-        RevParsePathFormat::Absolute => Ok(git_path_output(&canonical_or_absolute(absolute))),
+        RevParsePathFormat::Absolute => Ok(git_path_output(&canonical_or_absolute(resolved))),
         RevParsePathFormat::Default | RevParsePathFormat::Relative => {
-            relative_display_from_cwd(&absolute)
+            relative_display_from_cwd(&resolved)
         }
     }
 }
@@ -9330,21 +14285,28 @@ fn rev_parse_ref_format_value(repo: Option<&GitRepo>) -> Result<String> {
 }
 
 fn rev_parse_output_object_format_value(repo: &GitRepo, mode: &str, rev: &str) -> Result<String> {
-    match mode {
-        "storage" | "sha1" => rev_parse_object_value(repo, rev, None, false, false, false)?
-            .ok_or_else(|| CliError::Fatal {
+    let mut translator = ObjectFormatTranslator::new(repo)?;
+    let target_algorithm = match mode {
+        "storage" => translator.storage_algorithm(),
+        "sha1" => GitHashAlgorithm::Sha1,
+        "sha256" => GitHashAlgorithm::Sha256,
+        other => {
+            return Err(CliError::Fatal {
                 code: 128,
-                message: "missing revision output".into(),
-            }),
-        "sha256" => Err(CliError::Fatal {
+                message: format!("unsupported object format: {other}"),
+            });
+        }
+    };
+    if target_algorithm != translator.storage_algorithm()
+        && Some(target_algorithm) != translator.compat_algorithm()
+    {
+        return Err(CliError::Fatal {
             code: 128,
-            message: "unsupported object format: sha256".into(),
-        }),
-        other => Err(CliError::Fatal {
-            code: 128,
-            message: format!("unsupported object format: {other}"),
-        }),
+            message: format!("unsupported object format: {mode}"),
+        });
     }
+    let id = resolve_compatible_objectish(repo, &translator, rev).map_err(CliError::Io)?;
+    Ok(translator.translate_id(&id, target_algorithm)?.to_hex())
 }
 
 fn rev_parse_disambiguate_values(repo: &GitRepo, prefix: &str) -> Result<Vec<String>> {
@@ -9385,14 +14347,18 @@ fn rev_parse_disambiguate_values(repo: &GitRepo, prefix: &str) -> Result<Vec<Str
 
 fn rev_parse_shared_index_path(repo: &GitRepo) -> Result<Option<String>> {
     let index = fs::read(&repo.index_path).map_err(CliError::Io)?;
-    let marker = b"link\0";
+    let marker = b"link";
     let Some(position) = index
         .windows(marker.len())
-        .position(|window| window == marker)
+        .enumerate()
+        .find(|(position, window)| {
+            *window == marker && index.get(position + 4..position + 8).is_some()
+        })
+        .map(|(position, _)| position)
     else {
         return Ok(None);
     };
-    let start = position + marker.len();
+    let start = position + 8;
     if index.len() < start + 20 {
         return Ok(None);
     }
@@ -9400,9 +14366,13 @@ fn rev_parse_shared_index_path(repo: &GitRepo) -> Result<Option<String>> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    Ok(Some(git_path_output(
-        &repo.git_dir.join(format!("sharedindex.{hash}")),
-    )))
+    let path = repo.git_dir.join(format!("sharedindex.{hash}"));
+    let output = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| relative_path_between(&cwd, &path))
+        .map(|relative| git_path_output(&relative))
+        .unwrap_or_else(|| git_path_output(&path));
+    Ok(Some(output))
 }
 
 fn rev_parse_object_value(
@@ -9516,17 +14486,20 @@ fn gitmodules_declares_submodule_path(repo: &GitRepo, path: &str) -> Result<bool
 
 fn print_rev_parse_bisect_refs(repo: &GitRepo) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let (bad_term, good_term) = rev_parse_bisect_terms(&repo.git_dir)?;
+    let bad_prefix = format!("refs/bisect/{bad_term}");
+    let good_prefix = format!("refs/bisect/{good_term}");
     let mut bad_rows = Vec::new();
     let mut good_rows = Vec::new();
     refs.for_each_ref_name("refs/bisect/", |ref_name| {
         if ref_name
-            .strip_prefix("refs/bisect/bad")
+            .strip_prefix(&bad_prefix)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
         {
             bad_rows.push(ref_name.to_owned());
         }
         if ref_name
-            .strip_prefix("refs/bisect/good")
+            .strip_prefix(&good_prefix)
             .is_some_and(|rest| rest.is_empty() || rest.starts_with('-') || rest.starts_with('/'))
         {
             good_rows.push(format!("^{ref_name}"));
@@ -9539,6 +14512,30 @@ fn print_rev_parse_bisect_refs(repo: &GitRepo) -> Result<()> {
         println!("{row}");
     }
     Ok(())
+}
+
+fn rev_parse_bisect_terms(git_dir: &Path) -> Result<(String, String)> {
+    if !git_dir.join("BISECT_START").exists() {
+        return Ok(("bad".to_string(), "good".to_string()));
+    }
+    let path = git_dir.join("BISECT_TERMS");
+    let terms = match fs::read_to_string(path) {
+        Ok(terms) => terms,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(("bad".to_owned(), "good".to_owned()));
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let mut lines = terms.lines();
+    let bad = lines
+        .next()
+        .filter(|term| !term.is_empty())
+        .unwrap_or("bad");
+    let good = lines
+        .next()
+        .filter(|term| !term.is_empty())
+        .unwrap_or("good");
+    Ok((bad.to_owned(), good.to_owned()))
 }
 
 fn repo_object_format(repo: &GitRepo) -> Result<String> {
@@ -9558,27 +14555,34 @@ fn repo_ref_format(repo: &GitRepo) -> Result<String> {
     let version = read_repo_local_config_value(repo, "core", "", "repositoryformatversion")?
         .unwrap_or_else(|| "0".to_owned());
     let format = read_repo_local_config_value(repo, "extensions", "", "refstorage")?;
-    if let Some(value) = format.as_deref()
-        && !matches!(value, "files" | "reftable")
-    {
-        return Err(CliError::Stderr {
-            code: 128,
-            text: format!(
-                "error: invalid value for 'extensions.refstorage': '{value}'\n\
-                 fatal: bad config line 9 in file .git/config\n"
-            ),
-        });
-    }
+    let parsed_format = format
+        .as_deref()
+        .map(parse_ref_storage_format)
+        .transpose()?;
     if version == "0" && format.is_some() {
         return Err(CliError::Fatal {
             code: 128,
             message: "repo version is 0, but v1-only extension found".into(),
         });
     }
-    match format.as_deref().unwrap_or("files") {
-        "files" => Ok("files".to_owned()),
-        "reftable" => Ok("reftable".to_owned()),
-        _ => unreachable!("invalid ref storage values are handled above"),
+    Ok(parsed_format.unwrap_or_else(|| "files".to_owned()))
+}
+
+fn parse_ref_storage_format(value: &str) -> Result<String> {
+    match value {
+        "files" | "reftable" => Ok(value.to_owned()),
+        value => match value.split_once("://") {
+            Some((format @ ("files" | "reftable"), path)) if !path.is_empty() => {
+                Ok(format.to_owned())
+            }
+            _ => Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: invalid value for 'extensions.refstorage': '{value}'\n\
+                     fatal: bad config line 9 in file .git/config\n"
+                ),
+            }),
+        },
     }
 }
 fn git_dir_display(repo: &GitRepo, path_format: RevParsePathFormat) -> Result<String> {
@@ -9641,14 +14645,94 @@ fn git_path_display(
     path: &std::path::Path,
     path_format: RevParsePathFormat,
 ) -> Result<String> {
-    let git_path = read_common_git_dir(&repo.git_dir)?.join(path);
-    if path_format != RevParsePathFormat::Default {
-        return rev_parse_path_output(&git_path, path_format, false);
+    let raw = path.to_string_lossy();
+    let git_path = resolve_git_path(repo, path)?;
+    let mut output = if path_format != RevParsePathFormat::Default {
+        rev_parse_path_output(&git_path, path_format, false)?
+    } else if repo_is_bare(repo) {
+        git_path_output(&canonical_or_absolute(git_path))
+    } else if repo.root.join(".git").is_file()
+        && gitdir_file_display(&repo.root.join(".git"))?.is_some()
+    {
+        git_path_output(&canonical_or_absolute(git_path))
+    } else {
+        relative_display_from_cwd(&git_path)?
+    };
+    if raw.ends_with('/') && !output.ends_with('/') {
+        output.push('/');
     }
-    if repo_is_bare(repo) {
-        return Ok(git_path_output(&canonical_or_absolute(git_path)));
+    Ok(output)
+}
+
+fn resolve_git_path(repo: &GitRepo, path: &std::path::Path) -> Result<PathBuf> {
+    let raw = path.to_string_lossy();
+    let segments = git_path_segments(&raw);
+
+    if git_path_matches_segments(&segments, &["info", "grafts"])
+        && let Some(value) = std::env::var_os("GIT_GRAFT_FILE")
+    {
+        return absolute_path_from_base(&std::env::current_dir()?, std::path::Path::new(&value));
     }
-    relative_display_from_cwd(&git_path)
+
+    if git_path_matches_segments(&segments, &["index"])
+        && let Some(value) = std::env::var_os("GIT_INDEX_FILE")
+    {
+        return absolute_path_from_base(&std::env::current_dir()?, std::path::Path::new(&value));
+    }
+
+    if segments.first().copied() == Some("hooks")
+        && let Some(value) = read_config_value(repo, "core.hooksPath")?
+    {
+        let configured = std::path::Path::new(&value);
+        let mut hooks = if configured.is_absolute() {
+            configured.to_path_buf()
+        } else {
+            repo.root.join(configured)
+        };
+        for segment in segments.iter().skip(1) {
+            hooks.push(segment);
+        }
+        return Ok(hooks);
+    }
+
+    if segments.first().copied() == Some("objects")
+        && let Some(value) = std::env::var_os("GIT_OBJECT_DIRECTORY")
+    {
+        let mut base =
+            absolute_path_from_base(&std::env::current_dir()?, std::path::Path::new(&value))?;
+        if let Some(rest) = raw.strip_prefix("objects")
+            && !rest.is_empty()
+        {
+            base.push(rest.trim_start_matches('/'));
+        }
+        return Ok(base);
+    }
+
+    let base = if git_path_uses_per_worktree_git_dir(&segments) {
+        repo.git_dir.clone()
+    } else {
+        read_common_git_dir(&repo.git_dir)?
+    };
+    Ok(base.join(path))
+}
+
+fn git_path_segments(raw: &str) -> Vec<&str> {
+    raw.split('/').filter(|part| !part.is_empty()).collect()
+}
+
+fn git_path_matches_segments(segments: &[&str], expected: &[&str]) -> bool {
+    segments == expected
+}
+
+fn git_path_uses_per_worktree_git_dir(segments: &[&str]) -> bool {
+    git_path_matches_segments(segments, &["index"])
+        || git_path_matches_segments(segments, &["index.lock"])
+        || git_path_matches_segments(segments, &["HEAD"])
+        || git_path_matches_segments(segments, &["logs", "HEAD"])
+        || git_path_matches_segments(segments, &["logs", "HEAD.lock"])
+        || git_path_matches_segments(segments, &["info", "sparse-checkout"])
+        || matches!(segments, ["refs", "bisect", ..])
+        || matches!(segments, ["logs", "refs", "bisect", ..])
 }
 fn rev_parse_path_output(
     path: &std::path::Path,
@@ -9940,6 +15024,9 @@ mod tests {
             false,
             None,
             &ForEachRefRequirements::default(),
+            &[],
+            &ForEachRefSymrefs::new(),
+            &ForEachRefShortNameContext::default(),
             None,
         )
         .expect("collect rows");

@@ -1,0 +1,4 @@
+protocol=http
+host=example.com
+username=foo
+password=bar

@@ -576,7 +576,8 @@ fn write_fast_export_commit<W: Write>(
         .map(|parent| commit_cache.read_commit(parent))
         .transpose()?
         .map(|parent| parent.tree.clone());
-    let commands = collect_fast_export_commands(tree_cache, parent_tree.as_ref(), &commit.tree, options)?;
+    let commands =
+        collect_fast_export_commands(tree_cache, parent_tree.as_ref(), &commit.tree, options)?;
     write_fast_export_blob_records(out, store, state, options, &commands)?;
 
     let mark = state.alloc_mark();
@@ -600,11 +601,7 @@ fn write_fast_export_commit<W: Write>(
     } else {
         commit.committer.clone()
     };
-    writeln!(
-        out,
-        "committer {}",
-        String::from_utf8_lossy(&committer)
-    )?;
+    writeln!(out, "committer {}", String::from_utf8_lossy(&committer))?;
     let message = if options.anonymize {
         state.anonymizer.message()
     } else {
@@ -624,7 +621,11 @@ fn write_fast_export_commit<W: Write>(
         write_fast_export_file_command(out, state, &command, options)?;
     }
     writeln!(out)?;
-    note_fast_export_progress(out, state, fast_export_progress_step(options.progress.as_deref())?)?;
+    note_fast_export_progress(
+        out,
+        state,
+        fast_export_progress_step(options.progress.as_deref())?,
+    )?;
     Ok(())
 }
 
@@ -833,7 +834,11 @@ fn write_fast_export_blob_records<W: Write>(
         if !options.anonymize {
             writeln!(out)?;
         }
-        note_fast_export_progress(out, state, fast_export_progress_step(options.progress.as_deref())?)?;
+        note_fast_export_progress(
+            out,
+            state,
+            fast_export_progress_step(options.progress.as_deref())?,
+        )?;
     }
     Ok(())
 }
@@ -980,7 +985,9 @@ pub(crate) fn resolve_fast_import_max_pack_size_warning(raw_args: &[String]) -> 
     warning_value
 }
 
-pub(crate) fn resolve_fast_import_marks_resolution(raw_args: &[String]) -> FastImportMarksResolution {
+pub(crate) fn resolve_fast_import_marks_resolution(
+    raw_args: &[String],
+) -> FastImportMarksResolution {
     let mut relative_marks_enabled = false;
     let mut relative_marks_invalid_value = None;
     let mut export_marks = None;
@@ -1000,16 +1007,24 @@ pub(crate) fn resolve_fast_import_marks_resolution(raw_args: &[String]) -> FastI
             continue;
         }
         if let Some(value) = arg.strip_prefix("--export-marks=") {
-            export_marks = Some(resolve_fast_import_marks_path(value, relative_marks_enabled));
+            export_marks = Some(resolve_fast_import_marks_path(
+                value,
+                relative_marks_enabled,
+            ));
             continue;
         }
         if let Some(value) = arg.strip_prefix("--import-marks=") {
-            import_marks.push(resolve_fast_import_marks_path(value, relative_marks_enabled));
+            import_marks.push(resolve_fast_import_marks_path(
+                value,
+                relative_marks_enabled,
+            ));
             continue;
         }
         if let Some(value) = arg.strip_prefix("--import-marks-if-exists=") {
-            import_marks_if_exists
-                .push(resolve_fast_import_marks_path(value, relative_marks_enabled));
+            import_marks_if_exists.push(resolve_fast_import_marks_path(
+                value,
+                relative_marks_enabled,
+            ));
         }
     }
     FastImportMarksResolution {
@@ -1023,7 +1038,10 @@ pub(crate) fn resolve_fast_import_marks_resolution(raw_args: &[String]) -> FastI
 
 fn resolve_fast_import_marks_path(path: &str, relative_marks_enabled: bool) -> PathBuf {
     if relative_marks_enabled {
-        Path::new(".git").join("info").join("fast-import").join(path)
+        Path::new(".git")
+            .join("info")
+            .join("fast-import")
+            .join(path)
     } else {
         PathBuf::from(path)
     }
@@ -1191,14 +1209,18 @@ impl<'a> FastImportParser<'a> {
         if let Some(value) = feature.strip_prefix("relative-marks=") {
             return Err(fast_import_crash_error(
                 &self.repo.git_dir,
-                format!("this version of fast-import does not support feature relative-marks={value}."),
+                format!(
+                    "this version of fast-import does not support feature relative-marks={value}."
+                ),
                 None,
             )?);
         }
         if let Some(path) = feature.strip_prefix("export-marks=") {
             self.ensure_unsafe_fast_import_feature(feature)?;
-            self.options.export_marks =
-                Some(resolve_fast_import_marks_path(path, self.relative_marks_enabled));
+            self.options.export_marks = Some(resolve_fast_import_marks_path(
+                path,
+                self.relative_marks_enabled,
+            ));
             return Ok(());
         }
         if let Some(path) = feature.strip_prefix("import-marks=") {
@@ -1234,7 +1256,8 @@ impl<'a> FastImportParser<'a> {
             )?);
         }
         self.stream_import_marks_seen = true;
-        if !self.options.import_marks.is_empty() || !self.options.import_marks_if_exists.is_empty() {
+        if !self.options.import_marks.is_empty() || !self.options.import_marks_if_exists.is_empty()
+        {
             return Ok(());
         }
         let path = resolve_fast_import_marks_path(path, self.relative_marks_enabled);
@@ -1271,7 +1294,8 @@ impl<'a> FastImportParser<'a> {
             let mark = mark
                 .parse::<usize>()
                 .map_err(|_| fast_import_parse_error())?;
-            let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, oid.trim()).map_err(CliError::Io)?;
+            let id =
+                ObjectId::from_hex(GitHashAlgorithm::Sha1, oid.trim()).map_err(CliError::Io)?;
             self.marks.insert(mark, id);
         }
         Ok(())

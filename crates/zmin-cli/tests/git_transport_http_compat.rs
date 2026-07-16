@@ -1,7 +1,7 @@
 mod common;
 
-use std::fs;
 use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 
@@ -154,7 +154,11 @@ fn command_any_output_with_env(
     )
 }
 
-fn assert_any_ls_remote_output_matches_stock_git(cwd: &std::path::Path, args: &[&str], label: &str) {
+fn assert_any_ls_remote_output_matches_stock_git(
+    cwd: &std::path::Path,
+    args: &[&str],
+    label: &str,
+) {
     assert_eq!(
         command_any_output(zmin_bin(), cwd, args, label),
         command_any_output("git", cwd, args, label),
@@ -2069,12 +2073,24 @@ fn ls_remote_option_family_matches_stock_git_for_git_daemon_remote() {
     let _daemon = StockGitDaemon::spawn(dir.path(), port);
     let url = format!("git://127.0.0.1:{port}/remote.git");
     for (label, args) in [
-        ("ls-remote --branches daemon", vec!["ls-remote", "--branches", url.as_str()]),
+        (
+            "ls-remote --branches daemon",
+            vec!["ls-remote", "--branches", url.as_str()],
+        ),
         ("ls-remote -b daemon", vec!["ls-remote", "-b", url.as_str()]),
-        ("ls-remote --quiet daemon", vec!["ls-remote", "--quiet", url.as_str()]),
+        (
+            "ls-remote --quiet daemon",
+            vec!["ls-remote", "--quiet", url.as_str()],
+        ),
         ("ls-remote -q daemon", vec!["ls-remote", "-q", url.as_str()]),
-        ("ls-remote --get-url daemon", vec!["ls-remote", "--get-url", url.as_str()]),
-        ("ls-remote --symref daemon", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --get-url daemon",
+            vec!["ls-remote", "--get-url", url.as_str()],
+        ),
+        (
+            "ls-remote --symref daemon",
+            vec!["ls-remote", "--symref", url.as_str()],
+        ),
         (
             "ls-remote --exit-code match daemon",
             vec!["ls-remote", "--exit-code", url.as_str(), "main"],
@@ -2087,7 +2103,10 @@ fn ls_remote_option_family_matches_stock_git_for_git_daemon_remote() {
             "ls-remote --server-option=foo daemon",
             vec!["ls-remote", "--server-option=foo", url.as_str()],
         ),
-        ("ls-remote -o foo daemon", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote -o foo daemon",
+            vec!["ls-remote", "-o", "foo", url.as_str()],
+        ),
         (
             "ls-remote --sort=refname daemon",
             vec!["ls-remote", "--sort=refname", url.as_str()],
@@ -2378,6 +2397,58 @@ fn clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects() {
 }
 
 #[test]
+fn clone_worktree_first_git_daemon_demand_hydrate_recovers_missing_head_objects() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-daemon-worktree-first-demand");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--worktree-first",
+            "--demand-hydrate",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_demand_hydrate_config(&zmin_clone);
+    let head = git(&zmin_clone, ["rev-parse", "HEAD"]);
+    remove_all_pack_files(&zmin_clone);
+
+    assert_eq!(run_zmin(&zmin_clone, ["cat-file", "-t", "HEAD"]), "commit");
+    assert_eq!(run_zmin(&zmin_clone, ["cat-file", "-t", &head]), "commit");
+    git(&zmin_clone, ["fsck", "--strict"]);
+}
+
+#[test]
 fn clone_instant_git_daemon_background_fetch_hydrates_refs() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -2416,6 +2487,58 @@ fn clone_instant_git_daemon_background_fetch_hydrates_refs() {
         [
             "clone",
             "--instant",
+            "--background-fetch",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_background_fetch_hydrated(&zmin_clone);
+}
+
+#[test]
+fn clone_worktree_first_git_daemon_background_fetch_hydrates_refs() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-daemon-worktree-first-background");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["switch", "-c", "feature"]);
+    fs::write(work.join("feature.txt"), b"feature\n").expect("write feature");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature"]);
+    git(&work, ["switch", "main"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "release"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--worktree-first",
             "--background-fetch",
             url.as_str(),
             zmin_clone.to_str().expect("zmin clone path"),
@@ -2518,12 +2641,30 @@ fn ls_remote_option_family_matches_stock_git_for_ssh_remote() {
     let ssh_url = ssh_url_for_remote(&remote);
     let envs = [("GIT_SSH_COMMAND", fake_ssh_arg.as_str())];
     for (label, args) in [
-        ("ls-remote --branches ssh", vec!["ls-remote", "--branches", ssh_url.as_str()]),
-        ("ls-remote -b ssh", vec!["ls-remote", "-b", ssh_url.as_str()]),
-        ("ls-remote --quiet ssh", vec!["ls-remote", "--quiet", ssh_url.as_str()]),
-        ("ls-remote -q ssh", vec!["ls-remote", "-q", ssh_url.as_str()]),
-        ("ls-remote --get-url ssh", vec!["ls-remote", "--get-url", ssh_url.as_str()]),
-        ("ls-remote --symref ssh", vec!["ls-remote", "--symref", ssh_url.as_str()]),
+        (
+            "ls-remote --branches ssh",
+            vec!["ls-remote", "--branches", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote -b ssh",
+            vec!["ls-remote", "-b", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote --quiet ssh",
+            vec!["ls-remote", "--quiet", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote -q ssh",
+            vec!["ls-remote", "-q", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote --get-url ssh",
+            vec!["ls-remote", "--get-url", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote --symref ssh",
+            vec!["ls-remote", "--symref", ssh_url.as_str()],
+        ),
         (
             "ls-remote --exit-code match ssh",
             vec!["ls-remote", "--exit-code", ssh_url.as_str(), "main"],
@@ -2536,7 +2677,10 @@ fn ls_remote_option_family_matches_stock_git_for_ssh_remote() {
             "ls-remote --server-option=foo ssh",
             vec!["ls-remote", "--server-option=foo", ssh_url.as_str()],
         ),
-        ("ls-remote -o foo ssh", vec!["ls-remote", "-o", "foo", ssh_url.as_str()]),
+        (
+            "ls-remote -o foo ssh",
+            vec!["ls-remote", "-o", "foo", ssh_url.as_str()],
+        ),
         (
             "ls-remote --sort=refname ssh",
             vec!["ls-remote", "--sort=refname", ssh_url.as_str()],
@@ -2545,7 +2689,10 @@ fn ls_remote_option_family_matches_stock_git_for_ssh_remote() {
             "ls-remote --sort=-refname ssh",
             vec!["ls-remote", "--sort=-refname", ssh_url.as_str()],
         ),
-        ("ls-remote -t ssh", vec!["ls-remote", "-t", ssh_url.as_str()]),
+        (
+            "ls-remote -t ssh",
+            vec!["ls-remote", "-t", ssh_url.as_str()],
+        ),
     ] {
         assert_any_ls_remote_output_matches_stock_git_with_env(dir.path(), &args, &envs, label);
     }
@@ -7062,6 +7209,74 @@ fn clone_instant_ssh_demand_hydrate_recovers_missing_head_objects() {
 }
 
 #[test]
+fn clone_worktree_first_ssh_demand_hydrate_recovers_missing_head_objects() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-ssh-worktree-first-demand");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    command_output_with_env(
+        zmin_bin(),
+        dir.path(),
+        &[
+            "clone",
+            "--worktree-first",
+            "--demand-hydrate",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin clone worktree-first ssh demand",
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_demand_hydrate_config(&zmin_clone);
+    let head = git(&zmin_clone, ["rev-parse", "HEAD"]);
+    remove_all_pack_files(&zmin_clone);
+
+    let head_type = command_output_with_env(
+        zmin_bin(),
+        &zmin_clone,
+        &["cat-file", "-t", "HEAD"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin cat-file worktree-first ssh demand",
+    );
+    assert_eq!(head_type.1, "commit");
+    let object_type = command_output_with_env(
+        zmin_bin(),
+        &zmin_clone,
+        &["cat-file", "-t", &head],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin cat-file worktree-first ssh demand head",
+    );
+    assert_eq!(object_type.1, "commit");
+    git(&zmin_clone, ["fsck", "--strict"]);
+}
+
+#[test]
 fn clone_instant_ssh_background_fetch_hydrates_refs() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -7106,6 +7321,60 @@ fn clone_instant_ssh_background_fetch_hydrates_refs() {
         ],
         &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
         "zmin clone instant ssh background",
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_background_fetch_hydrated(&zmin_clone);
+}
+
+#[test]
+fn clone_worktree_first_ssh_background_fetch_hydrates_refs() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-ssh-worktree-first-background");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["switch", "-c", "feature"]);
+    fs::write(work.join("feature.txt"), b"feature\n").expect("write feature");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature"]);
+    git(&work, ["switch", "main"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "release"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    command_output_with_env(
+        zmin_bin(),
+        dir.path(),
+        &[
+            "clone",
+            "--worktree-first",
+            "--background-fetch",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin clone worktree-first ssh background",
     );
 
     assert_eq!(
@@ -9200,12 +9469,30 @@ fn ls_remote_option_family_matches_stock_git_for_dumb_http_remote() {
     let server = StaticHttpServer::new(source);
     let url = format!("http://127.0.0.1:{}/.git", server.port);
     for (label, args) in [
-        ("ls-remote --branches dumb-http", vec!["ls-remote", "--branches", url.as_str()]),
-        ("ls-remote -b dumb-http", vec!["ls-remote", "-b", url.as_str()]),
-        ("ls-remote --quiet dumb-http", vec!["ls-remote", "--quiet", url.as_str()]),
-        ("ls-remote -q dumb-http", vec!["ls-remote", "-q", url.as_str()]),
-        ("ls-remote --get-url dumb-http", vec!["ls-remote", "--get-url", url.as_str()]),
-        ("ls-remote --symref dumb-http", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --branches dumb-http",
+            vec!["ls-remote", "--branches", url.as_str()],
+        ),
+        (
+            "ls-remote -b dumb-http",
+            vec!["ls-remote", "-b", url.as_str()],
+        ),
+        (
+            "ls-remote --quiet dumb-http",
+            vec!["ls-remote", "--quiet", url.as_str()],
+        ),
+        (
+            "ls-remote -q dumb-http",
+            vec!["ls-remote", "-q", url.as_str()],
+        ),
+        (
+            "ls-remote --get-url dumb-http",
+            vec!["ls-remote", "--get-url", url.as_str()],
+        ),
+        (
+            "ls-remote --symref dumb-http",
+            vec!["ls-remote", "--symref", url.as_str()],
+        ),
         (
             "ls-remote --exit-code match dumb-http",
             vec!["ls-remote", "--exit-code", url.as_str(), "main"],
@@ -9218,7 +9505,10 @@ fn ls_remote_option_family_matches_stock_git_for_dumb_http_remote() {
             "ls-remote --server-option=foo dumb-http",
             vec!["ls-remote", "--server-option=foo", url.as_str()],
         ),
-        ("ls-remote -o foo dumb-http", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote -o foo dumb-http",
+            vec!["ls-remote", "-o", "foo", url.as_str()],
+        ),
         (
             "ls-remote --sort=refname dumb-http",
             vec!["ls-remote", "--sort=refname", url.as_str()],
@@ -9227,7 +9517,10 @@ fn ls_remote_option_family_matches_stock_git_for_dumb_http_remote() {
             "ls-remote --sort=-refname dumb-http",
             vec!["ls-remote", "--sort=-refname", url.as_str()],
         ),
-        ("ls-remote -t dumb-http", vec!["ls-remote", "-t", url.as_str()]),
+        (
+            "ls-remote -t dumb-http",
+            vec!["ls-remote", "-t", url.as_str()],
+        ),
     ] {
         assert_any_ls_remote_output_matches_stock_git(dir.path(), &args, label);
     }
@@ -9305,12 +9598,30 @@ fn ls_remote_option_family_matches_stock_git_for_smart_http_remote() {
     let server = SmartHttpServer::new(dir.path().to_path_buf());
     let url = format!("http://127.0.0.1:{}/remote.git", server.port);
     for (label, args) in [
-        ("ls-remote --branches smart-http", vec!["ls-remote", "--branches", url.as_str()]),
-        ("ls-remote -b smart-http", vec!["ls-remote", "-b", url.as_str()]),
-        ("ls-remote --quiet smart-http", vec!["ls-remote", "--quiet", url.as_str()]),
-        ("ls-remote -q smart-http", vec!["ls-remote", "-q", url.as_str()]),
-        ("ls-remote --get-url smart-http", vec!["ls-remote", "--get-url", url.as_str()]),
-        ("ls-remote --symref smart-http", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --branches smart-http",
+            vec!["ls-remote", "--branches", url.as_str()],
+        ),
+        (
+            "ls-remote -b smart-http",
+            vec!["ls-remote", "-b", url.as_str()],
+        ),
+        (
+            "ls-remote --quiet smart-http",
+            vec!["ls-remote", "--quiet", url.as_str()],
+        ),
+        (
+            "ls-remote -q smart-http",
+            vec!["ls-remote", "-q", url.as_str()],
+        ),
+        (
+            "ls-remote --get-url smart-http",
+            vec!["ls-remote", "--get-url", url.as_str()],
+        ),
+        (
+            "ls-remote --symref smart-http",
+            vec!["ls-remote", "--symref", url.as_str()],
+        ),
         (
             "ls-remote --exit-code match smart-http",
             vec!["ls-remote", "--exit-code", url.as_str(), "main"],
@@ -9323,7 +9634,10 @@ fn ls_remote_option_family_matches_stock_git_for_smart_http_remote() {
             "ls-remote --server-option=foo smart-http",
             vec!["ls-remote", "--server-option=foo", url.as_str()],
         ),
-        ("ls-remote -o foo smart-http", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote -o foo smart-http",
+            vec!["ls-remote", "-o", "foo", url.as_str()],
+        ),
         (
             "ls-remote --sort=refname smart-http",
             vec!["ls-remote", "--sort=refname", url.as_str()],
@@ -9332,7 +9646,10 @@ fn ls_remote_option_family_matches_stock_git_for_smart_http_remote() {
             "ls-remote --sort=-refname smart-http",
             vec!["ls-remote", "--sort=-refname", url.as_str()],
         ),
-        ("ls-remote -t smart-http", vec!["ls-remote", "-t", url.as_str()]),
+        (
+            "ls-remote -t smart-http",
+            vec!["ls-remote", "-t", url.as_str()],
+        ),
     ] {
         assert_any_ls_remote_output_matches_stock_git(dir.path(), &args, label);
     }
@@ -9657,6 +9974,59 @@ fn clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects() {
 }
 
 #[test]
+fn clone_worktree_first_smart_http_demand_hydrate_recovers_missing_head_objects() {
+    ensure_remote_http_helper();
+
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-http-worktree-first-demand");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--worktree-first",
+            "--demand-hydrate",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_demand_hydrate_config(&zmin_clone);
+    let head = git(&zmin_clone, ["rev-parse", "HEAD"]);
+    remove_all_pack_files(&zmin_clone);
+
+    assert_eq!(run_zmin(&zmin_clone, ["cat-file", "-t", "HEAD"]), "commit");
+    assert_eq!(run_zmin(&zmin_clone, ["cat-file", "-t", &head]), "commit");
+    git(&zmin_clone, ["fsck", "--strict"]);
+}
+
+#[test]
 fn clone_instant_smart_http_background_fetch_hydrates_refs() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -9694,6 +10064,57 @@ fn clone_instant_smart_http_background_fetch_hydrates_refs() {
         [
             "clone",
             "--instant",
+            "--background-fetch",
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        run_zmin(&zmin_clone, ["config", "--get", "zmin.worktreeFirst"]),
+        "true"
+    );
+    assert_background_fetch_hydrated(&zmin_clone);
+}
+
+#[test]
+fn clone_worktree_first_smart_http_background_fetch_hydrates_refs() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let zmin_clone = dir.path().join("zmin-http-worktree-first-background");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("README.md"), b"main\n").expect("write readme");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["switch", "-c", "feature"]);
+    fs::write(work.join("feature.txt"), b"feature\n").expect("write feature");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature"]);
+    git(&work, ["switch", "main"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "release"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--worktree-first",
             "--background-fetch",
             url.as_str(),
             zmin_clone.to_str().expect("zmin clone path"),

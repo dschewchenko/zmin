@@ -155,6 +155,12 @@ pub(crate) fn dispatch(
             strategy_options,
             args,
         }),
+        runtime::Command::MergeRecursive { args } => {
+            super::merge_commands::legacy_merge_recursive_command("merge-recursive", &args)
+        }
+        runtime::Command::MergeResolve { args } => {
+            super::merge_commands::legacy_merge_recursive_command("merge-resolve", &args)
+        }
         runtime::Command::MergeFile {
             stdout,
             quiet,
@@ -314,7 +320,10 @@ fn resolve_merge_fast_forward_mode(
             _ => {}
         }
     }
-    (effective_ff || (!effective_ff_only && !effective_no_ff), effective_no_ff)
+    (
+        effective_ff || (!effective_ff_only && !effective_no_ff),
+        effective_no_ff,
+    )
 }
 
 pub(crate) fn resolve_merge_edit_mode(raw_args: &[String], edit: u8, no_edit: u8) -> bool {

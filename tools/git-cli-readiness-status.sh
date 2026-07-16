@@ -5,7 +5,10 @@ usage() {
   cat >&2 <<'EOF'
 usage: tools/git-cli-readiness-status.sh [--require-complete]
 
-Print command-entrypoint readiness and full matrix compatibility status.
+Print command-entrypoint and catalog status.
+
+This command does not claim drop-in compatibility. That requires the complete
+upstream and differential oracle suites in addition to the catalog checks.
 EOF
 }
 
@@ -29,9 +32,21 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-zmin_bin="${ZMIN_BIN:-$repo_root/target/debug/zmin}"
+resolve_cargo_target_dir() {
+  cargo metadata --no-deps --format-version 1 |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])'
+}
+
+if [[ -n "${ZMIN_BIN:-}" ]]; then
+  zmin_bin="$ZMIN_BIN"
+else
+  target_dir="$(resolve_cargo_target_dir)"
+  cargo build -p zmin-cli --bin zmin --profile compat --quiet
+  zmin_bin="$target_dir/compat/zmin"
+fi
 if [[ ! -x "$zmin_bin" ]]; then
-  cargo build -p zmin-cli --bin zmin --quiet
+  echo "Zmin binary is not executable: $zmin_bin" >&2
+  exit 1
 fi
 
 stock_git="${ZMIN_STOCK_GIT:-${GIT_BIN:-}}"
@@ -90,6 +105,11 @@ invalid_input_rows="$(awk -F'\t' '$1 == "invalid_input_rows" { print $2 }' "$mat
 
 printf 'Git CLI readiness status\n'
 printf 'profile=v2-47\n'
+printf 'zmin_bin=%s\n' "$zmin_bin"
+printf 'zmin_version=%s\n' "$("$zmin_bin" --version)"
+printf 'zmin_sha256=%s\n' "$(shasum -a 256 "$zmin_bin" | awk '{ print $1 }')"
+printf 'stock_git_bin=%s\n' "$stock_git"
+printf 'stock_git_version=%s\n' "$("$stock_git" --version)"
 printf 'command_entrypoints_ready=%s\n' "$ready_count"
 printf 'explicit_not_ready=%s\n' "$not_ready_count"
 printf 'baseline_missing=%s\n' "$missing_baseline_count"
@@ -110,11 +130,13 @@ if [[ "$not_ready_count" == "0" &&
       "$complete_command_matrices" == "$total_command_matrices" &&
       "$complete_doc_option_pairs" == "$total_doc_option_pairs" &&
       "$behavior_rows_open" == "0" ]]; then
-  printf 'status=complete\n'
+  printf 'catalog_status=complete\n'
+  printf 'drop_in_compatibility=unverified\n'
   exit 0
 fi
 
-printf 'status=matrix-incomplete\n'
+printf 'catalog_status=incomplete\n'
+printf 'drop_in_compatibility=unverified\n'
 if [[ "$require_complete" == true ]]; then
   exit 1
 fi

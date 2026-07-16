@@ -172,14 +172,14 @@ pub(crate) fn dispatch(
                 identities,
             )
         }
-        runtime::Command::CheckAttr {
+        runtime::Command::CheckAttr(runtime::CheckAttrCommandArgs {
             all,
             cached,
             stdin,
             nul,
             source,
             args,
-        } => run_check_attr(all, cached, stdin, nul, source, args),
+        }) => run_check_attr(all, cached, stdin, nul, source, args, raw_args),
         runtime::Command::UnpackObjects {
             dry_run,
             quiet,
@@ -561,8 +561,22 @@ pub(crate) fn run_check_attr(
     nul: bool,
     source: Option<String>,
     args: Vec<String>,
+    raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
-    super::core_commands::check_attr(all, cached, stdin, nul, source, args)
+    const CHECK_ATTR_STACK_SIZE: usize = 512 * 1024;
+
+    let raw_args = raw_args.to_vec();
+    let worker = std::thread::Builder::new()
+        .name("zmin-check-attr".to_owned())
+        .stack_size(CHECK_ATTR_STACK_SIZE)
+        .spawn(move || {
+            super::core_commands::check_attr(all, cached, stdin, nul, source, args, &raw_args)
+        })
+        .map_err(runtime::CliError::Io)?;
+    match worker.join() {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 pub(crate) fn run_unpack_objects(

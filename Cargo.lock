@@ -2697,13 +2697,18 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "encoding_rs",
  "flate2",
+ "libc",
  "memmap2",
  "native-tls",
  "regex",
+ "rustc-hash",
  "sha1",
  "similar",
+ "syn",
  "tempfile",
+ "windows-sys 0.61.2",
  "zmin-cli-runtime",
  "zmin-cli-schema",
  "zmin-git-core",
@@ -2719,7 +2724,15 @@ name = "zmin-cli-schema"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "zmin-cli-schema-attrs",
 ]
+
+[[package]]
+name = "zmin-cli-schema-attrs"
+version = "0.1.0"
 
 [[package]]
 name = "zmin-core"

@@ -593,11 +593,11 @@ fn entry_identity(entry: &IndexEntry) -> (IndexMode, ObjectId) {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::process::Command;
 
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
     use crate::{
         GitHashAlgorithm, GitIndex, GitObjectKind, GitObjectSink, GitObjectStore,
         InMemoryObjectStore, IndexEntry, IndexMode, LooseObject, LooseObjectStore, TreeEntry,
@@ -885,35 +885,10 @@ mod tests {
     }
 
     fn git_init() -> TempDir {
-        let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
-            .arg("init")
-            .arg("--quiet")
-            .current_dir(repo.path())
-            .output()
-            .expect("run git init");
-        assert!(
-            output.status.success(),
-            "git init failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        repo
+        stock_git_support::git_init()
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 }

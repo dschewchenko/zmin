@@ -2,6 +2,8 @@ mod common;
 
 use std::fs;
 
+use tempfile::TempDir;
+
 use common::{
     command_output_with_env, configure_identity, git, git_args, git_init, git_status,
     git_status_args, git_with_env, run_zmin, run_zmin_args, run_zmin_status, run_zmin_status_args,
@@ -475,4 +477,54 @@ fn grep_binary_submodule_and_pager_schema_tail_matches_stock_git() {
         let git = command_output_with_env("git", repo.path(), args, &[("GIT_PAGER", "cat")], "git");
         assert_eq!(zmin, git, "env args: {args:?}");
     }
+}
+
+#[test]
+fn grep_cached_lazy_fetch_honors_partial_clone_filter_and_promisor_quiet() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let client = dir.path().join("client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("base.txt"), b"base\n").expect("write base");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "base"]);
+
+    let source_url = format!("file://{}", source.display());
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--filter=blob:none",
+            "--no-checkout",
+            &source_url,
+            client.to_str().expect("client path"),
+        ],
+    );
+    run_zmin(&client, ["config", "promisor.quiet", "true"]);
+
+    fs::write(source.join("new.txt"), b"world\n").expect("write new blob");
+    git(&source, ["add", "new.txt"]);
+    git_with_env(&source, ["commit", "-m", "new blob"]);
+    run_zmin(&client, ["fetch", "origin"]);
+    run_zmin(&client, ["reset", "--mixed", "origin/main"]);
+
+    let trace_path = dir.path().join("trace.json");
+    let (_, stdout, _) = command_output_with_env(
+        zmin_bin(),
+        &client,
+        &["grep", "--cached", "world"],
+        &[("GIT_TRACE2_EVENT", trace_path.to_str().expect("trace path"))],
+        "zmin lazy grep",
+    );
+    assert_eq!(stdout, "new.txt:world");
+    let trace = fs::read_to_string(trace_path).expect("read trace");
+    let fetch_line = trace
+        .lines()
+        .find(|line| line.contains("fetch.negotiationAlgorithm=noop"))
+        .expect("promisor fetch trace");
+    assert!(fetch_line.contains("--quiet"), "trace line: {fetch_line}");
 }

@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    command_any_output, configure_identity, git, git_init, git_with_env, git_with_stdin,
-    run_zmin, run_zmin_with_stdin, write_file, zmin_bin,
+    command_any_output, configure_identity, git, git_init, git_with_env, git_with_stdin, run_zmin,
+    run_zmin_with_stdin, write_file, zmin_bin,
 };
 
 fn seed_fast_export_repo() -> tempfile::TempDir {
@@ -248,8 +248,16 @@ fn fast_export_documented_option_batch_matches_stock_git() {
         &["fast-export", "--mark-tags", "--all"],
         &["fast-export", "-M", "--all"],
         &["fast-export", "-C", "--all"],
-        &["fast-export", "--refspec=refs/heads/main:refs/heads/main", "--all"],
-        &["fast-export", "--import-marks-if-exists=missing.marks", "--all"],
+        &[
+            "fast-export",
+            "--refspec=refs/heads/main:refs/heads/main",
+            "--all",
+        ],
+        &[
+            "fast-export",
+            "--import-marks-if-exists=missing.marks",
+            "--all",
+        ],
         &["fast-export", "--full-tree", "--all"],
         &["fast-export", "--show-original-ids", "--all"],
         &["fast-export", "--use-done-feature", "--all"],
@@ -288,7 +296,12 @@ fn fast_export_documented_option_batch_matches_stock_git() {
 fn fast_export_anonymize_option_family_matches_stock_git() {
     assert_fast_export_matches_stock_git(&["fast-export", "--anonymize", "--all"], |_, _| {}, &[]);
     assert_fast_export_matches_stock_git(
-        &["fast-export", "--anonymize", "--anonymize-map=map.txt", "--all"],
+        &[
+            "fast-export",
+            "--anonymize",
+            "--anonymize-map=map.txt",
+            "--all",
+        ],
         |git_repo, zmin_repo| {
             fs::write(git_repo.join("map.txt"), "seed\n").expect("write git anonymize map");
             fs::write(zmin_repo.join("map.txt"), "seed\n").expect("write zmin anonymize map");
@@ -381,7 +394,12 @@ fn fast_export_invalid_value_diagnostics_match_stock_git() {
     ] {
         assert_eq!(
             command_any_output("git", repo.path(), args, "git fast-export invalid value"),
-            command_any_output(zmin_bin(), repo.path(), args, "zmin fast-export invalid value")
+            command_any_output(
+                zmin_bin(),
+                repo.path(),
+                args,
+                "zmin fast-export invalid value"
+            )
         );
     }
 }
@@ -390,7 +408,12 @@ fn fast_export_invalid_value_diagnostics_match_stock_git() {
 fn fast_export_anonymize_map_token_forms_match_stock_git() {
     for args in [
         &["fast-export", "--anonymize", "--anonymize-map=foo", "--all"][..],
-        &["fast-export", "--anonymize", "--anonymize-map=foo:bar", "--all"],
+        &[
+            "fast-export",
+            "--anonymize",
+            "--anonymize-map=foo:bar",
+            "--all",
+        ],
         &[
             "fast-export",
             "--anonymize",

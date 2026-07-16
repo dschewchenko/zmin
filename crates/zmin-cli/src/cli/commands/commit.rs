@@ -7,6 +7,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Commit {
             all,
             include,
+            interactive,
             only,
             patch,
             allow_empty,
@@ -51,6 +52,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => super::commit_commands::commit_command(super::commit_commands::CommitCommandOptions {
             all,
             include: include > 0,
+            interactive: interactive > 0,
             only,
             patch: patch > 0,
             allow_empty,

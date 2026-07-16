@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Args as ClapArgs, Parser, Subcommand, ValueHint};
+use zmin_cli_schema_attrs::CliSchema;
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CompatProfile {
@@ -32,7 +33,7 @@ pub enum CompatFormat {
     Json,
 }
 
-#[derive(Parser, Debug)]
+#[derive(CliSchema, Debug)]
 #[command(
     name = "zmin",
     version,
@@ -44,7 +45,1273 @@ pub struct Args {
     pub command: Command,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(ClapArgs, Debug, Default)]
+pub struct ForEachRefArgs {
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    #[arg(long = "sort", overrides_with = "no_sort")]
+    pub sort: Vec<String>,
+    #[arg(long = "no-sort", overrides_with = "sort", action = ArgAction::SetTrue)]
+    pub no_sort: bool,
+    #[arg(long = "count")]
+    pub count: Option<usize>,
+    #[arg(short = 's', long = "shell", action = ArgAction::SetTrue)]
+    pub shell: bool,
+    #[arg(long = "python", action = ArgAction::SetTrue)]
+    pub python: bool,
+    #[arg(long = "perl", action = ArgAction::SetTrue)]
+    pub perl: bool,
+    #[arg(long = "tcl", action = ArgAction::SetTrue)]
+    pub tcl: bool,
+    #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+    pub color: Option<String>,
+    #[arg(long = "no-color", action = ArgAction::SetTrue)]
+    pub no_color: bool,
+    #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
+    pub ignore_case: bool,
+    #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub contains: Option<String>,
+    #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub no_contains: Option<String>,
+    #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub merged: Option<String>,
+    #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub no_merged: Option<String>,
+    #[arg(long = "points-at")]
+    pub points_at: Option<String>,
+    #[arg(long = "exclude")]
+    pub exclude: Vec<String>,
+    #[arg(long = "stdin", action = ArgAction::SetTrue)]
+    pub stdin: bool,
+    #[arg(long = "include-root-refs", action = ArgAction::SetTrue)]
+    pub include_root_refs: bool,
+    #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
+    pub omit_empty: bool,
+    pub patterns: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin for-each-ref",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct ForEachRefOnlyArgs {
+    #[command(flatten)]
+    pub options: ForEachRefArgs,
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct ShowRefArgs {
+    #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+    pub quiet: bool,
+    #[arg(long = "head", action = ArgAction::SetTrue)]
+    pub head: bool,
+    #[arg(long = "heads", alias = "branches", action = ArgAction::SetTrue)]
+    pub heads: bool,
+    #[arg(long = "tags", action = ArgAction::SetTrue)]
+    pub tags: bool,
+    #[arg(short = 'd', long = "dereference", action = ArgAction::SetTrue)]
+    pub dereference: bool,
+    #[arg(
+        short = 's',
+        long = "hash",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "40"
+    )]
+    pub hash: Option<usize>,
+    #[arg(
+        long = "abbrev",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "7"
+    )]
+    pub abbrev: Option<usize>,
+    #[arg(long = "verify", action = ArgAction::SetTrue)]
+    pub verify: bool,
+    #[arg(long = "exists", action = ArgAction::SetTrue)]
+    pub exists: bool,
+    #[arg(
+        long = "exclude-existing",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub exclude_existing: Option<String>,
+    pub refs: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin show-ref",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct ShowRefOnlyArgs {
+    #[command(flatten)]
+    pub options: ShowRefArgs,
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct PackRefsArgs {
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "auto", action = ArgAction::SetTrue)]
+    pub auto: bool,
+    #[arg(long = "include")]
+    pub include: Vec<String>,
+    #[arg(long = "no-include", action = ArgAction::SetTrue)]
+    pub no_include: bool,
+    #[arg(long = "exclude")]
+    pub exclude: Vec<String>,
+    #[arg(long = "no-exclude", action = ArgAction::SetTrue)]
+    pub no_exclude: bool,
+    #[arg(long = "prune", overrides_with = "no_prune", action = ArgAction::SetTrue)]
+    pub prune: bool,
+    #[arg(long = "no-prune", overrides_with = "prune", action = ArgAction::SetTrue)]
+    pub no_prune: bool,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct StatusCommandArgs {
+    #[arg(
+        long = "porcelain",
+        num_args = 0..=1,
+        default_missing_value = "v1",
+        require_equals = true,
+        overrides_with = "no_porcelain"
+    )]
+    pub porcelain: Option<String>,
+    #[arg(long = "no-porcelain", overrides_with = "porcelain", action = ArgAction::SetTrue)]
+    pub no_porcelain: bool,
+    #[arg(short = 'b', long = "branch", action = ArgAction::SetTrue)]
+    pub branch: bool,
+    #[arg(long = "no-branch", overrides_with = "branch", action = ArgAction::SetTrue)]
+    pub no_branch: bool,
+    #[arg(long = "ahead-behind", overrides_with = "no_ahead_behind", action = ArgAction::SetTrue)]
+    pub ahead_behind: bool,
+    #[arg(long = "no-ahead-behind", overrides_with = "ahead_behind", action = ArgAction::SetTrue)]
+    pub no_ahead_behind: bool,
+    #[arg(long = "show-stash", overrides_with = "no_show_stash", action = ArgAction::SetTrue)]
+    pub show_stash: bool,
+    #[arg(long = "no-show-stash", overrides_with = "show_stash", action = ArgAction::SetTrue)]
+    pub no_show_stash: bool,
+    #[arg(short = 'v', long = "verbose", overrides_with = "no_verbose", action = ArgAction::Count)]
+    pub verbose: u8,
+    #[arg(long = "no-verbose", overrides_with = "verbose", action = ArgAction::SetTrue)]
+    pub no_verbose: bool,
+    #[arg(long = "long", overrides_with = "short", action = ArgAction::SetTrue)]
+    pub long: bool,
+    #[arg(long = "no-long", overrides_with = "short", action = ArgAction::SetTrue)]
+    pub no_long: bool,
+    #[arg(
+        long = "column",
+        overrides_with = "no_column",
+        num_args = 0..=1,
+        default_missing_value = "always",
+        require_equals = true
+    )]
+    pub column: Option<String>,
+    #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
+    pub no_column: bool,
+    #[arg(long = "renames", overrides_with = "no_renames", action = ArgAction::SetTrue)]
+    pub renames: bool,
+    #[arg(long = "no-renames", overrides_with = "renames", action = ArgAction::SetTrue)]
+    pub no_renames: bool,
+    #[arg(
+        short = 'M',
+        long = "find-renames",
+        overrides_with = "no_renames",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub find_renames: Option<String>,
+    #[arg(
+        long = "ignore-submodules",
+        num_args = 0..=1,
+        default_missing_value = "all",
+        require_equals = true,
+        overrides_with = "no_ignore_submodules"
+    )]
+    pub ignore_submodules: Option<String>,
+    #[arg(
+        long = "no-ignore-submodules",
+        overrides_with = "ignore_submodules",
+        action = ArgAction::SetTrue
+    )]
+    pub no_ignore_submodules: bool,
+    #[arg(long = "untracked-cache", hide = true, action = ArgAction::SetTrue)]
+    pub untracked_cache: bool,
+    #[arg(long = "no-untracked-cache", hide = true, action = ArgAction::SetTrue)]
+    pub no_untracked_cache: bool,
+    #[arg(long = "split-index", hide = true, action = ArgAction::SetTrue)]
+    pub split_index: bool,
+    #[arg(long = "no-split-index", hide = true, action = ArgAction::SetTrue)]
+    pub no_split_index: bool,
+    #[arg(
+        short = 's',
+        long = "short",
+        overrides_with_all = ["long", "no_long", "no_short"],
+        action = ArgAction::SetTrue
+    )]
+    pub short: bool,
+    #[arg(long = "no-short", overrides_with = "short", action = ArgAction::SetTrue)]
+    pub no_short: bool,
+    #[arg(
+        short = 'z',
+        long = "null",
+        overrides_with = "no_null",
+        action = ArgAction::SetTrue
+    )]
+    pub null: bool,
+    #[arg(long = "no-null", overrides_with = "null", action = ArgAction::SetTrue)]
+    pub no_null: bool,
+    #[arg(
+        long = "ignored",
+        num_args = 0..=1,
+        default_missing_value = "traditional",
+        require_equals = true,
+        overrides_with = "no_ignored"
+    )]
+    pub ignored: Option<String>,
+    #[arg(long = "no-ignored", overrides_with = "ignored", action = ArgAction::SetTrue)]
+    pub no_ignored: bool,
+    #[arg(
+        short = 'u',
+        long = "untracked-files",
+        num_args = 0..=1,
+        default_missing_value = "all",
+        require_equals = true,
+        overrides_with = "no_untracked_files"
+    )]
+    pub untracked_files: Option<String>,
+    #[arg(
+        long = "no-untracked-files",
+        overrides_with = "untracked_files",
+        action = ArgAction::SetTrue
+    )]
+    pub no_untracked_files: bool,
+    #[arg(value_hint = ValueHint::AnyPath)]
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin status",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct StatusOnlyArgs {
+    #[command(flatten)]
+    pub options: StatusCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct LsFilesCommandArgs {
+    #[arg(short = 'c', long = "cached", overrides_with = "no_cached", action = ArgAction::SetTrue)]
+    pub cached: bool,
+    #[arg(long = "no-cached", overrides_with = "cached", action = ArgAction::SetTrue)]
+    pub no_cached: bool,
+    #[arg(short = 'z', action = ArgAction::SetTrue)]
+    pub zero: bool,
+    #[arg(long = "full-name", action = ArgAction::SetTrue)]
+    pub full_name: bool,
+    #[arg(long = "error-unmatch", overrides_with = "no_error_unmatch", action = ArgAction::SetTrue)]
+    pub error_unmatch: bool,
+    #[arg(long = "no-error-unmatch", overrides_with = "error_unmatch", action = ArgAction::SetTrue)]
+    pub no_error_unmatch: bool,
+    #[arg(short = 't', action = ArgAction::SetTrue)]
+    pub tagged: bool,
+    #[arg(short = 'v', action = ArgAction::SetTrue)]
+    pub lowercase_assume_valid: bool,
+    #[arg(short = 'f', action = ArgAction::SetTrue)]
+    pub fsmonitor_clean: bool,
+    #[arg(long = "deduplicate", overrides_with = "no_deduplicate", action = ArgAction::SetTrue)]
+    pub deduplicate: bool,
+    #[arg(long = "no-deduplicate", overrides_with = "deduplicate", action = ArgAction::SetTrue)]
+    pub no_deduplicate: bool,
+    #[arg(long = "sparse", overrides_with = "no_sparse", action = ArgAction::SetTrue)]
+    pub sparse: bool,
+    #[arg(long = "no-sparse", overrides_with = "sparse", action = ArgAction::SetTrue)]
+    pub no_sparse: bool,
+    #[arg(long = "recurse-submodules", overrides_with = "no_recurse_submodules", action = ArgAction::SetTrue)]
+    pub recurse_submodules: bool,
+    #[arg(long = "no-recurse-submodules", overrides_with = "recurse_submodules", action = ArgAction::SetTrue)]
+    pub no_recurse_submodules: bool,
+    #[arg(long = "debug", overrides_with = "no_debug", action = ArgAction::SetTrue)]
+    pub debug: bool,
+    #[arg(long = "no-debug", overrides_with = "debug", action = ArgAction::SetTrue)]
+    pub no_debug: bool,
+    #[arg(long = "abbrev", overrides_with = "no_abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
+    pub abbrev: Option<usize>,
+    #[arg(long = "no-abbrev", overrides_with = "abbrev", action = ArgAction::SetTrue)]
+    pub no_abbrev: bool,
+    #[arg(long = "eol", overrides_with = "no_eol", action = ArgAction::SetTrue)]
+    pub eol: bool,
+    #[arg(long = "no-eol", overrides_with = "eol", action = ArgAction::SetTrue)]
+    pub no_eol: bool,
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    #[arg(long = "with-tree", overrides_with = "no_with_tree")]
+    pub with_tree: Option<String>,
+    #[arg(long = "no-with-tree", overrides_with = "with_tree", action = ArgAction::SetTrue)]
+    pub no_with_tree: bool,
+    #[arg(long = "resolve-undo", overrides_with = "no_resolve_undo", action = ArgAction::SetTrue)]
+    pub resolve_undo: bool,
+    #[arg(long = "no-resolve-undo", overrides_with = "resolve_undo", action = ArgAction::SetTrue)]
+    pub no_resolve_undo: bool,
+    #[arg(short = 's', long = "stage", overrides_with = "no_stage", action = ArgAction::SetTrue)]
+    pub stage: bool,
+    #[arg(long = "no-stage", overrides_with = "stage", action = ArgAction::SetTrue)]
+    pub no_stage: bool,
+    #[arg(short = 'u', long = "unmerged", overrides_with = "no_unmerged", action = ArgAction::SetTrue)]
+    pub unmerged: bool,
+    #[arg(long = "no-unmerged", overrides_with = "unmerged", action = ArgAction::SetTrue)]
+    pub no_unmerged: bool,
+    #[arg(short = 'd', long = "deleted", overrides_with = "no_deleted", action = ArgAction::SetTrue)]
+    pub deleted: bool,
+    #[arg(long = "no-deleted", overrides_with = "deleted", action = ArgAction::SetTrue)]
+    pub no_deleted: bool,
+    #[arg(short = 'm', long = "modified", overrides_with = "no_modified", action = ArgAction::SetTrue)]
+    pub modified: bool,
+    #[arg(long = "no-modified", overrides_with = "modified", action = ArgAction::SetTrue)]
+    pub no_modified: bool,
+    #[arg(short = 'o', long = "others", overrides_with = "no_others", action = ArgAction::SetTrue)]
+    pub others: bool,
+    #[arg(long = "no-others", overrides_with = "others", action = ArgAction::SetTrue)]
+    pub no_others: bool,
+    #[arg(short = 'k', long = "killed", overrides_with = "no_killed", action = ArgAction::SetTrue)]
+    pub killed: bool,
+    #[arg(long = "no-killed", overrides_with = "killed", action = ArgAction::SetTrue)]
+    pub no_killed: bool,
+    #[arg(long = "directory", overrides_with = "no_directory", action = ArgAction::SetTrue)]
+    pub directory: bool,
+    #[arg(long = "no-directory", overrides_with = "directory", action = ArgAction::SetTrue)]
+    pub no_directory: bool,
+    #[arg(
+        long = "empty-directory",
+        action = ArgAction::SetTrue,
+        overrides_with = "no_empty_directory"
+    )]
+    pub empty_directory: bool,
+    #[arg(
+        long = "no-empty-directory",
+        action = ArgAction::SetTrue,
+        overrides_with = "empty_directory"
+    )]
+    pub no_empty_directory: bool,
+    #[arg(short = 'i', long = "ignored", overrides_with = "no_ignored", action = ArgAction::SetTrue)]
+    pub ignored: bool,
+    #[arg(long = "no-ignored", overrides_with = "ignored", action = ArgAction::SetTrue)]
+    pub no_ignored: bool,
+    #[arg(short = 'x', long = "exclude")]
+    pub excludes: Vec<String>,
+    #[arg(short = 'X', long = "exclude-from", value_hint = ValueHint::FilePath)]
+    pub exclude_from: Vec<PathBuf>,
+    #[arg(long = "exclude-per-directory")]
+    pub exclude_per_directory: Option<String>,
+    #[arg(long = "exclude-standard", action = ArgAction::SetTrue)]
+    pub exclude_standard: bool,
+    #[arg(value_hint = ValueHint::AnyPath)]
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin ls-files",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct LsFilesOnlyArgs {
+    #[command(flatten)]
+    pub options: LsFilesCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct ShowCommandArgs {
+    #[arg(short = 's', long = "no-patch", action = ArgAction::SetTrue)]
+    pub no_patch: bool,
+    #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
+    pub patch: bool,
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub oneline: bool,
+    #[arg(short = 'z', action = ArgAction::SetTrue)]
+    pub zero: bool,
+    #[arg(long = "stat", action = ArgAction::SetTrue)]
+    pub stat: bool,
+    #[arg(long = "patch-with-raw", action = ArgAction::SetTrue)]
+    pub patch_with_raw: bool,
+    #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
+    pub patch_with_stat: bool,
+    #[arg(long = "numstat", action = ArgAction::SetTrue)]
+    pub numstat: bool,
+    #[arg(long = "shortstat", action = ArgAction::SetTrue)]
+    pub shortstat: bool,
+    #[arg(long = "raw", action = ArgAction::SetTrue)]
+    pub raw: bool,
+    #[arg(long = "summary", action = ArgAction::SetTrue)]
+    pub summary: bool,
+    #[arg(long = "name-only", action = ArgAction::SetTrue)]
+    pub name_only: bool,
+    #[arg(long = "name-status", action = ArgAction::SetTrue)]
+    pub name_status: bool,
+    #[arg(short = 'M', long = "find-renames", num_args = 0..=1, default_missing_value = "")]
+    pub find_renames: Option<String>,
+    #[arg(short = 'C', long = "find-copies", num_args = 0..=1, default_missing_value = "")]
+    pub find_copies: Option<String>,
+    #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
+    pub find_copies_harder: bool,
+    #[arg(long = "encoding")]
+    pub encoding: Option<String>,
+    #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+    pub expand_tabs: bool,
+    #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+    pub no_expand_tabs: bool,
+    #[arg(long = "notes", action = ArgAction::SetTrue)]
+    pub notes: bool,
+    #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+    pub no_notes: bool,
+    #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+    pub show_notes: bool,
+    #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+    pub show_notes_by_default: bool,
+    #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+    pub standard_notes: bool,
+    #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+    pub no_standard_notes: bool,
+    #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+    pub show_signature: bool,
+    #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+    pub abbrev: Option<String>,
+    #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+    pub no_abbrev: bool,
+    #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+    pub abbrev_commit: bool,
+    #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+    pub no_abbrev_commit: bool,
+    #[arg(long = "parents", action = ArgAction::SetTrue)]
+    pub parents: bool,
+    #[arg(long = "root", action = ArgAction::SetTrue)]
+    pub root: bool,
+    #[arg(short = 'c', action = ArgAction::SetTrue)]
+    pub combined: bool,
+    #[arg(short = 'm', action = ArgAction::SetTrue)]
+    pub separate_merges: bool,
+    #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+    pub first_parent: bool,
+    #[arg(long = "diff-merges")]
+    pub diff_merges: Option<String>,
+    #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+    pub no_diff_merges: bool,
+    #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+    pub do_walk: bool,
+    #[arg(long = "no-walk", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+    pub no_walk: Option<String>,
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    #[arg(long = "max-count", short = 'n')]
+    pub max_count: Option<String>,
+    #[arg(long = "pretty")]
+    pub pretty: Option<String>,
+    #[arg(long = "stdin", action = ArgAction::SetTrue)]
+    pub stdin: bool,
+    #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin show",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct ShowOnlyArgs {
+    #[command(flatten)]
+    pub options: ShowCommandArgs,
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct CheckAttrCommandArgs {
+    #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "cached", action = ArgAction::SetTrue)]
+    pub cached: bool,
+    #[arg(long = "stdin", action = ArgAction::SetTrue)]
+    pub stdin: bool,
+    #[arg(short = 'z', action = ArgAction::SetTrue)]
+    pub nul: bool,
+    #[arg(long = "source")]
+    pub source: Option<String>,
+    #[arg(allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin check-attr",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct CheckAttrOnlyArgs {
+    #[command(flatten)]
+    pub options: CheckAttrCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct LsTreeCommandArgs {
+    #[arg(short = 'd', action = ArgAction::SetTrue)]
+    pub directory_only: bool,
+    #[arg(short = 'r', action = ArgAction::SetTrue)]
+    pub recursive: bool,
+    #[arg(short = 't', action = ArgAction::SetTrue)]
+    pub show_trees: bool,
+    #[arg(short = 'l', long = "long", action = ArgAction::SetTrue)]
+    pub long: bool,
+    #[arg(short = 'z', action = ArgAction::SetTrue)]
+    pub nul_terminated: bool,
+    #[arg(long = "name-only", action = ArgAction::SetTrue)]
+    pub name_only: bool,
+    #[arg(long = "name-status", action = ArgAction::SetTrue)]
+    pub name_status: bool,
+    #[arg(long = "object-only", action = ArgAction::SetTrue)]
+    pub object_only: bool,
+    #[arg(long = "full-name", action = ArgAction::Count)]
+    pub full_name: u8,
+    #[arg(long = "no-full-name", action = ArgAction::Count)]
+    pub no_full_name: u8,
+    #[arg(long = "full-tree", action = ArgAction::SetTrue)]
+    pub full_tree: bool,
+    #[arg(
+        long = "abbrev",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "7"
+    )]
+    pub abbrev: Option<usize>,
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    pub treeish: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin ls-tree",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct LsTreeOnlyArgs {
+    #[command(flatten)]
+    pub options: LsTreeCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct RevParseCommandArgs {
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(
+        long = "branches",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub branches: Vec<String>,
+    #[arg(
+        long = "tags",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub tags: Vec<String>,
+    #[arg(
+        long = "remotes",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub remotes: Vec<String>,
+    #[arg(long = "glob")]
+    pub glob: Vec<String>,
+    #[arg(long = "exclude")]
+    pub exclude: Vec<String>,
+    #[arg(long = "exclude-hidden")]
+    pub exclude_hidden: Option<String>,
+    #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
+    pub local_env_vars: bool,
+    #[arg(long = "flags", action = ArgAction::SetTrue)]
+    pub flags: bool,
+    #[arg(long = "no-flags", action = ArgAction::SetTrue)]
+    pub no_flags: bool,
+    #[arg(long = "revs-only", action = ArgAction::SetTrue)]
+    pub revs_only: bool,
+    #[arg(long = "no-revs", action = ArgAction::SetTrue)]
+    pub no_revs: bool,
+    #[arg(long = "default")]
+    pub default: Option<String>,
+    #[arg(long = "prefix")]
+    pub prefix: Option<String>,
+    #[arg(long = "sq", action = ArgAction::SetTrue)]
+    pub sq: bool,
+    #[arg(long = "sq-quote", action = ArgAction::SetTrue)]
+    pub sq_quote: bool,
+    #[arg(long = "not", action = ArgAction::SetTrue)]
+    pub not: bool,
+    #[arg(long = "symbolic", action = ArgAction::SetTrue)]
+    pub symbolic: bool,
+    #[arg(long = "parseopt", action = ArgAction::SetTrue)]
+    pub parseopt: bool,
+    #[arg(long = "keep-dashdash", action = ArgAction::SetTrue)]
+    pub keep_dashdash: bool,
+    #[arg(long = "stop-at-non-option", action = ArgAction::SetTrue)]
+    pub stop_at_non_option: bool,
+    #[arg(long = "stuck-long", action = ArgAction::SetTrue)]
+    pub stuck_long: bool,
+    #[arg(
+        long = "short",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "7"
+    )]
+    pub short: Option<usize>,
+    #[arg(
+        long = "abbrev-ref",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "loose"
+    )]
+    pub abbrev_ref: Option<String>,
+    #[arg(long = "verify", action = ArgAction::SetTrue)]
+    pub verify: bool,
+    #[arg(long = "end-of-options", action = ArgAction::SetTrue)]
+    pub end_of_options: bool,
+    #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+    pub quiet: bool,
+    #[arg(long = "symbolic-full-name", action = ArgAction::SetTrue)]
+    pub symbolic_full_name: bool,
+    #[arg(long = "bisect", action = ArgAction::SetTrue)]
+    pub bisect: bool,
+    #[arg(long = "path-format")]
+    pub path_format: Vec<String>,
+    #[arg(long = "since", alias = "after")]
+    pub since: Vec<String>,
+    #[arg(long = "until", alias = "before")]
+    pub until: Vec<String>,
+    #[arg(
+        long = "show-object-format",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "storage"
+    )]
+    pub show_object_format: Vec<String>,
+    #[arg(long = "show-ref-format", action = ArgAction::SetTrue)]
+    pub show_ref_format: bool,
+    #[arg(long = "show-toplevel", action = ArgAction::SetTrue)]
+    pub show_toplevel: bool,
+    #[arg(long = "show-prefix", action = ArgAction::SetTrue)]
+    pub show_prefix: bool,
+    #[arg(long = "show-cdup", action = ArgAction::SetTrue)]
+    pub show_cdup: bool,
+    #[arg(long = "show-superproject-working-tree", action = ArgAction::SetTrue)]
+    pub show_superproject_working_tree: bool,
+    #[arg(long = "git-dir", action = ArgAction::SetTrue)]
+    pub git_dir: bool,
+    #[arg(long = "absolute-git-dir", action = ArgAction::SetTrue)]
+    pub absolute_git_dir: bool,
+    #[arg(long = "git-common-dir", action = ArgAction::SetTrue)]
+    pub git_common_dir: bool,
+    #[arg(long = "resolve-git-dir")]
+    pub resolve_git_dir: Vec<PathBuf>,
+    #[arg(long = "output-object-format", num_args = 1, require_equals = true)]
+    pub output_object_format: Vec<String>,
+    #[arg(long = "disambiguate", require_equals = true)]
+    pub disambiguate: Vec<String>,
+    #[arg(long = "shared-index-path", action = ArgAction::SetTrue)]
+    pub shared_index_path: bool,
+    #[arg(long = "git-path")]
+    pub git_paths: Vec<PathBuf>,
+    #[arg(long = "is-inside-git-dir", action = ArgAction::SetTrue)]
+    pub is_inside_git_dir: bool,
+    #[arg(long = "is-inside-work-tree", action = ArgAction::SetTrue)]
+    pub is_inside_work_tree: bool,
+    #[arg(long = "is-bare-repository", action = ArgAction::SetTrue)]
+    pub is_bare_repository: bool,
+    #[arg(long = "is-shallow-repository", action = ArgAction::SetTrue)]
+    pub is_shallow_repository: bool,
+    pub revs: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin rev-parse",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct RevParseOnlyArgs {
+    #[command(flatten)]
+    pub options: RevParseCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct BranchCommandArgs {
+    #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+    pub help: bool,
+    #[arg(short = 'r', long = "remotes", action = ArgAction::Count)]
+    pub remotes: u8,
+    #[arg(short = 'a', long = "all", action = ArgAction::Count)]
+    pub all: u8,
+    #[arg(short = 'l', long = "list", action = ArgAction::Count)]
+    pub list: u8,
+    #[arg(long = "no-list", action = ArgAction::Count)]
+    pub no_list: u8,
+    #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
+    pub force: bool,
+    #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+    pub quiet: u8,
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbose: u8,
+    #[arg(long = "no-verbose", action = ArgAction::Count)]
+    pub no_verbose: u8,
+    #[arg(
+        long = "abbrev",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "7"
+    )]
+    pub abbrev: Option<usize>,
+    #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+    pub no_abbrev: bool,
+    #[arg(
+        long = "column",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "column"
+    )]
+    pub column: Option<String>,
+    #[arg(long = "no-column", action = ArgAction::SetTrue)]
+    pub no_column: bool,
+    #[arg(short = 'i', long = "ignore-case", action = ArgAction::Count)]
+    pub ignore_case: u8,
+    #[arg(
+        long = "color",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "always"
+    )]
+    pub color: Option<String>,
+    #[arg(long = "no-color", action = ArgAction::Count)]
+    pub no_color: u8,
+    #[arg(long = "create-reflog", overrides_with = "no_create_reflog", action = ArgAction::SetTrue)]
+    pub create_reflog: bool,
+    #[arg(long = "no-create-reflog", overrides_with = "create_reflog", action = ArgAction::SetTrue)]
+    pub no_create_reflog: bool,
+    #[arg(long = "show-current", action = ArgAction::Count)]
+    pub show_current: u8,
+    #[arg(long = "no-show-current", action = ArgAction::Count)]
+    pub no_show_current: u8,
+    #[arg(long = "edit-description", action = ArgAction::SetTrue)]
+    pub edit_description: bool,
+    #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
+    pub delete: bool,
+    #[arg(short = 'D', action = ArgAction::SetTrue)]
+    pub force_delete: bool,
+    #[arg(short = 'm', long = "move", action = ArgAction::SetTrue)]
+    pub move_branch: bool,
+    #[arg(short = 'M', action = ArgAction::SetTrue)]
+    pub force_move: bool,
+    #[arg(short = 'c', long = "copy", action = ArgAction::SetTrue)]
+    pub copy_branch: bool,
+    #[arg(short = 'C', action = ArgAction::SetTrue)]
+    pub force_copy: bool,
+    #[arg(short = 'u', long = "set-upstream-to")]
+    pub set_upstream_to: Option<String>,
+    #[arg(long = "set-upstream", action = ArgAction::SetTrue)]
+    pub set_upstream: bool,
+    #[arg(long = "unset-upstream", action = ArgAction::SetTrue)]
+    pub unset_upstream: bool,
+    #[arg(
+        short = 't',
+        long = "track",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "direct"
+    )]
+    pub track: Option<String>,
+    #[arg(long = "no-track", action = ArgAction::SetTrue)]
+    pub no_track: bool,
+    #[arg(long = "sort")]
+    pub sort: Vec<String>,
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    #[arg(long = "no-format", action = ArgAction::SetTrue)]
+    pub no_format: bool,
+    #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
+    pub omit_empty: bool,
+    #[arg(long = "no-sort", action = ArgAction::SetTrue)]
+    pub no_sort: bool,
+    #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
+    pub recurse_submodules: bool,
+    #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
+    pub no_recurse_submodules: bool,
+    #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub contains: Vec<String>,
+    #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub no_contains: Vec<String>,
+    #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub merged: Vec<String>,
+    #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
+    pub no_merged: Vec<String>,
+    #[arg(long = "points-at")]
+    pub points_at: Option<String>,
+    pub name: Option<String>,
+    pub start_point: Option<String>,
+    pub extra_args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin branch",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct BranchOnlyArgs {
+    #[command(flatten)]
+    pub options: BranchCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct ConfigCommandArgs {
+    #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
+    pub null: bool,
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "blob")]
+    pub blob: Option<String>,
+    #[arg(long = "comment")]
+    pub comment: Option<String>,
+    #[arg(long = "fixed-value", action = ArgAction::SetTrue)]
+    pub fixed_value: bool,
+    #[arg(long = "get", action = ArgAction::SetTrue)]
+    pub get: bool,
+    #[arg(long = "get-all", action = ArgAction::SetTrue)]
+    pub get_all: bool,
+    #[arg(long = "get-colorbool", action = ArgAction::SetTrue)]
+    pub get_colorbool: bool,
+    #[arg(long = "get-color", action = ArgAction::SetTrue)]
+    pub get_color: bool,
+    #[arg(long = "get-regexp", action = ArgAction::SetTrue)]
+    pub get_regexp: bool,
+    #[arg(long = "get-urlmatch", action = ArgAction::SetTrue)]
+    pub get_urlmatch: bool,
+    #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue)]
+    pub edit: bool,
+    #[arg(long = "list", short = 'l', action = ArgAction::SetTrue)]
+    pub list: bool,
+    #[arg(long = "name-only", action = ArgAction::SetTrue)]
+    pub name_only: bool,
+    #[arg(long = "show-names", action = ArgAction::SetTrue)]
+    pub show_names: bool,
+    #[arg(long = "no-includes", action = ArgAction::SetTrue)]
+    pub no_includes: bool,
+    #[arg(long = "no-type", action = ArgAction::Count)]
+    pub no_type: u8,
+    #[arg(long = "regexp", action = ArgAction::SetTrue)]
+    pub regexp: bool,
+    #[arg(long = "replace-all", action = ArgAction::SetTrue)]
+    pub replace_all: bool,
+    #[arg(long = "rename-section", action = ArgAction::SetTrue)]
+    pub rename_section: bool,
+    #[arg(long = "remove-section", action = ArgAction::SetTrue)]
+    pub remove_section: bool,
+    #[arg(long = "system", action = ArgAction::SetTrue)]
+    pub system: bool,
+    #[arg(long = "unset", action = ArgAction::SetTrue)]
+    pub unset: bool,
+    #[arg(long = "unset-all", action = ArgAction::SetTrue)]
+    pub unset_all: bool,
+    #[arg(long = "add", action = ArgAction::SetTrue)]
+    pub add: bool,
+    #[arg(long = "append", action = ArgAction::SetTrue)]
+    pub append: bool,
+    #[arg(long = "bool", action = ArgAction::Count)]
+    pub bool_value: u8,
+    #[arg(long = "int", action = ArgAction::Count)]
+    pub int_value: u8,
+    #[arg(long = "bool-or-int", action = ArgAction::Count)]
+    pub bool_or_int_value: u8,
+    #[arg(long = "bool-or-str", action = ArgAction::Count)]
+    pub bool_or_str_value: u8,
+    #[arg(long = "path", action = ArgAction::Count)]
+    pub path_value: u8,
+    #[arg(long = "expiry-date", action = ArgAction::Count)]
+    pub expiry_date_value: u8,
+    #[arg(long = "type", action = ArgAction::Append)]
+    pub value_type: Vec<String>,
+    #[arg(long = "default")]
+    pub default: Option<String>,
+    #[arg(long = "worktree", action = ArgAction::SetTrue)]
+    pub worktree: bool,
+    #[arg(long = "local", action = ArgAction::SetTrue)]
+    pub local: bool,
+    #[arg(long = "global", action = ArgAction::SetTrue)]
+    pub global: bool,
+    #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath)]
+    pub file: Option<PathBuf>,
+    #[arg(long = "includes", action = ArgAction::SetTrue)]
+    pub includes: bool,
+    #[arg(long = "show-origin", action = ArgAction::SetTrue)]
+    pub show_origin: bool,
+    #[arg(long = "show-scope", action = ArgAction::SetTrue)]
+    pub show_scope: bool,
+    #[arg(long = "url")]
+    pub url: Option<String>,
+    #[arg(long = "value")]
+    pub value_pattern: Option<String>,
+    pub arg0: Option<String>,
+    #[arg(allow_hyphen_values = true)]
+    pub arg1: Option<String>,
+    #[arg(allow_hyphen_values = true)]
+    pub arg2: Option<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin config",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct ConfigOnlyArgs {
+    #[command(flatten)]
+    pub options: ConfigCommandArgs,
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct LogCommandArgs {
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub oneline: bool,
+    #[arg(short = 'z', action = ArgAction::SetTrue)]
+    pub zero: bool,
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "exclude")]
+    pub exclude: Vec<String>,
+    #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
+    pub exclude_first_parent_only: bool,
+    #[arg(long = "exclude-hidden")]
+    pub exclude_hidden: Option<String>,
+    #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
+    pub exclude_promisor_objects: bool,
+    #[arg(
+        long = "tags",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = ""
+    )]
+    pub tags: Vec<String>,
+    #[arg(long = "author")]
+    pub author: Option<String>,
+    #[arg(long = "committer")]
+    pub committer: Option<String>,
+    #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
+    pub alternate_refs: bool,
+    #[arg(long = "bisect", action = ArgAction::SetTrue)]
+    pub bisect: bool,
+    #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
+    pub bisect_all: bool,
+    #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
+    pub bisect_vars: bool,
+    #[arg(long = "cherry", action = ArgAction::SetTrue)]
+    pub cherry: bool,
+    #[arg(long = "count", action = ArgAction::SetTrue)]
+    pub count: bool,
+    #[arg(long = "glob")]
+    pub glob: Option<String>,
+    #[arg(long = "skip")]
+    pub skip: Option<usize>,
+    #[arg(long = "max-parents")]
+    pub max_parents: Option<String>,
+    #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
+    pub no_max_parents: bool,
+    #[arg(long = "merges", action = ArgAction::SetTrue)]
+    pub merges: bool,
+    #[arg(long = "merge", action = ArgAction::SetTrue)]
+    pub merge: bool,
+    #[arg(long = "max-age")]
+    pub max_age: Option<String>,
+    #[arg(long = "min-parents")]
+    pub min_parents: Option<String>,
+    #[arg(long = "min-age")]
+    pub min_age: Option<String>,
+    #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
+    pub no_min_parents: bool,
+    #[arg(long = "no-merges", action = ArgAction::SetTrue)]
+    pub no_merges: bool,
+    #[arg(long = "parents", action = ArgAction::SetTrue)]
+    pub parents: bool,
+    #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+    pub first_parent: bool,
+    #[arg(long = "follow", action = ArgAction::SetTrue)]
+    pub follow: bool,
+    #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+    pub no_diff_merges: bool,
+    #[arg(long = "diff-merges")]
+    pub diff_merges: Option<String>,
+    #[arg(short = 'm', action = ArgAction::SetTrue)]
+    pub separate_merges: bool,
+    #[arg(long = "dd", action = ArgAction::SetTrue)]
+    pub dd: bool,
+    #[arg(long = "reverse", action = ArgAction::SetTrue)]
+    pub reverse: bool,
+    #[arg(long = "full-history", action = ArgAction::SetTrue)]
+    pub full_history: bool,
+    #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
+    pub ancestry_path: bool,
+    #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
+    pub in_commit_order: bool,
+    #[arg(long = "dense", action = ArgAction::SetTrue)]
+    pub dense: bool,
+    #[arg(long = "sparse", action = ArgAction::SetTrue)]
+    pub sparse: bool,
+    #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
+    pub show_pulls: bool,
+    #[arg(long = "show-linear-break", action = ArgAction::SetTrue)]
+    pub show_linear_break: bool,
+    #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
+    pub simplify_merges: bool,
+    #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
+    pub simplify_by_decoration: bool,
+    #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+    pub topo_order: bool,
+    #[arg(long = "date-order", action = ArgAction::SetTrue)]
+    pub date_order: bool,
+    #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
+    pub author_date_order: bool,
+    #[arg(long = "left-right", action = ArgAction::SetTrue)]
+    pub left_right: bool,
+    #[arg(long = "left-only", action = ArgAction::SetTrue)]
+    pub left_only: bool,
+    #[arg(long = "right-only", action = ArgAction::SetTrue)]
+    pub right_only: bool,
+    #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
+    pub cherry_pick: bool,
+    #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
+    pub cherry_mark: bool,
+    #[arg(long = "boundary", action = ArgAction::SetTrue)]
+    pub boundary: bool,
+    #[arg(long = "children", action = ArgAction::SetTrue)]
+    pub children: bool,
+    #[arg(long = "root", action = ArgAction::SetTrue)]
+    pub root: bool,
+    #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
+    pub patch: bool,
+    #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
+    pub patch_with_stat: bool,
+    #[arg(short = 'c', action = ArgAction::SetTrue)]
+    pub combined: bool,
+    #[arg(long = "cc", action = ArgAction::SetTrue)]
+    pub dense_combined: bool,
+    #[arg(long = "stat", action = ArgAction::SetTrue)]
+    pub stat: bool,
+    #[arg(long = "numstat", action = ArgAction::SetTrue)]
+    pub numstat: bool,
+    #[arg(long = "shortstat", action = ArgAction::SetTrue)]
+    pub shortstat: bool,
+    #[arg(long = "raw", action = ArgAction::SetTrue)]
+    pub raw: bool,
+    #[arg(long = "summary", action = ArgAction::SetTrue)]
+    pub summary: bool,
+    #[arg(long = "name-only", action = ArgAction::SetTrue)]
+    pub name_only: bool,
+    #[arg(long = "name-status", action = ArgAction::SetTrue)]
+    pub name_status: bool,
+    #[arg(long = "encoding")]
+    pub encoding: Option<String>,
+    #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+    pub expand_tabs: bool,
+    #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+    pub no_expand_tabs: bool,
+    #[arg(long = "notes", action = ArgAction::SetTrue)]
+    pub notes: bool,
+    #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+    pub no_notes: bool,
+    #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+    pub show_notes: bool,
+    #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+    pub show_notes_by_default: bool,
+    #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+    pub standard_notes: bool,
+    #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+    pub no_standard_notes: bool,
+    #[arg(
+        long = "decorate",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "short"
+    )]
+    pub decorate: Option<String>,
+    #[arg(long = "decorate-refs")]
+    pub decorate_refs: Option<String>,
+    #[arg(long = "decorate-refs-exclude")]
+    pub decorate_refs_exclude: Option<String>,
+    #[arg(long = "no-decorate", action = ArgAction::SetTrue)]
+    pub no_decorate: bool,
+    #[arg(long = "clear-decorations", action = ArgAction::SetTrue)]
+    pub clear_decorations: bool,
+    #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+    pub abbrev_commit: bool,
+    #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+    pub no_abbrev_commit: bool,
+    #[arg(long = "graph", action = ArgAction::SetTrue)]
+    pub graph: bool,
+    #[arg(long = "objects", action = ArgAction::SetTrue)]
+    pub objects: bool,
+    #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
+    pub objects_edge: bool,
+    #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
+    pub objects_edge_aggressive: bool,
+    #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
+    pub no_object_names: bool,
+    #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
+    pub indexed_objects: bool,
+    #[arg(long = "unpacked", action = ArgAction::SetTrue)]
+    pub unpacked: bool,
+    #[arg(long = "remove-empty", action = ArgAction::SetTrue)]
+    pub remove_empty: bool,
+    #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
+    pub ignore_missing: bool,
+    #[arg(long = "filter")]
+    pub filter: Option<String>,
+    #[arg(long = "full-diff", action = ArgAction::SetTrue)]
+    pub full_diff: bool,
+    #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
+    pub filter_print_omitted: bool,
+    #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
+    pub filter_provided_objects: bool,
+    #[arg(short = 'S')]
+    pub pickaxe_string: Option<String>,
+    #[arg(short = 'G')]
+    pub pickaxe_regex: Option<String>,
+    #[arg(long = "pickaxe-regex", action = ArgAction::SetTrue)]
+    pub pickaxe_regex_mode: bool,
+    #[arg(long = "pickaxe-all", action = ArgAction::SetTrue)]
+    pub pickaxe_all: bool,
+    #[arg(short = 'I', long = "ignore-matching-lines")]
+    pub ignore_matching_lines: Vec<String>,
+    #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
+    pub walk_reflogs: bool,
+    #[arg(long = "reflog", action = ArgAction::SetTrue)]
+    pub reflog: bool,
+    #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+    pub do_walk: bool,
+    #[arg(long = "no-walk", action = ArgAction::SetTrue)]
+    pub no_walk: bool,
+    #[arg(long = "stdin", action = ArgAction::SetTrue)]
+    pub stdin: bool,
+    #[arg(long = "grep-reflog")]
+    pub grep_reflog: Vec<String>,
+    #[arg(long = "grep")]
+    pub grep: Vec<String>,
+    #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
+    pub invert_grep: bool,
+    #[arg(long = "all-match", action = ArgAction::SetTrue)]
+    pub all_match: bool,
+    #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
+    pub regexp_ignore_case: bool,
+    #[arg(
+        long = "basic-regexp",
+        action = ArgAction::SetTrue,
+        overrides_with_all = ["extended_regexp", "fixed_strings", "perl_regexp"]
+    )]
+    pub basic_regexp: bool,
+    #[arg(
+        short = 'E',
+        long = "extended-regexp",
+        action = ArgAction::SetTrue,
+        overrides_with_all = ["basic_regexp", "fixed_strings", "perl_regexp"]
+    )]
+    pub extended_regexp: bool,
+    #[arg(
+        short = 'F',
+        long = "fixed-strings",
+        action = ArgAction::SetTrue,
+        overrides_with_all = ["basic_regexp", "extended_regexp", "perl_regexp"]
+    )]
+    pub fixed_strings: bool,
+    #[arg(
+        short = 'P',
+        long = "perl-regexp",
+        action = ArgAction::SetTrue,
+        overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
+    )]
+    pub perl_regexp: bool,
+    #[arg(long = "format")]
+    pub format: Option<String>,
+    #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+    pub show_signature: bool,
+    #[arg(long = "log-size", action = ArgAction::SetTrue)]
+    pub log_size: bool,
+    #[arg(short = 'L')]
+    pub line_ranges: Vec<String>,
+    #[arg(long = "mailmap", action = ArgAction::SetTrue)]
+    pub mailmap: bool,
+    #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
+    pub no_mailmap: bool,
+    #[arg(long = "use-mailmap", action = ArgAction::SetTrue)]
+    pub use_mailmap: bool,
+    #[arg(long = "no-use-mailmap", action = ArgAction::SetTrue)]
+    pub no_use_mailmap: bool,
+    #[arg(long = "source", action = ArgAction::SetTrue)]
+    pub source: bool,
+    #[arg(long = "max-count", short = 'n')]
+    pub max_count: Option<String>,
+    #[arg(long = "since", alias = "after")]
+    pub since: Option<String>,
+    #[arg(long = "since-as-filter")]
+    pub since_as_filter: Option<String>,
+    #[arg(long = "until", alias = "before")]
+    pub until: Option<String>,
+    #[arg(long = "date")]
+    pub date: Option<String>,
+    #[arg(long = "relative-date", action = ArgAction::SetTrue)]
+    pub relative_date: bool,
+    #[arg(long = "pretty")]
+    pub pretty: Option<String>,
+    #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+    pub single_worktree: bool,
+    #[arg(long = "commit-header", action = ArgAction::SetTrue)]
+    pub commit_header: bool,
+    #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
+    pub no_commit_header: bool,
+    #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
+    pub disk_usage: bool,
+    #[arg(long = "header", action = ArgAction::SetTrue)]
+    pub header: bool,
+    #[arg(long = "progress", action = ArgAction::SetTrue)]
+    pub progress: bool,
+    #[arg(long = "no-filter", action = ArgAction::SetTrue)]
+    pub no_filter: bool,
+    #[arg(long = "missing", action = ArgAction::SetTrue)]
+    pub missing: bool,
+    #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
+    pub use_bitmap_index: bool,
+    #[arg(long = "quiet", action = ArgAction::SetTrue)]
+    pub quiet: bool,
+    #[arg(allow_hyphen_values = true)]
+    pub revs: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin log",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct LogOnlyArgs {
+    #[command(flatten)]
+    pub options: LogCommandArgs,
+}
+#[derive(CliSchema, Debug)]
 pub enum Command {
     #[command(name = "compatibility", aliases = ["compat"])]
     Compatibility {
@@ -372,20 +1639,7 @@ pub enum Command {
         no_stdin: bool,
         identities: Vec<String>,
     },
-    CheckAttr {
-        #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(long = "cached", action = ArgAction::SetTrue)]
-        cached: bool,
-        #[arg(long = "stdin", action = ArgAction::SetTrue)]
-        stdin: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        nul: bool,
-        #[arg(long = "source")]
-        source: Option<String>,
-        #[arg(allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
+    CheckAttr(CheckAttrCommandArgs),
     UnpackObjects {
         #[arg(short = 'n', action = ArgAction::Count)]
         dry_run: u8,
@@ -943,7 +2197,6 @@ pub enum Command {
         since_as_filter: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
-        #[arg(allow_hyphen_values = true)]
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
@@ -1647,7 +2900,12 @@ pub enum Command {
         filter_provided_objects: bool,
         #[arg(long = "progress")]
         progress: Option<String>,
-        #[arg(long = "missing")]
+        #[arg(
+            long = "missing",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
         missing: Option<String>,
         #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
         use_bitmap_index: bool,
@@ -1736,176 +2994,10 @@ pub enum Command {
         #[arg(short = 'c', long = "comment-lines", action = ArgAction::Count)]
         comment_lines: u8,
     },
-    Status {
-        #[arg(
-            long = "porcelain",
-            num_args = 0..=1,
-            default_missing_value = "v1",
-            require_equals = true
-        )]
-        porcelain: Option<String>,
-        #[arg(short = 'b', long = "branch", action = ArgAction::SetTrue)]
-        branch: bool,
-        #[arg(long = "no-branch", overrides_with = "branch", action = ArgAction::SetTrue)]
-        no_branch: bool,
-        #[arg(long = "ahead-behind", overrides_with = "no_ahead_behind", action = ArgAction::SetTrue)]
-        ahead_behind: bool,
-        #[arg(long = "no-ahead-behind", overrides_with = "ahead_behind", action = ArgAction::SetTrue)]
-        no_ahead_behind: bool,
-        #[arg(long = "show-stash", overrides_with = "no_show_stash", action = ArgAction::SetTrue)]
-        show_stash: bool,
-        #[arg(long = "no-show-stash", overrides_with = "show_stash", action = ArgAction::SetTrue)]
-        no_show_stash: bool,
-        #[arg(short = 'v', long = "verbose", overrides_with = "no_verbose", action = ArgAction::Count)]
-        verbose: u8,
-        #[arg(long = "no-verbose", overrides_with = "verbose", action = ArgAction::SetTrue)]
-        no_verbose: bool,
-        #[arg(long = "long", overrides_with = "short", action = ArgAction::SetTrue)]
-        long: bool,
-        #[arg(long = "no-long", overrides_with = "short", action = ArgAction::SetTrue)]
-        no_long: bool,
-        #[arg(
-            long = "column",
-            overrides_with = "no_column",
-            num_args = 0..=1,
-            default_missing_value = "always",
-            require_equals = true
-        )]
-        column: Option<String>,
-        #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
-        no_column: bool,
-        #[arg(long = "renames", overrides_with = "no_renames", action = ArgAction::SetTrue)]
-        renames: bool,
-        #[arg(long = "no-renames", overrides_with = "renames", action = ArgAction::SetTrue)]
-        no_renames: bool,
-        #[arg(
-            short = 'M',
-            long = "find-renames",
-            overrides_with = "no_renames",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        find_renames: Option<String>,
-        #[arg(
-            long = "ignore-submodules",
-            num_args = 0..=1,
-            default_missing_value = "all"
-        )]
-        ignore_submodules: Option<String>,
-        #[arg(long = "untracked-cache", hide = true, action = ArgAction::SetTrue)]
-        untracked_cache: bool,
-        #[arg(long = "no-untracked-cache", hide = true, action = ArgAction::SetTrue)]
-        no_untracked_cache: bool,
-        #[arg(long = "split-index", hide = true, action = ArgAction::SetTrue)]
-        split_index: bool,
-        #[arg(long = "no-split-index", hide = true, action = ArgAction::SetTrue)]
-        no_split_index: bool,
-        #[arg(
-            short = 's',
-            long = "short",
-            overrides_with_all = ["long", "no_long"],
-            action = ArgAction::SetTrue
-        )]
-        short: bool,
-        #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
-        null: bool,
-        #[arg(
-            long = "ignored",
-            num_args = 0..=1,
-            default_missing_value = "traditional"
-        )]
-        ignored: Option<String>,
-        #[arg(
-            short = 'u',
-            long = "untracked-files",
-            num_args = 0..=1,
-            default_missing_value = "all"
-        )]
-        untracked_files: Option<String>,
-        #[arg(value_hint = ValueHint::AnyPath)]
-        paths: Vec<PathBuf>,
-    },
+    Status(StatusCommandArgs),
     Config {
-        #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
-        null: bool,
-        #[arg(long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(long = "blob")]
-        blob: Option<String>,
-        #[arg(long = "comment")]
-        comment: Option<String>,
-        #[arg(long = "fixed-value", action = ArgAction::SetTrue)]
-        fixed_value: bool,
-        #[arg(long = "get", action = ArgAction::SetTrue)]
-        get: bool,
-        #[arg(long = "get-all", action = ArgAction::SetTrue)]
-        get_all: bool,
-        #[arg(long = "get-colorbool", action = ArgAction::SetTrue)]
-        get_colorbool: bool,
-        #[arg(long = "get-regexp", action = ArgAction::SetTrue)]
-        get_regexp: bool,
-        #[arg(long = "list", short = 'l', action = ArgAction::SetTrue)]
-        list: bool,
-        #[arg(long = "name-only", action = ArgAction::SetTrue)]
-        name_only: bool,
-        #[arg(long = "no-includes", action = ArgAction::SetTrue)]
-        no_includes: bool,
-        #[arg(long = "no-type", action = ArgAction::SetTrue)]
-        no_type: bool,
-        #[arg(long = "regexp", action = ArgAction::SetTrue)]
-        regexp: bool,
-        #[arg(long = "replace-all", action = ArgAction::SetTrue)]
-        replace_all: bool,
-        #[arg(long = "system", action = ArgAction::SetTrue)]
-        system: bool,
-        #[arg(long = "unset", action = ArgAction::SetTrue)]
-        unset: bool,
-        #[arg(long = "unset-all", action = ArgAction::SetTrue)]
-        unset_all: bool,
-        #[arg(long = "add", action = ArgAction::SetTrue)]
-        add: bool,
-        #[arg(long = "append", action = ArgAction::SetTrue)]
-        append: bool,
-        #[arg(long = "bool", action = ArgAction::SetTrue)]
-        bool_value: bool,
-        #[arg(long = "int", action = ArgAction::SetTrue)]
-        int_value: bool,
-        #[arg(long = "bool-or-int", action = ArgAction::SetTrue)]
-        bool_or_int_value: bool,
-        #[arg(long = "bool-or-str", action = ArgAction::SetTrue)]
-        bool_or_str_value: bool,
-        #[arg(long = "path", action = ArgAction::SetTrue)]
-        path_value: bool,
-        #[arg(long = "expiry-date", action = ArgAction::SetTrue)]
-        expiry_date_value: bool,
-        #[arg(long = "type")]
-        value_type: Option<String>,
-        #[arg(long = "default")]
-        default: Option<String>,
-        #[arg(long = "worktree", action = ArgAction::SetTrue)]
-        worktree: bool,
-        #[arg(long = "local", action = ArgAction::SetTrue)]
-        local: bool,
-        #[arg(long = "global", action = ArgAction::SetTrue)]
-        global: bool,
-        #[arg(short = 'f', long = "file", value_hint = ValueHint::FilePath)]
-        file: Option<PathBuf>,
-        #[arg(long = "includes", action = ArgAction::SetTrue)]
-        includes: bool,
-        #[arg(long = "show-origin", action = ArgAction::SetTrue)]
-        show_origin: bool,
-        #[arg(long = "show-scope", action = ArgAction::SetTrue)]
-        show_scope: bool,
-        #[arg(long = "url")]
-        url: Option<String>,
-        #[arg(long = "value")]
-        value_pattern: Option<String>,
-        arg0: Option<String>,
-        #[arg(allow_hyphen_values = true)]
-        arg1: Option<String>,
-        #[arg(allow_hyphen_values = true)]
-        arg2: Option<String>,
+        #[command(flatten)]
+        options: ConfigCommandArgs,
     },
     Var {
         #[arg(short = 'l', action = ArgAction::SetTrue)]
@@ -2310,80 +3402,7 @@ pub enum Command {
         remote: Option<String>,
         refspecs: Vec<String>,
     },
-    LsFiles {
-        #[arg(short = 'c', long = "cached", action = ArgAction::SetTrue)]
-        cached: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        zero: bool,
-        #[arg(long = "full-name", action = ArgAction::SetTrue)]
-        full_name: bool,
-        #[arg(long = "error-unmatch", action = ArgAction::SetTrue)]
-        error_unmatch: bool,
-        #[arg(short = 't', action = ArgAction::SetTrue)]
-        tagged: bool,
-        #[arg(short = 'v', action = ArgAction::SetTrue)]
-        lowercase_assume_valid: bool,
-        #[arg(short = 'f', action = ArgAction::SetTrue)]
-        fsmonitor_clean: bool,
-        #[arg(long = "deduplicate", action = ArgAction::SetTrue)]
-        deduplicate: bool,
-        #[arg(long = "sparse", action = ArgAction::SetTrue)]
-        sparse: bool,
-        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
-        recurse_submodules: bool,
-        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
-        no_recurse_submodules: bool,
-        #[arg(long = "debug", action = ArgAction::SetTrue)]
-        debug: bool,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
-        abbrev: Option<usize>,
-        #[arg(long = "eol", action = ArgAction::SetTrue)]
-        eol: bool,
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "with-tree")]
-        with_tree: Option<String>,
-        #[arg(long = "resolve-undo", action = ArgAction::SetTrue)]
-        resolve_undo: bool,
-        #[arg(short = 's', long = "stage", action = ArgAction::SetTrue)]
-        stage: bool,
-        #[arg(short = 'u', long = "unmerged", action = ArgAction::SetTrue)]
-        unmerged: bool,
-        #[arg(short = 'd', long = "deleted", action = ArgAction::SetTrue)]
-        deleted: bool,
-        #[arg(short = 'm', long = "modified", action = ArgAction::SetTrue)]
-        modified: bool,
-        #[arg(short = 'o', long = "others", action = ArgAction::SetTrue)]
-        others: bool,
-        #[arg(short = 'k', long = "killed", action = ArgAction::SetTrue)]
-        killed: bool,
-        #[arg(long = "directory", action = ArgAction::SetTrue)]
-        directory: bool,
-        #[arg(
-            long = "empty-directory",
-            action = ArgAction::SetTrue,
-            overrides_with = "no_empty_directory"
-        )]
-        empty_directory: bool,
-        #[arg(
-            long = "no-empty-directory",
-            action = ArgAction::SetTrue,
-            overrides_with = "empty_directory"
-        )]
-        no_empty_directory: bool,
-        #[arg(short = 'i', long = "ignored", action = ArgAction::SetTrue)]
-        ignored: bool,
-        #[arg(short = 'x', long = "exclude")]
-        excludes: Vec<String>,
-        #[arg(short = 'X', long = "exclude-from", value_hint = ValueHint::FilePath)]
-        exclude_from: Vec<PathBuf>,
-        #[arg(long = "exclude-per-directory")]
-        exclude_per_directory: Option<String>,
-        #[arg(long = "exclude-standard", action = ArgAction::SetTrue)]
-        exclude_standard: bool,
-        #[arg(value_hint = ValueHint::AnyPath)]
-        paths: Vec<PathBuf>,
-    },
+    LsFiles(LsFilesCommandArgs),
     Add {
         #[arg(short = 'A', long = "all", action = ArgAction::Count)]
         all: u8,
@@ -2583,6 +3602,8 @@ pub enum Command {
         all: bool,
         #[arg(short = 'i', long = "include", action = ArgAction::Count)]
         include: u8,
+        #[arg(long = "interactive", action = ArgAction::Count)]
+        interactive: u8,
         #[arg(short = 'o', long = "only", action = ArgAction::SetTrue)]
         only: bool,
         #[arg(short = 'p', long = "patch", action = ArgAction::Count)]
@@ -2666,7 +3687,7 @@ pub enum Command {
         fixup: Option<String>,
         #[arg(short = 'F', long = "file", value_hint = ValueHint::FilePath)]
         message_file: Option<PathBuf>,
-        #[arg(short = 'm', long = "message")]
+        #[arg(short = 'm', long = "message", allow_hyphen_values = true)]
         messages: Vec<String>,
         #[arg(long = "no-post-rewrite", action = ArgAction::Count)]
         no_post_rewrite: u8,
@@ -2769,18 +3790,8 @@ pub enum Command {
         no_strict: bool,
     },
     PackRefs {
-        #[arg(long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(long = "auto", action = ArgAction::SetTrue)]
-        auto: bool,
-        #[arg(long = "include")]
-        include: Vec<String>,
-        #[arg(long = "exclude")]
-        exclude: Vec<String>,
-        #[arg(long = "prune", overrides_with = "no_prune", action = ArgAction::SetTrue)]
-        prune: bool,
-        #[arg(long = "no-prune", overrides_with = "prune", action = ArgAction::SetTrue)]
-        no_prune: bool,
+        #[command(flatten)]
+        options: PackRefsArgs,
     },
     PrunePacked {
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
@@ -2938,13 +3949,17 @@ pub enum Command {
         index_output: Vec<PathBuf>,
         #[arg(long = "prefix")]
         prefix: Option<String>,
+        #[arg(long = "exclude-per-directory")]
+        exclude_per_directory: Option<String>,
+        #[arg(long = "super-prefix")]
+        super_prefix: Option<String>,
         #[arg(long = "recurse-submodules", action = ArgAction::Count)]
         recurse_submodules: u8,
         #[arg(long = "no-recurse-submodules", action = ArgAction::Count)]
         no_recurse_submodules: u8,
         #[arg(long = "no-sparse-checkout", action = ArgAction::Count)]
         no_sparse_checkout: u8,
-        treeish: Option<String>,
+        treeish: Vec<String>,
     },
     Checkout {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
@@ -3196,6 +4211,8 @@ pub enum Command {
         rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(long = "cc", action = ArgAction::SetTrue)]
+        dense_combined: bool,
         #[arg(short = 't', action = ArgAction::SetTrue)]
         tree_in_diff: bool,
         #[arg(short = 'S')]
@@ -4442,317 +5459,8 @@ pub enum Command {
         args: Vec<String>,
     },
     Log {
-        #[arg(long, action = ArgAction::SetTrue)]
-        oneline: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        zero: bool,
-        #[arg(long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(long = "exclude")]
-        exclude: Vec<String>,
-        #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
-        exclude_first_parent_only: bool,
-        #[arg(long = "exclude-hidden")]
-        exclude_hidden: Option<String>,
-        #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
-        exclude_promisor_objects: bool,
-        #[arg(
-            long = "tags",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        tags: Vec<String>,
-        #[arg(long = "author")]
-        author: Option<String>,
-        #[arg(long = "committer")]
-        committer: Option<String>,
-        #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
-        alternate_refs: bool,
-        #[arg(long = "bisect", action = ArgAction::SetTrue)]
-        bisect: bool,
-        #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
-        bisect_all: bool,
-        #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
-        bisect_vars: bool,
-        #[arg(long = "cherry", action = ArgAction::SetTrue)]
-        cherry: bool,
-        #[arg(long = "count", action = ArgAction::SetTrue)]
-        count: bool,
-        #[arg(long = "glob")]
-        glob: Option<String>,
-        #[arg(long = "skip")]
-        skip: Option<usize>,
-        #[arg(long = "max-parents")]
-        max_parents: Option<String>,
-        #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
-        no_max_parents: bool,
-        #[arg(long = "merges", action = ArgAction::SetTrue)]
-        merges: bool,
-        #[arg(long = "merge", action = ArgAction::SetTrue)]
-        merge: bool,
-        #[arg(long = "max-age")]
-        max_age: Option<String>,
-        #[arg(long = "min-parents")]
-        min_parents: Option<String>,
-        #[arg(long = "min-age")]
-        min_age: Option<String>,
-        #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
-        no_min_parents: bool,
-        #[arg(long = "no-merges", action = ArgAction::SetTrue)]
-        no_merges: bool,
-        #[arg(long = "parents", action = ArgAction::SetTrue)]
-        parents: bool,
-        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
-        first_parent: bool,
-        #[arg(long = "follow", action = ArgAction::SetTrue)]
-        follow: bool,
-        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
-        no_diff_merges: bool,
-        #[arg(long = "diff-merges")]
-        diff_merges: Option<String>,
-        #[arg(short = 'm', action = ArgAction::SetTrue)]
-        separate_merges: bool,
-        #[arg(long = "dd", action = ArgAction::SetTrue)]
-        dd: bool,
-        #[arg(long = "reverse", action = ArgAction::SetTrue)]
-        reverse: bool,
-        #[arg(long = "full-history", action = ArgAction::SetTrue)]
-        full_history: bool,
-        #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
-        ancestry_path: bool,
-        #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
-        in_commit_order: bool,
-        #[arg(long = "dense", action = ArgAction::SetTrue)]
-        dense: bool,
-        #[arg(long = "sparse", action = ArgAction::SetTrue)]
-        sparse: bool,
-        #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
-        show_pulls: bool,
-        #[arg(long = "show-linear-break", action = ArgAction::SetTrue)]
-        show_linear_break: bool,
-        #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
-        simplify_merges: bool,
-        #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
-        simplify_by_decoration: bool,
-        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
-        topo_order: bool,
-        #[arg(long = "date-order", action = ArgAction::SetTrue)]
-        date_order: bool,
-        #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
-        author_date_order: bool,
-        #[arg(long = "left-right", action = ArgAction::SetTrue)]
-        left_right: bool,
-        #[arg(long = "left-only", action = ArgAction::SetTrue)]
-        left_only: bool,
-        #[arg(long = "right-only", action = ArgAction::SetTrue)]
-        right_only: bool,
-        #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
-        cherry_pick: bool,
-        #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
-        cherry_mark: bool,
-        #[arg(long = "boundary", action = ArgAction::SetTrue)]
-        boundary: bool,
-        #[arg(long = "children", action = ArgAction::SetTrue)]
-        children: bool,
-        #[arg(long = "root", action = ArgAction::SetTrue)]
-        root: bool,
-        #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
-        patch: bool,
-        #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
-        patch_with_stat: bool,
-        #[arg(short = 'c', action = ArgAction::SetTrue)]
-        combined: bool,
-        #[arg(long = "cc", action = ArgAction::SetTrue)]
-        dense_combined: bool,
-        #[arg(long = "stat", action = ArgAction::SetTrue)]
-        stat: bool,
-        #[arg(long = "numstat", action = ArgAction::SetTrue)]
-        numstat: bool,
-        #[arg(long = "shortstat", action = ArgAction::SetTrue)]
-        shortstat: bool,
-        #[arg(long = "raw", action = ArgAction::SetTrue)]
-        raw: bool,
-        #[arg(long = "summary", action = ArgAction::SetTrue)]
-        summary: bool,
-        #[arg(long = "name-only", action = ArgAction::SetTrue)]
-        name_only: bool,
-        #[arg(long = "name-status", action = ArgAction::SetTrue)]
-        name_status: bool,
-        #[arg(long = "encoding")]
-        encoding: Option<String>,
-        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
-        expand_tabs: bool,
-        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
-        no_expand_tabs: bool,
-        #[arg(long = "notes", action = ArgAction::SetTrue)]
-        notes: bool,
-        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
-        no_notes: bool,
-        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
-        show_notes: bool,
-        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
-        show_notes_by_default: bool,
-        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
-        standard_notes: bool,
-        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
-        no_standard_notes: bool,
-        #[arg(
-            long = "decorate",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "short"
-        )]
-        decorate: Option<String>,
-        #[arg(long = "decorate-refs")]
-        decorate_refs: Option<String>,
-        #[arg(long = "decorate-refs-exclude")]
-        decorate_refs_exclude: Option<String>,
-        #[arg(long = "no-decorate", action = ArgAction::SetTrue)]
-        no_decorate: bool,
-        #[arg(long = "clear-decorations", action = ArgAction::SetTrue)]
-        clear_decorations: bool,
-        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
-        abbrev_commit: bool,
-        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
-        no_abbrev_commit: bool,
-        #[arg(long = "graph", action = ArgAction::SetTrue)]
-        graph: bool,
-        #[arg(long = "objects", action = ArgAction::SetTrue)]
-        objects: bool,
-        #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
-        objects_edge: bool,
-        #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
-        objects_edge_aggressive: bool,
-        #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
-        no_object_names: bool,
-        #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
-        indexed_objects: bool,
-        #[arg(long = "unpacked", action = ArgAction::SetTrue)]
-        unpacked: bool,
-        #[arg(long = "remove-empty", action = ArgAction::SetTrue)]
-        remove_empty: bool,
-        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
-        ignore_missing: bool,
-        #[arg(long = "filter")]
-        filter: Option<String>,
-        #[arg(long = "full-diff", action = ArgAction::SetTrue)]
-        full_diff: bool,
-        #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
-        filter_print_omitted: bool,
-        #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
-        filter_provided_objects: bool,
-        #[arg(short = 'S')]
-        pickaxe_string: Option<String>,
-        #[arg(short = 'G')]
-        pickaxe_regex: Option<String>,
-        #[arg(long = "pickaxe-regex", action = ArgAction::SetTrue)]
-        pickaxe_regex_mode: bool,
-        #[arg(long = "pickaxe-all", action = ArgAction::SetTrue)]
-        pickaxe_all: bool,
-        #[arg(short = 'I', long = "ignore-matching-lines")]
-        ignore_matching_lines: Vec<String>,
-        #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
-        walk_reflogs: bool,
-        #[arg(long = "reflog", action = ArgAction::SetTrue)]
-        reflog: bool,
-        #[arg(long = "do-walk", action = ArgAction::SetTrue)]
-        do_walk: bool,
-        #[arg(long = "no-walk", action = ArgAction::SetTrue)]
-        no_walk: bool,
-        #[arg(long = "stdin", action = ArgAction::SetTrue)]
-        stdin: bool,
-        #[arg(long = "grep-reflog")]
-        grep_reflog: Vec<String>,
-        #[arg(long = "grep")]
-        grep: Vec<String>,
-        #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
-        invert_grep: bool,
-        #[arg(long = "all-match", action = ArgAction::SetTrue)]
-        all_match: bool,
-        #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
-        regexp_ignore_case: bool,
-        #[arg(
-            long = "basic-regexp",
-            action = ArgAction::SetTrue,
-            overrides_with_all = ["extended_regexp", "fixed_strings", "perl_regexp"]
-        )]
-        basic_regexp: bool,
-        #[arg(
-            short = 'E',
-            long = "extended-regexp",
-            action = ArgAction::SetTrue,
-            overrides_with_all = ["basic_regexp", "fixed_strings", "perl_regexp"]
-        )]
-        extended_regexp: bool,
-        #[arg(
-            short = 'F',
-            long = "fixed-strings",
-            action = ArgAction::SetTrue,
-            overrides_with_all = ["basic_regexp", "extended_regexp", "perl_regexp"]
-        )]
-        fixed_strings: bool,
-        #[arg(
-            short = 'P',
-            long = "perl-regexp",
-            action = ArgAction::SetTrue,
-            overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
-        )]
-        perl_regexp: bool,
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
-        show_signature: bool,
-        #[arg(long = "log-size", action = ArgAction::SetTrue)]
-        log_size: bool,
-        #[arg(short = 'L')]
-        line_ranges: Vec<String>,
-        #[arg(long = "mailmap", action = ArgAction::SetTrue)]
-        mailmap: bool,
-        #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
-        no_mailmap: bool,
-        #[arg(long = "use-mailmap", action = ArgAction::SetTrue)]
-        use_mailmap: bool,
-        #[arg(long = "no-use-mailmap", action = ArgAction::SetTrue)]
-        no_use_mailmap: bool,
-        #[arg(long = "source", action = ArgAction::SetTrue)]
-        source: bool,
-        #[arg(long = "max-count", short = 'n')]
-        max_count: Option<String>,
-        #[arg(long = "since", alias = "after")]
-        since: Option<String>,
-        #[arg(long = "since-as-filter")]
-        since_as_filter: Option<String>,
-        #[arg(long = "until", alias = "before")]
-        until: Option<String>,
-        #[arg(long = "date")]
-        date: Option<String>,
-        #[arg(long = "relative-date", action = ArgAction::SetTrue)]
-        relative_date: bool,
-        #[arg(long = "pretty")]
-        pretty: Option<String>,
-        #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
-        single_worktree: bool,
-        #[arg(long = "commit-header", action = ArgAction::SetTrue)]
-        commit_header: bool,
-        #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
-        no_commit_header: bool,
-        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
-        disk_usage: bool,
-        #[arg(long = "header", action = ArgAction::SetTrue)]
-        header: bool,
-        #[arg(long = "progress", action = ArgAction::SetTrue)]
-        progress: bool,
-        #[arg(long = "no-filter", action = ArgAction::SetTrue)]
-        no_filter: bool,
-        #[arg(long = "missing", action = ArgAction::SetTrue)]
-        missing: bool,
-        #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
-        use_bitmap_index: bool,
-        #[arg(long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(allow_hyphen_values = true)]
-        revs: Vec<String>,
+        #[command(flatten)]
+        options: LogCommandArgs,
     },
     FormatPatch {
         #[arg(short = 'o', long = "output-directory", value_hint = ValueHint::DirPath)]
@@ -4893,24 +5601,37 @@ pub enum Command {
         no_renames: bool,
         #[arg(long = "no-thread", action = ArgAction::SetTrue)]
         no_thread: bool,
-        #[arg(long = "thread", action = ArgAction::SetTrue)]
-        thread: bool,
+        #[arg(
+            long = "thread",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "shallow"
+        )]
+        thread: Option<String>,
         #[arg(long = "name-only", action = ArgAction::SetTrue)]
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
-        #[arg(long = "notes", action = ArgAction::SetTrue)]
-        notes: bool,
+        #[arg(long = "notes", num_args = 0..=1, default_missing_value = "")]
+        notes: Vec<String>,
         #[arg(long = "to")]
         to: Vec<String>,
+        #[arg(long = "no-to", action = ArgAction::SetTrue)]
+        no_to: bool,
         #[arg(long = "cc")]
         cc: Vec<String>,
+        #[arg(long = "no-cc", action = ArgAction::SetTrue)]
+        no_cc: bool,
         #[arg(long = "add-header")]
         add_header: Vec<String>,
+        #[arg(long = "no-add-header", action = ArgAction::SetTrue)]
+        no_add_header: bool,
         #[arg(long = "in-reply-to")]
         in_reply_to: Option<String>,
-        #[arg(long = "from")]
+        #[arg(long = "from", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         from: Option<String>,
+        #[arg(long = "no-from", action = ArgAction::SetTrue)]
+        no_from: bool,
         #[arg(long = "force-in-body-from", action = ArgAction::SetTrue)]
         force_in_body_from: bool,
         #[arg(long = "no-force-in-body-from", action = ArgAction::SetTrue)]
@@ -5033,6 +5754,8 @@ pub enum Command {
         numbered_files: bool,
         #[arg(long = "start-number")]
         start_number: Option<String>,
+        #[arg(long = "commit-list-format")]
+        commit_list_format: Option<String>,
         #[arg(long = "cover-letter", action = ArgAction::SetTrue)]
         cover_letter: bool,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
@@ -5049,13 +5772,18 @@ pub enum Command {
         no_encode_email_headers: bool,
         #[arg(short = 'v', long = "reroll-count")]
         reroll_count: Option<String>,
+        #[arg(long = "max-count")]
+        max_count: Option<String>,
         #[arg(
             long = "rfc",
             num_args = 0..=1,
             require_equals = true,
-            default_missing_value = "RFC"
+            default_missing_value = "RFC",
+            action = ArgAction::Append
         )]
-        rfc: Option<String>,
+        rfc: Vec<String>,
+        #[arg(long = "no-rfc", action = ArgAction::SetTrue)]
+        no_rfc: bool,
         #[arg(long = "zero-commit", action = ArgAction::SetTrue)]
         zero_commit: bool,
         #[arg(short = '1', action = ArgAction::SetTrue)]
@@ -5605,70 +6333,7 @@ pub enum Command {
         i_still_use_this: bool,
         revs: Vec<String>,
     },
-    Show {
-        #[arg(short = 's', long = "no-patch", action = ArgAction::SetTrue)]
-        no_patch: bool,
-        #[arg(long, action = ArgAction::SetTrue)]
-        oneline: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        zero: bool,
-        #[arg(long = "stat", action = ArgAction::SetTrue)]
-        stat: bool,
-        #[arg(long = "patch-with-raw", action = ArgAction::SetTrue)]
-        patch_with_raw: bool,
-        #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
-        patch_with_stat: bool,
-        #[arg(long = "numstat", action = ArgAction::SetTrue)]
-        numstat: bool,
-        #[arg(long = "shortstat", action = ArgAction::SetTrue)]
-        shortstat: bool,
-        #[arg(long = "raw", action = ArgAction::SetTrue)]
-        raw: bool,
-        #[arg(long = "summary", action = ArgAction::SetTrue)]
-        summary: bool,
-        #[arg(long = "name-only", action = ArgAction::SetTrue)]
-        name_only: bool,
-        #[arg(long = "name-status", action = ArgAction::SetTrue)]
-        name_status: bool,
-        #[arg(long = "encoding")]
-        encoding: Option<String>,
-        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
-        expand_tabs: bool,
-        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
-        no_expand_tabs: bool,
-        #[arg(long = "notes", action = ArgAction::SetTrue)]
-        notes: bool,
-        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
-        no_notes: bool,
-        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
-        show_notes: bool,
-        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
-        show_notes_by_default: bool,
-        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
-        standard_notes: bool,
-        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
-        no_standard_notes: bool,
-        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
-        show_signature: bool,
-        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
-        abbrev_commit: bool,
-        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
-        no_abbrev_commit: bool,
-        #[arg(long = "root", action = ArgAction::SetTrue)]
-        root: bool,
-        #[arg(short = 'c', action = ArgAction::SetTrue)]
-        combined: bool,
-        #[arg(short = 'm', action = ArgAction::SetTrue)]
-        separate_merges: bool,
-        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
-        first_parent: bool,
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "pretty")]
-        pretty: Option<String>,
-        #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
+    Show(ShowCommandArgs),
     #[command(disable_help_flag = true)]
     Grep {
         #[arg(long = "cached", action = ArgAction::SetTrue)]
@@ -6021,8 +6686,13 @@ pub enum Command {
         progress: bool,
         #[arg(long = "no-filter", action = ArgAction::SetTrue)]
         no_filter: bool,
-        #[arg(long = "missing", action = ArgAction::SetTrue)]
-        missing: bool,
+        #[arg(
+            long = "missing",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        missing: Option<String>,
         #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
         use_bitmap_index: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
@@ -6187,6 +6857,16 @@ pub enum Command {
         strategy_options: Vec<String>,
         args: Vec<String>,
     },
+    #[command(name = "merge-recursive")]
+    MergeRecursive {
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    #[command(name = "merge-resolve")]
+    MergeResolve {
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
+    },
     MergeFile {
         #[arg(short = 'p', long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
@@ -6270,6 +6950,7 @@ pub enum Command {
         no_batch_updates: bool,
         name: Option<String>,
         newvalue: Option<String>,
+        oldvalue: Option<String>,
     },
     SymbolicRef {
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
@@ -6314,337 +6995,25 @@ pub enum Command {
         args: Vec<String>,
     },
     RevParse {
-        #[arg(long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(
-            long = "branches",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        branches: Vec<String>,
-        #[arg(
-            long = "tags",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        tags: Vec<String>,
-        #[arg(
-            long = "remotes",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        remotes: Vec<String>,
-        #[arg(long = "glob")]
-        glob: Vec<String>,
-        #[arg(long = "exclude")]
-        exclude: Vec<String>,
-        #[arg(long = "exclude-hidden")]
-        exclude_hidden: Option<String>,
-        #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
-        local_env_vars: bool,
-        #[arg(long = "flags", action = ArgAction::SetTrue)]
-        flags: bool,
-        #[arg(long = "no-flags", action = ArgAction::SetTrue)]
-        no_flags: bool,
-        #[arg(long = "revs-only", action = ArgAction::SetTrue)]
-        revs_only: bool,
-        #[arg(long = "no-revs", action = ArgAction::SetTrue)]
-        no_revs: bool,
-        #[arg(long = "default")]
-        default: Option<String>,
-        #[arg(long = "prefix")]
-        prefix: Option<String>,
-        #[arg(long = "sq", action = ArgAction::SetTrue)]
-        sq: bool,
-        #[arg(long = "sq-quote", action = ArgAction::SetTrue)]
-        sq_quote: bool,
-        #[arg(long = "not", action = ArgAction::SetTrue)]
-        not: bool,
-        #[arg(long = "symbolic", action = ArgAction::SetTrue)]
-        symbolic: bool,
-        #[arg(long = "parseopt", action = ArgAction::SetTrue)]
-        parseopt: bool,
-        #[arg(long = "keep-dashdash", action = ArgAction::SetTrue)]
-        keep_dashdash: bool,
-        #[arg(long = "stop-at-non-option", action = ArgAction::SetTrue)]
-        stop_at_non_option: bool,
-        #[arg(long = "stuck-long", action = ArgAction::SetTrue)]
-        stuck_long: bool,
-        #[arg(
-            long = "short",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "7"
-        )]
-        short: Option<usize>,
-        #[arg(
-            long = "abbrev-ref",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "loose"
-        )]
-        abbrev_ref: Option<String>,
-        #[arg(long = "verify", action = ArgAction::SetTrue)]
-        verify: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(long = "symbolic-full-name", action = ArgAction::SetTrue)]
-        symbolic_full_name: bool,
-        #[arg(long = "bisect", action = ArgAction::SetTrue)]
-        bisect: bool,
-        #[arg(long = "path-format")]
-        path_format: Vec<String>,
-        #[arg(long = "since", alias = "after")]
-        since: Vec<String>,
-        #[arg(long = "until", alias = "before")]
-        until: Vec<String>,
-        #[arg(
-            long = "show-object-format",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "storage"
-        )]
-        show_object_format: Vec<String>,
-        #[arg(long = "show-ref-format", action = ArgAction::SetTrue)]
-        show_ref_format: bool,
-        #[arg(long = "show-toplevel", action = ArgAction::SetTrue)]
-        show_toplevel: bool,
-        #[arg(long = "show-prefix", action = ArgAction::SetTrue)]
-        show_prefix: bool,
-        #[arg(long = "show-cdup", action = ArgAction::SetTrue)]
-        show_cdup: bool,
-        #[arg(long = "show-superproject-working-tree", action = ArgAction::SetTrue)]
-        show_superproject_working_tree: bool,
-        #[arg(long = "git-dir", action = ArgAction::SetTrue)]
-        git_dir: bool,
-        #[arg(long = "absolute-git-dir", action = ArgAction::SetTrue)]
-        absolute_git_dir: bool,
-        #[arg(long = "git-common-dir", action = ArgAction::SetTrue)]
-        git_common_dir: bool,
-        #[arg(long = "resolve-git-dir")]
-        resolve_git_dir: Vec<PathBuf>,
-        #[arg(long = "output-object-format", num_args = 1, require_equals = true)]
-        output_object_format: Vec<String>,
-        #[arg(long = "disambiguate", require_equals = true)]
-        disambiguate: Vec<String>,
-        #[arg(long = "shared-index-path", action = ArgAction::SetTrue)]
-        shared_index_path: bool,
-        #[arg(long = "git-path")]
-        git_paths: Vec<PathBuf>,
-        #[arg(long = "is-inside-git-dir", action = ArgAction::SetTrue)]
-        is_inside_git_dir: bool,
-        #[arg(long = "is-inside-work-tree", action = ArgAction::SetTrue)]
-        is_inside_work_tree: bool,
-        #[arg(long = "is-bare-repository", action = ArgAction::SetTrue)]
-        is_bare_repository: bool,
-        #[arg(long = "is-shallow-repository", action = ArgAction::SetTrue)]
-        is_shallow_repository: bool,
-        revs: Vec<String>,
+        #[command(flatten)]
+        options: RevParseCommandArgs,
     },
     ShowRef {
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(long = "head", action = ArgAction::SetTrue)]
-        head: bool,
-        #[arg(long = "heads", alias = "branches", action = ArgAction::SetTrue)]
-        heads: bool,
-        #[arg(long = "tags", action = ArgAction::SetTrue)]
-        tags: bool,
-        #[arg(short = 'd', long = "dereference", action = ArgAction::SetTrue)]
-        dereference: bool,
-        #[arg(
-            short = 's',
-            long = "hash",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "40"
-        )]
-        hash: Option<usize>,
-        #[arg(
-            long = "abbrev",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "7"
-        )]
-        abbrev: Option<usize>,
-        #[arg(long = "verify", action = ArgAction::SetTrue)]
-        verify: bool,
-        #[arg(long = "exists", action = ArgAction::SetTrue)]
-        exists: bool,
-        #[arg(
-            long = "exclude-existing",
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = ""
-        )]
-        exclude_existing: Option<String>,
-        refs: Vec<String>,
+        #[command(flatten)]
+        options: ShowRefArgs,
     },
     ForEachRef {
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "sort")]
-        sort: Vec<String>,
-        #[arg(long = "count")]
-        count: Option<usize>,
-        #[arg(long = "shell", action = ArgAction::SetTrue)]
-        shell: bool,
-        #[arg(long = "python", action = ArgAction::SetTrue)]
-        python: bool,
-        #[arg(long = "perl", action = ArgAction::SetTrue)]
-        perl: bool,
-        #[arg(long = "tcl", action = ArgAction::SetTrue)]
-        tcl: bool,
-        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
-        color: Option<String>,
-        #[arg(long = "no-color", action = ArgAction::SetTrue)]
-        no_color: bool,
-        #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
-        ignore_case: bool,
-        #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
-        contains: Option<String>,
-        #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
-        no_contains: Option<String>,
-        #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
-        merged: Option<String>,
-        #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
-        no_merged: Option<String>,
-        #[arg(long = "points-at")]
-        points_at: Option<String>,
-        #[arg(long = "exclude")]
-        exclude: Vec<String>,
-        #[arg(long = "stdin", action = ArgAction::SetTrue)]
-        stdin: bool,
-        #[arg(long = "include-root-refs", action = ArgAction::SetTrue)]
-        include_root_refs: bool,
-        #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
-        omit_empty: bool,
-        patterns: Vec<String>,
+        #[command(flatten)]
+        options: ForEachRefArgs,
     },
     LsTree {
-        #[arg(short = 'd', action = ArgAction::SetTrue)]
-        directory_only: bool,
-        #[arg(short = 'r', action = ArgAction::SetTrue)]
-        recursive: bool,
-        #[arg(short = 't', action = ArgAction::SetTrue)]
-        show_trees: bool,
-        #[arg(short = 'l', long = "long", action = ArgAction::SetTrue)]
-        long: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        nul_terminated: bool,
-        #[arg(long = "name-only", action = ArgAction::SetTrue)]
-        name_only: bool,
-        #[arg(long = "name-status", action = ArgAction::SetTrue)]
-        name_status: bool,
-        #[arg(long = "object-only", action = ArgAction::SetTrue)]
-        object_only: bool,
-        #[arg(long = "full-name", action = ArgAction::SetTrue)]
-        full_name: bool,
-        #[arg(long = "full-tree", action = ArgAction::SetTrue)]
-        full_tree: bool,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
-        abbrev: Option<usize>,
-        #[arg(long = "format")]
-        format: Option<String>,
-        treeish: String,
-        paths: Vec<String>,
+        #[command(flatten)]
+        options: LsTreeCommandArgs,
     },
     #[command(disable_help_flag = true)]
     Branch {
-        #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
-        help: bool,
-        #[arg(short = 'r', long = "remotes", action = ArgAction::Count)]
-        remotes: u8,
-        #[arg(short = 'a', long = "all", action = ArgAction::Count)]
-        all: u8,
-        #[arg(short = 'l', long = "list", action = ArgAction::Count)]
-        list: u8,
-        #[arg(long = "no-list", action = ArgAction::Count)]
-        no_list: u8,
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
-        quiet: u8,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
-        verbose: u8,
-        #[arg(long = "no-verbose", action = ArgAction::Count)]
-        no_verbose: u8,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
-        abbrev: Option<usize>,
-        #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
-        no_abbrev: bool,
-        #[arg(long = "column", num_args = 0..=1, require_equals = true, default_missing_value = "column")]
-        column: Option<String>,
-        #[arg(long = "no-column", action = ArgAction::SetTrue)]
-        no_column: bool,
-        #[arg(short = 'i', long = "ignore-case", action = ArgAction::Count)]
-        ignore_case: u8,
-        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
-        color: Option<String>,
-        #[arg(long = "no-color", action = ArgAction::Count)]
-        no_color: u8,
-        #[arg(long = "create-reflog", overrides_with = "no_create_reflog", action = ArgAction::SetTrue)]
-        create_reflog: bool,
-        #[arg(long = "no-create-reflog", overrides_with = "create_reflog", action = ArgAction::SetTrue)]
-        no_create_reflog: bool,
-        #[arg(long = "show-current", action = ArgAction::Count)]
-        show_current: u8,
-        #[arg(long = "no-show-current", action = ArgAction::Count)]
-        no_show_current: u8,
-        #[arg(long = "edit-description", action = ArgAction::SetTrue)]
-        edit_description: bool,
-        #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
-        delete: bool,
-        #[arg(short = 'D', action = ArgAction::SetTrue)]
-        force_delete: bool,
-        #[arg(short = 'm', long = "move", action = ArgAction::SetTrue)]
-        move_branch: bool,
-        #[arg(short = 'M', action = ArgAction::SetTrue)]
-        force_move: bool,
-        #[arg(short = 'c', long = "copy", action = ArgAction::SetTrue)]
-        copy_branch: bool,
-        #[arg(short = 'C', action = ArgAction::SetTrue)]
-        force_copy: bool,
-        #[arg(short = 'u', long = "set-upstream-to")]
-        set_upstream_to: Option<String>,
-        #[arg(long = "set-upstream", action = ArgAction::SetTrue)]
-        set_upstream: bool,
-        #[arg(long = "unset-upstream", action = ArgAction::SetTrue)]
-        unset_upstream: bool,
-        #[arg(short = 't', long = "track", num_args = 0..=1, require_equals = true, default_missing_value = "direct")]
-        track: Option<String>,
-        #[arg(long = "no-track", action = ArgAction::SetTrue)]
-        no_track: bool,
-        #[arg(long = "sort")]
-        sort: Vec<String>,
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "no-format", action = ArgAction::SetTrue)]
-        no_format: bool,
-        #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
-        omit_empty: bool,
-        #[arg(long = "no-sort", action = ArgAction::SetTrue)]
-        no_sort: bool,
-        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
-        recurse_submodules: bool,
-        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
-        no_recurse_submodules: bool,
-        #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
-        contains: Option<String>,
-        #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
-        no_contains: Option<String>,
-        #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
-        merged: Option<String>,
-        #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
-        no_merged: Option<String>,
-        #[arg(long = "points-at")]
-        points_at: Option<String>,
-        name: Option<String>,
-        start_point: Option<String>,
-        extra_args: Vec<String>,
+        #[command(flatten)]
+        options: BranchCommandArgs,
     },
     Tag {
         #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
@@ -6889,6 +7258,15 @@ pub enum ManagedHooksCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RefsCommand {
+    Migrate {
+        #[arg(long = "ref-format", num_args = 1, require_equals = true)]
+        ref_format: Option<String>,
+        #[arg(long = "no-reflog", action = ArgAction::SetTrue)]
+        no_reflog: bool,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        arguments: Vec<String>,
+    },
     Verify {
         #[arg(long = "strict", action = ArgAction::SetTrue)]
         strict: bool,
@@ -7187,24 +7565,31 @@ pub struct ConfigArgs {
     pub get: bool,
     pub get_all: bool,
     pub get_colorbool: bool,
+    pub get_color: bool,
     pub get_regexp: bool,
+    pub get_urlmatch: bool,
+    pub edit: bool,
     pub list: bool,
     pub name_only: bool,
+    pub show_names: bool,
     pub no_includes: bool,
-    pub no_type: bool,
+    pub no_type: u8,
     pub regexp: bool,
     pub replace_all: bool,
+    pub rename_section: bool,
+    pub remove_section: bool,
     pub system: bool,
     pub unset: bool,
     pub unset_all: bool,
     pub append: bool,
-    pub bool_value: bool,
-    pub int_value: bool,
-    pub bool_or_int_value: bool,
-    pub bool_or_str_value: bool,
-    pub path_value: bool,
-    pub expiry_date_value: bool,
-    pub value_type: Option<String>,
+    pub bool_value: u8,
+    pub int_value: u8,
+    pub bool_or_int_value: u8,
+    pub bool_or_str_value: u8,
+    pub path_value: u8,
+    pub expiry_date_value: u8,
+    pub value_type: Vec<String>,
+    pub type_specifiers: Vec<String>,
     pub default: Option<String>,
     pub worktree: bool,
     pub local: bool,
@@ -7212,6 +7597,7 @@ pub struct ConfigArgs {
     pub file: Option<PathBuf>,
     pub includes: bool,
     pub modern_get: bool,
+    pub modern_set: bool,
     pub show_origin: bool,
     pub show_scope: bool,
     pub url: Option<String>,
@@ -7373,8 +7759,8 @@ impl Default for DiffOptions {
             no_renames: false,
             rename_limit_short: None,
             merge: false,
-            tree_in_diff: false,
             dense_combined: false,
+            tree_in_diff: false,
             pickaxe_string: None,
             pickaxe_regex: None,
             pickaxe_regex_mode: false,
@@ -7702,3 +8088,5 @@ pub struct ResetOptions {
     pub pathspec_file_nul: bool,
     pub args: Vec<String>,
 }
+
+include!(concat!(env!("OUT_DIR"), "/command_only.rs"));

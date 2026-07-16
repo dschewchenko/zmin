@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -18,11 +18,25 @@ use zmin_primitives::{Error as PrimitiveError, Result as PrimitiveResult};
 
 use super::{
     CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry, FormatPatchPreludeMode,
-    GitRepo, SubmoduleDiffFormat, WordDiffMode, default_abbrev_len, local_clone_source,
-    local_repository_path_from_location, normalize_git_path, read_common_git_dir, read_config_file,
-    run_receive_pack_request_service, run_upload_pack_request_service, signature_from_commit_bytes,
+    GitRepo, SubmoduleDiffFormat, WordDiffMode, default_abbrev_len, is_per_worktree_ref,
+    local_clone_source, local_repository_path_from_location, normalize_git_path,
+    read_common_git_dir, read_config_file, run_receive_pack_request_service,
+    run_upload_pack_request_service, signature_from_commit_bytes,
     write_format_patch_with_tree_diff_cached,
 };
+
+fn map_ref_iteration_storage_error(error: io::Error, action: &str, prefix: &str) -> PrimitiveError {
+    if error.kind() == io::ErrorKind::InvalidData && error.to_string().contains(".git/packed-refs")
+    {
+        return PrimitiveError::ExitMessage {
+            code: 128,
+            message: format!("fatal: {error}\n"),
+        };
+    }
+    PrimitiveError::Storage {
+        details: format!("{action} {prefix}: {error}"),
+    }
+}
 
 // The legacy CLI runtime module currently owns repository-level object stores as concrete
 // `zmin_git_core` types. This adapter bridges that implementation into shared primitives
@@ -273,6 +287,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             })?;
         let store = self.store.as_object_store();
         let tree_cache = TreeObjectCache::new(store);
+        let empty_notes = HashMap::new();
         let commit = FormatPatchContext {
             repo: &self.repo,
             store,
@@ -287,8 +302,13 @@ impl GitPatchRenderer for CliPatchRenderer {
             attach: false,
             inline: false,
             cover_letter: false,
+            include_mime_headers: false,
+            mime_boundary: None,
+            mboxrd: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
+            reroll_count: None,
+            commit_list_format: None,
             prelude_mode: FormatPatchPreludeMode::Diffstat,
             reverse: false,
             order_file: None,
@@ -297,20 +317,30 @@ impl GitPatchRenderer for CliPatchRenderer {
             word_diff: WordDiffMode::None,
             word_diff_regex: None,
             submodule_format: SubmoduleDiffFormat::Short,
-            thread: false,
+            unified_context: 3,
+            thread: None,
             extra_headers: &[],
             in_reply_to: None,
             sender_override: None,
             body_from_override: false,
+            encode_email_headers: true,
             message_id_timestamp: None,
+            notes_by_commit: &empty_notes,
             keep_subject: false,
             number_offset: 0,
+            filename_max_length: None,
             signoff_line: None,
             signature: Some("0.1.0.zmin"),
             zero_commit: false,
+            cover_subject: None,
             cover_blurb: None,
             base_information: None,
             appendix: None,
+            relative_prefix: None,
+            pathspecs: &[],
+            rename_threshold: Some(100),
+            copy_threshold: None,
+            find_copies_harder: false,
         };
         let synthetic_signature = b"Zmin Primitive <primitive@example.test> 1 +0000".to_vec();
         let format_entry = FormatPatchEntry {
@@ -356,6 +386,7 @@ impl GitPatchRenderer for CliPatchRenderer {
 
         let store = self.store.as_object_store();
         let tree_cache = TreeObjectCache::new(store);
+        let empty_notes = HashMap::new();
         let context = FormatPatchContext {
             repo: &self.repo,
             store,
@@ -370,8 +401,13 @@ impl GitPatchRenderer for CliPatchRenderer {
             attach: false,
             inline: false,
             cover_letter: false,
+            include_mime_headers: false,
+            mime_boundary: None,
+            mboxrd: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
+            reroll_count: None,
+            commit_list_format: None,
             prelude_mode: FormatPatchPreludeMode::Diffstat,
             reverse: false,
             order_file: None,
@@ -380,20 +416,30 @@ impl GitPatchRenderer for CliPatchRenderer {
             word_diff: WordDiffMode::None,
             word_diff_regex: None,
             submodule_format: SubmoduleDiffFormat::Short,
-            thread: false,
+            unified_context: 3,
+            thread: None,
             extra_headers: &[],
             in_reply_to: None,
             sender_override: None,
             body_from_override: false,
+            encode_email_headers: true,
             message_id_timestamp: None,
+            notes_by_commit: &empty_notes,
             keep_subject: false,
             number_offset: 0,
+            filename_max_length: None,
             signoff_line: None,
             signature: Some("0.1.0.zmin"),
             zero_commit: false,
+            cover_subject: None,
             cover_blurb: None,
             base_information: None,
             appendix: None,
+            relative_prefix: None,
+            pathspecs: &[],
+            rename_threshold: Some(100),
+            copy_threshold: None,
+            find_copies_harder: false,
         };
         let mut blob_cache = FormatPatchBlobCache::new(store);
         let mut total_written = 0usize;
@@ -950,8 +996,13 @@ mod transport_tests {
                 .to_vec();
         let object_id = store
             .write_object(GitObjectKind::Commit, &object_id)
-            .expect("write object")
-            .to_hex();
+            .expect("write object");
+        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        refs.write_ref("refs/heads/main", &object_id)
+            .expect("write advertised ref");
+        refs.write_head_symbolic("refs/heads/main")
+            .expect("write symbolic head");
+        let object_id = object_id.to_hex();
 
         let mut request = Vec::new();
         write_pkt_line(&mut request, &format!("want {object_id}\n"));
@@ -1094,13 +1145,17 @@ impl<'a> CliRefsStoreAdapter<'a> {
         Self { refs }
     }
 
-    fn read_oid_from_target(&self, target: RefTarget, name: &str) -> PrimitiveResult<String> {
+    fn read_oid_from_target(
+        &self,
+        target: RefTarget,
+        name: &str,
+    ) -> PrimitiveResult<Option<String>> {
         match target {
-            RefTarget::Direct(id) => Ok(id.to_hex()),
+            RefTarget::Direct(id) => Ok(Some(id.to_hex())),
             RefTarget::Symbolic(_) => self
                 .refs
                 .resolve(name)
-                .map(|resolved| resolved.to_hex())
+                .map(|resolved| Some(resolved.to_hex()))
                 .map_err(|error| PrimitiveError::Storage {
                     details: format!("failed to resolve symbolic ref {name}: {error}"),
                 }),
@@ -1162,8 +1217,18 @@ impl<'a> GitRefsStore for CliRefsStoreAdapter<'a> {
             self.refs.read_ref(name)
         };
         match target {
-            Ok(ref_target) => self.read_oid_from_target(ref_target, name).map(Some),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Ok(ref_target) => self.read_oid_from_target(ref_target, name),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::IsADirectory
+                        | io::ErrorKind::InvalidData
+                ) =>
+            {
+                Ok(None)
+            }
             Err(error) => Err(PrimitiveError::Storage {
                 details: format!("read ref {name}: {error}"),
             }),
@@ -1196,7 +1261,16 @@ impl<'a> GitRefsStore for CliRefsStoreAdapter<'a> {
         match target {
             Ok(RefTarget::Symbolic(target)) => Ok(Some(target)),
             Ok(RefTarget::Direct(_)) => Ok(None),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::NotADirectory
+                        | io::ErrorKind::IsADirectory
+                ) =>
+            {
+                Ok(None)
+            }
             Err(error) => Err(PrimitiveError::Storage {
                 details: format!("read symbolic ref {name}: {error}"),
             }),
@@ -1213,20 +1287,14 @@ impl<'a> GitRefsStore for CliRefsStoreAdapter<'a> {
 
     fn list_refs(&self, pattern: Option<&str>) -> PrimitiveResult<Vec<(GitRefName, String)>> {
         let prefix = pattern.unwrap_or("");
-        let names = self
+        let refs = self
             .refs
-            .list_refs(prefix)
-            .map_err(|error| PrimitiveError::Storage {
-                details: format!("list refs {prefix}: {error}"),
-            })?;
-
-        let mut refs = Vec::new();
-        for name in names {
-            if let Some(oid) = self.read_ref(&name)? {
-                refs.push((name, oid));
-            }
-        }
-        Ok(refs)
+            .resolved_refs(prefix)
+            .map_err(|error| map_ref_iteration_storage_error(error, "list refs", prefix))?;
+        Ok(refs
+            .into_iter()
+            .map(|(name, id)| (name, id.to_hex()))
+            .collect())
     }
 
     fn visit_refs(
@@ -1235,17 +1303,13 @@ impl<'a> GitRefsStore for CliRefsStoreAdapter<'a> {
         visitor: &mut dyn FnMut(&GitRefName, &String) -> PrimitiveResult<()>,
     ) -> PrimitiveResult<()> {
         let prefix = pattern.unwrap_or("");
-        self.refs
-            .for_each_ref_name(prefix, |name| {
-                let ref_name = name.to_owned();
-                if let Some(oid) = self.read_ref(&ref_name)? {
-                    visitor(&ref_name, &oid)?;
-                }
-                Ok::<(), PrimitiveError>(())
-            })
-            .map_err(|error| PrimitiveError::Storage {
-                details: format!("visit refs {prefix}: {error}"),
-            })?;
+        for (name, id) in self
+            .refs
+            .resolved_refs(prefix)
+            .map_err(|error| map_ref_iteration_storage_error(error, "visit refs", prefix))?
+        {
+            visitor(&name, &id.to_hex())?;
+        }
         Ok(())
     }
 
@@ -1398,10 +1462,22 @@ impl OwnedCliRefsStoreAdapter {
         common_git_dir: impl AsRef<Path>,
         algorithm: GitHashAlgorithm,
     ) -> Self {
-        Self {
-            refs: RefStore::new(git_dir.as_ref(), algorithm),
-            common_refs: RefStore::new(common_git_dir.as_ref(), algorithm),
-        }
+        let git_dir = git_dir.as_ref();
+        let common_git_dir = common_git_dir.as_ref();
+        let common_refs = RefStore::new(common_git_dir, algorithm);
+        let refs = if git_dir == common_git_dir {
+            common_refs.clone()
+        } else {
+            RefStore::new_with_storage_root(
+                git_dir,
+                git_dir,
+                algorithm,
+                common_refs
+                    .storage_kind()
+                    .expect("valid common ref storage for linked worktree"),
+            )
+        };
+        Self { refs, common_refs }
     }
 
     pub(crate) fn from_path(git_dir: impl AsRef<Path>, algorithm: GitHashAlgorithm) -> Self {
@@ -1552,11 +1628,16 @@ impl GitRefsStore for OwnedCliRefsStoreAdapter {
                 }),
             };
         }
-        CliRefsStoreAdapter::new(&self.common_refs).read_ref(name)
+        let refs = if is_per_worktree_ref(name) {
+            &self.refs
+        } else {
+            &self.common_refs
+        };
+        CliRefsStoreAdapter::new(refs).read_ref(name)
     }
 
     fn write_ref(&self, name: &GitRefName, value: &String) -> PrimitiveResult<()> {
-        let refs = if name == "HEAD" {
+        let refs = if is_per_worktree_ref(name) {
             &self.refs
         } else {
             &self.common_refs
@@ -1565,18 +1646,28 @@ impl GitRefsStore for OwnedCliRefsStoreAdapter {
     }
 
     fn delete_ref(&self, name: &GitRefName) -> PrimitiveResult<()> {
-        CliRefsStoreAdapter::new(&self.common_refs).delete_ref(name)
+        let refs = if is_per_worktree_ref(name) {
+            &self.refs
+        } else {
+            &self.common_refs
+        };
+        CliRefsStoreAdapter::new(refs).delete_ref(name)
     }
 
     fn read_symbolic_ref(&self, name: &GitRefName) -> PrimitiveResult<Option<String>> {
         if name == "HEAD" {
             return CliRefsStoreAdapter::new(&self.refs).read_symbolic_ref(name);
         }
-        CliRefsStoreAdapter::new(&self.common_refs).read_symbolic_ref(name)
+        let refs = if is_per_worktree_ref(name) {
+            &self.refs
+        } else {
+            &self.common_refs
+        };
+        CliRefsStoreAdapter::new(refs).read_symbolic_ref(name)
     }
 
     fn write_symbolic_ref(&self, name: &GitRefName, target: &String) -> PrimitiveResult<()> {
-        let refs = if name == "HEAD" {
+        let refs = if is_per_worktree_ref(name) {
             &self.refs
         } else {
             &self.common_refs
@@ -1585,7 +1676,23 @@ impl GitRefsStore for OwnedCliRefsStoreAdapter {
     }
 
     fn list_refs(&self, pattern: Option<&str>) -> PrimitiveResult<Vec<(GitRefName, String)>> {
-        CliRefsStoreAdapter::new(&self.common_refs).list_refs(pattern)
+        if self.refs.git_dir() == self.common_refs.git_dir() {
+            return CliRefsStoreAdapter::new(&self.common_refs).list_refs(pattern);
+        }
+        let mut refs = CliRefsStoreAdapter::new(&self.common_refs)
+            .list_refs(pattern)?
+            .into_iter()
+            .filter(|(name, _)| !is_per_worktree_ref(name))
+            .collect::<Vec<_>>();
+        refs.extend(
+            CliRefsStoreAdapter::new(&self.refs)
+                .list_refs(pattern)?
+                .into_iter()
+                .filter(|(name, _)| is_per_worktree_ref(name)),
+        );
+        refs.sort_by(|left, right| left.0.cmp(&right.0));
+        refs.dedup_by(|left, right| left.0 == right.0);
+        Ok(refs)
     }
 
     fn visit_refs(
@@ -1593,7 +1700,10 @@ impl GitRefsStore for OwnedCliRefsStoreAdapter {
         pattern: Option<&str>,
         visitor: &mut dyn FnMut(&GitRefName, &String) -> PrimitiveResult<()>,
     ) -> PrimitiveResult<()> {
-        CliRefsStoreAdapter::new(&self.common_refs).visit_refs(pattern, visitor)
+        for (name, value) in self.list_refs(pattern)? {
+            visitor(&name, &value)?;
+        }
+        Ok(())
     }
 
     fn pack_refs(&self, all: bool, prune: bool) -> PrimitiveResult<()> {

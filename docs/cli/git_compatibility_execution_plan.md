@@ -29,6 +29,15 @@ Use these files instead of chat history:
 | `docs/cli/matrix_row_growth_audit.md` | audited explanation of row-count growth and the required predeclared row-growth budget for future imports |
 | `docs/cli/matrices/*_v2_47.tsv` | per-command behavior rows with command, option, value, combinations, state, transport, expected behavior and evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the Git `2.47.1` denominator |
+| `tools/git-upstream-compat-tests-core.txt` | default upstream Git core-suite allowlist for replace-git validation |
+| `tools/git-upstream-compat-manifest.sh` | generates full-core, all-top-level, or all-nondeprecated upstream shell-suite manifests from the pinned cache without vendoring `t/` |
+| `tools/git-upstream-compat-materialize.sh` | exports a runnable scratch `t/` subtree for all-top-level, all-nondeprecated, full-core, or fully excluded deprecated upstream shells without copying them into this repository |
+| `tools/git-upstream-sync.sh` | syncs a local gitignored upstream shell-suite snapshot under `.upstream-snapshots/` for sustained in-repo work without tracking upstream files |
+| `tools/git-upstream-compat-audit.sh` | audits top-level upstream test families and verifies explicit legacy/external excludes against the pinned cache |
+| `tools/git-upstream-deprecated-audit.sh` | separates fully excluded deprecated families from mixed deprecated assertions that must stay in upstream full-core |
+| `tools/git-upstream-compat-tests-legacy-excludes.tsv` | explicit upstream legacy/external families excluded from the core suite |
+| `tools/git-upstream-compat-tests-file-excludes.tsv` | optional per-file upstream exclusions when a whole file is intentionally out of scope |
+| `tools/git-compat-test-topology.sh` | classifies upstream-authoritative scope versus intentionally retained local Rust compat suites |
 | `/Users/dschewchenko/work/private/.knowledge/projects/skron-core.md` | cross-session project memory that points back to the active execution plan |
 
 ## Objective
@@ -48,9 +57,11 @@ A row is useful only when it records:
 - expected stdout, stderr, exit code and observable `.git` side effects
 - stock Git oracle evidence
 
-Public documentation must keep complete command matrices at `0/151` and
-complete doc-option matrices at `0/4632` until the full matrix is expanded and
-closed with stock-Git evidence.
+Public documentation may report the generated catalog as `151/151` command
+matrices and `3212/3212` documented option pairs, but must not equate catalog
+closure with verified drop-in compatibility. Replacement readiness also
+requires the upstream, GUI, platform, byte-exact I/O/state, performance and
+memory gates below.
 
 ## Non-Negotiable Rules
 
@@ -59,11 +70,24 @@ closed with stock-Git evidence.
 3. Use stock Git as the oracle for stdout, stderr, exit code and side effects.
 4. Close a row only with focused evidence: compat test, upstream Git test slice
    or recorded dogfood trace.
-5. Do not publish support percentages from command dispatch, parser acceptance,
+5. Prefer the pinned upstream Git suite and generated manifests over copying
+   upstream tests into tracked repository files. If a local in-worktree copy is
+   useful, sync a gitignored snapshot with `tools/git-upstream-sync.sh`.
+6. Do not drop an upstream shell test from full-core just because it contains
+   deprecated assertions. Use `tools/git-upstream-deprecated-audit.sh audit`
+   and exclude only whole deprecated/external families or explicit per-file
+   rows that are truly out of the Git `2.47.1` replace-git contract.
+7. Keep local Rust compat files intentionally small-scope: focused stock-Git
+   oracle regression checks, invalid-input parity, observed IDE/client traces,
+   replace-git dogfood, bounded LFS workflow probes, or Zmin-only surfaces.
+8. Use `tools/git-compat-test-topology.sh audit` before adding a new local
+   compat file; if a lane belongs in upstream full-core, extend the upstream
+   manifest/audit path instead of creating another issue-shaped Rust suite.
+9. Do not publish support percentages from command dispatch, parser acceptance,
    represented option pairs or written-row pass rates.
-6. Keep Zmin-only features in `docs/cli/zmin_extensions_inventory.md`, outside
+10. Keep Zmin-only features in `docs/cli/zmin_extensions_inventory.md`, outside
    the Git `2.47.1` compatibility denominator.
-7. Commit each completed slice locally before starting a different command,
+11. Commit each completed slice locally before starting a different command,
    option class or extension. Push only on explicit request.
 
 ## Resume Procedure
@@ -111,14 +135,24 @@ census outputs.
 The current census snapshot reports:
 
 - `151` Git `2.47.1` commands from upstream command-list
-- `4632` Git doc option seed rows
-- `2457` verified exact behavior rows
-- `388` invalid-input parity rows
-- `676` implemented-but-unverified schema rows
-- `4676` remaining rows to fix, expand or verify
+- `3212` Git doc option seed rows
+- `6823` verified exact behavior rows
+- `906` invalid-input parity rows
+- `0` implemented-but-unverified schema rows
+- `0` remaining rows to fix, expand or verify
 
-These are checklist counts, not a compatibility percentage. Complete command
-matrices and complete doc-option matrices remain `0/151` and `0/4632`.
+This means the current Git `2.47.1` census/checklist is closed for the rows
+that are written down and classified in the generated inventory. It does not by
+itself prove practical replace-git readiness. The next default work no longer
+comes from `remaining_to_fix_or_verify.tsv`; it comes from real replace-git
+lanes outside the Git `2.47.1` denominator, such as broader Git LFS transport
+coverage, observed IDE/client performance and memory gaps, replacement-binary
+dogfood on real repositories, and Zmin-only snapshot-clone / hooks / CMS
+surfaces.
+
+These are checklist counts, not a compatibility percentage. The generated
+catalog is `151/151` command matrices and `3212/3212` documented option pairs;
+the drop-in objective remains open until the completion gates are green.
 
 ## Baseline Verification Contract
 
@@ -133,8 +167,8 @@ awk -F '\t' 'NR==1{for(i=1;i<=NF;i++) h[$i]=i; next} { total++; c[$h["inventory_
 tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
 ```
 
-The current frozen focused-oracle backlog is `969` functions: `778`
-represented or classified and `191` `missing_or_unclassified`. Treat
+The current focused-oracle inventory is `1462` functions: `1244`
+represented or classified and `218` `missing_or_unclassified`. Treat
 `docs/cli/existing_oracle_test_inventory.tsv` as the complete current list to
 walk. A docs-only row import from that list must reduce
 `missing_or_unclassified` by the declared evidence-function count. If behavior
@@ -162,12 +196,14 @@ Every compatibility slice follows this exact order:
 5. Implement the smallest behavior change required for that row.
 6. Run the focused test first.
 7. Run `cargo check -p zmin-cli --bin zmin --profile compat`.
-8. Run `tools/git-cli-readiness-status.sh`.
-9. Run `tools/git-compat-command-summary.sh --tsv`.
-10. Run `tools/git-compat-audit-summary.sh --tsv`.
-11. Update README, inventory, variant plan and project notes with generated
+8. If the slice changes upstream suite scope, run
+   `tools/git-upstream-compat-audit.sh legacy-audit`.
+9. Run `tools/git-cli-readiness-status.sh`.
+10. Run `tools/git-compat-command-summary.sh --tsv`.
+11. Run `tools/git-compat-audit-summary.sh --tsv`.
+12. Update README, inventory, variant plan and project notes with generated
     counts when counts changed.
-12. Commit with a Conventional Commit message and push the branch.
+13. Commit with a Conventional Commit message and push the branch.
 
 Transport rows also run the relevant HTTP, SSH and git-daemon focused tests.
 Replacement-binary rows also run `tools/git-replacement-dogfood-smoke.sh`.
@@ -209,11 +245,13 @@ If any item is missing, the slice stays open even if the code appears to work.
 
 Keep public and internal reporting aligned on the strict model:
 
-- complete command matrices: `0/151`
-- complete doc-option matrices: `0/4632`
+- generated command matrices: `151/151`
+- generated documented option pairs: `3212/3212`
 - written behavior rows: generated count only
 - matching stock Git: generated count only
 - open and invalid-input rows reported separately
+- drop-in compatibility remains unclaimed until the upstream, client and
+  platform gates pass
 
 ### M1: Local Replacement Dogfood
 

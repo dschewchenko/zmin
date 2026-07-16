@@ -148,6 +148,73 @@ fn submodule_add_branch_name_reference_and_quiet_match_stock_git() {
 }
 
 #[test]
+fn submodule_add_existing_repo_path_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let git_repo = dir.path().join("git-super");
+    let zmin_repo = dir.path().join("zmin-super");
+
+    for repo in [&git_repo, &zmin_repo] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", repo.to_str().expect("super path")],
+        );
+        configure_identity(repo);
+        git(
+            repo,
+            [
+                "init",
+                "-b",
+                "main",
+                repo.join("sub").to_str().expect("sub path"),
+            ],
+        );
+        configure_identity(&repo.join("sub"));
+        write_file(&repo.join("sub"), "x.txt", "x\n");
+        git(&repo.join("sub"), ["add", "-A"]);
+        git_with_env(&repo.join("sub"), ["commit", "-m", "x"]);
+    }
+
+    let git_output = command_any_output(
+        common::stock_git_bin().to_str().expect("stock git path"),
+        &git_repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "./sub",
+        ],
+        "git submodule add",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_repo,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "./sub",
+        ],
+        "zmin submodule add",
+    );
+
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".gitmodules")).expect("read zmin gitmodules"),
+        fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
+    );
+    assert_eq!(
+        git(&zmin_repo, ["status", "--short"]),
+        git(&git_repo, ["status", "--short"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["ls-files", "-s", "sub"]),
+        git(&git_repo, ["ls-files", "-s", "sub"])
+    );
+}
+
+#[test]
 fn add_submodule_path_updates_gitlink_without_staging_nested_files() {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
@@ -2113,6 +2180,11 @@ fn submodule_absorbgitdirs_moves_embedded_git_dir_like_stock_git() {
             "deps/sub",
         ],
     );
+    let absorbed_git_dir = super_repo.path().join(".git/modules/deps/sub");
+    let embedded_git_dir = super_repo.path().join("deps/sub/.git");
+    assert!(embedded_git_dir.is_file());
+    fs::remove_file(&embedded_git_dir).expect("remove submodule gitfile");
+    fs::rename(&absorbed_git_dir, &embedded_git_dir).expect("restore embedded submodule git dir");
     assert!(super_repo.path().join("deps/sub/.git").is_dir());
     run_zmin(super_repo.path(), ["submodule", "absorbgitdirs"]);
     assert!(super_repo.path().join("deps/sub/.git").is_file());

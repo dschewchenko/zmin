@@ -208,8 +208,19 @@ fn notes_ref_name(repo: &GitRepo, notes_ref: Option<&str>) -> Result<String> {
             .ok()
             .or_else(|| read_config_value(repo, "core.notesRef").ok().flatten())
             .unwrap_or_else(|| "refs/notes/commits".to_owned())),
-        Some(name) if name.starts_with("refs/notes/") => Ok(name.to_owned()),
-        Some(name) => Ok(format!("refs/notes/{name}")),
+        Some(name) => {
+            let ref_name = if name.starts_with("refs/notes/") {
+                name.to_owned()
+            } else {
+                format!("refs/notes/{name}")
+            };
+            if ref_name.contains("@{") {
+                return resolve_objectish(repo, &ref_name)
+                    .map(|id| id.to_hex())
+                    .map_err(CliError::Io);
+            }
+            Ok(ref_name)
+        }
     }
 }
 
@@ -298,6 +309,7 @@ fn notes_add(
     let NotesAddArgs {
         force,
         edit,
+        allow_empty,
         separator,
         stripspace,
         sources,
@@ -316,6 +328,20 @@ fn notes_add(
     let mut message = notes_message_from_sources(repo, store, sources, &separator, stripspace)?;
     if edit {
         message = strip_note_editor_comments(edit_history_message(repo, &message)?);
+    }
+    if message.is_empty() && !allow_empty {
+        eprintln!("Removing note for object {key}");
+        if notes.remove(&key).is_some() {
+            write_notes_ref(
+                repo,
+                store,
+                refs,
+                ref_name,
+                &notes,
+                "Notes removed by 'git notes add'",
+            )?;
+        }
+        return Ok(());
     }
     let note_id = store.write_object(GitObjectKind::Blob, &message)?;
     notes.insert(key, note_id);
@@ -341,6 +367,7 @@ fn notes_append(
     let NotesAddArgs {
         force: _,
         edit,
+        allow_empty: _,
         separator,
         stripspace,
         sources,
@@ -835,6 +862,7 @@ enum NotesMessageSource {
 struct NotesAddArgs {
     force: bool,
     edit: bool,
+    allow_empty: bool,
     separator: Vec<u8>,
     stripspace: NotesStripspaceMode,
     sources: Vec<NotesMessageSource>,
@@ -1120,24 +1148,20 @@ fn parse_notes_add_args(args: Vec<String>) -> Result<NotesAddArgs> {
         cursor += 1;
     }
     if sources.is_empty() {
-        if allow_empty || edit {
-            return Ok(NotesAddArgs {
-                force,
-                edit: true,
-                separator,
-                stripspace,
-                sources: vec![NotesMessageSource::Empty],
-                object,
-            });
-        }
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "notes add requires -m or -F".into(),
+        return Ok(NotesAddArgs {
+            force,
+            edit: true,
+            allow_empty,
+            separator,
+            stripspace,
+            sources: vec![NotesMessageSource::Empty],
+            object,
         });
     }
     Ok(NotesAddArgs {
         force,
         edit,
+        allow_empty,
         separator,
         stripspace,
         sources,
@@ -1814,10 +1838,13 @@ pub(crate) fn read_notes_map(
     let object_store = store.as_object_store();
     let commit_cache = CommitObjectCache::new(object_store);
     let tree_cache = TreeObjectCache::new(object_store);
-    let commit_id = match refs.resolve(ref_name) {
+    let commit_id = match ObjectId::from_hex(GitHashAlgorithm::Sha1, ref_name) {
         Ok(id) => id,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
-        Err(error) => return Err(CliError::Io(error)),
+        Err(_) => match refs.resolve(ref_name) {
+            Ok(id) => id,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(error) => return Err(CliError::Io(error)),
+        },
     };
     let commit = commit_cache
         .read_commit(&commit_id)
@@ -1866,6 +1893,7 @@ fn write_notes_ref(
     notes: &HashMap<String, ObjectId>,
     message: &str,
 ) -> Result<()> {
+    let reflog_message = message;
     let tree_id = write_notes_tree(store, notes)?;
     let author = signature_from_identity(repo, "GIT_AUTHOR")?;
     let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
@@ -1877,8 +1905,7 @@ fn write_notes_ref(
     message.push(b'\n');
     let commit = builder.message(message)?.encode()?;
     let commit_id = store.write_object(GitObjectKind::Commit, &commit)?;
-    refs.write_ref(ref_name, &commit_id)?;
-    Ok(())
+    write_ref_with_reflog(repo, refs, ref_name, &commit_id, reflog_message)
 }
 
 fn write_notes_tree(

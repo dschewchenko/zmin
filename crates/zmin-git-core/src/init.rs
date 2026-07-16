@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 pub struct InitRepositoryOptions {
     pub bare: bool,
     pub initial_branch: String,
+    pub objects_directory: Option<PathBuf>,
+    pub populate_template_files: bool,
+    pub write_log_all_ref_updates: bool,
 }
 
 impl Default for InitRepositoryOptions {
@@ -13,6 +16,9 @@ impl Default for InitRepositoryOptions {
         Self {
             bare: false,
             initial_branch: "main".to_owned(),
+            objects_directory: None,
+            populate_template_files: true,
+            write_log_all_ref_updates: true,
         }
     }
 }
@@ -36,30 +42,46 @@ pub fn init_repository(
         worktree.join(".git")
     };
 
-    fs::create_dir_all(git_dir.join("objects/info"))?;
-    fs::create_dir_all(git_dir.join("objects/pack"))?;
     fs::create_dir_all(git_dir.join("refs/heads"))?;
     fs::create_dir_all(git_dir.join("refs/tags"))?;
-    fs::create_dir_all(git_dir.join("hooks"))?;
-    write_default_sample_hooks(&git_dir)?;
-    fs::create_dir_all(git_dir.join("info"))?;
-    let exclude = git_dir.join("info/exclude");
-    if !exclude.exists() {
-        fs::write(exclude, default_exclude_contents())?;
-    }
     if !options.bare {
         fs::create_dir_all(worktree)?;
+    }
+    if options.populate_template_files {
+        fs::create_dir_all(git_dir.join("hooks"))?;
+        write_default_sample_hooks(&git_dir)?;
+        fs::create_dir_all(git_dir.join("info"))?;
+        let exclude = git_dir.join("info/exclude");
+        if !exclude.exists() {
+            fs::write(exclude, default_exclude_contents())?;
+        }
     }
 
     fs::write(
         git_dir.join("HEAD"),
         format!("ref: refs/heads/{}\n", options.initial_branch),
     )?;
+    if options.populate_template_files {
+        fs::write(
+            git_dir.join("description"),
+            "Unnamed repository; edit this file 'description' to name the repository.\n",
+        )?;
+    }
     fs::write(
-        git_dir.join("description"),
-        "Unnamed repository; edit this file 'description' to name the repository.\n",
+        git_dir.join("config"),
+        config_contents(
+            options.bare,
+            detect_case_insensitive_filesystem(worktree),
+            options.write_log_all_ref_updates,
+        ),
     )?;
-    fs::write(git_dir.join("config"), config_contents(options.bare))?;
+
+    let objects_directory = options
+        .objects_directory
+        .unwrap_or_else(|| git_dir.join("objects"));
+    fs::create_dir_all(&objects_directory)?;
+    fs::create_dir_all(objects_directory.join("info"))?;
+    fs::create_dir_all(objects_directory.join("pack"))?;
 
     Ok(InitRepositoryResult {
         worktree: worktree.to_path_buf(),
@@ -96,13 +118,37 @@ fn default_exclude_contents() -> &'static str {
     "# git ls-files --others --exclude-from=.git/info/exclude\n# Lines that start with '#' are comments.\n# For a project mostly in C, the following would be a good set of\n# exclude patterns (uncomment them if you want to use them):\n# *.[oa]\n# *~\n"
 }
 
-fn config_contents(bare: bool) -> String {
+fn config_contents(bare: bool, ignorecase: bool, write_log_all_ref_updates: bool) -> String {
     let filemode = if cfg!(unix) { "true" } else { "false" };
-    format!(
-        "[core]\n\trepositoryformatversion = 0\n\tfilemode = {filemode}\n\tbare = {}\n\tlogallrefupdates = {}\n",
+    let mut config = format!(
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = {filemode}\n\tbare = {}\n",
         if bare { "true" } else { "false" },
-        if bare { "false" } else { "true" },
-    )
+    );
+    if write_log_all_ref_updates {
+        config.push_str(&format!(
+            "\tlogallrefupdates = {}\n",
+            if bare { "false" } else { "true" },
+        ));
+    }
+    if ignorecase {
+        config.push_str("\tignorecase = true\n");
+    }
+    config
+}
+
+fn detect_case_insensitive_filesystem(worktree: &Path) -> bool {
+    if !worktree.is_dir() {
+        return false;
+    }
+    let upper = worktree.join(".zmin-ignorecase-probe");
+    let lower = worktree.join(".zmin-IGNORECASE-probe");
+    let detected = fs::write(&upper, b"probe")
+        .ok()
+        .and_then(|_| fs::symlink_metadata(&lower).ok())
+        .is_some();
+    let _ = fs::remove_file(&upper);
+    let _ = fs::remove_file(&lower);
+    detected
 }
 
 fn validate_ref_name_component(name: &str) -> io::Result<()> {
@@ -130,11 +176,10 @@ fn validate_ref_name_component(name: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use tempfile::TempDir;
 
     use super::*;
+    use crate::stock_git_support;
 
     #[test]
     fn initializes_repository_readable_by_stock_git() {
@@ -144,6 +189,9 @@ mod tests {
             InitRepositoryOptions {
                 bare: false,
                 initial_branch: "trunk".to_owned(),
+                objects_directory: None,
+                populate_template_files: true,
+                write_log_all_ref_updates: true,
             },
         )
         .expect("init repo");
@@ -161,6 +209,9 @@ mod tests {
             InitRepositoryOptions {
                 bare: true,
                 initial_branch: "main".to_owned(),
+                objects_directory: None,
+                populate_template_files: true,
+                write_log_all_ref_updates: true,
             },
         )
         .expect("init bare repo");
@@ -170,19 +221,6 @@ mod tests {
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(repo.path())
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout)
-            .expect("git stdout utf8")
-            .trim_end_matches('\n')
-            .to_owned()
+        stock_git_support::git(repo, &args)
     }
 }

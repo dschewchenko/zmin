@@ -17,8 +17,39 @@ pub enum ObjectStorageHint {
     Unknown,
 }
 
+#[derive(Debug, Clone)]
+pub struct PrefixOrFullObject {
+    pub object: LooseObject,
+    pub is_complete: bool,
+}
+
 pub trait GitObjectStore {
     fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject>;
+
+    fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        let object = self.read_object(id)?;
+        let prefix_len = object.content.len().min(max_bytes);
+        Ok(Some(LooseObject {
+            id: object.id,
+            kind: object.kind,
+            content: object.content[..prefix_len].to_vec(),
+        }))
+    }
+
+    fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        _max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        Ok(PrefixOrFullObject {
+            object: self.read_object(id)?,
+            is_complete: true,
+        })
+    }
 
     fn contains_object(&self, id: &ObjectId) -> io::Result<bool> {
         match self.read_object(id) {
@@ -231,6 +262,46 @@ impl GitObjectStore for InMemoryObjectStore {
             .get(id.as_bytes())
             .cloned()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "git object not found"))
+    }
+
+    fn read_object_prefix(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<Option<LooseObject>> {
+        let object = self.read_object(id)?;
+        let prefix_len = object.content.len().min(max_bytes);
+        Ok(Some(LooseObject {
+            id: object.id,
+            kind: object.kind,
+            content: object.content[..prefix_len].to_vec(),
+        }))
+    }
+
+    fn read_object_prefix_or_full(
+        &self,
+        id: &ObjectId,
+        max_bytes: usize,
+    ) -> io::Result<PrefixOrFullObject> {
+        let object = self.read_object(id)?;
+        let is_complete = object.content.len() <= max_bytes;
+        let object = if is_complete {
+            object
+        } else {
+            PrefixOrFullObject {
+                object: LooseObject {
+                    id: object.id,
+                    kind: object.kind,
+                    content: object.content[..max_bytes].to_vec(),
+                },
+                is_complete,
+            }
+            .object
+        };
+        Ok(PrefixOrFullObject {
+            object,
+            is_complete,
+        })
     }
 
     fn object_count(&self) -> io::Result<usize> {

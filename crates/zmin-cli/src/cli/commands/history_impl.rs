@@ -5,10 +5,25 @@ use super::sequencer_commands::apply_tree_delta;
 use super::*;
 use crate::runtime::{DiffColorMode, parse_diff_color_option};
 use chrono::Datelike;
+use similar::{Algorithm, DiffTag, capture_diff_slices};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
+use std::sync::Arc;
 
 const REFLOG_REVERSE_READ_CHUNK_SIZE: usize = 16 * 1024;
+const COMMIT_AUTHOR_METADATA_PREFIX_BYTES: usize = 1024;
+const COMMIT_AUTHOR_HINT_PREFIX_BYTES: usize = 256;
+const COMMIT_AUTHOR_HEADER_PREFIX_BYTES: usize = 128;
+const PARALLEL_LOG_RENDER_METADATA_MIN_COMMITS: usize = 1024;
+const PARALLEL_LOG_AUTHOR_METADATA_MIN_COMMITS: usize = 1024;
+const PARALLEL_LOG_METADATA_MAX_WORKERS: usize = 8;
+const PARALLEL_LOG_AUTHOR_METADATA_MAX_WORKERS: usize = 3;
+const PARALLEL_LOG_METADATA_STACK_BYTES: usize = 128 * 1024;
+const REV_LIST_OUTPUT_BUFFER_BYTES: usize = 64 * 1024;
+const REV_LIST_PACK_OBJECT_CACHE_BYTES: usize = 128 * 1024;
+const LOG_PACK_OBJECT_CACHE_BYTES: usize = 4 * 1024;
+const LOG_PACK_FILE_READER_BUFFER_BYTES: usize = 512;
 
 const BLAME_USAGE: &str = r#"usage: git blame [<options>] [<rev-opts>] [<rev>] [--] <file>
 
@@ -199,7 +214,8 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         });
     }
 
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_stable_pack_snapshot();
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     if topo_order || count {
@@ -215,116 +231,116 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             "warning: some rev walking options will be overridden as 'reverse' bit in 'struct rev_info' will be forced"
         );
     }
-    let empty_selection_lane = replay_has_empty_selection_lane(left_only, merges, min_age.as_deref());
+    let empty_selection_lane =
+        replay_has_empty_selection_lane(left_only, merges, min_age.as_deref());
     let glob_multiple_sources = advance.is_some() && glob.is_some();
-    let rev_args =
-        collect_replay_rev_args(
-            branches,
-            tags,
-            remotes,
-            not,
-            stdin,
-            count,
-            exclude,
-            alternate_refs,
-            glob,
-            abbrev_commit,
-            no_abbrev_commit,
-            author,
-            committer,
-            encoding,
-            ignore_missing,
-            indexed_objects,
-            remove_empty,
-            single_worktree,
-            unpacked,
-            bisect_all,
-            bisect_vars,
-            boundary,
-            first_parent,
-            right_only,
-            left_only,
-            left_right,
-            cherry,
-            cherry_pick,
-            cherry_mark,
-            parents,
-            objects,
-            objects_edge,
-            objects_edge_aggressive,
-            show_signature,
-            walk_reflogs,
-            no_walk,
-            do_walk,
-            no_merges,
-            merge,
-            dense,
-            sparse,
-            full_history,
-            children,
-            ancestry_path,
-            simplify_merges,
-            simplify_by_decoration,
-            in_commit_order,
-            commit_header,
-            no_commit_header,
-            disk_usage,
-            expand_tabs,
-            no_expand_tabs,
-            show_linear_break,
-            header,
-            notes,
-            no_notes,
-            show_notes,
-            show_notes_by_default,
-            standard_notes,
-            no_standard_notes,
-            reflog,
-            bisect,
-            grep_reflog.clone(),
-            grep,
-            invert_grep,
-            all_match,
-            regexp_ignore_case,
-            basic_regexp,
-            extended_regexp,
-            fixed_strings,
-            perl_regexp,
-            pretty,
-            oneline,
-            format,
-            date,
-            relative_date,
-            graph,
-            object_names,
-            no_object_names,
-            exclude_promisor_objects,
-            filter.clone(),
-            filter_print_omitted,
-            filter_provided_objects,
-            progress.clone(),
-            missing.clone(),
-            use_bitmap_index,
-            quiet,
-            show_pulls,
-            timestamp,
-            no_filter,
-            parsed_max_count,
-            max_age,
-            min_age,
-            skip,
-            since,
-            since_as_filter,
-            until,
-            max_parents,
-            no_max_parents,
-            min_parents,
-            no_min_parents,
-            merges,
-            exclude_first_parent_only,
-            exclude_hidden,
-            revision_ranges,
-        )?;
+    let rev_args = collect_replay_rev_args(
+        branches,
+        tags,
+        remotes,
+        not,
+        stdin,
+        count,
+        exclude,
+        alternate_refs,
+        glob,
+        abbrev_commit,
+        no_abbrev_commit,
+        author,
+        committer,
+        encoding,
+        ignore_missing,
+        indexed_objects,
+        remove_empty,
+        single_worktree,
+        unpacked,
+        bisect_all,
+        bisect_vars,
+        boundary,
+        first_parent,
+        right_only,
+        left_only,
+        left_right,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        parents,
+        objects,
+        objects_edge,
+        objects_edge_aggressive,
+        show_signature,
+        walk_reflogs,
+        no_walk,
+        do_walk,
+        no_merges,
+        merge,
+        dense,
+        sparse,
+        full_history,
+        children,
+        ancestry_path,
+        simplify_merges,
+        simplify_by_decoration,
+        in_commit_order,
+        commit_header,
+        no_commit_header,
+        disk_usage,
+        expand_tabs,
+        no_expand_tabs,
+        show_linear_break,
+        header,
+        notes,
+        no_notes,
+        show_notes,
+        show_notes_by_default,
+        standard_notes,
+        no_standard_notes,
+        reflog,
+        bisect,
+        grep_reflog.clone(),
+        grep,
+        invert_grep,
+        all_match,
+        regexp_ignore_case,
+        basic_regexp,
+        extended_regexp,
+        fixed_strings,
+        perl_regexp,
+        pretty,
+        oneline,
+        format,
+        date,
+        relative_date,
+        graph,
+        object_names,
+        no_object_names,
+        exclude_promisor_objects,
+        filter.clone(),
+        filter_print_omitted,
+        filter_provided_objects,
+        progress.clone(),
+        missing.clone(),
+        use_bitmap_index,
+        quiet,
+        show_pulls,
+        timestamp,
+        no_filter,
+        parsed_max_count,
+        max_age,
+        min_age,
+        skip,
+        since,
+        since_as_filter,
+        until,
+        max_parents,
+        no_max_parents,
+        min_parents,
+        no_min_parents,
+        merges,
+        exclude_first_parent_only,
+        exclude_hidden,
+        revision_ranges,
+    )?;
     if bisect_all {
         return Err(replay_unrecognized_argument("--bisect-all"));
     }
@@ -414,7 +430,9 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
     if glob_multiple_sources {
         return Err(CliError::Fatal {
             code: 128,
-            message: "cannot advance target with multiple sources because ordering would be ill-defined".into(),
+            message:
+                "cannot advance target with multiple sources because ordering would be ill-defined"
+                    .into(),
         });
     }
     if empty_selection_lane {
@@ -439,7 +457,9 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
     {
         return Err(CliError::Fatal {
             code: 128,
-            message: "cannot advance target with multiple sources because ordering would be ill-defined".into(),
+            message:
+                "cannot advance target with multiple sources because ordering would be ill-defined"
+                    .into(),
         });
     }
     let mut commits =
@@ -738,11 +758,7 @@ fn replay_usage_error(message: &str) -> String {
     )
 }
 
-fn replay_has_empty_selection_lane(
-    left_only: bool,
-    merges: bool,
-    min_age: Option<&str>,
-) -> bool {
+fn replay_has_empty_selection_lane(left_only: bool, merges: bool, min_age: Option<&str>) -> bool {
     left_only || merges || min_age.is_some()
 }
 
@@ -796,7 +812,7 @@ pub(crate) fn run_history(command: HistoryCommand, _raw_args: &[String]) -> Resu
 }
 
 fn history_reword(commit: &str, dry_run: bool, update_refs: Option<&str>) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -959,7 +975,7 @@ fn history_split(
     update_refs: Option<&str>,
     pathspecs: Vec<String>,
 ) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -1125,13 +1141,13 @@ fn history_split_patches(
 }
 
 pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let mut args = args.into_iter().peekable();
     let command = args
         .next_if(|arg| {
             matches!(
                 arg.as_str(),
-                "show" | "list" | "exists" | "expire" | "delete" | "drop"
+                "show" | "list" | "exists" | "expire" | "delete" | "drop" | "write"
             )
         })
         .map(|arg| match arg.as_str() {
@@ -1141,11 +1157,13 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
             "expire" => ReflogCommand::Expire,
             "delete" => ReflogCommand::Delete,
             "drop" => ReflogCommand::Drop,
+            "write" => ReflogCommand::Write,
             _ => unreachable!("reflog command parser only selects known subcommands"),
         })
         .unwrap_or(ReflogCommand::Show);
     match command {
         ReflogCommand::Drop => reflog_drop(&repo, args.collect()),
+        ReflogCommand::Write => reflog_write(&repo, args.collect()),
         ReflogCommand::Delete => reflog_delete(&repo, args.collect()),
         ReflogCommand::Expire => {
             let args = args.collect::<Vec<_>>();
@@ -1159,10 +1177,13 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
             let mut date_mode = ReflogDateMode::Index;
             let mut no_abbrev_commit = false;
             let mut format = None;
+            let mut max_count = None;
+            let mut grep_reflog = Vec::new();
             let mut ref_name = None;
+            let mut all = false;
             let mut pathspecs = Vec::new();
             let mut in_pathspecs = false;
-            for arg in args {
+            while let Some(arg) = args.next() {
                 if in_pathspecs {
                     pathspecs.push(arg);
                 } else if arg == "--" {
@@ -1174,6 +1195,8 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                     date_mode = parse_reflog_date_mode(value)?;
                 } else if arg == "--no-abbrev-commit" {
                     no_abbrev_commit = true;
+                } else if arg == "--all" {
+                    all = true;
                 } else if arg == "--date" {
                     return Err(CliError::Fatal {
                         code: 129,
@@ -1181,20 +1204,65 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                     });
                 } else if let Some(value) = arg.strip_prefix("--format=") {
                     format = Some(value.to_owned());
+                } else if arg == "--max-count" {
+                    let value = args.next().ok_or_else(|| CliError::Fatal {
+                        code: 129,
+                        message: "reflog --max-count requires a value".into(),
+                    })?;
+                    max_count = parse_log_max_count(Some(&value))?;
+                } else if let Some(value) = arg.strip_prefix("--max-count=") {
+                    max_count = parse_log_max_count(Some(value))?;
+                } else if let Some(value) = arg.strip_prefix('-')
+                    && !value.is_empty()
+                    && value.bytes().all(|byte| byte.is_ascii_digit())
+                {
+                    max_count = parse_log_max_count(Some(value))?;
+                } else if arg == "-n" {
+                    let value = args.next().ok_or_else(|| CliError::Fatal {
+                        code: 129,
+                        message: "reflog -n requires a value".into(),
+                    })?;
+                    max_count = parse_log_max_count(Some(&value))?;
+                } else if let Some(value) = arg.strip_prefix("-n") {
+                    if value.is_empty() {
+                        ref_name = Some(arg);
+                    } else {
+                        max_count = parse_log_max_count(Some(value))?;
+                    }
+                } else if arg == "--grep-reflog" {
+                    grep_reflog.push(args.next().ok_or_else(|| CliError::Fatal {
+                        code: 129,
+                        message: "reflog --grep-reflog requires a value".into(),
+                    })?);
+                } else if let Some(value) = arg.strip_prefix("--grep-reflog=") {
+                    grep_reflog.push(value.to_owned());
                 } else {
                     ref_name = Some(arg);
                 }
             }
-            reflog_show(
-                &repo,
-                ReflogShowOptions {
-                    ref_name: ref_name.as_deref().unwrap_or("HEAD"),
-                    date_mode,
-                    no_abbrev_commit,
-                    format: format.as_deref(),
-                    pathspecs: &pathspecs,
-                },
-            )
+            let options = ReflogShowOptions {
+                ref_name: ref_name.as_deref().unwrap_or("HEAD"),
+                date_mode,
+                no_abbrev_commit,
+                format: format.as_deref(),
+                max_count,
+                grep_reflog: &grep_reflog,
+                pathspecs: &pathspecs,
+            };
+            if all {
+                for name in reflog_names(&repo)? {
+                    reflog_show(
+                        &repo,
+                        ReflogShowOptions {
+                            ref_name: &name,
+                            ..options
+                        },
+                    )?;
+                }
+                Ok(())
+            } else {
+                reflog_show(&repo, options)
+            }
         }
         ReflogCommand::List => {
             if let Some(arg) = args.next() {
@@ -1206,13 +1274,21 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
             reflog_list(&repo)
         }
         ReflogCommand::Exists => {
-            let Some(ref_name) = args.next() else {
-                return Err(CliError::Fatal {
+            let mut args = args.collect::<Vec<_>>();
+            if matches!(
+                args.first().map(String::as_str),
+                Some("--" | "--end-of-options")
+            ) {
+                args.remove(0);
+            }
+            if args.len() != 1 || args[0].starts_with('-') {
+                return Err(CliError::Stderr {
                     code: 129,
-                    message: "reflog exists requires a ref".into(),
+                    text: "usage: git reflog exists <ref>\n".into(),
                 });
-            };
-            if reflog_path(&repo, &ref_name)?.is_file() {
+            }
+            let ref_name = args.remove(0);
+            if reflog_exists(&repo, &ref_name)? {
                 Ok(())
             } else {
                 Err(CliError::Exit(1))
@@ -1229,6 +1305,51 @@ enum ReflogCommand {
     Expire,
     Delete,
     Drop,
+    Write,
+}
+
+fn reflog_write(repo: &GitRepo, args: Vec<String>) -> Result<()> {
+    if args.len() != 4 {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "usage: git reflog write <ref> <old-oid> <new-oid> <message>\n".into(),
+        });
+    }
+    let ref_name = &args[0];
+    if !(ref_name.starts_with("refs/") && check_ref_format(ref_name, false)
+        || is_valid_pseudoref_name(ref_name))
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid reference name: {ref_name}"),
+        });
+    }
+    let old_id = reflog_write_object_id(&args[1], "old")?;
+    let new_id = reflog_write_object_id(&args[2], "new")?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    for (label, id) in [("old", &old_id), ("new", &new_id)] {
+        if *id != zero_object_id() && !store.contains_object(id)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("{label} object {} does not exist", id.to_hex()),
+            });
+        }
+    }
+    let message = args[3].split_whitespace().collect::<Vec<_>>().join(" ");
+    append_reflog(repo, ref_name, &old_id, &new_id, &message)
+}
+
+fn reflog_write_object_id(value: &str, label: &str) -> Result<ObjectId> {
+    if value.len() != GitHashAlgorithm::Sha1.digest_len() * 2 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid {label} object ID: {value}"),
+        });
+    }
+    ObjectId::from_hex(GitHashAlgorithm::Sha1, value).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid {label} object ID: {value}"),
+    })
 }
 
 fn reflog_expire_usage() -> &'static str {
@@ -1290,6 +1411,7 @@ enum ReflogDeleteSelector {
 }
 
 fn reflog_delete(repo: &GitRepo, args: Vec<String>) -> Result<()> {
+    let update_ref = args.iter().any(|arg| arg == "--updateref");
     let selectors = args
         .into_iter()
         .filter(|arg| arg != "--rewrite" && arg != "--updateref")
@@ -1303,8 +1425,39 @@ fn reflog_delete(repo: &GitRepo, args: Vec<String>) -> Result<()> {
     for selector in selectors {
         let (ref_name, selector) = parse_reflog_delete_selector(&selector)?;
         reflog_delete_one(repo, &ref_name, selector)?;
+        if update_ref && ref_name != "HEAD" {
+            reflog_update_ref_to_log_tip(repo, &ref_name)?;
+        }
     }
     Ok(())
+}
+
+fn reflog_update_ref_to_log_tip(repo: &GitRepo, ref_name: &str) -> Result<()> {
+    if let Some(reftable) = reftable_reflog(repo, ref_name)? {
+        let Some(record) = reftable
+            .store
+            .reftable_logs()?
+            .into_iter()
+            .filter(|record| record.ref_name == reftable.ref_name)
+            .max_by_key(|record| record.update_index)
+        else {
+            return Ok(());
+        };
+        return reftable
+            .store
+            .write_ref(&reftable.ref_name, &record.new_id)
+            .map_err(CliError::Io);
+    }
+    let path = reflog_path(repo, ref_name)?;
+    let content = fs::read_to_string(path)?;
+    let Some(entry) = content.lines().next_back().and_then(parse_reflog_entry) else {
+        return Ok(());
+    };
+    let canonical = reflog_expire_canonical_ref_name(repo, ref_name)?;
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    RefStore::new(common_dir, GitHashAlgorithm::Sha1)
+        .write_ref(&canonical, &entry.new_id)
+        .map_err(CliError::Io)
 }
 
 fn parse_reflog_delete_selector(raw: &str) -> Result<(String, ReflogDeleteSelector)> {
@@ -1338,13 +1491,37 @@ fn parse_reflog_delete_date(value: &str) -> Option<i64> {
 }
 
 fn reflog_delete_one(repo: &GitRepo, ref_name: &str, selector: ReflogDeleteSelector) -> Result<()> {
+    if let Some(reftable) = reftable_reflog(repo, ref_name)? {
+        let mut records = reftable
+            .store
+            .reftable_logs()?
+            .into_iter()
+            .filter(|record| record.ref_name == reftable.ref_name)
+            .collect::<Vec<_>>();
+        records.sort_by_key(|record| record.update_index);
+        let remove_index = match selector {
+            ReflogDeleteSelector::Index(index) => records.len().checked_sub(index + 1),
+            ReflogDeleteSelector::Date(timestamp) => records.iter().rposition(|record| {
+                i64::try_from(record.timestamp).unwrap_or(i64::MAX) <= timestamp
+            }),
+        };
+        let Some(remove_index) = remove_index else {
+            return Ok(());
+        };
+        return reftable
+            .store
+            .delete_reftable_log_entries(
+                &reftable.ref_name,
+                &[records[remove_index].update_index],
+                true,
+            )
+            .map_err(CliError::Io);
+    }
     let path = reflog_path(repo, ref_name)?;
     let content = fs::read_to_string(&path)?;
     let mut lines = content.lines().map(str::to_owned).collect::<Vec<_>>();
     let Some(remove_index) = reflog_delete_line_index(&lines, selector) else {
-        return Err(ambiguous_revision_error(&format!(
-            "{ref_name}@{{{selector:?}}}"
-        )));
+        return Ok(());
     };
     lines.remove(remove_index);
     let output = if lines.is_empty() {
@@ -1373,7 +1550,8 @@ fn reflog_expire(args: Vec<String>) -> Result<()> {
     if dry_run {
         return Ok(());
     }
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
+    validate_explicit_reflog_expire_refs(&repo, &args)?;
     if reflog_expire_apply_pattern_config(&repo, &args)? {
         return Ok(());
     }
@@ -1406,9 +1584,6 @@ fn reflog_expire(args: Vec<String>) -> Result<()> {
                 }
             };
         }
-    }
-    if args.iter().any(|arg| arg == "--all") {
-        return Ok(());
     }
     if reflog_expire_refs(&repo, &args)?.is_empty() {
         return Ok(());
@@ -1472,7 +1647,7 @@ fn reflog_expire_apply_pattern_config(repo: &GitRepo, args: &[String]) -> Result
             if !path.is_file() {
                 return Err(reflog_not_found_error(&ref_name));
             }
-            reflog_expire_path_by_timestamp(&path, i64::MAX, verbose)?;
+            reflog_expire_path_by_timestamp(repo, &path, i64::MAX, verbose)?;
         } else {
             return Ok(false);
         }
@@ -1635,10 +1810,15 @@ fn parse_reflog_expire_relative_ago(value: &str) -> Result<Option<i64>> {
 }
 
 fn reflog_expire_by_timestamp(repo: &GitRepo, args: &[String], timestamp: i64) -> Result<()> {
-    let paths = reflog_expire_paths(repo, args)?;
     let verbose = args.iter().any(|arg| arg == "--verbose");
-    for path in paths {
-        reflog_expire_path_by_timestamp(&path, timestamp, verbose)?;
+    if args.iter().any(|arg| arg == "--all") {
+        for path in reflog_expire_paths(repo, args)? {
+            reflog_expire_path_by_timestamp(repo, &path, timestamp, verbose)?;
+        }
+        return Ok(());
+    }
+    for ref_name in reflog_expire_refs(repo, args)? {
+        reflog_expire_ref_by_timestamp(repo, &ref_name, timestamp, verbose)?;
     }
     Ok(())
 }
@@ -1667,9 +1847,44 @@ fn reflog_expire_default_by_timestamp(
             reflog_expire_keep_ref(repo, &ref_name, false)?;
             continue;
         }
-        reflog_expire_path_by_timestamp(&reflog_path(repo, &ref_name)?, timestamp, verbose)?;
+        reflog_expire_ref_by_timestamp(repo, &ref_name, timestamp, verbose)?;
     }
     Ok(())
+}
+
+fn reflog_expire_ref_by_timestamp(
+    repo: &GitRepo,
+    ref_name: &str,
+    timestamp: i64,
+    verbose: bool,
+) -> Result<()> {
+    if let Some(reftable) = reftable_reflog(repo, ref_name)? {
+        let records = reftable
+            .store
+            .reftable_logs()?
+            .into_iter()
+            .filter(|record| {
+                record.ref_name == reftable.ref_name
+                    && i64::try_from(record.timestamp).unwrap_or(i64::MAX) <= timestamp
+            })
+            .collect::<Vec<_>>();
+        if verbose {
+            for record in &records {
+                println!("prune {}", record.message.trim_end_matches('\n'));
+            }
+        }
+        let indices = records
+            .iter()
+            .map(|record| record.update_index)
+            .collect::<Vec<_>>();
+        return reftable
+            .store
+            .delete_reftable_log_entries(&reftable.ref_name, &indices, true)
+            .map_err(CliError::Io);
+    }
+    let path = reflog_path(repo, ref_name)?;
+    reflog_expire_path_by_timestamp(repo, &path, timestamp, verbose)?;
+    apply_reflog_shared_repository_permissions(repo, &path)
 }
 
 fn reflog_expire_paths(repo: &GitRepo, args: &[String]) -> Result<Vec<PathBuf>> {
@@ -1689,7 +1904,7 @@ fn reflog_expire_paths(repo: &GitRepo, args: &[String]) -> Result<Vec<PathBuf>> 
 }
 
 fn collect_linked_worktree_reflog_paths(repo: &GitRepo, paths: &mut Vec<PathBuf>) -> Result<()> {
-    let worktrees = repo.git_dir.join("worktrees");
+    let worktrees = read_common_git_dir(&repo.git_dir)?.join("worktrees");
     let entries = match fs::read_dir(worktrees) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -1719,7 +1934,12 @@ fn collect_reflog_file_paths(path: &Path, paths: &mut Vec<PathBuf>) -> Result<()
     Ok(())
 }
 
-fn reflog_expire_path_by_timestamp(path: &Path, timestamp: i64, verbose: bool) -> Result<()> {
+fn reflog_expire_path_by_timestamp(
+    repo: &GitRepo,
+    path: &Path,
+    timestamp: i64,
+    verbose: bool,
+) -> Result<()> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -1739,7 +1959,8 @@ fn reflog_expire_path_by_timestamp(path: &Path, timestamp: i64, verbose: bool) -
             kept.push('\n');
         }
     }
-    fs::write(path, kept).map_err(CliError::Io)
+    fs::write(path, kept).map_err(CliError::Io)?;
+    apply_reflog_shared_repository_permissions(repo, path)
 }
 
 fn reflog_expire_ref_with_policy(
@@ -1779,7 +2000,33 @@ fn reflog_expire_ref_with_policy(
             kept.push('\n');
         }
     }
-    fs::write(path, kept).map_err(CliError::Io)
+    fs::write(&path, kept).map_err(CliError::Io)?;
+    apply_reflog_shared_repository_permissions(repo, &path)
+}
+
+fn apply_reflog_shared_repository_permissions(repo: &GitRepo, path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let Some(value) = read_config_value(&repo, "core.sharedRepository")? else {
+            return Ok(());
+        };
+        let mode = match value.as_str() {
+            "group" | "true" | "1" | "2" | "0664" | "664" => 0o664,
+            "all" | "world" | "everybody" | "0666" | "666" => 0o666,
+            "0660" | "660" => 0o660,
+            _ => return Ok(()),
+        };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(CliError::Io)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = repo;
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn reflog_expire_reachable_tip(
@@ -1894,6 +2141,22 @@ fn reflog_expire_noop(repo: &GitRepo, args: &[String]) -> Result<()> {
 }
 
 fn reflog_expire_keep_ref(repo: &GitRepo, ref_name: &str, verbose: bool) -> Result<()> {
+    if let Some(reftable) = reftable_reflog(repo, ref_name)? {
+        if !reftable.store.reftable_log_exists(&reftable.ref_name)? {
+            return Err(reflog_not_found_error(ref_name));
+        }
+        if verbose {
+            for record in reftable
+                .store
+                .reftable_logs()?
+                .into_iter()
+                .filter(|record| record.ref_name == reftable.ref_name)
+            {
+                println!("keep {}", record.message.trim_end_matches('\n'));
+            }
+        }
+        return Ok(());
+    }
     let path = reflog_path(repo, ref_name)?;
     let content = fs::read_to_string(&path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -1925,10 +2188,7 @@ fn reflog_not_found_error(ref_name: &str) -> CliError {
 
 fn reflog_expire_refs(repo: &GitRepo, args: &[String]) -> Result<Vec<String>> {
     if args.iter().any(|arg| arg == "--all") {
-        let logs_dir = repo.git_dir.join("logs");
-        let mut names = Vec::new();
-        collect_reflog_names(&logs_dir, &logs_dir, &mut names)?;
-        return Ok(names);
+        return Ok(reflog_names(repo)?.into_iter().collect());
     }
     let mut refs = Vec::new();
     let mut iter = args.iter().peekable();
@@ -1948,6 +2208,33 @@ fn reflog_expire_refs(repo: &GitRepo, args: &[String]) -> Result<Vec<String>> {
         refs.push(arg.to_owned());
     }
     Ok(refs)
+}
+
+fn validate_explicit_reflog_expire_refs(repo: &GitRepo, args: &[String]) -> Result<()> {
+    if args.iter().any(|arg| arg == "--all") {
+        return Ok(());
+    }
+    let mut errors = String::new();
+    for ref_name in reflog_expire_refs(repo, args)? {
+        let exists = if ref_name.contains("@{") {
+            false
+        } else if let Some(reftable) = reftable_reflog(repo, &ref_name)? {
+            reftable.store.reftable_log_exists(&reftable.ref_name)?
+        } else {
+            reflog_path(repo, &ref_name)?.is_file()
+        };
+        if !exists {
+            errors.push_str(&format!("error: {ref_name} points nowhere!\n"));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::Stderr {
+            code: 1,
+            text: errors,
+        })
+    }
 }
 
 fn reflog_expire_stale_fix_ref(
@@ -2064,6 +2351,8 @@ struct ReflogShowOptions<'a> {
     date_mode: ReflogDateMode,
     no_abbrev_commit: bool,
     format: Option<&'a str>,
+    max_count: Option<usize>,
+    grep_reflog: &'a [String],
     pathspecs: &'a [String],
 }
 
@@ -2072,34 +2361,68 @@ fn reflog_show(repo: &GitRepo, options: ReflogShowOptions<'_>) -> Result<()> {
     if !reflog_show_pathspecs_match(repo, options.pathspecs)? {
         return Ok(());
     }
-    let path = reflog_path(repo, ref_name)?;
-    let file = match fs::File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if ref_name == "HEAD" {
-                return Ok(());
-            }
-            return Err(ambiguous_revision_error(ref_name));
-        }
-        Err(error) => return Err(CliError::Io(error)),
-    };
     let display = reflog_display_name(ref_name);
     let object_len = if options.no_abbrev_commit {
         GitHashAlgorithm::Sha1.digest_len() * 2
     } else {
         7
     };
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
     let mut index = 0usize;
-    for_each_reflog_line_rev(file, |line| {
-        let Some(entry) = parse_reflog_entry(line) else {
-            return Ok(());
-        };
-        if options.format == Some("%H") {
-            println!("{}", entry.new_id.to_hex());
-            index += 1;
+    let mut emitted = 0usize;
+    let limit = options.max_count.unwrap_or(usize::MAX);
+    let mut render_entry = |entry: ReflogEntry| -> Result<()> {
+        if emitted >= limit {
             return Ok(());
         }
-        let selector = reflog_selector(index, &entry, options.date_mode)?;
+        let selector_index = index;
+        index += 1;
+        if !options.grep_reflog.is_empty()
+            && !shortlog_commit_matches_grep(
+                entry.message.as_bytes(),
+                options.grep_reflog,
+                false,
+                false,
+                false,
+                ShortlogPatternMode::Basic,
+            )?
+        {
+            return Ok(());
+        }
+        if let Some(format) = options.format
+            && format.starts_with('%')
+        {
+            println!(
+                "{}",
+                render_reflog_log_format(format, &display, selector_index, &entry)?
+            );
+            emitted += 1;
+            return Ok(());
+        }
+        if let Some(format) = options.format {
+            let log_format = LogFormat::parse(false, Some(format), None)?;
+            let commit = commit_cache.read_commit(&entry.new_id)?;
+            let rendered = log_format.render_with_context_default_date(
+                &entry.new_id,
+                commit.as_ref(),
+                false,
+                object_len,
+                None,
+                true,
+                true,
+                &LogDecorations::empty(),
+                &LogNotes::empty(),
+            )?;
+            let selector = reflog_selector(selector_index, &entry, options.date_mode)?;
+            print!(
+                "{}",
+                insert_reflog_headers(rendered, &format!("{}@{{{selector}}}", display), &entry,)
+            );
+            emitted += 1;
+            return Ok(());
+        }
+        let selector = reflog_selector(selector_index, &entry, options.date_mode)?;
         println!(
             "{} {}@{{{}}}: {}",
             short_object_id_len(&entry.new_id, object_len),
@@ -2107,9 +2430,35 @@ fn reflog_show(repo: &GitRepo, options: ReflogShowOptions<'_>) -> Result<()> {
             selector,
             entry.message
         );
-        index += 1;
+        emitted += 1;
         Ok(())
-    })?;
+    };
+    if let Some(entries) = reftable_reflog_entries(repo, ref_name)? {
+        if entries.is_empty() && ref_name != "HEAD" && !reflog_exists(repo, ref_name)? {
+            return Err(ambiguous_revision_error(ref_name));
+        }
+        for entry in entries.into_iter().rev() {
+            render_entry(entry)?;
+        }
+    } else {
+        let path = reflog_path(repo, ref_name)?;
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if ref_name == "HEAD" {
+                    return Ok(());
+                }
+                return Err(ambiguous_revision_error(ref_name));
+            }
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        for_each_reflog_line_rev(file, |line| {
+            if let Some(entry) = parse_reflog_entry(line) {
+                render_entry(entry)?;
+            }
+            Ok(())
+        })?;
+    }
     Ok(())
 }
 
@@ -2222,12 +2571,27 @@ fn reflog_selector(index: usize, entry: &ReflogEntry, mode: ReflogDateMode) -> R
 }
 
 fn reflog_list(repo: &GitRepo) -> Result<()> {
+    for name in reflog_names(repo)? {
+        println!("{name}");
+    }
+    Ok(())
+}
+
+fn reflog_names(repo: &GitRepo) -> Result<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     let logs_dir = repo.git_dir.join("logs");
     let mut local_names = Vec::new();
     collect_reflog_names(&logs_dir, &logs_dir, &mut local_names)?;
     names.extend(local_names);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        names.extend(
+            refs.reftable_logs()?
+                .into_iter()
+                .map(|record| record.ref_name),
+        );
+    }
     if common_git_dir != repo.git_dir {
         let common_logs_dir = common_git_dir.join("logs");
         let mut common_names = Vec::new();
@@ -2238,10 +2602,46 @@ fn reflog_list(repo: &GitRepo) -> Result<()> {
                 .filter(|name| name != "HEAD" && !name.starts_with("refs/worktree/")),
         );
     }
-    for name in names {
-        println!("{name}");
+    Ok(names)
+}
+
+fn log_reflog_object_ids(repo: &GitRepo) -> Result<Vec<String>> {
+    let zero = zero_object_id();
+    let mut seen = HashSet::new();
+    let mut ids = Vec::new();
+    for name in reflog_names(repo)? {
+        if let Some(entries) = reftable_reflog_entries(repo, &name)? {
+            for entry in entries {
+                insert_log_reflog_object_id(&entry.old_id, &zero, &mut seen, &mut ids);
+                insert_log_reflog_object_id(&entry.new_id, &zero, &mut seen, &mut ids);
+            }
+            continue;
+        }
+        let file = match fs::File::open(reflog_path(repo, &name)?) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        for_each_reflog_line_rev(file, |line| {
+            if let Some(entry) = parse_reflog_entry(line) {
+                insert_log_reflog_object_id(&entry.old_id, &zero, &mut seen, &mut ids);
+                insert_log_reflog_object_id(&entry.new_id, &zero, &mut seen, &mut ids);
+            }
+            Ok(())
+        })?;
     }
-    Ok(())
+    Ok(ids)
+}
+
+fn insert_log_reflog_object_id(
+    id: &ObjectId,
+    zero: &ObjectId,
+    seen: &mut HashSet<ObjectId>,
+    ids: &mut Vec<String>,
+) {
+    if id != zero && seen.insert(id.clone()) {
+        ids.push(id.to_string());
+    }
 }
 
 fn collect_reflog_names(
@@ -2270,6 +2670,7 @@ fn collect_reflog_names(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct ReflogEntry {
     pub(crate) old_id: ObjectId,
     pub(crate) new_id: ObjectId,
@@ -2365,13 +2766,11 @@ fn reflog_short_date(entry: &ReflogEntry) -> Result<String> {
 }
 
 fn reflog_local_date(entry: &ReflogEntry) -> Result<String> {
-    let utc =
-        chrono::DateTime::from_timestamp(entry.timestamp, 0).ok_or_else(|| CliError::Fatal {
+    Ok(crate::runtime::local_datetime(entry.timestamp)
+        .ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "reflog entry timestamp is out of range".into(),
-        })?;
-    Ok(utc
-        .with_timezone(&chrono::Local)
+        })?
         .format("%a %b %-d %H:%M:%S %Y")
         .to_string())
 }
@@ -2386,7 +2785,7 @@ fn reflog_relative_date(timestamp: i64) -> Result<String> {
     Ok(relative_date_from_timestamps(timestamp, now))
 }
 
-fn relative_date_from_timestamps(timestamp: i64, now: i64) -> String {
+pub(crate) fn relative_date_from_timestamps(timestamp: i64, now: i64) -> String {
     if now < timestamp {
         return "in the future".to_owned();
     }
@@ -2440,7 +2839,7 @@ fn reflog_human_date(entry: &ReflogEntry) -> Result<String> {
     let now = git_test_date_now()
         .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
         .map(|timestamp| timestamp.with_timezone(&offset))
-        .unwrap_or_else(|| chrono::Local::now().with_timezone(&offset));
+        .unwrap_or_else(|| crate::runtime::local_now().with_timezone(&offset));
     if entry_time.year() == now.year() && entry_time.month() == now.month() {
         if entry_time.day() + 5 > now.day() {
             return Ok(entry_time.format("%a %H:%M %z").to_string());
@@ -2454,17 +2853,100 @@ fn reflog_human_date(entry: &ReflogEntry) -> Result<String> {
 }
 
 fn reflog_path(repo: &GitRepo, ref_name: &str) -> Result<PathBuf> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let normalized = if ref_name == "HEAD" || ref_name.starts_with("refs/") {
-        ref_name.to_owned()
-    } else if ref_name == "stash" {
-        "refs/stash".to_owned()
-    } else if let Some(ref_name) = branch_checkout_ref(&refs, ref_name)? {
-        ref_name
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    if ref_name == "main-worktree/HEAD" {
+        return Ok(common_git_dir.join("logs/HEAD"));
+    }
+    if let Some(rest) = ref_name.strip_prefix("worktrees/")
+        && let Some((worktree, "HEAD")) = rest.split_once('/')
+    {
+        return Ok(common_git_dir
+            .join("worktrees")
+            .join(worktree)
+            .join("logs/HEAD"));
+    }
+    let normalized = normalized_reflog_name(repo, ref_name)?;
+    let git_dir = if is_per_worktree_ref(&normalized) {
+        repo.git_dir.clone()
     } else {
-        ref_name.to_owned()
+        common_git_dir
     };
-    Ok(repo.git_dir.join("logs").join(normalized))
+    Ok(git_dir.join("logs").join(normalized))
+}
+
+fn normalized_reflog_name(repo: &GitRepo, ref_name: &str) -> Result<String> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    if ref_name == "HEAD" || ref_name.starts_with("refs/") {
+        Ok(ref_name.to_owned())
+    } else if ref_name == "stash" {
+        Ok("refs/stash".to_owned())
+    } else if let Some(ref_name) = branch_checkout_ref(&refs, ref_name)? {
+        Ok(ref_name)
+    } else {
+        Ok(ref_name.to_owned())
+    }
+}
+
+struct ReftableReflog {
+    ref_name: String,
+    store: RefStore,
+}
+
+fn reftable_reflog(repo: &GitRepo, ref_name: &str) -> Result<Option<ReftableReflog>> {
+    if ref_name == "main-worktree/HEAD" || ref_name.starts_with("worktrees/") {
+        return Ok(None);
+    }
+    let normalized = normalized_reflog_name(repo, ref_name)?;
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let git_dir = if is_per_worktree_ref(&normalized) {
+        repo.git_dir.clone()
+    } else {
+        common_git_dir
+    };
+    let store = RefStore::new(git_dir, repo_hash_algorithm_from_config(repo)?);
+    if store.storage_kind()? != zmin_git_core::refs::RefStorageKind::Reftable {
+        return Ok(None);
+    }
+    Ok(Some(ReftableReflog {
+        ref_name: normalized,
+        store,
+    }))
+}
+
+fn reftable_reflog_entries(repo: &GitRepo, ref_name: &str) -> Result<Option<Vec<ReflogEntry>>> {
+    let Some(reftable) = reftable_reflog(repo, ref_name)? else {
+        return Ok(None);
+    };
+    let mut records = reftable
+        .store
+        .reftable_logs()?
+        .into_iter()
+        .filter(|record| record.ref_name == reftable.ref_name)
+        .collect::<Vec<_>>();
+    records.sort_by_key(|record| record.update_index);
+    Ok(Some(
+        records
+            .into_iter()
+            .map(|record| ReflogEntry {
+                old_id: record.old_id,
+                new_id: record.new_id,
+                identity: format!("{} <{}>", record.name, record.email),
+                timestamp: i64::try_from(record.timestamp).unwrap_or(i64::MAX),
+                timezone: format!("{:+05}", record.timezone_offset),
+                message: record.message.trim_end_matches('\n').to_owned(),
+            })
+            .collect(),
+    ))
+}
+
+fn reflog_exists(repo: &GitRepo, ref_name: &str) -> Result<bool> {
+    if let Some(reftable) = reftable_reflog(repo, ref_name)? {
+        return reftable
+            .store
+            .reftable_log_exists(&reftable.ref_name)
+            .map_err(CliError::Io);
+    }
+    Ok(reflog_path(repo, ref_name)?.is_file())
 }
 
 fn reflog_display_name(ref_name: &str) -> String {
@@ -2886,7 +3368,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         no_max_parents,
         merges,
     )?;
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let effective_revs = shortlog_effective_revs(raw_args, revs);
     if !all && !shortlog_has_positive_revs(&effective_revs) {
@@ -2959,8 +3441,8 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
     if simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo)?;
-        commits.retain(|entry| decorated.contains(&entry.id.to_hex()));
+        let decorated = collect_default_log_decoration_ids(&repo, None)?;
+        commits.retain(|entry| decorated.contains(&entry.id));
     }
     if left_only {
         let commit_ids = commits
@@ -3100,8 +3582,7 @@ fn rev_list_usage_error() -> CliError {
 }
 
 fn shortlog_effective_revs(raw_args: &[String], mut revs: Vec<String>) -> Vec<String> {
-    if raw_arg_present_before_dashdash(raw_args, "--not")
-        && !revs.iter().any(|rev| rev == "--not")
+    if raw_arg_present_before_dashdash(raw_args, "--not") && !revs.iter().any(|rev| rev == "--not")
     {
         revs.insert(0, "--not".to_owned());
     }
@@ -3438,7 +3919,7 @@ fn shortlog_regex_matches(text: &str, pattern: &str, regexp_ignore_case: bool) -
 }
 
 pub(crate) fn request_pull(patch: bool, start: &str, url: &str, end: Option<&str>) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
@@ -3543,6 +4024,7 @@ fn print_request_pull_shortlog(
 struct BlameLine {
     commit: ObjectId,
     line_no: usize,
+    source_line_no: usize,
     content: Vec<u8>,
     boundary: bool,
 }
@@ -3648,12 +4130,24 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
         return Err(CliError::Exit(129));
     }
     let options = parse_blame_args(args)?;
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let rev = options.rev.as_deref().unwrap_or("HEAD");
     let head = resolve_commitish(&repo, &store, &rev)?;
     let path_bytes = normalize_git_path(&options.path)?.into_bytes();
+    if options.rev.is_none()
+        && options.contents_path.is_none()
+        && !path_exists(&worktree_path_for_index_entry(&repo.root, &path_bytes))
+    {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "fatal: Cannot lstat '{}': No such file or directory\n",
+                String::from_utf8_lossy(&path_bytes)
+            ),
+        });
+    }
     let final_lines = if let Some(contents_path) = options.contents_path.as_deref() {
         Some(split_blame_contents(fs::read(contents_path)?))
     } else {
@@ -3764,6 +4258,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--no-show-number" => show_number = false,
                 "-e" | "--show-email" => show_email = true,
                 "--no-show-email" => show_email = false,
+                "-l" => {}
                 "--root" => root = true,
                 "--no-root" => root = false,
                 "-b" => blank_boundary = true,
@@ -4919,37 +5414,289 @@ fn blame_lines(
     final_lines_override: Option<Vec<Vec<u8>>>,
     ignore_whitespace: bool,
 ) -> Result<Vec<BlameLine>> {
+    let mut file_lines_cache = HashMap::new();
+    let mut file_object_id_cache = HashMap::new();
+    let has_virtual_final_lines = final_lines_override.is_some();
     let final_lines = match final_lines_override {
         Some(lines) => lines,
-        None => commit_file_lines_cached(store, commit_cache, head, path)?,
+        None => {
+            blame_commit_file_lines_cached(store, commit_cache, &mut file_lines_cache, head, path)?
+                .to_vec()
+        }
     };
+    let mut owners = vec![head.clone(); final_lines.len()];
+    let mut current_positions = (0..final_lines.len()).map(Some).collect::<Vec<_>>();
+    let mut current_lines = final_lines.clone();
+    let mut active = (0..final_lines.len()).collect::<Vec<_>>();
+    let mut current = head.clone();
+    let mut current_object_id = if has_virtual_final_lines {
+        None
+    } else {
+        blame_commit_file_object_id_cached(
+            store,
+            commit_cache,
+            &mut file_object_id_cache,
+            &current,
+            path,
+        )?
+    };
+    while !active.is_empty() {
+        let commit = commit_cache.read_commit(&current)?;
+        let Some(parent) = commit.parents.first() else {
+            break;
+        };
+        let parent_object_id = blame_commit_file_object_id_cached(
+            store,
+            commit_cache,
+            &mut file_object_id_cache,
+            parent,
+            path,
+        )?;
+        if current_object_id.is_some() && current_object_id == parent_object_id {
+            for idx in &active {
+                owners[*idx] = parent.clone();
+            }
+            current = parent.clone();
+            current_object_id = parent_object_id;
+            continue;
+        }
+        let parent_lines = blame_commit_file_lines_cached(
+            store,
+            commit_cache,
+            &mut file_lines_cache,
+            parent,
+            path,
+        )?;
+        let parent_positions =
+            blame_parent_line_positions(parent_lines, &current_lines, ignore_whitespace);
+        let mut next_active = Vec::new();
+        for idx in active {
+            let Some(current_pos) = current_positions[idx] else {
+                continue;
+            };
+            let Some(parent_pos) = parent_positions
+                .get(current_pos)
+                .and_then(|position| *position)
+            else {
+                continue;
+            };
+            owners[idx] = parent.clone();
+            current_positions[idx] = Some(parent_pos);
+            next_active.push(idx);
+        }
+        active = next_active;
+        current = parent.clone();
+        current_object_id = parent_object_id;
+        current_lines = parent_lines.to_vec();
+    }
+
     let mut out = Vec::with_capacity(final_lines.len());
     for (idx, content) in final_lines.into_iter().enumerate() {
-        let mut owner = head.clone();
-        loop {
-            let commit = commit_cache.read_commit(&owner)?;
-            let Some(parent) = commit.parents.first() else {
-                break;
-            };
-            let parent_lines = commit_file_lines_cached(store, commit_cache, parent, path)?;
-            if parent_lines
-                .get(idx)
-                .is_some_and(|parent| blame_line_matches(parent, &content, ignore_whitespace))
-            {
-                owner = parent.clone();
-            } else {
-                break;
-            }
-        }
+        let owner = owners[idx].clone();
         let boundary = commit_cache.read_commit(&owner)?.parents.is_empty();
         out.push(BlameLine {
             commit: owner,
             line_no: idx + 1,
+            source_line_no: current_positions[idx].unwrap_or(idx) + 1,
             content,
             boundary,
         });
     }
     Ok(out)
+}
+
+fn blame_commit_file_lines_cached<'a>(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    file_lines_cache: &'a mut HashMap<ObjectId, Vec<Vec<u8>>>,
+    commit_id: &ObjectId,
+    path: &[u8],
+) -> Result<&'a [Vec<u8>]> {
+    if !file_lines_cache.contains_key(commit_id) {
+        let lines = commit_file_lines_cached(store, commit_cache, commit_id, path)?;
+        file_lines_cache.insert(commit_id.clone(), lines);
+    }
+
+    Ok(file_lines_cache
+        .get(commit_id)
+        .expect("blame file lines cache entry must exist")
+        .as_slice())
+}
+
+fn blame_commit_file_object_id_cached(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    file_object_id_cache: &mut HashMap<ObjectId, Option<ObjectId>>,
+    commit_id: &ObjectId,
+    path: &[u8],
+) -> Result<Option<ObjectId>> {
+    if !file_object_id_cache.contains_key(commit_id) {
+        let commit = commit_cache.read_commit(commit_id)?;
+        let object_id = find_tree_entry(store, &commit.tree, path)?.map(|entry| entry.id);
+        file_object_id_cache.insert(commit_id.clone(), object_id);
+    }
+
+    Ok(file_object_id_cache
+        .get(commit_id)
+        .expect("blame file object cache entry must exist")
+        .clone())
+}
+
+fn blame_parent_line_positions(
+    parent_lines: &[Vec<u8>],
+    current_lines: &[Vec<u8>],
+    ignore_whitespace: bool,
+) -> Vec<Option<usize>> {
+    let mut exact_positions = vec![None; current_lines.len()];
+    let exact_ops = capture_diff_slices(Algorithm::Myers, parent_lines, current_lines);
+    for op in exact_ops {
+        if op.tag() == DiffTag::Equal {
+            for (parent_idx, current_idx) in op.old_range().zip(op.new_range()) {
+                exact_positions[current_idx] = Some(parent_idx);
+            }
+        }
+    }
+
+    let keep_current_whitespace = exact_positions
+        .iter()
+        .enumerate()
+        .map(|(current_idx, position)| {
+            *position == Some(current_idx)
+                && !blame_line_has_substantive_content(&current_lines[current_idx])
+                && blame_whitespace_only_line_touches_changed_hunk(current_idx, &exact_positions)
+        })
+        .collect::<Vec<_>>();
+
+    let mut positions = exact_positions.clone();
+    for current_idx in 1..positions.len() {
+        if keep_current_whitespace[current_idx] {
+            continue;
+        }
+        if positions[current_idx] != Some(current_idx)
+            || blame_line_has_substantive_content(&current_lines[current_idx])
+        {
+            continue;
+        }
+        let Some(previous_parent_idx) = positions[current_idx - 1] else {
+            continue;
+        };
+        let shifted_parent_idx = previous_parent_idx + 1;
+        if shifted_parent_idx >= parent_lines.len() || shifted_parent_idx == current_idx {
+            continue;
+        }
+        if blame_normalized_line(&parent_lines[shifted_parent_idx])
+            == blame_normalized_line(&current_lines[current_idx])
+        {
+            positions[current_idx] = Some(shifted_parent_idx);
+        }
+    }
+    for current_idx in 0..positions.len() {
+        if keep_current_whitespace[current_idx] {
+            positions[current_idx] = None;
+        }
+    }
+
+    if ignore_whitespace && positions.iter().any(Option::is_none) {
+        let parent_normalized = parent_lines
+            .iter()
+            .map(|line| blame_normalized_line(line))
+            .collect::<Vec<_>>();
+        let current_normalized = current_lines
+            .iter()
+            .map(|line| blame_normalized_line(line))
+            .collect::<Vec<_>>();
+        let normalized_ops =
+            capture_diff_slices(Algorithm::Myers, &parent_normalized, &current_normalized);
+        for op in normalized_ops {
+            if op.tag() != DiffTag::Equal {
+                continue;
+            }
+            for (parent_idx, current_idx) in op.old_range().zip(op.new_range()) {
+                if keep_current_whitespace[current_idx] {
+                    continue;
+                }
+                if positions[current_idx].is_none() {
+                    positions[current_idx] = Some(parent_idx);
+                }
+            }
+        }
+    }
+
+    if positions.iter().any(Option::is_none) {
+        blame_fill_unresolved_whitespace_positions(
+            parent_lines,
+            current_lines,
+            &mut positions,
+            &keep_current_whitespace,
+        );
+    }
+    positions
+}
+
+fn blame_fill_unresolved_whitespace_positions(
+    parent_lines: &[Vec<u8>],
+    current_lines: &[Vec<u8>],
+    positions: &mut [Option<usize>],
+    keep_current_whitespace: &[bool],
+) {
+    let mut next_parent_position = None;
+    let mut next_resolved = vec![None; positions.len()];
+    for current_idx in (0..positions.len()).rev() {
+        next_resolved[current_idx] = next_parent_position;
+        if let Some(parent_idx) = positions[current_idx] {
+            next_parent_position = Some(parent_idx);
+        }
+    }
+
+    let mut previous_parent_position = None;
+    for current_idx in 0..positions.len() {
+        if let Some(parent_idx) = positions[current_idx] {
+            previous_parent_position = Some(parent_idx);
+            continue;
+        }
+        if keep_current_whitespace[current_idx] {
+            continue;
+        }
+        if blame_line_has_substantive_content(&current_lines[current_idx]) {
+            continue;
+        }
+        let lower_bound = previous_parent_position.map_or(0, |parent_idx| parent_idx + 1);
+        let upper_bound = next_resolved[current_idx].unwrap_or(parent_lines.len());
+        let Some(parent_idx) = (lower_bound..upper_bound).find(|parent_idx| {
+            *parent_idx != current_idx
+                && blame_normalized_line(&parent_lines[*parent_idx])
+                    == blame_normalized_line(&current_lines[current_idx])
+        }) else {
+            continue;
+        };
+        positions[current_idx] = Some(parent_idx);
+        previous_parent_position = Some(parent_idx);
+    }
+}
+
+fn blame_normalized_line(line: &[u8]) -> Vec<u8> {
+    line.iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect()
+}
+
+fn blame_line_has_substantive_content(line: &[u8]) -> bool {
+    line.iter().any(|byte| !byte.is_ascii_whitespace())
+}
+
+fn blame_whitespace_only_line_touches_changed_hunk(
+    current_idx: usize,
+    exact_positions: &[Option<usize>],
+) -> bool {
+    let previous_is_exact = current_idx
+        .checked_sub(1)
+        .and_then(|idx| exact_positions.get(idx))
+        .is_some_and(Option::is_some);
+    let next_is_exact = exact_positions
+        .get(current_idx + 1)
+        .is_some_and(Option::is_some);
+    !previous_is_exact && !next_is_exact
 }
 
 fn split_blame_contents(contents: Vec<u8>) -> Vec<Vec<u8>> {
@@ -4973,20 +5720,6 @@ fn print_blame_stats(lines: &[BlameLine]) {
     println!("num read blob: {}", unique_commits.len());
     println!("num get patch: {commit_count}");
     println!("num commits: {commit_count}");
-}
-
-fn blame_line_matches(parent: &[u8], current: &[u8], ignore_whitespace: bool) -> bool {
-    if !ignore_whitespace {
-        return parent == current;
-    }
-    parent
-        .iter()
-        .copied()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .eq(current
-            .iter()
-            .copied()
-            .filter(|byte| !byte.is_ascii_whitespace()))
 }
 
 fn commit_file_lines_cached(
@@ -5139,13 +5872,11 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
                     code: 128,
                     message: "commit has invalid author date".into(),
                 })?;
-            let utc =
-                chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+            Ok(crate::runtime::local_datetime(timestamp)
+                .ok_or_else(|| CliError::Fatal {
                     code: 128,
                     message: "commit author timestamp is out of range".into(),
-                })?;
-            Ok(utc
-                .with_timezone(&chrono::Local)
+                })?
                 .format("%a %b %-d %H:%M:%S %Y")
                 .to_string())
         }
@@ -5192,8 +5923,11 @@ fn signature_formatted_log_date(signature: &[u8], pattern: &str, local: bool) ->
         message: "commit author timestamp is out of range".into(),
     })?;
     if local {
-        return Ok(utc
-            .with_timezone(&chrono::Local)
+        return Ok(crate::runtime::local_datetime(timestamp)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit author timestamp is out of range".into(),
+            })?
             .format(pattern)
             .to_string());
     }
@@ -5213,14 +5947,15 @@ fn signature_raw_log_date(signature: &[u8], local: bool) -> Result<String> {
     if !local {
         return Ok(format!("{timestamp} {timezone}"));
     }
-    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: "commit author timestamp is out of range".into(),
-    })?;
     Ok(format!(
         "{} {}",
         timestamp,
-        utc.with_timezone(&chrono::Local).format("%z")
+        crate::runtime::local_datetime(timestamp)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit author timestamp is out of range".into(),
+            })?
+            .format("%z")
     ))
 }
 
@@ -5253,7 +5988,10 @@ fn signature_human_log_date(signature: &[u8], local: bool) -> Result<String> {
     })?;
     if local {
         return Ok(format_human_log_date(
-            utc.with_timezone(&chrono::Local),
+            crate::runtime::local_datetime(timestamp).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit author timestamp is out of range".into(),
+            })?,
             timestamp,
             signature_relative_blame_date(signature)?,
         ));
@@ -5276,8 +6014,8 @@ where
 {
     let now = git_test_date_now()
         .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-        .map(|timestamp| timestamp.with_timezone(&chrono::Local))
-        .unwrap_or_else(chrono::Local::now);
+        .and_then(|timestamp| crate::runtime::local_datetime(timestamp.timestamp()))
+        .unwrap_or_else(crate::runtime::local_now);
     if commit.year() == now.year()
         && commit.month() == now.month()
         && commit.day() == now.day()
@@ -5421,11 +6159,16 @@ fn print_porcelain_blame_lines(
             println!(
                 "{} {} {} {group_len}",
                 line.commit.to_hex(),
-                line.line_no,
+                line.source_line_no,
                 line.line_no
             );
         } else {
-            println!("{} {} {}", line.commit.to_hex(), line.line_no, line.line_no);
+            println!(
+                "{} {} {}",
+                line.commit.to_hex(),
+                line.source_line_no,
+                line.line_no
+            );
         }
         let describe_commit = repeat_metadata || described.insert(line.commit.clone());
         if describe_commit {
@@ -5448,6 +6191,7 @@ fn print_incremental_blame_lines(
     root: bool,
 ) -> Result<()> {
     let mut groups = Vec::new();
+    let mut described = HashSet::new();
     for (index, _) in lines.iter().enumerate() {
         if blame_starts_group(lines, index) {
             let commit = commit_cache.read_commit(&lines[index].commit)?;
@@ -5463,17 +6207,24 @@ fn print_incremental_blame_lines(
         println!(
             "{} {} {} {group_len}",
             line.commit.to_hex(),
-            line.line_no,
+            line.source_line_no,
             line.line_no
         );
         let commit = commit_cache.read_commit(&line.commit)?;
-        print_blame_porcelain_commit(&commit, line.boundary && !root, path)?;
+        print_blame_incremental_commit(
+            &commit,
+            line.boundary && !root,
+            path,
+            described.insert(line.commit.clone()),
+        )?;
     }
     Ok(())
 }
 
 fn blame_starts_group(lines: &[BlameLine], index: usize) -> bool {
-    index == 0 || lines[index - 1].commit != lines[index].commit
+    index == 0
+        || lines[index - 1].commit != lines[index].commit
+        || lines[index - 1].source_line_no + 1 != lines[index].source_line_no
 }
 
 fn blame_group_len(lines: &[BlameLine], index: usize) -> usize {
@@ -5481,10 +6232,10 @@ fn blame_group_len(lines: &[BlameLine], index: usize) -> usize {
         return 1;
     }
     let mut len = 1;
-    while lines
-        .get(index + len)
-        .is_some_and(|line| line.commit == lines[index].commit)
-    {
+    while lines.get(index + len).is_some_and(|line| {
+        line.commit == lines[index].commit
+            && line.source_line_no == lines[index + len - 1].source_line_no + 1
+    }) {
         len += 1;
     }
     len
@@ -5516,6 +6267,48 @@ fn print_blame_porcelain_commit(
     println!("summary {}", commit_subject(&commit.message));
     if boundary {
         println!("boundary");
+    } else if let Some(parent) = commit.parents.first() {
+        println!(
+            "previous {} {}",
+            parent.to_hex(),
+            String::from_utf8_lossy(path)
+        );
+    }
+    println!("filename {}", String::from_utf8_lossy(path));
+    Ok(())
+}
+
+fn print_blame_incremental_commit(
+    commit: &zmin_git_core::CommitObject,
+    boundary: bool,
+    path: &[u8],
+    describe_commit: bool,
+) -> Result<()> {
+    if describe_commit {
+        let (author_time, author_tz) =
+            signature_timestamp_timezone(&commit.author).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit has invalid author date".into(),
+            })?;
+        let (committer_time, committer_tz) = signature_timestamp_timezone(&commit.committer)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit has invalid committer date".into(),
+            })?;
+        println!("author {}", signature_name(&commit.author));
+        println!("author-mail <{}>", signature_email(&commit.author));
+        println!("author-time {author_time}");
+        println!("author-tz {author_tz}");
+        println!("committer {}", signature_name(&commit.committer));
+        println!("committer-mail <{}>", signature_email(&commit.committer));
+        println!("committer-time {committer_time}");
+        println!("committer-tz {committer_tz}");
+        println!("summary {}", commit_subject(&commit.message));
+    }
+    if boundary {
+        if describe_commit {
+            println!("boundary");
+        }
     } else if let Some(parent) = commit.parents.first() {
         println!(
             "previous {} {}",
@@ -5585,7 +6378,7 @@ pub(crate) struct ShowBranchOptions {
 }
 
 pub(crate) fn show_branch(options: ShowBranchOptions) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -6076,7 +6869,7 @@ pub(crate) fn cherry(
     head: Option<&str>,
     limit: Option<&str>,
 ) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let upstream = match upstream {
         Some(upstream) => upstream.to_owned(),
         None => cherry_default_upstream(&repo)?,
@@ -6210,8 +7003,10 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
             message: "option '--broken' and commit-ishes cannot be used together".into(),
         });
     }
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_stable_pack_snapshot()
+        .with_packed_objects_first();
     let commits = if options.commits.is_empty() {
         vec!["HEAD".to_owned()]
     } else {
@@ -6577,6 +7372,83 @@ fn describe_candidate_cmp(candidate: &DescribeCandidate, best: &DescribeCandidat
                     && candidate.name < best.name)))
 }
 
+pub(crate) fn validate_for_each_ref_describe_atom(atom: &str) -> Result<()> {
+    parse_for_each_ref_describe_options(atom).map(|_| ())
+}
+
+pub(crate) fn describe_for_each_ref(
+    repo: &GitRepo,
+    object_id: &ObjectId,
+    atom: &str,
+) -> Result<String> {
+    let options = parse_for_each_ref_describe_options(atom)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let Some(commit_id) = peel_to_commit(&store, object_id.clone())? else {
+        return Ok(String::new());
+    };
+    let abbrev_len = options.abbrev.unwrap_or(default_abbrev_len(&store)?);
+    let candidates = describe_candidates(repo, &store, &options)?;
+    let commit_cache = CommitObjectCache::new(&store);
+    Ok(
+        describe_commit(&commit_cache, &commit_id, &candidates, &options, abbrev_len)?
+            .unwrap_or_default(),
+    )
+}
+
+fn parse_for_each_ref_describe_options(atom: &str) -> Result<DescribeOptions> {
+    let atom = atom.strip_prefix('*').unwrap_or(atom);
+    let arguments = atom.strip_prefix("describe:");
+    if atom != "describe" && arguments.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unknown field name: {atom}"),
+        });
+    }
+    let mut options = DescribeOptions {
+        all: false,
+        tags: false,
+        contains: false,
+        long: false,
+        abbrev: None,
+        exact_match: false,
+        always: false,
+        dirty: None,
+        broken: None,
+        candidates: None,
+        debug: false,
+        first_parent: false,
+        matches: Vec::new(),
+        excludes: Vec::new(),
+        commits: Vec::new(),
+    };
+    let mut remaining = arguments.unwrap_or_default();
+    while !remaining.is_empty() {
+        let (argument, rest) = remaining
+            .split_once(',')
+            .map(|(argument, rest)| (argument, Some(rest)))
+            .unwrap_or((remaining, None));
+        if argument == "tags" {
+            options.tags = true;
+        } else if let Some(value) = argument.strip_prefix("abbrev=") {
+            options.abbrev = Some(value.parse::<usize>().map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("unrecognized %(describe) argument: {remaining}"),
+            })?);
+        } else if let Some(value) = argument.strip_prefix("match=") {
+            options.matches.push(value.to_owned());
+        } else if let Some(value) = argument.strip_prefix("exclude=") {
+            options.excludes.push(value.to_owned());
+        } else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unrecognized %(describe) argument: {remaining}"),
+            });
+        }
+        remaining = rest.unwrap_or_default();
+    }
+    Ok(options)
+}
+
 pub(crate) struct NameRevOptions {
     pub(crate) name_only: bool,
     pub(crate) tags: bool,
@@ -6609,7 +7481,7 @@ pub(crate) fn name_rev(options: NameRevOptions) -> Result<()> {
             message: "--annotate-stdin cannot be combined with commits".into(),
         });
     }
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let candidates = name_rev_candidates(&repo, &store, &commit_cache, &options)?;
@@ -6811,7 +7683,7 @@ pub(crate) fn render_range_diff_output(
     ranges: &[String; 2],
     options: &RangeDiffOptions,
 ) -> Result<String> {
-    let repo = find_repo()?;
+    let repo = find_repo_or_bare()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let old = range_diff_commits(&repo, &store, &ranges[0])?;
     let new = range_diff_commits(&repo, &store, &ranges[1])?;
@@ -7092,6 +7964,13 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) revs: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RevListMissingMode {
+    AllowAny,
+    AllowPromisor,
+    Print,
+}
+
 impl LogOptions<'_> {
     fn history_order(&self) -> Option<HistoryCommitOrder> {
         if self.author_date_order {
@@ -7347,6 +8226,48 @@ fn reorder_collected_commits(
         .collect()
 }
 
+fn reorder_collected_commit_metadata(
+    commits: Vec<CollectedCommitMetadata>,
+    order: HistoryCommitOrder,
+) -> Result<Vec<CollectedCommitMetadata>> {
+    let metadata = commits
+        .iter()
+        .enumerate()
+        .map(|(original_index, entry)| {
+            let timestamp = match order {
+                HistoryCommitOrder::AuthorDate => signature_timestamp(&entry.author),
+                HistoryCommitOrder::Topo | HistoryCommitOrder::Date => {
+                    signature_timestamp(&entry.committer)
+                }
+            }
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "history ordering encountered an invalid commit timestamp".into(),
+            })?;
+            Ok(HistoryOrderMetadata {
+                id: entry.id.clone(),
+                parents: entry.parents.clone(),
+                timestamp,
+                original_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let ordered_ids = reorder_history_from_metadata(metadata, order)?;
+    let mut commits_by_id = commits
+        .into_iter()
+        .map(|entry| (entry.id.clone(), entry))
+        .collect::<HashMap<_, _>>();
+    ordered_ids
+        .into_iter()
+        .map(|id| {
+            commits_by_id.remove(&id).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "history ordered commit metadata missing from collected set".into(),
+            })
+        })
+        .collect()
+}
+
 fn reorder_commit_ids<S>(
     commit_cache: &CommitObjectCache<'_, S>,
     commit_ids: Vec<ObjectId>,
@@ -7428,18 +8349,31 @@ fn resolve_ancestry_path_bounds(
         .collect()
 }
 
-fn collect_default_log_decoration_ids(repo: &GitRepo) -> Result<HashSet<String>> {
+fn collect_default_log_decoration_ids(
+    repo: &GitRepo,
+    ref_snapshot: Option<&RevListRefSnapshot>,
+) -> Result<HashSet<ObjectId>> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let mut decorated = HashSet::new();
-    if let Ok(head_id) = refs.resolve("HEAD") {
-        decorated.insert(head_id.to_hex());
+    if let Some(head_id) = ref_snapshot.and_then(|snapshot| snapshot.head_id.clone()) {
+        decorated.insert(head_id);
+    } else if let Ok(head_id) = refs.resolve("HEAD") {
+        decorated.insert(head_id);
     }
-    refs.for_each_resolved_ref("refs/", |ref_name, id| {
-        if log_decorates_ref_by_default(ref_name) {
-            decorated.insert(id.to_hex());
+    if let Some(snapshot) = ref_snapshot {
+        for row in &snapshot.refs {
+            if log_decorates_ref_by_default(&row.ref_name) {
+                decorated.insert(row.id.clone());
+            }
         }
-        Ok::<(), CliError>(())
-    })?;
+    } else {
+        refs.for_each_resolved_ref("refs/", |ref_name, id| {
+            if log_decorates_ref_by_default(ref_name) {
+                decorated.insert(id.clone());
+            }
+            Ok::<(), CliError>(())
+        })?;
+    }
     Ok(decorated)
 }
 
@@ -7476,7 +8410,21 @@ fn parse_log_diff_merges_value(value: &str, include_on: bool) -> Option<LogMerge
 }
 
 pub(crate) fn log(options: LogOptions<'_>) -> Result<()> {
-    log_with_options(options)
+    match log_with_options(options) {
+        Err(CliError::Io(error)) if error.to_string().contains("reference broken") => {
+            Err(CliError::Fatal {
+                code: 128,
+                message: "your current branch appears to be broken".into(),
+            })
+        }
+        Err(CliError::Fatal { code, message }) if message == "reference broken" => {
+            Err(CliError::Fatal {
+                code,
+                message: "your current branch appears to be broken".into(),
+            })
+        }
+        other => other,
+    }
 }
 
 fn log_with_options(options: LogOptions<'_>) -> Result<()> {
@@ -7501,7 +8449,6 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_unpacked = options.unpacked;
     let _accepted_remove_empty = options.remove_empty;
     let _accepted_ignore_missing = options.ignore_missing;
-    let _accepted_stdin = options.stdin;
     let _accepted_single_worktree = options.single_worktree;
     let _accepted_no_filter = options.no_filter;
     let _accepted_follow = options.follow;
@@ -7558,8 +8505,27 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
-    let (revs, max_count, parsed_zero) =
-        split_log_revs_and_count(options.revs.clone(), options.max_count)?;
+    let revs_with_stdin = history_revs_with_stdin(&options.revs, options.stdin)?;
+    let late_options = split_log_revs_and_count(
+        revs_with_stdin,
+        options.max_count,
+        options.regexp_ignore_case,
+        options.basic_regexp,
+        options.extended_regexp,
+        options.fixed_strings,
+        options.perl_regexp,
+    )?;
+    let revs = late_options.revs;
+    let max_count = late_options.max_count;
+    let parsed_zero = late_options.zero;
+    let regexp_ignore_case = late_options.regexp_ignore_case;
+    let basic_regexp = late_options.basic_regexp;
+    let extended_regexp = late_options.extended_regexp;
+    let fixed_strings = late_options.fixed_strings;
+    let perl_regexp = late_options.perl_regexp;
+    let topo_order = options.topo_order || late_options.topo_order;
+    let date_order = options.date_order || late_options.date_order;
+    let author_date_order = options.author_date_order || late_options.author_date_order;
     let zero = options.zero || parsed_zero;
     let parsed_log_revs = split_log_revs_and_pickaxe(
         revs,
@@ -7575,7 +8541,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let selected_formats = [
         options.patch_with_stat,
         options.stat,
-        parsed_log_revs.patch,
+        parsed_log_revs.patch && !options.patch_with_stat,
         options.numstat,
         options.shortstat,
         options.raw,
@@ -7594,7 +8560,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
-    let walk_reflogs = options.walk_reflogs || options.reflog;
+    let walk_reflogs = options.walk_reflogs;
     let no_walk = resolve_history_walk_mode(options.raw_args, options.no_walk, options.do_walk);
     if !options.grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
@@ -7621,13 +8587,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         });
     }
     if walk_reflogs {
-        return log_reflog(
-            &options,
-            parsed_log_revs.revs,
-            max_count,
-            parsed_log_revs.format.as_deref(),
-            parsed_log_revs.pretty.as_deref(),
-        );
+        return log_reflog(&options, &parsed_log_revs, max_count);
     }
     let format = LogFormat::parse(
         options.oneline,
@@ -7636,12 +8596,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     )?;
     let ignore_matching_lines =
         compile_ignore_matching_lines(&parsed_log_revs.ignore_matching_lines)?;
-    let grep_mode = parse_shortlog_pattern_mode(
-        options.basic_regexp,
-        options.extended_regexp,
-        options.fixed_strings,
-        options.perl_regexp,
-    );
+    let grep_mode =
+        parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
     let effective_since = options.since.or(options.since_as_filter);
     let (since, until) = resolve_history_age_bounds(
         options.raw_args,
@@ -7669,59 +8625,100 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     )?;
     let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date);
     let date_mode = parse_log_date_mode(date_arg.as_deref())?;
-    let expand_tabs = log_expand_tabs_enabled(
-        options.encoding,
-        options.expand_tabs,
-        options.no_expand_tabs,
-    );
-    let repo = find_repo()?;
+    let encoding = parsed_log_revs.encoding.as_deref().or(options.encoding);
+    let expand_tabs =
+        log_expand_tabs_enabled(encoding, options.expand_tabs, options.no_expand_tabs);
+    let repo = find_repo_or_bare()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let diff_format = options.diff_format(parsed_log_revs.patch);
     let merge_diff_mode = options.merge_diff_mode(&repo, diff_format)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let (parsed_revs, implicit_pathspecs) =
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_transient_packed_object_reads()
+        .with_trusted_packed_object_reads()
+        .with_buffered_pack_reads()
+        .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES)
+        .with_packed_object_read_cache_byte_limit(LOG_PACK_OBJECT_CACHE_BYTES);
+    let (mut parsed_revs, implicit_pathspecs) =
         split_log_implicit_pathspecs(&repo, parsed_log_revs.revs.clone());
     let mut parsed_pathspecs = parsed_log_revs.pathspecs.clone();
     parsed_pathspecs.extend(implicit_pathspecs);
+    if options.follow && parsed_pathspecs.is_empty() && parsed_revs.len() == 1 {
+        let candidate = parsed_revs[0].clone();
+        if resolve_objectish(&repo, &candidate).is_err() {
+            parsed_revs.clear();
+            parsed_pathspecs.push(candidate);
+        }
+    }
     let pathspecs = parsed_pathspecs
         .iter()
         .map(|path| path_arg_to_repo_relative(&repo, Path::new(path)))
         .collect::<Result<Vec<_>>>()?;
-    let revs = if parsed_revs.is_empty() && !options.all {
+    let mut requested_revs = if parsed_revs.is_empty() && !options.all && !options.reflog {
         vec!["HEAD".to_owned()]
     } else {
         parsed_revs
     };
+    if options.reflog {
+        requested_revs.extend(log_reflog_object_ids(&repo)?);
+    }
+    let configured_decoration_mode = if parsed_log_revs.decorate.is_none() {
+        log_configured_decoration_mode(&repo)?
+    } else {
+        None
+    };
+    let decoration_mode = parsed_log_revs
+        .decorate
+        .or(configured_decoration_mode)
+        .or_else(|| {
+            format
+                .uses_decoration_placeholder()
+                .then_some(LogDecorationMode::Short)
+        });
+    let ref_snapshot = if options.all
+        || requested_revs.iter().any(|rev| {
+            matches!(
+                rev.as_str(),
+                "--branches" | "--heads" | "--remotes" | "--tags"
+            ) || rev.starts_with("--branches=")
+                || rev.starts_with("--heads=")
+                || rev.starts_with("--remotes=")
+                || rev.starts_with("--tags=")
+        })
+        || decoration_mode.is_some()
+        || options.simplify_by_decoration
+    {
+        Some(collect_rev_list_ref_snapshot(&repo)?)
+    } else {
+        None
+    };
     let revs = {
         let _trace = phase_trace("log.collect_revs");
-        collect_rev_list_revs(&repo, &store, options.all, revs)?
+        collect_rev_list_revs_with_snapshot(
+            &repo,
+            &store,
+            options.all,
+            requested_revs.clone(),
+            ref_snapshot.as_ref(),
+        )?
     };
     let commit_cache = CommitObjectCache::new(&store);
-    let decoration_mode =
-        if format.uses_decoration_placeholder() && parsed_log_revs.decorate.is_none() {
-            Some(LogDecorationMode::Short)
-        } else {
-            parsed_log_revs.decorate
-        };
     let decorations = LogDecorations::load(
         &repo,
         &store,
         decoration_mode,
         parsed_log_revs.clear_decorations,
+        ref_snapshot.as_ref(),
     )?;
-    let notes = LogNotes::load(
-        &repo,
-        &store,
-        log_notes_enabled(
-            &format,
-            options.notes,
-            options.no_notes,
-            options.show_notes,
-            options.show_notes_by_default,
-            options.standard_notes,
-            options.no_standard_notes,
-        ),
-    )?;
+    let notes_enabled = log_notes_enabled(
+        &format,
+        options.notes,
+        options.no_notes,
+        options.show_notes,
+        options.show_notes_by_default,
+        options.standard_notes,
+        options.no_standard_notes,
+    );
+    let notes = LogNotes::load(&repo, &store, notes_enabled)?;
     let line_range_specs = options
         .line_ranges
         .iter()
@@ -7759,8 +8756,20 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_graph = options.graph;
     let _accepted_objects = options.objects;
     let _accepted_filter = options.filter.as_deref();
-    let history_order = options.history_order();
+    let history_order = if author_date_order {
+        Some(HistoryCommitOrder::AuthorDate)
+    } else if date_order {
+        Some(HistoryCommitOrder::Date)
+    } else if topo_order {
+        Some(HistoryCommitOrder::Topo)
+    } else {
+        None
+    };
     let simplify_history_topo = options.simplify_merges || options.simplify_by_decoration;
+    let history_order_requires_full_collection = matches!(
+        history_order,
+        Some(HistoryCommitOrder::Topo | HistoryCommitOrder::AuthorDate)
+    );
     let post_collection_filters = since.is_some()
         || until.is_some()
         || !options.grep.is_empty()
@@ -7771,12 +8780,420 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         || options.ancestry_path
         || options.simplify_by_decoration
         || simplify_history_topo
-        || history_order.is_some();
+        || history_order_requires_full_collection;
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
     } else {
         expand_history_max_count(max_count, skip)
     };
+    if let LogFormat::Custom { pattern, .. } = &format
+        && log_format_supports_metadata_only(pattern)
+        && diff_format.is_none()
+        && !notes_enabled
+        && pathspecs.is_empty()
+        && !pickaxe_options.enabled()
+        && since.is_none()
+        && until.is_none()
+        && options.grep.is_empty()
+        && author_pattern.is_none()
+        && committer_pattern.is_none()
+        && min_parents.is_none()
+        && max_parents.is_none()
+        && !options.ancestry_path
+        && !options.simplify_by_decoration
+        && !simplify_history_topo
+        && !no_walk
+        && !options.first_parent
+        && !options.left_right
+        && !options.left_only
+        && !options.right_only
+        && !options.cherry
+        && !options.cherry_pick
+        && !options.cherry_mark
+        && !options.boundary
+    {
+        let render_plan = LogMetadataRenderPlan::from_pattern(pattern, history_order);
+        let uses_abbreviated_ids = format.uses_abbreviated_object_id() || options.abbrev_commit;
+        let record_terminator = if zero {
+            b"\0".as_slice()
+        } else {
+            b"\n".as_slice()
+        };
+        let stdout = io::stdout();
+        let mut out = io::BufWriter::new(stdout.lock());
+        if render_plan.supports_lightweight(history_order) {
+            let exact_observed_roots = observed_log_root_ids_exact_family(
+                &repo,
+                &store,
+                &requested_revs,
+                ref_snapshot.as_ref(),
+            )?;
+            if render_plan.supports_author_only_lightweight(history_order) {
+                if let Some(roots) = exact_observed_roots.as_ref()
+                    && skip.is_none()
+                    && max_count.is_none()
+                    && !options.reverse
+                    && !uses_abbreviated_ids
+                    && let Some(commit_hints) =
+                        collect_commit_render_hints_from_ids_with_exclusions_commit_graph(
+                            &repo, roots, None,
+                        )?
+                {
+                    let _trace = phase_trace("log.render_author_metadata_streaming");
+                    render_commit_author_metadata_from_hints_streaming(
+                        &store,
+                        &commit_hints,
+                        render_plan,
+                        pattern,
+                        GitHashAlgorithm::Sha1.digest_len() * 2,
+                        &decorations,
+                        record_terminator,
+                        zero || format.terminates_lines(),
+                        &mut out,
+                    )?;
+                    return Ok(());
+                }
+                let mut commits = {
+                    let _trace = phase_trace("log.collect_commits");
+                    if let Some(roots) = exact_observed_roots.as_ref() {
+                        if let Some(commit_hints) =
+                            collect_commit_render_hints_from_ids_with_exclusions_commit_graph(
+                                &repo,
+                                roots,
+                                collect_max_count,
+                            )?
+                        {
+                            collect_commit_author_metadata_from_hints(
+                                &store,
+                                &commit_hints,
+                                render_plan,
+                            )?
+                        } else if let Some(commit_hints) =
+                            collect_commit_render_hints_with_exclusions_commit_graph(
+                                &repo,
+                                &store,
+                                &revs,
+                                collect_max_count,
+                            )?
+                        {
+                            collect_commit_author_metadata_from_hints(
+                                &store,
+                                &commit_hints,
+                                render_plan,
+                            )?
+                        } else {
+                            collect_commit_author_metadata_with_exclusions(
+                                &repo,
+                                &store,
+                                &revs,
+                                collect_max_count,
+                                render_plan,
+                            )?
+                        }
+                    } else if let Some(commit_hints) =
+                        collect_commit_render_hints_with_exclusions_commit_graph(
+                            &repo,
+                            &store,
+                            &revs,
+                            collect_max_count,
+                        )?
+                    {
+                        collect_commit_author_metadata_from_hints(
+                            &store,
+                            &commit_hints,
+                            render_plan,
+                        )?
+                    } else {
+                        collect_commit_author_metadata_with_exclusions(
+                            &repo,
+                            &store,
+                            &revs,
+                            collect_max_count,
+                            render_plan,
+                        )?
+                    }
+                };
+                if let Some(skip) = skip {
+                    commits = commits.into_iter().skip(skip).collect();
+                }
+                if let Some(max_count) = max_count {
+                    commits.truncate(max_count);
+                }
+                if options.reverse {
+                    commits.reverse();
+                }
+                let abbrev_len = log_output_abbrev_len(
+                    &repo,
+                    &store,
+                    options.no_abbrev_commit,
+                    uses_abbreviated_ids,
+                    commits.iter().flat_map(|commit| {
+                        std::iter::once(&commit.id).chain(commit.parents.iter())
+                    }),
+                )?;
+                let _render_trace = phase_trace("log.render");
+                for (index, commit) in commits.iter().enumerate() {
+                    let rendered = render_log_format_author_metadata(
+                        pattern,
+                        &commit.id,
+                        commit,
+                        abbrev_len,
+                        &decorations,
+                    )?;
+                    out.write_all(rendered.as_bytes())?;
+                    if zero || format.terminates_lines() || index + 1 < commits.len() {
+                        out.write_all(record_terminator)?;
+                    }
+                }
+            } else {
+                let mut commits = {
+                    let _trace = phase_trace("log.collect_commits");
+                    if let Some(roots) = exact_observed_roots.as_ref() {
+                        if let Some(commit_hints) =
+                            collect_commit_render_hints_from_ids_with_exclusions_commit_graph(
+                                &repo,
+                                roots,
+                                collect_max_count,
+                            )?
+                        {
+                            collect_commit_render_metadata_from_hints(
+                                &store,
+                                &commit_hints,
+                                render_plan,
+                            )?
+                        } else if let Some(commit_hints) =
+                            collect_commit_render_hints_with_exclusions_commit_graph(
+                                &repo,
+                                &store,
+                                &revs,
+                                collect_max_count,
+                            )?
+                        {
+                            collect_commit_render_metadata_from_hints(
+                                &store,
+                                &commit_hints,
+                                render_plan,
+                            )?
+                        } else {
+                            collect_commit_render_metadata_with_exclusions(
+                                &repo,
+                                &store,
+                                &revs,
+                                collect_max_count,
+                                render_plan,
+                            )?
+                        }
+                    } else if let Some(commit_hints) =
+                        collect_commit_render_hints_with_exclusions_commit_graph(
+                            &repo,
+                            &store,
+                            &revs,
+                            collect_max_count,
+                        )?
+                    {
+                        collect_commit_render_metadata_from_hints(
+                            &store,
+                            &commit_hints,
+                            render_plan,
+                        )?
+                    } else {
+                        collect_commit_render_metadata_with_exclusions(
+                            &repo,
+                            &store,
+                            &revs,
+                            collect_max_count,
+                            render_plan,
+                        )?
+                    }
+                };
+                if let Some(skip) = skip {
+                    commits = commits.into_iter().skip(skip).collect();
+                }
+                if let Some(max_count) = max_count {
+                    commits.truncate(max_count);
+                }
+                if options.reverse {
+                    commits.reverse();
+                }
+                let abbrev_len = log_output_abbrev_len(
+                    &repo,
+                    &store,
+                    options.no_abbrev_commit,
+                    uses_abbreviated_ids,
+                    commits.iter().flat_map(|commit| {
+                        std::iter::once(&commit.id).chain(commit.parents.iter())
+                    }),
+                )?;
+                let _render_trace = phase_trace("log.render");
+                for (index, commit) in commits.iter().enumerate() {
+                    let rendered = render_log_format_render_metadata(
+                        pattern,
+                        &commit.id,
+                        commit,
+                        abbrev_len,
+                        &decorations,
+                        date_mode,
+                    )?;
+                    out.write_all(rendered.as_bytes())?;
+                    if zero || format.terminates_lines() || index + 1 < commits.len() {
+                        out.write_all(record_terminator)?;
+                    }
+                }
+            }
+        } else {
+            let mut commits = {
+                let _trace = phase_trace("log.collect_commits");
+                if let Some(commit_ids) = collect_commits_with_exclusions_commit_graph(
+                    &repo,
+                    &store,
+                    &revs,
+                    collect_max_count,
+                )? {
+                    let packed_first_store = store.packed_first();
+                    commit_ids
+                        .into_iter()
+                        .map(|id| read_commit_metadata_from_store(&packed_first_store, &id))
+                        .collect::<Result<Vec<_>>>()?
+                } else {
+                    collect_commit_metadata_with_exclusions(
+                        &repo,
+                        &store,
+                        &revs,
+                        collect_max_count,
+                    )?
+                }
+            };
+            if let Some(order) = history_order
+                && order != HistoryCommitOrder::Date
+            {
+                commits = reorder_collected_commit_metadata(commits, order)?;
+            }
+            if let Some(skip) = skip {
+                commits = commits.into_iter().skip(skip).collect();
+            }
+            if let Some(max_count) = max_count {
+                commits.truncate(max_count);
+            }
+            if options.reverse {
+                commits.reverse();
+            }
+            let abbrev_len = log_output_abbrev_len(
+                &repo,
+                &store,
+                options.no_abbrev_commit,
+                uses_abbreviated_ids,
+                commits
+                    .iter()
+                    .flat_map(|commit| std::iter::once(&commit.id).chain(commit.parents.iter())),
+            )?;
+            let _render_trace = phase_trace("log.render");
+            for (index, commit) in commits.iter().enumerate() {
+                let rendered = render_log_format_metadata(
+                    pattern,
+                    &commit.id,
+                    commit,
+                    abbrev_len,
+                    &decorations,
+                    date_mode,
+                )?;
+                out.write_all(rendered.as_bytes())?;
+                if zero || format.terminates_lines() || index + 1 < commits.len() {
+                    out.write_all(record_terminator)?;
+                }
+            }
+        }
+        return Ok(());
+    }
+    if matches!(format, LogFormat::ShortOneline | LogFormat::FullOneline)
+        && diff_format.is_none()
+        && !notes_enabled
+        && pathspecs.is_empty()
+        && !pickaxe_options.enabled()
+        && since.is_none()
+        && until.is_none()
+        && options.grep.is_empty()
+        && author_pattern.is_none()
+        && committer_pattern.is_none()
+        && min_parents.is_none()
+        && max_parents.is_none()
+        && !options.ancestry_path
+        && !options.simplify_by_decoration
+        && !simplify_history_topo
+        && history_order.is_none()
+        && !no_walk
+        && !options.first_parent
+        && !options.left_right
+        && !options.left_only
+        && !options.right_only
+        && !options.cherry
+        && !options.cherry_pick
+        && !options.cherry_mark
+        && !options.boundary
+        && !options.follow
+        && !options.graph
+        && !options.log_size
+        && !options.diff_required
+    {
+        let mut commits = {
+            let _trace = phase_trace("log.collect_commits.compact_oneline");
+            collect_commit_oneline_with_exclusions(&repo, &store, &revs, collect_max_count)?
+        };
+        if let Some(skip) = skip {
+            commits = commits.into_iter().skip(skip).collect();
+        }
+        if let Some(max_count) = max_count {
+            commits.truncate(max_count);
+        }
+        if options.reverse {
+            commits.reverse();
+        }
+        let abbrev_len = log_output_abbrev_len(
+            &repo,
+            &store,
+            options.no_abbrev_commit,
+            matches!(format, LogFormat::ShortOneline),
+            commits
+                .iter()
+                .flat_map(|commit| std::iter::once(&commit.id).chain(commit.parents.iter())),
+        )?;
+        let record_terminator = if zero {
+            b"\0".as_slice()
+        } else {
+            b"\n".as_slice()
+        };
+        let mut out = io::stdout().lock();
+        let _render_trace = phase_trace("log.render.compact_oneline");
+        for commit in &commits {
+            match format {
+                LogFormat::ShortOneline => {
+                    out.write_all(short_object_id_len(&commit.id, abbrev_len).as_bytes())?;
+                    if options.parents {
+                        for parent in &commit.parents {
+                            out.write_all(b" ")?;
+                            out.write_all(short_object_id_len(parent, abbrev_len).as_bytes())?;
+                        }
+                    }
+                }
+                LogFormat::FullOneline => {
+                    out.write_all(commit.id.to_hex().as_bytes())?;
+                    if options.parents {
+                        for parent in &commit.parents {
+                            out.write_all(b" ")?;
+                            out.write_all(parent.to_hex().as_bytes())?;
+                        }
+                    }
+                }
+                _ => unreachable!("compact oneline format guard"),
+            }
+            if let Some(wrapped) = decorations.wrapped(&commit.id) {
+                out.write_all(wrapped.as_bytes())?;
+            }
+            out.write_all(b" ")?;
+            out.write_all(commit.subject.as_bytes())?;
+            out.write_all(record_terminator)?;
+        }
+        return Ok(());
+    }
     let mut commits = {
         let _trace = phase_trace("log.collect_commits");
         if no_walk && !options.all {
@@ -7826,7 +9243,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 &options.grep,
                 options.all_match,
                 options.invert_grep,
-                options.regexp_ignore_case,
+                regexp_ignore_case,
                 grep_mode,
             )
             .unwrap_or(false)
@@ -7837,7 +9254,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             log_signature_matches_pattern(
                 &entry.commit.author,
                 pattern,
-                options.regexp_ignore_case,
+                regexp_ignore_case,
                 grep_mode,
             )
         });
@@ -7847,7 +9264,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             log_signature_matches_pattern(
                 &entry.commit.committer,
                 pattern,
-                options.regexp_ignore_case,
+                regexp_ignore_case,
                 grep_mode,
             )
         });
@@ -7871,8 +9288,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
     if options.simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo)?;
-        commits.retain(|entry| decorated.contains(&entry.id.to_hex()));
+        let decorated = collect_default_log_decoration_ids(&repo, ref_snapshot.as_ref())?;
+        commits.retain(|entry| decorated.contains(&entry.id));
     }
     let mut traversal_markers = HashMap::new();
     if options.left_right
@@ -7916,10 +9333,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         traversal_markers = traversal.markers;
     }
     if options.left_only {
-        commits.retain(|entry| traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left));
+        commits.retain(|entry| {
+            traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
+        });
     }
     if options.right_only {
-        commits.retain(|entry| traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Right));
+        commits.retain(|entry| {
+            traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Right)
+        });
     }
     if let Some(order) =
         history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
@@ -7935,12 +9356,16 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if options.reverse {
         commits.reverse();
     }
-    let abbrev_len = if options.no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
-    } else {
-        7
-    };
     let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
+    let abbrev_len = log_output_abbrev_len(
+        &repo,
+        &store,
+        options.no_abbrev_commit,
+        format.uses_abbreviated_object_id() || default_commit_abbrev,
+        commits
+            .iter()
+            .flat_map(|entry| std::iter::once(&entry.id).chain(entry.commit.parents.iter())),
+    )?;
     let terminates_lines = format.terminates_lines();
     let record_terminator = if zero {
         b"\0".as_slice()
@@ -8020,11 +9445,19 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                         pickaxe_options,
                         &ignore_matching_lines,
                         &pathspecs,
+                        None,
+                        None,
                         zero,
+                        None,
+                        None,
+                        false,
                     )?;
                     out = io::stdout().lock();
                 }
-                if visible_index + 1 < visible_parent_indexes.len() || idx + 1 < commits.len() {
+                if zero
+                    || visible_index + 1 < visible_parent_indexes.len()
+                    || idx + 1 < commits.len()
+                {
                     out.write_all(record_terminator)?;
                 }
             }
@@ -8069,7 +9502,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             options.standard_notes && !options.show_notes,
         )?;
         if options.log_size {
-            writeln!(out, "log size {}", log_message_size(commit.message.as_slice()))?;
+            writeln!(
+                out,
+                "log size {}",
+                log_message_size(commit.message.as_slice())
+            )?;
         }
         if options.graph {
             out.write_all(b"* ")?;
@@ -8077,7 +9514,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
             options.root && commit.parents.is_empty() && format.separates_patch();
-        if terminates_lines
+        if zero
+            || terminates_lines
             || next_output
             || (commit_diff_format.is_some() && !root_patch_separator)
         {
@@ -8115,10 +9553,28 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 pickaxe_options,
                 &ignore_matching_lines,
                 &pathspecs,
+                None,
+                None,
                 zero,
+                None,
+                None,
+                false,
             )?;
             out = io::stdout().lock();
-            if next_output && !(matches!(diff_format, ShowDiffFormat::Raw) && terminates_lines) {
+            if next_output
+                && !(terminates_lines
+                    && matches!(
+                        diff_format,
+                        ShowDiffFormat::Raw
+                            | ShowDiffFormat::Stat
+                            | ShowDiffFormat::StatSummary
+                            | ShowDiffFormat::Numstat
+                            | ShowDiffFormat::Shortstat
+                            | ShowDiffFormat::Summary
+                            | ShowDiffFormat::NameOnly
+                            | ShowDiffFormat::NameStatus
+                    ))
+            {
                 out.write_all(b"\n")?;
             }
         }
@@ -8140,11 +9596,13 @@ fn parse_log_line_range_spec(value: &str) -> Result<LogLineRangeSpec> {
         });
     }
     match parse_blame_line_range(range)? {
-        BlameLineRange::Numeric { start, end } if start == 1 && end >= start => Ok(LogLineRangeSpec {
-            start,
-            end,
-            path: path.to_owned(),
-        }),
+        BlameLineRange::Numeric { start, end } if start == 1 && end >= start => {
+            Ok(LogLineRangeSpec {
+                start,
+                end,
+                path: path.to_owned(),
+            })
+        }
         _ => Err(CliError::Fatal {
             code: 128,
             message: format!("unsupported log line range '{value}'"),
@@ -8199,11 +9657,12 @@ fn log_with_line_ranges(
         });
     }
 
-    let commits = collect_commit_objects_with_exclusions_cached(repo, store, commit_cache, revs, None)?;
+    let commits =
+        collect_commit_objects_with_exclusions_cached(repo, store, commit_cache, revs, None)?;
     let abbrev_len = if options.no_abbrev_commit {
         GitHashAlgorithm::Sha1.digest_len() * 2
     } else {
-        7
+        configured_default_abbrev_len(repo, store)?
     };
     let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
     let mut out = io::stdout().lock();
@@ -8216,7 +9675,10 @@ fn log_with_line_ranges(
             if commit.parents.len() > 1 {
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: format!("unsupported log line range '{}'", options.line_ranges[spec_idx]),
+                    message: format!(
+                        "unsupported log line range '{}'",
+                        options.line_ranges[spec_idx]
+                    ),
                 });
             }
             let new_lines = commit_file_lines_cached(store, commit_cache, &entry.id, &path_bytes)?;
@@ -8397,17 +9859,67 @@ fn split_log_implicit_pathspecs(repo: &GitRepo, revs: Vec<String>) -> (Vec<Strin
     (parsed_revs, pathspecs)
 }
 
+struct LateLogRevOptions {
+    revs: Vec<String>,
+    max_count: Option<usize>,
+    zero: bool,
+    regexp_ignore_case: bool,
+    basic_regexp: bool,
+    extended_regexp: bool,
+    fixed_strings: bool,
+    perl_regexp: bool,
+    topo_order: bool,
+    date_order: bool,
+    author_date_order: bool,
+}
+
 fn split_log_revs_and_count(
     revs: Vec<String>,
     max_count: Option<&str>,
-) -> Result<(Vec<String>, Option<usize>, bool)> {
+    regexp_ignore_case: bool,
+    basic_regexp: bool,
+    extended_regexp: bool,
+    fixed_strings: bool,
+    perl_regexp: bool,
+) -> Result<LateLogRevOptions> {
     let mut parsed_max_count = parse_log_max_count(max_count)?;
     let mut parsed_zero = false;
     let mut parsed_revs = Vec::new();
+    let mut parsed_regexp_ignore_case = regexp_ignore_case;
+    let mut parsed_basic_regexp = basic_regexp;
+    let mut parsed_extended_regexp = extended_regexp;
+    let mut parsed_fixed_strings = fixed_strings;
+    let mut parsed_perl_regexp = perl_regexp;
+    let mut parsed_topo_order = false;
+    let mut parsed_date_order = false;
+    let mut parsed_author_date_order = false;
     let mut iter = revs.into_iter();
     while let Some(rev) = iter.next() {
         if rev == "-z" {
             parsed_zero = true;
+        } else if rev == "--regexp-ignore-case" {
+            parsed_regexp_ignore_case = true;
+        } else if rev == "--basic-regexp" {
+            parsed_basic_regexp = true;
+        } else if rev == "--extended-regexp" {
+            parsed_extended_regexp = true;
+        } else if rev == "--fixed-strings" {
+            parsed_fixed_strings = true;
+        } else if rev == "--perl-regexp" {
+            parsed_perl_regexp = true;
+        } else if rev == "--topo-order" {
+            parsed_topo_order = true;
+            parsed_date_order = false;
+            parsed_author_date_order = false;
+        } else if rev == "--date-order" {
+            parsed_topo_order = false;
+            parsed_date_order = true;
+            parsed_author_date_order = false;
+        } else if rev == "--author-date-order" {
+            parsed_topo_order = false;
+            parsed_date_order = false;
+            parsed_author_date_order = true;
+        } else if rev == "--find-copies-harder" {
         } else if let Some(value) = rev.strip_prefix('-')
             && !value.is_empty()
             && value.bytes().all(|byte| byte.is_ascii_digit())
@@ -8439,11 +9951,36 @@ fn split_log_revs_and_count(
                 code: 128,
                 message: format!("'{value}': not an integer"),
             })?);
+        } else if let Some(value) = rev.strip_prefix("--find-renames=")
+            && value.chars().all(|ch| ch.is_ascii_digit() || ch == '%')
+        {
+        } else if let Some(value) = rev.strip_prefix("--find-copies=")
+            && value.chars().all(|ch| ch.is_ascii_digit() || ch == '%')
+        {
+        } else if let Some(value) = rev.strip_prefix("-M")
+            && value.chars().all(|ch| ch.is_ascii_digit() || ch == '%')
+        {
+        } else if let Some(value) = rev.strip_prefix("-C")
+            && value.chars().all(|ch| ch.is_ascii_digit() || ch == '%')
+        {
+        } else if rev == "-M" || rev == "-C" || rev == "--find-renames" || rev == "--find-copies" {
         } else {
             parsed_revs.push(rev);
         }
     }
-    Ok((parsed_revs, parsed_max_count, parsed_zero))
+    Ok(LateLogRevOptions {
+        revs: parsed_revs,
+        max_count: parsed_max_count,
+        zero: parsed_zero,
+        regexp_ignore_case: parsed_regexp_ignore_case,
+        basic_regexp: parsed_basic_regexp,
+        extended_regexp: parsed_extended_regexp,
+        fixed_strings: parsed_fixed_strings,
+        perl_regexp: parsed_perl_regexp,
+        topo_order: parsed_topo_order,
+        date_order: parsed_date_order,
+        author_date_order: parsed_author_date_order,
+    })
 }
 
 struct LogParsedRevs {
@@ -8459,6 +9996,26 @@ struct LogParsedRevs {
     pathspecs: Vec<String>,
     format: Option<String>,
     pretty: Option<String>,
+    encoding: Option<String>,
+}
+
+fn history_revs_with_stdin(revs: &[String], stdin: bool) -> Result<Vec<String>> {
+    let mut resolved = revs.to_vec();
+    if !stdin {
+        return Ok(resolved);
+    }
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .map_err(CliError::Io)?;
+    resolved.extend(
+        input
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned),
+    );
+    Ok(resolved)
 }
 
 fn split_log_revs_and_pickaxe(
@@ -8484,6 +10041,7 @@ fn split_log_revs_and_pickaxe(
     let mut parsed_pathspecs = Vec::new();
     let mut parsed_format = None;
     let mut parsed_pretty = None;
+    let mut parsed_encoding = None;
     let mut iter = revs.into_iter();
     while let Some(rev) = iter.next() {
         if rev == "-S" {
@@ -8562,6 +10120,24 @@ fn split_log_revs_and_pickaxe(
             parsed_pretty = Some(value);
         } else if let Some(value) = rev.strip_prefix("--pretty=") {
             parsed_pretty = Some(value.to_owned());
+        } else if rev == "--encoding" {
+            let Some(value) = iter.next() else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option '--encoding' requires a value".into(),
+                });
+            };
+            parsed_encoding = Some(value);
+        } else if let Some(value) = rev.strip_prefix("--encoding=") {
+            parsed_encoding = Some(value.to_owned());
+        } else if rev == "--date" {
+            if iter.next().is_none() {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option '--date' requires a value".into(),
+                });
+            }
+        } else if rev.starts_with("--date=") || rev == "--relative-date" {
         } else if rev == "--decorate" {
             parsed_decorate = Some(LogDecorationMode::Short);
         } else if let Some(value) = rev.strip_prefix("--decorate=") {
@@ -8588,6 +10164,7 @@ fn split_log_revs_and_pickaxe(
         pathspecs: parsed_pathspecs,
         format: parsed_format,
         pretty: parsed_pretty,
+        encoding: parsed_encoding,
     })
 }
 
@@ -8772,11 +10349,15 @@ where
         revs.to_vec()
     };
     let mut commits = Vec::new();
+    let mut seen = HashSet::new();
     for root in roots {
         if max_count.is_some_and(|limit| commits.len() >= limit) {
             break;
         }
         let id = resolve_commitish(repo, store, &root)?;
+        if !seen.insert(id.clone()) {
+            continue;
+        }
         let commit = commit_cache.read_commit(&id)?;
         commits.push(CollectedCommit { id, commit });
     }
@@ -8822,26 +10403,26 @@ where
 
 fn log_reflog(
     options: &LogOptions<'_>,
-    revs: Vec<String>,
+    parsed_revs: &LogParsedRevs,
     max_count: Option<usize>,
-    parsed_format: Option<&str>,
-    parsed_pretty: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let explicit_format = parsed_format
+    let explicit_format = parsed_revs
+        .format
+        .as_deref()
         .or(options.format)
-        .or(parsed_pretty)
+        .or(parsed_revs.pretty.as_deref())
         .or(options.pretty);
-    let embedded_format = log_reflog_embedded_format(&revs);
+    let embedded_format = log_reflog_embedded_format(&parsed_revs.revs);
     let format = explicit_format.or(embedded_format).unwrap_or("%gd %H %gs");
     let format = format.strip_prefix("format:").unwrap_or(format);
     let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date)
-        .or_else(|| log_reflog_embedded_date(&revs).map(str::to_owned));
+        .or_else(|| log_reflog_embedded_date(&parsed_revs.revs).map(str::to_owned));
     let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let custom_format = explicit_format
         .or(embedded_format)
         .map(|value| value.strip_prefix("format:").unwrap_or(value));
-    if let Some(patterns) = log_reflog_branch_patterns(&revs) {
+    if let Some(patterns) = log_reflog_branch_patterns(&parsed_revs.revs) {
         return log_reflog_branches(
             &repo,
             format,
@@ -8849,25 +10430,465 @@ fn log_reflog(
             date_mode,
             &patterns,
             max_count,
-            options.walk_reflogs,
+            true,
             &options.grep_reflog,
             options.regexp_ignore_case,
         );
     }
-    let target = revs.first().map(String::as_str).unwrap_or("HEAD");
-    log_reflog_target(
+    log_reflog_targets(
         &repo,
-        format,
+        options,
+        parsed_revs,
+        max_count,
         custom_format,
         date_mode,
-        target,
-        max_count,
-        false,
-        options.walk_reflogs,
-        &options.grep_reflog,
-        options.regexp_ignore_case,
+        date_arg.as_deref(),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum LogReflogTargetSelector {
+    None,
+    Index(usize),
+    Date,
+}
+
+struct LogReflogRecord {
+    display: String,
+    index: usize,
+    target_order: usize,
+    selector: LogReflogTargetSelector,
+    entry: ReflogEntry,
+}
+
+fn log_reflog_targets(
+    repo: &GitRepo,
+    options: &LogOptions<'_>,
+    parsed_revs: &LogParsedRevs,
+    max_count: Option<usize>,
+    custom_format: Option<&str>,
+    date_mode: LogDateMode<'_>,
+    date_arg: Option<&str>,
+) -> Result<()> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let (reflog_revs, implicit_pathspecs) =
+        split_log_implicit_pathspecs(repo, parsed_revs.revs.clone());
+    let mut targets = reflog_revs
+        .iter()
+        .filter(|rev| !rev.starts_with('-'))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if targets.is_empty() {
+        targets.push("HEAD");
+    }
+    let mut records = Vec::new();
+    for (target_order, target) in targets.into_iter().enumerate() {
+        collect_log_reflog_records(repo, target, target_order, &mut records)?;
+    }
+    records.sort_by(|left, right| {
+        right
+            .entry
+            .timestamp
+            .cmp(&left.entry.timestamp)
+            .then_with(|| left.target_order.cmp(&right.target_order))
+            .then_with(|| left.index.cmp(&right.index))
+    });
+
+    let (since, until) = resolve_history_age_bounds(
+        options.raw_args,
+        options.since.or(options.since_as_filter),
+        options.max_age,
+        options.until,
+        options.min_age,
+    );
+    let since = parse_log_since(since).flatten();
+    let until = parse_log_until(until).flatten();
+    let (_, max_parents) = parse_log_parent_bounds(
+        options.min_parents,
+        options.no_min_parents,
+        options.no_merges,
+        options.max_parents,
+        options.no_max_parents,
+        options.merges,
     )?;
+    let mut raw_pathspecs = parsed_revs.pathspecs.clone();
+    raw_pathspecs.extend(implicit_pathspecs);
+    let pathspecs = raw_pathspecs
+        .iter()
+        .map(|path| path_arg_to_repo_relative_lexical(repo, Path::new(path)))
+        .collect::<Result<Vec<_>>>()?;
+    let explicit_selector_date = history_has_explicit_date_arg(options.raw_args)
+        || log_reflog_embedded_date(&parsed_revs.revs).is_some();
+    let selector_date_mode = if explicit_selector_date {
+        log_reflog_date_mode(date_arg.unwrap_or("default"))?
+    } else {
+        ReflogDateMode::Index
+    };
+    let format = log_reflog_format(options, parsed_revs)?;
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
+    let abbrev_len = if options.no_abbrev_commit {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        configured_default_abbrev_len(repo, &store)?
+    };
+    let default_commit_abbrev = options.reflog || options.abbrev_commit;
+    let diff_format = options.diff_format(parsed_revs.patch);
+    let merge_diff_mode = options.merge_diff_mode(repo, diff_format)?;
+    let ignore_matching_lines = compile_ignore_matching_lines(&parsed_revs.ignore_matching_lines)?;
+    let show_root = options.root || log_showroot_enabled(repo)?;
+    let mut emitted = 0usize;
+    let limit = max_count.unwrap_or(usize::MAX);
+    let mut out = io::stdout().lock();
+
+    for record in records {
+        if emitted >= limit {
+            break;
+        }
+        if since.is_some_and(|value| record.entry.timestamp < value)
+            || until.is_some_and(|value| record.entry.timestamp > value)
+            || record.entry.new_id == zero_object_id()
+        {
+            continue;
+        }
+        if !options.grep_reflog.is_empty()
+            && !shortlog_commit_matches_grep(
+                record.entry.message.as_bytes(),
+                &options.grep_reflog,
+                false,
+                false,
+                options.regexp_ignore_case,
+                ShortlogPatternMode::Basic,
+            )?
+        {
+            continue;
+        }
+        let commit = commit_cache.read_commit(&record.entry.new_id)?;
+        let matches_pathspec = if pathspecs.is_empty() {
+            true
+        } else if commit.parents.len() > 1 {
+            let mut matches_all_parents = true;
+            for parent_index in 0..commit.parents.len() {
+                if !commit_diff_against_parent_has_entries(
+                    repo,
+                    &store,
+                    commit.as_ref(),
+                    parent_index,
+                    empty_pickaxe_options(),
+                    &pathspecs,
+                )? {
+                    matches_all_parents = false;
+                    break;
+                }
+            }
+            matches_all_parents
+        } else {
+            show_commit_matches_pathspec(
+                repo,
+                &store,
+                commit.as_ref(),
+                merge_diff_mode,
+                true,
+                empty_pickaxe_options(),
+                &pathspecs,
+                None,
+            )?
+        };
+        if max_parents.is_some_and(|limit| commit.parents.len() > limit) || !matches_pathspec {
+            continue;
+        }
+        let record_date_mode = match record.selector {
+            LogReflogTargetSelector::Date if !explicit_selector_date => ReflogDateMode::Default,
+            LogReflogTargetSelector::Index(_) => ReflogDateMode::Index,
+            _ => selector_date_mode,
+        };
+        let selector = reflog_selector(record.index, &record.entry, record_date_mode)?;
+        let selector = format!("{}@{{{selector}}}", record.display);
+        let rendered = render_log_reflog_record(
+            &format,
+            custom_format,
+            &record,
+            commit.as_ref(),
+            &selector,
+            abbrev_len,
+            default_commit_abbrev,
+            &decorations,
+            &notes,
+            date_mode,
+        )?;
+        if emitted > 0 && log_reflog_format_is_multiline(&format) {
+            out.write_all(b"\n")?;
+        }
+        out.write_all(rendered.as_bytes())?;
+        if let Some(diff_format) = diff_format {
+            if !rendered.ends_with('\n') {
+                out.write_all(b"\n")?;
+            }
+            out.write_all(b"\n")?;
+            drop(out);
+            show_commit_diff(
+                repo,
+                &store,
+                commit.as_ref(),
+                diff_format,
+                merge_diff_mode,
+                options.dense_combined,
+                show_root,
+                empty_pickaxe_options(),
+                &ignore_matching_lines,
+                &pathspecs,
+                None,
+                None,
+                false,
+                None,
+                None,
+                false,
+            )?;
+            out = io::stdout().lock();
+        }
+        emitted += 1;
+    }
     Ok(())
+}
+
+fn collect_log_reflog_records(
+    repo: &GitRepo,
+    target: &str,
+    target_order: usize,
+    records: &mut Vec<LogReflogRecord>,
+) -> Result<()> {
+    let resolved_target = resolve_previous_checkout_expression(repo, target)?;
+    let target = resolved_target.as_deref().unwrap_or(target);
+    let (base, selector) = parse_log_reflog_target(target)?;
+    let path = reflog_path(repo, &base)?;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                && resolve_objectish(repo, &base).is_ok() =>
+        {
+            return Ok(());
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let display = normalize_reflog_display_target(repo, &base)?;
+    let mut index = 0usize;
+    for_each_reflog_line_rev(file, |line| {
+        let Some(entry) = parse_reflog_entry(line) else {
+            return Ok(());
+        };
+        let include = match selector {
+            LogReflogTargetSelector::None => true,
+            LogReflogTargetSelector::Index(selected) => index >= selected,
+            LogReflogTargetSelector::Date => true,
+        };
+        if include {
+            records.push(LogReflogRecord {
+                display: display.clone(),
+                index,
+                target_order,
+                selector,
+                entry,
+            });
+        }
+        index += 1;
+        Ok(())
+    })?;
+    if let Some(timestamp) = log_reflog_target_date(target)? {
+        records.retain(|record| {
+            record.target_order != target_order || record.entry.timestamp <= timestamp
+        });
+    }
+    Ok(())
+}
+
+fn parse_log_reflog_target(target: &str) -> Result<(String, LogReflogTargetSelector)> {
+    let Some(prefix) = target.strip_suffix('}') else {
+        return Ok((target.to_owned(), LogReflogTargetSelector::None));
+    };
+    let Some((base, raw)) = prefix.rsplit_once("@{") else {
+        return Ok((target.to_owned(), LogReflogTargetSelector::None));
+    };
+    let base = if base.is_empty() { "HEAD" } else { base }.to_owned();
+    if let Ok(index) = raw.parse::<usize>() {
+        return Ok((base, LogReflogTargetSelector::Index(index)));
+    }
+    parse_reflog_selector_timestamp(raw).map_err(CliError::Io)?;
+    Ok((base, LogReflogTargetSelector::Date))
+}
+
+fn log_reflog_target_date(target: &str) -> Result<Option<i64>> {
+    let Some(prefix) = target.strip_suffix('}') else {
+        return Ok(None);
+    };
+    let Some((_, raw)) = prefix.rsplit_once("@{") else {
+        return Ok(None);
+    };
+    if raw.parse::<usize>().is_ok() {
+        return Ok(None);
+    }
+    parse_reflog_selector_timestamp(raw)
+        .map(Some)
+        .map_err(CliError::Io)
+}
+
+fn history_has_explicit_date_arg(raw_args: &[String]) -> bool {
+    raw_args
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--date" || arg == "--relative-date" || arg.starts_with("--date="))
+}
+
+fn log_reflog_date_mode(value: &str) -> Result<ReflogDateMode> {
+    let value = value
+        .strip_suffix("-local")
+        .unwrap_or(value)
+        .strip_prefix("format:")
+        .unwrap_or(value);
+    parse_reflog_date_mode(value).or(Ok(ReflogDateMode::Default))
+}
+
+fn log_reflog_format<'a>(
+    options: &LogOptions<'a>,
+    parsed_revs: &'a LogParsedRevs,
+) -> Result<LogFormat<'a>> {
+    let embedded = log_reflog_embedded_format(&parsed_revs.revs);
+    let format = parsed_revs
+        .format
+        .as_deref()
+        .or(options.format)
+        .or(embedded);
+    let pretty = parsed_revs.pretty.as_deref().or(options.pretty);
+    if format.is_none() && pretty.is_none() && options.reflog && !options.oneline {
+        return Ok(LogFormat::ShortOneline);
+    }
+    LogFormat::parse(options.oneline, format, pretty)
+}
+
+fn log_reflog_format_is_multiline(format: &LogFormat<'_>) -> bool {
+    matches!(
+        format,
+        LogFormat::Default | LogFormat::Short | LogFormat::Full | LogFormat::Fuller
+    )
+}
+
+fn render_log_reflog_record(
+    format: &LogFormat<'_>,
+    _custom_format: Option<&str>,
+    record: &LogReflogRecord,
+    commit: &zmin_git_core::CommitObject,
+    selector: &str,
+    abbrev_len: usize,
+    default_commit_abbrev: bool,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    let mut rendered = match format {
+        LogFormat::ShortOneline => format!(
+            "{} {selector}: {}",
+            short_object_id_len(&record.entry.new_id, abbrev_len),
+            record.entry.message
+        ),
+        LogFormat::FullOneline => format!(
+            "{} {selector}: {}",
+            record.entry.new_id.to_hex(),
+            record.entry.message
+        ),
+        LogFormat::Custom { pattern, .. } => render_log_reflog_custom_format(
+            pattern,
+            record,
+            commit,
+            selector,
+            abbrev_len,
+            decorations,
+            notes,
+            date_mode,
+        )?,
+        _ => {
+            let rendered = format.render_with_context(
+                &record.entry.new_id,
+                commit,
+                false,
+                abbrev_len,
+                None,
+                default_commit_abbrev,
+                true,
+                decorations,
+                notes,
+                date_mode,
+            )?;
+            insert_reflog_headers(rendered, selector, &record.entry)
+        }
+    };
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    Ok(rendered)
+}
+
+fn insert_reflog_headers(mut rendered: String, selector: &str, entry: &ReflogEntry) -> String {
+    let first_end = rendered.find('\n').map(|index| index + 1).unwrap_or(0);
+    let insert_at = if rendered[first_end..].starts_with("Merge:") {
+        first_end
+            + rendered[first_end..]
+                .find('\n')
+                .map(|index| index + 1)
+                .unwrap_or(0)
+    } else {
+        first_end
+    };
+    let headers = format!(
+        "Reflog: {selector} ({})\nReflog message: {}\n",
+        entry.identity, entry.message
+    );
+    rendered.insert_str(insert_at, &headers);
+    rendered
+}
+
+fn render_log_reflog_custom_format(
+    pattern: &str,
+    record: &LogReflogRecord,
+    commit: &zmin_git_core::CommitObject,
+    selector: &str,
+    abbrev_len: usize,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    const SELECTOR_TOKEN: &str = "\u{1f}zmin-reflog-selector\u{1f}";
+    const SUBJECT_TOKEN: &str = "\u{1f}zmin-reflog-subject\u{1f}";
+    let mut rewritten = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '%' && chars.peek() == Some(&'g') {
+            chars.next();
+            match chars.next() {
+                Some('d' | 'D') => rewritten.push_str(SELECTOR_TOKEN),
+                Some('s') => rewritten.push_str(SUBJECT_TOKEN),
+                Some(atom) => {
+                    rewritten.push('%');
+                    rewritten.push('g');
+                    rewritten.push(atom);
+                }
+                None => rewritten.push_str("%g"),
+            }
+        } else {
+            rewritten.push(ch);
+        }
+    }
+    Ok(render_log_format(
+        &rewritten,
+        &record.entry.new_id,
+        commit,
+        abbrev_len,
+        decorations,
+        notes,
+        date_mode,
+    )?
+    .replace(SELECTOR_TOKEN, selector)
+    .replace(SUBJECT_TOKEN, &record.entry.message))
 }
 
 fn log_reflog_target(
@@ -8884,6 +10905,7 @@ fn log_reflog_target(
 ) -> Result<usize> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
+    let display_target = normalize_reflog_display_target(repo, target)?;
     let path = reflog_path(&repo, target)?;
     let file = match fs::File::open(&path) {
         Ok(file) => file,
@@ -8925,7 +10947,7 @@ fn log_reflog_target(
         }
         let rendered = if let Some(pattern) = custom_format {
             if render_reflog_placeholders && log_format_uses_placeholder(pattern, 'g') {
-                render_reflog_log_format(pattern, target, entry_index, &entry)?
+                render_reflog_log_format(pattern, &display_target, entry_index, &entry)?
             } else {
                 let commit = commit_cache.read_commit(&entry.new_id)?;
                 render_log_format(
@@ -8939,13 +10961,31 @@ fn log_reflog_target(
                 )?
             }
         } else {
-            render_reflog_log_format(format, target, entry_index, &entry)?
+            render_reflog_log_format(format, &display_target, entry_index, &entry)?
         };
         println!("{rendered}");
         emitted += 1;
         Ok(())
     })?;
     Ok(emitted)
+}
+
+fn normalize_reflog_display_target(repo: &GitRepo, target: &str) -> Result<String> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let resolved_previous = resolve_previous_checkout_expression(repo, target)
+        .ok()
+        .flatten();
+    let target = resolved_previous.as_deref().unwrap_or(target);
+    if target == "HEAD" || target.starts_with("refs/") {
+        return Ok(target.to_owned());
+    }
+    if target == "stash" {
+        return Ok("stash".to_owned());
+    }
+    if let Some(ref_name) = branch_checkout_ref(&refs, target)? {
+        return Ok(branch_display_name(&ref_name));
+    }
+    Ok(target.to_owned())
 }
 
 fn log_reflog_branch_patterns(revs: &[String]) -> Option<Vec<String>> {
@@ -9099,7 +11139,7 @@ fn reflog_default_date(entry: &ReflogEntry) -> Result<String> {
         })?;
     Ok(utc
         .with_timezone(&offset)
-        .format("%a %b %e %H:%M:%S %Y %z")
+        .format("%a %b %-d %H:%M:%S %Y %z")
         .to_string())
 }
 
@@ -9149,6 +11189,8 @@ fn raw_arg_last_toggle(
         match arg.as_str() {
             value if value == enabled_name => last = Some(true),
             value if value == disabled_name => last = Some(false),
+            value if value.starts_with(&(enabled_name.to_owned() + "=")) => last = Some(true),
+            value if value.starts_with(&(disabled_name.to_owned() + "=")) => last = Some(false),
             _ => {}
         }
     }
@@ -9336,6 +11378,9 @@ fn seconds_since_midnight_utc() -> Option<i64> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LogFormat<'a> {
     Default,
+    Short,
+    Full,
+    Fuller,
     ShortOneline,
     FullOneline,
     Custom {
@@ -9365,8 +11410,35 @@ fn parse_log_decoration_mode(value: Option<&str>) -> Result<Option<LogDecoration
     }
 }
 
+fn log_configured_decoration_mode(repo: &GitRepo) -> Result<Option<LogDecorationMode>> {
+    let Some(entry) = read_config_entry(repo, "log.decorate")? else {
+        return Ok(None);
+    };
+    parse_log_decoration_mode(Some(if entry.implicit_bool {
+        ""
+    } else {
+        &entry.value
+    }))
+    .map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("bad config value '{}' for 'log.decorate'", entry.value),
+    })
+}
+
 pub(crate) struct LogDecorations {
-    entries: HashMap<String, Vec<String>>,
+    entries: HashMap<ObjectId, LogDecorationEntry>,
+}
+
+struct LogDecorationEntry {
+    items: Vec<String>,
+    joined: String,
+    wrapped: String,
+}
+
+struct LogDecorationRefRow {
+    ref_name: String,
+    target: ObjectId,
+    annotated_tag: bool,
 }
 
 impl LogDecorations {
@@ -9378,52 +11450,155 @@ impl LogDecorations {
 
     fn load(
         repo: &GitRepo,
-        _store: &LooseObjectStore,
+        store: &LooseObjectStore,
         mode: Option<LogDecorationMode>,
         clear_decorations: bool,
+        ref_snapshot: Option<&RevListRefSnapshot>,
     ) -> Result<Self> {
         let Some(mode) = mode else {
             return Ok(Self::empty());
         };
-        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let refs = RefStore::new(log_repo_common_dir(repo), GitHashAlgorithm::Sha1);
         let mut decorations = Self::empty();
-        let current_branch = current_branch_ref(&refs)?;
-        if let Ok(head_id) = refs.resolve("HEAD") {
+        let current_branch = current_branch_ref(&head_refs).map_err(|error| match error {
+            CliError::Io(inner)
+                if matches!(
+                    inner.kind(),
+                    io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData
+                ) =>
+            {
+                CliError::Fatal {
+                    code: 128,
+                    message: "your current branch appears to be broken".into(),
+                }
+            }
+            other => other,
+        })?;
+        if let Some(head_id) = ref_snapshot
+            .and_then(|snapshot| snapshot.head_id.clone())
+            .or_else(|| {
+                current_branch
+                    .as_deref()
+                    .and_then(|branch| refs.resolve(branch).ok())
+            })
+            .or_else(|| head_refs.resolve("HEAD").ok())
+            && let Some(head_target) = peel_to_commit(store, head_id)?
+        {
             let display = match current_branch.as_deref() {
                 Some(branch) => format!("HEAD -> {}", decorate_ref_name(branch, mode, true)),
                 None => "HEAD".to_owned(),
             };
-            decorations.add(head_id, display);
+            decorations.add(head_target, display);
         }
 
         let prefix = if clear_decorations { "refs/" } else { "refs/" };
-        let mut ref_rows = Vec::<(String, ObjectId)>::new();
-        refs.for_each_resolved_ref(prefix, |ref_name, id| {
-            if !clear_decorations && !log_decorates_ref_by_default(ref_name) {
-                return Ok(());
+        let mut ref_rows = Vec::<LogDecorationRefRow>::new();
+        if let Some(snapshot) = ref_snapshot {
+            for row in &snapshot.refs {
+                if !row.ref_name.starts_with(prefix) {
+                    continue;
+                }
+                if !clear_decorations && !log_decorates_ref_by_default(&row.ref_name) {
+                    continue;
+                }
+                if current_branch.as_deref() == Some(row.ref_name.as_str()) {
+                    continue;
+                }
+                let annotated_tag = if row.ref_name.starts_with("refs/tags/") {
+                    matches!(store.read_object(&row.id)?.kind, GitObjectKind::Tag)
+                } else {
+                    false
+                };
+                let Some(target) = peel_to_commit(store, row.id.clone())? else {
+                    continue;
+                };
+                ref_rows.push(LogDecorationRefRow {
+                    ref_name: row.ref_name.clone(),
+                    target,
+                    annotated_tag,
+                });
             }
-            if current_branch.as_deref() == Some(ref_name) {
-                return Ok(());
-            }
-            ref_rows.push((ref_name.to_owned(), id.clone()));
-            Ok::<(), CliError>(())
-        })?;
+        } else {
+            refs.for_each_resolved_ref(prefix, |ref_name, id| {
+                if !clear_decorations && !log_decorates_ref_by_default(ref_name) {
+                    return Ok(());
+                }
+                if current_branch.as_deref() == Some(ref_name) {
+                    return Ok(());
+                }
+                let annotated_tag = if ref_name.starts_with("refs/tags/") {
+                    matches!(store.read_object(id)?.kind, GitObjectKind::Tag)
+                } else {
+                    false
+                };
+                let Some(target) = peel_to_commit(store, id.clone())? else {
+                    return Ok(());
+                };
+                ref_rows.push(LogDecorationRefRow {
+                    ref_name: ref_name.to_owned(),
+                    target,
+                    annotated_tag,
+                });
+                Ok::<(), CliError>(())
+            })?;
+        }
         ref_rows.sort_by(|left, right| {
-            log_decoration_sort_key(&left.0).cmp(&log_decoration_sort_key(&right.0))
+            if left.ref_name.starts_with("refs/heads/") && right.ref_name.starts_with("refs/heads/")
+            {
+                return right.ref_name.cmp(&left.ref_name);
+            }
+            let left_key = log_decoration_sort_key(&left.ref_name, left.annotated_tag);
+            let right_key = log_decoration_sort_key(&right.ref_name, right.annotated_tag);
+            left_key.cmp(&right_key)
         });
-        for (ref_name, id) in ref_rows {
-            decorations.add(id, decorate_ref_name(&ref_name, mode, false));
+        for row in ref_rows {
+            decorations.add(row.target, decorate_ref_name(&row.ref_name, mode, false));
         }
         Ok(decorations)
     }
 
     fn add(&mut self, id: ObjectId, display: String) {
-        self.entries.entry(id.to_hex()).or_default().push(display);
+        let entry = self
+            .entries
+            .entry(id)
+            .or_insert_with(|| LogDecorationEntry {
+                items: Vec::new(),
+                joined: String::new(),
+                wrapped: String::new(),
+            });
+        if !entry.joined.is_empty() {
+            entry.joined.push_str(", ");
+        }
+        entry.joined.push_str(&display);
+        entry.items.push(display);
+        entry.wrapped.clear();
+        entry.wrapped.push_str(" (");
+        entry.wrapped.push_str(&entry.joined);
+        entry.wrapped.push(')');
     }
 
     fn get(&self, id: &ObjectId) -> Option<&[String]> {
-        self.entries.get(&id.to_hex()).map(Vec::as_slice)
+        self.entries.get(id).map(|entry| entry.items.as_slice())
     }
+
+    fn joined(&self, id: &ObjectId) -> Option<&str> {
+        self.entries
+            .get(id)
+            .filter(|entry| !entry.joined.is_empty())
+            .map(|entry| entry.joined.as_str())
+    }
+
+    fn wrapped(&self, id: &ObjectId) -> Option<&str> {
+        self.entries
+            .get(id)
+            .filter(|entry| !entry.items.is_empty())
+            .map(|entry| entry.wrapped.as_str())
+    }
+}
+
+fn log_repo_common_dir(repo: &GitRepo) -> &Path {
+    repo.objects_dir.parent().unwrap_or(&repo.git_dir)
 }
 
 fn log_decorates_ref_by_default(ref_name: &str) -> bool {
@@ -9432,21 +11607,21 @@ fn log_decorates_ref_by_default(ref_name: &str) -> bool {
         || ref_name.starts_with("refs/tags/")
 }
 
-fn log_decoration_sort_key(ref_name: &str) -> (u8, &str, u8, &str) {
+fn log_decoration_sort_key(ref_name: &str, annotated_tag: bool) -> (u8, u8, &str, u8, &str) {
     if let Some(short) = ref_name.strip_prefix("refs/tags/") {
-        return (0, short, 0, "");
+        return (0, u8::from(!annotated_tag), short, 0, "");
     }
     if let Some(short) = ref_name.strip_prefix("refs/remotes/") {
         if let Some((remote, name)) = short.split_once('/') {
             let remote_head = u8::from(name == "HEAD");
-            return (1, remote, remote_head, name);
+            return (1, 0, remote, remote_head, name);
         }
-        return (1, short, 0, "");
+        return (1, 0, short, 0, "");
     }
     if let Some(short) = ref_name.strip_prefix("refs/heads/") {
-        return (2, short, 0, "");
+        return (2, 0, short, 0, "");
     }
-    (3, ref_name, 0, "")
+    (3, 0, ref_name, 0, "")
 }
 
 fn decorate_ref_name(ref_name: &str, mode: LogDecorationMode, head_target: bool) -> String {
@@ -9475,7 +11650,7 @@ fn decorate_ref_name(ref_name: &str, mode: LogDecorationMode, head_target: bool)
 }
 
 pub(crate) struct LogNotes {
-    entries: HashMap<String, Vec<u8>>,
+    entries: HashMap<ObjectId, Vec<u8>>,
 }
 
 impl LogNotes {
@@ -9497,14 +11672,16 @@ impl LogNotes {
         for (object, note_id) in notes {
             let note = store.read_object(&note_id)?;
             if note.kind == GitObjectKind::Blob {
-                entries.insert(object, note.content);
+                let object_id =
+                    ObjectId::from_hex(GitHashAlgorithm::Sha1, &object).map_err(CliError::Io)?;
+                entries.insert(object_id, note.content);
             }
         }
         Ok(Self { entries })
     }
 
     pub(crate) fn get(&self, id: &ObjectId) -> Option<&[u8]> {
-        self.entries.get(&id.to_hex()).map(Vec::as_slice)
+        self.entries.get(id).map(Vec::as_slice)
     }
 }
 
@@ -9522,6 +11699,10 @@ impl<'a> LogFormat<'a> {
         }
         if let Some(raw) = format {
             return match raw {
+                "short" => Ok(Self::Short),
+                "medium" | "default" => Ok(Self::Default),
+                "full" => Ok(Self::Full),
+                "fuller" => Ok(Self::Fuller),
                 "oneline" => Ok(Self::FullOneline),
                 pattern => Ok(Self::Custom {
                     pattern: pattern.strip_prefix("format:").unwrap_or(pattern),
@@ -9537,6 +11718,9 @@ impl<'a> LogFormat<'a> {
         };
         match raw {
             "" | "medium" | "default" => Ok(Self::Default),
+            "short" => Ok(Self::Short),
+            "full" => Ok(Self::Full),
+            "fuller" => Ok(Self::Fuller),
             "oneline" => Ok(Self::FullOneline),
             pattern => Ok(Self::Custom {
                 pattern: pattern.strip_prefix("format:").unwrap_or(pattern),
@@ -9548,7 +11732,7 @@ impl<'a> LogFormat<'a> {
     pub(crate) fn terminates_lines(&self) -> bool {
         match self {
             Self::ShortOneline | Self::FullOneline => true,
-            Self::Default => false,
+            Self::Default | Self::Short | Self::Full | Self::Fuller => false,
             Self::Custom {
                 terminates_lines, ..
             } => *terminates_lines,
@@ -9557,7 +11741,7 @@ impl<'a> LogFormat<'a> {
 
     pub(crate) fn separates_patch(&self) -> bool {
         match self {
-            Self::Default => true,
+            Self::Default | Self::Short | Self::Full | Self::Fuller => true,
             Self::ShortOneline | Self::FullOneline => false,
             Self::Custom {
                 terminates_lines, ..
@@ -9567,8 +11751,27 @@ impl<'a> LogFormat<'a> {
 
     fn uses_decoration_placeholder(&self) -> bool {
         match self {
-            Self::Custom { pattern, .. } => log_format_uses_placeholder(pattern, 'D'),
+            Self::Custom { pattern, .. } => {
+                log_format_uses_placeholder(pattern, 'd')
+                    || log_format_uses_placeholder(pattern, 'D')
+            }
             _ => false,
+        }
+    }
+
+    fn uses_notes_display(&self) -> bool {
+        match self {
+            Self::Default | Self::Short | Self::Full | Self::Fuller => true,
+            Self::Custom { pattern, .. } => log_format_uses_placeholder(pattern, 'N'),
+            Self::ShortOneline | Self::FullOneline => false,
+        }
+    }
+
+    fn uses_abbreviated_object_id(&self) -> bool {
+        match self {
+            Self::ShortOneline => true,
+            Self::Custom { pattern, .. } => log_format_uses_placeholder(pattern, 'h'),
+            Self::Default | Self::Short | Self::Full | Self::Fuller | Self::FullOneline => false,
         }
     }
 
@@ -9646,6 +11849,40 @@ impl<'a> LogFormat<'a> {
                 notes,
                 date_mode,
             ),
+            Self::Short => render_short_log(
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                marker,
+                default_commit_abbrev,
+                expand_tabs,
+                notes,
+            ),
+            Self::Full => render_full_log(
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                marker,
+                default_commit_abbrev,
+                expand_tabs,
+                decorations,
+                notes,
+                false,
+            ),
+            Self::Fuller => render_full_log(
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                marker,
+                default_commit_abbrev,
+                expand_tabs,
+                decorations,
+                notes,
+                true,
+            ),
             Self::ShortOneline => Ok(format!(
                 "{}{}{}{} {}",
                 marker
@@ -9720,14 +11957,38 @@ impl<'a> LogFormat<'a> {
     }
 }
 
+fn log_output_abbrev_len<'a, I>(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    no_abbrev_commit: bool,
+    uses_abbreviated_ids: bool,
+    ids: I,
+) -> Result<usize>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let _trace = phase_trace("log.abbrev");
+    let full_len = GitHashAlgorithm::Sha1.digest_len() * 2;
+    if no_abbrev_commit || !uses_abbreviated_ids {
+        return Ok(full_len);
+    }
+    let ids = ids.into_iter().cloned().collect::<Vec<_>>();
+    configured_default_abbrev_len_for_ids(repo, store, &ids)
+}
+
 fn render_oneline_decorations(decorations: &LogDecorations, id: &ObjectId) -> String {
-    let Some(items) = decorations.get(id) else {
-        return String::new();
-    };
-    if items.is_empty() {
-        String::new()
+    decorations.wrapped(id).unwrap_or_default().to_owned()
+}
+
+fn render_log_decorations<'a>(
+    decorations: &'a LogDecorations,
+    id: &ObjectId,
+    wrapped: bool,
+) -> &'a str {
+    if wrapped {
+        decorations.wrapped(id).unwrap_or_default()
     } else {
-        format!(" ({})", items.join(", "))
+        decorations.joined(id).unwrap_or_default()
     }
 }
 
@@ -9754,15 +12015,11 @@ fn render_default_log(
     } else {
         out.push_str(&id.to_hex());
     }
-    if let Some(items) = decorations.get(id)
-        && !items.is_empty()
-    {
-        out.push_str(" (");
-        out.push_str(&items.join(", "));
-        out.push(')');
-    }
     if parents {
         out.push_str(&parent_suffix(commit, true));
+    }
+    if let Some(wrapped) = decorations.wrapped(id) {
+        out.push_str(wrapped);
     }
     out.push('\n');
     if commit.parents.len() > 1 {
@@ -9781,6 +12038,139 @@ fn render_default_log(
     out.push_str("Date:   ");
     out.push_str(&format_log_date(&commit.author, date_mode)?);
     out.push_str("\n\n");
+    for line in split_log_message_lines(&commit.message) {
+        out.push_str("    ");
+        append_indented_log_line(&mut out, line, expand_tabs);
+        out.push('\n');
+    }
+    if let Some(note) = notes.get(id) {
+        out.push('\n');
+        out.push_str("Notes:\n");
+        for line in split_log_message_lines(note) {
+            out.push_str("    ");
+            append_indented_log_line(&mut out, line, expand_tabs);
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+fn render_short_log(
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    parents: bool,
+    abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
+    default_commit_abbrev: bool,
+    expand_tabs: bool,
+    notes: &LogNotes,
+) -> Result<String> {
+    let mut out = String::new();
+    out.push_str("commit ");
+    if let Some(marker) = marker {
+        out.push(marker.rev_list_prefix());
+        out.push(' ');
+    }
+    if default_commit_abbrev {
+        out.push_str(&short_object_id_len(id, abbrev_len));
+    } else {
+        out.push_str(&id.to_hex());
+    }
+    if parents {
+        out.push_str(&parent_suffix(commit, true));
+    }
+    out.push('\n');
+    out.push_str("Author: ");
+    out.push_str(&signature_name(&commit.author));
+    out.push_str(" <");
+    out.push_str(&signature_email(&commit.author));
+    out.push_str(">\n\n");
+    for line in split_log_message_lines(&commit.message) {
+        out.push_str("    ");
+        append_indented_log_line(&mut out, line, expand_tabs);
+        out.push('\n');
+    }
+    if let Some(note) = notes.get(id) {
+        out.push('\n');
+        out.push_str("Notes:\n");
+        for line in split_log_message_lines(note) {
+            out.push_str("    ");
+            append_indented_log_line(&mut out, line, expand_tabs);
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+fn render_full_log(
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    parents: bool,
+    abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
+    default_commit_abbrev: bool,
+    expand_tabs: bool,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    fuller: bool,
+) -> Result<String> {
+    let mut out = String::new();
+    out.push_str("commit ");
+    if let Some(marker) = marker {
+        out.push(marker.rev_list_prefix());
+        out.push(' ');
+    }
+    if default_commit_abbrev {
+        out.push_str(&short_object_id_len(id, abbrev_len));
+    } else {
+        out.push_str(&id.to_hex());
+    }
+    if parents {
+        out.push_str(&parent_suffix(commit, true));
+    }
+    if let Some(wrapped) = decorations.wrapped(id) {
+        out.push_str(wrapped);
+    }
+    out.push('\n');
+    if commit.parents.len() > 1 {
+        out.push_str("Merge:");
+        for parent in &commit.parents {
+            out.push(' ');
+            out.push_str(&short_object_id_len(parent, abbrev_len));
+        }
+        out.push('\n');
+    }
+    if fuller {
+        let author_date = signature_log_date(&commit.author)?;
+        let committer_date = signature_log_date(&commit.committer)?;
+        out.push_str("Author:     ");
+        out.push_str(&signature_name(&commit.author));
+        out.push_str(" <");
+        out.push_str(&signature_email(&commit.author));
+        out.push_str(">\n");
+        out.push_str("AuthorDate: ");
+        out.push_str(&author_date);
+        out.push('\n');
+        out.push_str("Commit:     ");
+        out.push_str(&signature_name(&commit.committer));
+        out.push_str(" <");
+        out.push_str(&signature_email(&commit.committer));
+        out.push_str(">\n");
+        out.push_str("CommitDate: ");
+        out.push_str(&committer_date);
+        out.push_str("\n\n");
+    } else {
+        out.push_str("Author: ");
+        out.push_str(&signature_name(&commit.author));
+        out.push_str(" <");
+        out.push_str(&signature_email(&commit.author));
+        out.push_str(">\n");
+        out.push_str("Commit: ");
+        out.push_str(&signature_name(&commit.committer));
+        out.push_str(" <");
+        out.push_str(&signature_email(&commit.committer));
+        out.push_str(">\n\n");
+    }
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
         append_indented_log_line(&mut out, line, expand_tabs);
@@ -9892,6 +12282,1488 @@ fn log_format_uses_placeholder(pattern: &str, target: char) -> bool {
     false
 }
 
+#[derive(Clone, Copy)]
+struct LogMetadataRenderPlan {
+    needs_parents: bool,
+    needs_author_name: bool,
+    needs_author_email: bool,
+    needs_author_signature: bool,
+    needs_author_timestamp: bool,
+    needs_committer_name: bool,
+    needs_committer_email: bool,
+    needs_committer_signature: bool,
+    needs_committer_timestamp: bool,
+}
+
+impl LogMetadataRenderPlan {
+    fn from_pattern(pattern: &str, history_order: Option<HistoryCommitOrder>) -> Self {
+        let mut plan = Self {
+            needs_parents: false,
+            needs_author_name: false,
+            needs_author_email: false,
+            needs_author_signature: false,
+            needs_author_timestamp: matches!(history_order, Some(HistoryCommitOrder::AuthorDate)),
+            needs_committer_name: false,
+            needs_committer_email: false,
+            needs_committer_signature: false,
+            needs_committer_timestamp: matches!(
+                history_order,
+                Some(HistoryCommitOrder::Date | HistoryCommitOrder::Topo)
+            ),
+        };
+        let mut chars = pattern.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '%' {
+                continue;
+            }
+            let Some(atom) = chars.next() else {
+                break;
+            };
+            match atom {
+                'P' => plan.needs_parents = true,
+                'x' => {
+                    let _ = chars.next();
+                    let _ = chars.next();
+                }
+                'a' => match chars.next() {
+                    Some('n') => plan.needs_author_name = true,
+                    Some('e') => plan.needs_author_email = true,
+                    Some('d') => {
+                        plan.needs_author_signature = true;
+                        plan.needs_author_timestamp = true;
+                    }
+                    Some('t') => plan.needs_author_timestamp = true,
+                    _ => {}
+                },
+                'c' => match chars.next() {
+                    Some('n') => plan.needs_committer_name = true,
+                    Some('e') => plan.needs_committer_email = true,
+                    Some('d') => {
+                        plan.needs_committer_signature = true;
+                        plan.needs_committer_timestamp = true;
+                    }
+                    Some('t') => plan.needs_committer_timestamp = true,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        plan
+    }
+
+    fn supports_lightweight(self, history_order: Option<HistoryCommitOrder>) -> bool {
+        !matches!(
+            history_order,
+            Some(HistoryCommitOrder::Topo | HistoryCommitOrder::AuthorDate)
+        )
+    }
+
+    fn supports_author_only_lightweight(self, history_order: Option<HistoryCommitOrder>) -> bool {
+        self.supports_lightweight(history_order)
+            && !self.needs_author_signature
+            && !self.needs_committer_name
+            && !self.needs_committer_email
+            && !self.needs_committer_signature
+    }
+
+    fn author_hint_prefix_bytes(self, hints: &CommitRenderMetadataHints) -> usize {
+        if hints.parents.is_some() && hints.committer_timestamp.is_some() {
+            return COMMIT_AUTHOR_HEADER_PREFIX_BYTES;
+        }
+        if hints.parents.is_some() || hints.committer_timestamp.is_some() {
+            return COMMIT_AUTHOR_HINT_PREFIX_BYTES;
+        }
+        COMMIT_AUTHOR_METADATA_PREFIX_BYTES
+    }
+}
+
+#[derive(Clone)]
+struct CollectedCommitAuthorMetadata {
+    id: ObjectId,
+    parents: Arc<[ObjectId]>,
+    author_name: Option<Arc<str>>,
+    author_email: Option<Arc<str>>,
+    author_timestamp: Option<i64>,
+    committer_timestamp: i64,
+}
+
+type AuthorIdentityPool = HashMap<Arc<str>, Arc<str>>;
+
+fn intern_author_identity(pool: &mut AuthorIdentityPool, value: &mut Option<Arc<str>>) {
+    let Some(identity) = value.as_mut() else {
+        return;
+    };
+    if let Some(interned) = pool.get(identity.as_ref()) {
+        *identity = Arc::clone(interned);
+    } else {
+        pool.insert(Arc::clone(identity), Arc::clone(identity));
+    }
+}
+
+fn intern_commit_author_metadata(
+    pool: &mut AuthorIdentityPool,
+    metadata: &mut CollectedCommitAuthorMetadata,
+) {
+    intern_author_identity(pool, &mut metadata.author_name);
+    intern_author_identity(pool, &mut metadata.author_email);
+}
+
+struct CollectedCommitRenderMetadata {
+    id: ObjectId,
+    parents: Arc<[ObjectId]>,
+    author_name: Option<String>,
+    author_email: Option<String>,
+    author_signature: Option<Vec<u8>>,
+    author_timestamp: Option<i64>,
+    committer_name: Option<String>,
+    committer_email: Option<String>,
+    committer_signature: Option<Vec<u8>>,
+    committer_timestamp: Option<i64>,
+}
+
+#[derive(Clone, Default)]
+struct CommitRenderMetadataHints {
+    parents: Option<Arc<[ObjectId]>>,
+    committer_timestamp: Option<i64>,
+}
+
+struct PendingCommitRenderMetadata {
+    metadata: CollectedCommitRenderMetadata,
+    timestamp: i64,
+}
+
+struct HeapPendingCommitRenderMetadata {
+    pending: PendingCommitRenderMetadata,
+    sequence: u64,
+}
+
+impl HeapPendingCommitRenderMetadata {
+    fn new(pending: PendingCommitRenderMetadata, sequence: u64) -> Self {
+        Self { pending, sequence }
+    }
+}
+
+impl PartialEq for HeapPendingCommitRenderMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.pending.metadata.id == other.pending.metadata.id
+            && self.pending.timestamp == other.pending.timestamp
+            && self.sequence == other.sequence
+    }
+}
+
+impl Eq for HeapPendingCommitRenderMetadata {}
+
+impl PartialOrd for HeapPendingCommitRenderMetadata {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeapPendingCommitRenderMetadata {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.pending
+            .timestamp
+            .cmp(&other.pending.timestamp)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| {
+                other
+                    .pending
+                    .metadata
+                    .id
+                    .as_bytes()
+                    .cmp(self.pending.metadata.id.as_bytes())
+            })
+    }
+}
+
+struct PendingCommitAuthorMetadata {
+    metadata: CollectedCommitAuthorMetadata,
+    timestamp: i64,
+}
+
+struct HeapPendingCommitAuthorMetadata {
+    pending: PendingCommitAuthorMetadata,
+    sequence: u64,
+}
+
+impl HeapPendingCommitAuthorMetadata {
+    fn new(pending: PendingCommitAuthorMetadata, sequence: u64) -> Self {
+        Self { pending, sequence }
+    }
+}
+
+impl PartialEq for HeapPendingCommitAuthorMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.pending.metadata.id == other.pending.metadata.id
+            && self.pending.timestamp == other.pending.timestamp
+            && self.sequence == other.sequence
+    }
+}
+
+impl Eq for HeapPendingCommitAuthorMetadata {}
+
+impl PartialOrd for HeapPendingCommitAuthorMetadata {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HeapPendingCommitAuthorMetadata {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.pending
+            .timestamp
+            .cmp(&other.pending.timestamp)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| {
+                other
+                    .pending
+                    .metadata
+                    .id
+                    .as_bytes()
+                    .cmp(self.pending.metadata.id.as_bytes())
+            })
+    }
+}
+
+fn commit_render_metadata_complete(
+    plan: LogMetadataRenderPlan,
+    parents_ready: bool,
+    author_name: &Option<String>,
+    author_email: &Option<String>,
+    author_signature: &Option<Vec<u8>>,
+    author_timestamp: &Option<i64>,
+    committer_name: &Option<String>,
+    committer_email: &Option<String>,
+    committer_signature: &Option<Vec<u8>>,
+    committer_timestamp: &Option<i64>,
+) -> bool {
+    (!plan.needs_parents || parents_ready)
+        && (!plan.needs_author_name || author_name.is_some())
+        && (!plan.needs_author_email || author_email.is_some())
+        && (!plan.needs_author_signature || author_signature.is_some())
+        && (!plan.needs_author_timestamp || author_timestamp.is_some())
+        && (!plan.needs_committer_name || committer_name.is_some())
+        && (!plan.needs_committer_email || committer_email.is_some())
+        && (!plan.needs_committer_signature || committer_signature.is_some())
+        && (!plan.needs_committer_timestamp || committer_timestamp.is_some())
+}
+
+fn find_commit_header_value<'a>(bytes: &'a [u8], header: &[u8]) -> Option<&'a [u8]> {
+    let mut start = 0;
+    while start < bytes.len() {
+        let end = bytes[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset)
+            .unwrap_or(bytes.len());
+        let line = &bytes[start..end];
+        if line.is_empty() {
+            return None;
+        }
+        if !line.starts_with(b" ")
+            && let Some(value) = line.strip_prefix(header)
+        {
+            return Some(value);
+        }
+        start = end.saturating_add(1);
+    }
+    None
+}
+
+fn commit_header_line_complete(bytes: &[u8], header: &[u8]) -> bool {
+    let mut start = 0;
+    while start < bytes.len() {
+        let Some(offset) = bytes[start..].iter().position(|byte| *byte == b'\n') else {
+            return false;
+        };
+        let end = start + offset;
+        let line = &bytes[start..end];
+        if line.is_empty() {
+            return false;
+        }
+        if !line.starts_with(b" ") && line.starts_with(header) {
+            return true;
+        }
+        start = end.saturating_add(1);
+    }
+    false
+}
+
+fn parse_commit_render_metadata(
+    algorithm: GitHashAlgorithm,
+    id: &ObjectId,
+    bytes: &[u8],
+    plan: LogMetadataRenderPlan,
+) -> Result<CollectedCommitRenderMetadata> {
+    parse_commit_render_metadata_with_hints(
+        algorithm,
+        id,
+        bytes,
+        plan,
+        CommitRenderMetadataHints::default(),
+    )
+}
+
+fn parse_commit_author_metadata_with_hints(
+    algorithm: GitHashAlgorithm,
+    id: &ObjectId,
+    bytes: &[u8],
+    plan: LogMetadataRenderPlan,
+    hints: CommitRenderMetadataHints,
+) -> Result<CollectedCommitAuthorMetadata> {
+    let hinted_parents = hints.parents;
+    if let (Some(parents), Some(committer_timestamp)) =
+        (hinted_parents.as_ref(), hints.committer_timestamp)
+        && let Some(author) = find_commit_header_value(bytes, b"author ")
+    {
+        let (author_name, author_email) = if plan.needs_author_name && plan.needs_author_email {
+            let (name, email) = signature_name_email(author);
+            (Some(Arc::from(name)), Some(Arc::from(email)))
+        } else {
+            (
+                plan.needs_author_name
+                    .then(|| Arc::from(signature_name(author))),
+                plan.needs_author_email
+                    .then(|| Arc::from(signature_email(author))),
+            )
+        };
+        let author_timestamp = if plan.needs_author_timestamp {
+            Some(signature_timestamp(author).ok_or_else(|| {
+                CliError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "commit has invalid author timestamp",
+                ))
+            })?)
+        } else {
+            None
+        };
+        return Ok(CollectedCommitAuthorMetadata {
+            id: id.clone(),
+            parents: Arc::clone(parents),
+            author_name,
+            author_email,
+            author_timestamp,
+            committer_timestamp,
+        });
+    }
+
+    let mut parsed_parents = Vec::new();
+    let mut saw_author_header = false;
+    let mut author_name = None;
+    let mut author_email = None;
+    let mut author_timestamp = None;
+    let mut committer_timestamp = hints.committer_timestamp;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            break;
+        }
+        if line.starts_with(b" ") {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(b"parent ") {
+            if plan.needs_parents && hinted_parents.is_none() {
+                let hex =
+                    std::str::from_utf8(value.split(|byte| *byte == b' ').next().unwrap_or(value))
+                        .map_err(|_| {
+                            CliError::Io(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "commit has invalid parent header",
+                            ))
+                        })?;
+                parsed_parents.push(ObjectId::from_hex(algorithm, hex).map_err(|_| {
+                    CliError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "commit has invalid parent header",
+                    ))
+                })?);
+            }
+        } else if let Some(value) = line.strip_prefix(b"author ") {
+            saw_author_header = true;
+            if plan.needs_author_name && plan.needs_author_email {
+                let (name, email) = signature_name_email(value);
+                author_name = Some(Arc::from(name));
+                author_email = Some(Arc::from(email));
+            } else {
+                if plan.needs_author_name {
+                    author_name = Some(Arc::from(signature_name(value)));
+                }
+                if plan.needs_author_email {
+                    author_email = Some(Arc::from(signature_email(value)));
+                }
+            }
+            if plan.needs_author_timestamp {
+                author_timestamp = signature_timestamp(value);
+            }
+        } else if let Some(value) = line.strip_prefix(b"committer ")
+            && committer_timestamp.is_none()
+        {
+            committer_timestamp = signature_timestamp(value);
+        }
+        if (!plan.needs_author_name || author_name.is_some())
+            && (!plan.needs_author_email || author_email.is_some())
+            && (!plan.needs_author_timestamp || author_timestamp.is_some())
+            && committer_timestamp.is_some()
+        {
+            break;
+        }
+    }
+    if plan.needs_author_name && author_name.is_none() {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit missing author header",
+        )));
+    }
+    if plan.needs_author_email && author_email.is_none() {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit missing author header",
+        )));
+    }
+    if plan.needs_author_timestamp && author_timestamp.is_none() {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid author timestamp",
+        )));
+    }
+    if !saw_author_header {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit missing author header",
+        )));
+    }
+    let committer_timestamp = committer_timestamp.ok_or_else(|| {
+        CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid committer timestamp",
+        ))
+    })?;
+    let parents = hinted_parents.unwrap_or_else(|| Arc::from(parsed_parents));
+    Ok(CollectedCommitAuthorMetadata {
+        id: id.clone(),
+        parents,
+        author_name,
+        author_email,
+        author_timestamp,
+        committer_timestamp,
+    })
+}
+
+fn read_pending_commit_author_metadata(
+    store: &LooseObjectStore,
+    id: ObjectId,
+    plan: LogMetadataRenderPlan,
+) -> Result<PendingCommitAuthorMetadata> {
+    let metadata = read_commit_author_metadata_with_hints(
+        store,
+        &id,
+        plan,
+        CommitRenderMetadataHints::default(),
+    )?;
+    let timestamp = metadata.committer_timestamp;
+    Ok(PendingCommitAuthorMetadata {
+        metadata,
+        timestamp,
+    })
+}
+
+fn collect_commit_author_metadata_with_exclusions(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+    plan: LogMetadataRenderPlan,
+) -> Result<Vec<CollectedCommitAuthorMetadata>> {
+    let excluded = if revs.exclude.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        collect_rev_list_excluded_commits(repo, store, revs)?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let traversal_plan = LogMetadataRenderPlan {
+        needs_parents: true,
+        needs_committer_timestamp: true,
+        ..plan
+    };
+    let mut pending = std::collections::BinaryHeap::new();
+    let mut scheduled = std::collections::HashSet::new();
+    let mut sequence = 0_u64;
+    for rev in &revs.include {
+        let id = resolve_commitish(repo, store, rev)?;
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommitAuthorMetadata::new(
+                read_pending_commit_author_metadata(store, id, traversal_plan)?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut out = Vec::new();
+    while let Some(heap_entry) = pending.pop() {
+        let pending_commit = heap_entry.pending;
+        let metadata = pending_commit.metadata;
+        if excluded.contains(&metadata.id) {
+            continue;
+        }
+        let is_shallow = shallow_commits.contains(&metadata.id);
+        if !is_shallow {
+            for parent in metadata.parents.iter() {
+                if scheduled.insert(parent.clone()) {
+                    pending.push(HeapPendingCommitAuthorMetadata::new(
+                        read_pending_commit_author_metadata(store, parent.clone(), traversal_plan)?,
+                        sequence,
+                    ));
+                    sequence += 1;
+                }
+            }
+        }
+        out.push(metadata);
+        if max_count.is_some_and(|max| out.len() >= max) {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn parse_commit_render_metadata_with_hints(
+    algorithm: GitHashAlgorithm,
+    id: &ObjectId,
+    bytes: &[u8],
+    plan: LogMetadataRenderPlan,
+    hints: CommitRenderMetadataHints,
+) -> Result<CollectedCommitRenderMetadata> {
+    let hinted_parents = hints.parents;
+    let mut parsed_parents = Vec::new();
+    let mut parents_ready = !plan.needs_parents || hinted_parents.is_some();
+    let mut author_name = None;
+    let mut author_email = None;
+    let mut author_signature = None;
+    let mut author_timestamp = None;
+    let mut committer_name = None;
+    let mut committer_email = None;
+    let mut committer_signature = None;
+    let mut committer_timestamp = if plan.needs_committer_timestamp {
+        hints.committer_timestamp
+    } else {
+        None
+    };
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            break;
+        }
+        if line.starts_with(b" ") {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(b"parent ") {
+            if plan.needs_parents && !parents_ready {
+                let hex =
+                    std::str::from_utf8(value.split(|byte| *byte == b' ').next().unwrap_or(value))
+                        .map_err(|_| {
+                            CliError::Io(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "commit has invalid parent header",
+                            ))
+                        })?;
+                let parent = ObjectId::from_hex(algorithm, hex).map_err(|_| {
+                    CliError::Io(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "commit has invalid parent header",
+                    ))
+                })?;
+                parsed_parents.push(parent);
+            }
+        } else if let Some(value) = line.strip_prefix(b"author ") {
+            parents_ready = true;
+            if plan.needs_author_name && plan.needs_author_email {
+                let (name, email) = signature_name_email(value);
+                author_name = Some(name);
+                author_email = Some(email);
+            } else {
+                if plan.needs_author_name {
+                    author_name = Some(signature_name(value));
+                }
+                if plan.needs_author_email {
+                    author_email = Some(signature_email(value));
+                }
+            }
+            if plan.needs_author_signature {
+                author_signature = Some(value.to_vec());
+            }
+            if plan.needs_author_timestamp {
+                author_timestamp = signature_timestamp(value);
+            }
+        } else if let Some(value) = line.strip_prefix(b"committer ") {
+            parents_ready = true;
+            if plan.needs_committer_name {
+                committer_name = Some(signature_name(value));
+            }
+            if plan.needs_committer_email {
+                committer_email = Some(signature_email(value));
+            }
+            if plan.needs_committer_signature {
+                committer_signature = Some(value.to_vec());
+            }
+            if plan.needs_committer_timestamp {
+                committer_timestamp = committer_timestamp.or_else(|| signature_timestamp(value));
+            }
+        }
+        if commit_render_metadata_complete(
+            plan,
+            parents_ready,
+            &author_name,
+            &author_email,
+            &author_signature,
+            &author_timestamp,
+            &committer_name,
+            &committer_email,
+            &committer_signature,
+            &committer_timestamp,
+        ) {
+            break;
+        }
+    }
+    if plan.needs_parents && !parents_ready {
+        parents_ready = true;
+    }
+    if plan.needs_author_timestamp && author_timestamp.is_none() {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid author timestamp",
+        )));
+    }
+    if plan.needs_committer_timestamp && committer_timestamp.is_none() {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid committer timestamp",
+        )));
+    }
+    if plan.needs_parents && !parents_ready {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit parent headers could not be resolved",
+        )));
+    }
+    let parents = hinted_parents.unwrap_or_else(|| Arc::from(parsed_parents));
+    Ok(CollectedCommitRenderMetadata {
+        id: id.clone(),
+        parents,
+        author_name,
+        author_email,
+        author_signature,
+        author_timestamp,
+        committer_name,
+        committer_email,
+        committer_signature,
+        committer_timestamp,
+    })
+}
+
+fn read_pending_commit_render_metadata(
+    store: &LooseObjectStore,
+    id: ObjectId,
+    plan: LogMetadataRenderPlan,
+) -> Result<PendingCommitRenderMetadata> {
+    let metadata = read_commit_render_metadata_with_hints(
+        store,
+        &id,
+        plan,
+        CommitRenderMetadataHints::default(),
+    )?;
+    let timestamp = metadata.committer_timestamp.ok_or_else(|| {
+        CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "commit has invalid committer timestamp",
+        ))
+    })?;
+    Ok(PendingCommitRenderMetadata {
+        metadata,
+        timestamp,
+    })
+}
+
+fn collect_commit_render_metadata_with_exclusions(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+    plan: LogMetadataRenderPlan,
+) -> Result<Vec<CollectedCommitRenderMetadata>> {
+    let excluded = if revs.exclude.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        collect_rev_list_excluded_commits(repo, store, revs)?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let traversal_plan = LogMetadataRenderPlan {
+        needs_parents: true,
+        needs_committer_timestamp: true,
+        ..plan
+    };
+    let mut pending = std::collections::BinaryHeap::new();
+    let mut scheduled = std::collections::HashSet::new();
+    let mut sequence = 0_u64;
+    for rev in &revs.include {
+        let id = resolve_commitish(repo, store, rev)?;
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommitRenderMetadata::new(
+                read_pending_commit_render_metadata(store, id, traversal_plan)?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut out = Vec::new();
+    while let Some(heap_entry) = pending.pop() {
+        let pending_commit = heap_entry.pending;
+        let metadata = pending_commit.metadata;
+        if excluded.contains(&metadata.id) {
+            continue;
+        }
+        let is_shallow = shallow_commits.contains(&metadata.id);
+        if !is_shallow {
+            for parent in metadata.parents.iter() {
+                if scheduled.insert(parent.clone()) {
+                    pending.push(HeapPendingCommitRenderMetadata::new(
+                        read_pending_commit_render_metadata(store, parent.clone(), traversal_plan)?,
+                        sequence,
+                    ));
+                    sequence += 1;
+                }
+            }
+        }
+        out.push(metadata);
+        if max_count.is_some_and(|max| out.len() >= max) {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+fn read_commit_render_metadata(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    plan: LogMetadataRenderPlan,
+) -> Result<CollectedCommitRenderMetadata> {
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    parse_commit_render_metadata(id.algorithm(), id, &object.content, plan)
+}
+
+fn read_commit_render_metadata_with_hints<S>(
+    store: &S,
+    id: &ObjectId,
+    plan: LogMetadataRenderPlan,
+    hints: CommitRenderMetadataHints,
+) -> Result<CollectedCommitRenderMetadata>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let prefix_or_full =
+        store.read_object_prefix_or_full(id, COMMIT_AUTHOR_METADATA_PREFIX_BYTES)?;
+    if prefix_or_full.object.kind == GitObjectKind::Commit {
+        let parsed = parse_commit_render_metadata_with_hints(
+            id.algorithm(),
+            id,
+            &prefix_or_full.object.content,
+            plan,
+            hints.clone(),
+        );
+        if let Ok(metadata) = parsed {
+            return Ok(metadata);
+        }
+        if prefix_or_full.is_complete {
+            return parsed;
+        }
+    } else if prefix_or_full.is_complete {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    parse_commit_render_metadata_with_hints(id.algorithm(), id, &object.content, plan, hints)
+}
+
+fn read_commit_author_metadata_with_hints<S>(
+    store: &S,
+    id: &ObjectId,
+    plan: LogMetadataRenderPlan,
+    hints: CommitRenderMetadataHints,
+) -> Result<CollectedCommitAuthorMetadata>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let prefix_len = plan.author_hint_prefix_bytes(&hints);
+    let prefix_or_full = store.read_object_prefix_or_full(id, prefix_len)?;
+    if prefix_or_full.object.kind == GitObjectKind::Commit {
+        let parsed = parse_commit_author_metadata_with_hints(
+            id.algorithm(),
+            id,
+            &prefix_or_full.object.content,
+            plan,
+            hints.clone(),
+        );
+        if let Ok(metadata) = parsed.as_ref() {
+            if !prefix_or_full.is_complete
+                && prefix_len == COMMIT_AUTHOR_HEADER_PREFIX_BYTES
+                && !commit_header_line_complete(&prefix_or_full.object.content, b"author ")
+            {
+                // The short author-only prefix can end in the middle of the
+                // author header. Fall back to the full object so output stays
+                // byte-identical to stock Git.
+            } else {
+                return Ok(metadata.clone());
+            }
+        }
+        if prefix_or_full.is_complete {
+            return parsed;
+        }
+    } else if prefix_or_full.is_complete {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    parse_commit_author_metadata_with_hints(id.algorithm(), id, &object.content, plan, hints)
+}
+
+fn collect_commit_render_metadata_from_hints(
+    store: &LooseObjectStore,
+    hints: &[CommitGraphRenderHint],
+    plan: LogMetadataRenderPlan,
+) -> Result<Vec<CollectedCommitRenderMetadata>> {
+    let _trace = phase_trace("log.collect_commits.render_metadata_from_hints");
+    let workers = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1)
+        .min(hints.len())
+        .min(PARALLEL_LOG_METADATA_MAX_WORKERS);
+    if workers <= 1 || hints.len() < PARALLEL_LOG_RENDER_METADATA_MIN_COMMITS {
+        let packed_first_store = store.packed_first();
+        return hints
+            .iter()
+            .map(|hint| {
+                read_commit_render_metadata_with_hints(
+                    &packed_first_store,
+                    &hint.id,
+                    plan,
+                    CommitRenderMetadataHints {
+                        parents: Some(hint.parents.clone()),
+                        committer_timestamp: Some(hint.committer_timestamp),
+                    },
+                )
+            })
+            .collect();
+    }
+
+    let chunk_len = hints.len().div_ceil(workers).max(1);
+    let chunked = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for chunk in hints.chunks(chunk_len) {
+            let worker_store = store.fork_for_parallel_reads();
+            handles.push(
+                std::thread::Builder::new()
+                    .stack_size(PARALLEL_LOG_METADATA_STACK_BYTES)
+                    .spawn_scoped(
+                        scope,
+                        move || -> Result<Vec<CollectedCommitRenderMetadata>> {
+                            let packed_first_store = worker_store.packed_first();
+                            chunk
+                                .iter()
+                                .map(|hint| {
+                                    read_commit_render_metadata_with_hints(
+                                        &packed_first_store,
+                                        &hint.id,
+                                        plan,
+                                        CommitRenderMetadataHints {
+                                            parents: Some(hint.parents.clone()),
+                                            committer_timestamp: Some(hint.committer_timestamp),
+                                        },
+                                    )
+                                })
+                                .collect()
+                        },
+                    )?,
+            );
+        }
+        let mut chunked = Vec::with_capacity(handles.len());
+        for handle in handles {
+            chunked.push(handle.join().map_err(|_| {
+                CliError::Message("parallel log metadata worker panicked".into())
+            })??);
+        }
+        Ok::<_, CliError>(chunked)
+    })?;
+
+    let mut out = Vec::with_capacity(hints.len());
+    for mut chunk in chunked {
+        out.append(&mut chunk);
+    }
+    Ok(out)
+}
+
+fn collect_commit_author_metadata_from_hints(
+    store: &LooseObjectStore,
+    hints: &[CommitGraphRenderHint],
+    plan: LogMetadataRenderPlan,
+) -> Result<Vec<CollectedCommitAuthorMetadata>> {
+    let _trace = phase_trace("log.collect_commits.author_metadata_from_hints");
+    let workers = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1)
+        .min(hints.len())
+        .min(PARALLEL_LOG_AUTHOR_METADATA_MAX_WORKERS);
+    if workers <= 1 || hints.len() < PARALLEL_LOG_AUTHOR_METADATA_MIN_COMMITS {
+        let packed_first_store = store.packed_first();
+        return hints
+            .iter()
+            .map(|hint| {
+                read_commit_author_metadata_with_hints(
+                    &packed_first_store,
+                    &hint.id,
+                    plan,
+                    CommitRenderMetadataHints {
+                        parents: Some(hint.parents.clone()),
+                        committer_timestamp: Some(hint.committer_timestamp),
+                    },
+                )
+            })
+            .collect();
+    }
+
+    let chunk_len = hints.len().div_ceil(workers).max(1);
+    let chunked = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for chunk in hints.chunks(chunk_len) {
+            let worker_store = store.fork_for_parallel_reads();
+            handles.push(
+                std::thread::Builder::new()
+                    .stack_size(PARALLEL_LOG_METADATA_STACK_BYTES)
+                    .spawn_scoped(
+                        scope,
+                        move || -> Result<Vec<CollectedCommitAuthorMetadata>> {
+                            let packed_first_store = worker_store.packed_first();
+                            let mut author_identity_pool = AuthorIdentityPool::new();
+                            chunk
+                                .iter()
+                                .map(|hint| {
+                                    let mut metadata = read_commit_author_metadata_with_hints(
+                                        &packed_first_store,
+                                        &hint.id,
+                                        plan,
+                                        CommitRenderMetadataHints {
+                                            parents: Some(hint.parents.clone()),
+                                            committer_timestamp: Some(hint.committer_timestamp),
+                                        },
+                                    )?;
+                                    intern_commit_author_metadata(
+                                        &mut author_identity_pool,
+                                        &mut metadata,
+                                    );
+                                    Ok(metadata)
+                                })
+                                .collect()
+                        },
+                    )?,
+            );
+        }
+        let mut chunked = Vec::with_capacity(handles.len());
+        for handle in handles {
+            chunked.push(handle.join().map_err(|_| {
+                CliError::Message("parallel log author metadata worker panicked".into())
+            })??);
+        }
+        Ok::<_, CliError>(chunked)
+    })?;
+
+    let mut out = Vec::with_capacity(hints.len());
+    for mut chunk in chunked {
+        out.append(&mut chunk);
+    }
+    Ok(out)
+}
+
+fn render_commit_author_metadata_from_hints_streaming<W: Write>(
+    store: &LooseObjectStore,
+    hints: &[CommitGraphRenderHint],
+    plan: LogMetadataRenderPlan,
+    pattern: &str,
+    abbrev_len: usize,
+    decorations: &LogDecorations,
+    record_terminator: &[u8],
+    terminate_last: bool,
+    out: &mut W,
+) -> Result<()> {
+    let workers = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1)
+        .min(hints.len())
+        .min(PARALLEL_LOG_AUTHOR_METADATA_MAX_WORKERS);
+    if workers <= 1 || hints.len() < PARALLEL_LOG_AUTHOR_METADATA_MIN_COMMITS {
+        let packed_first_store = store.packed_first();
+        let mut author_identity_pool = AuthorIdentityPool::new();
+        for (index, hint) in hints.iter().enumerate() {
+            let mut metadata = read_commit_author_metadata_with_hints(
+                &packed_first_store,
+                &hint.id,
+                plan,
+                CommitRenderMetadataHints {
+                    parents: Some(hint.parents.clone()),
+                    committer_timestamp: Some(hint.committer_timestamp),
+                },
+            )?;
+            intern_commit_author_metadata(&mut author_identity_pool, &mut metadata);
+            let rendered = render_log_format_author_metadata(
+                pattern,
+                &metadata.id,
+                &metadata,
+                abbrev_len,
+                decorations,
+            )?;
+            out.write_all(rendered.as_bytes())?;
+            if terminate_last || index + 1 < hints.len() {
+                out.write_all(record_terminator)?;
+            }
+        }
+        return Ok(());
+    }
+
+    std::thread::scope(|scope| {
+        let mut receivers = Vec::with_capacity(workers);
+        let mut handles = Vec::with_capacity(workers);
+        for worker_index in 0..workers {
+            let worker_store = store.fork_for_parallel_reads();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            receivers.push(receiver);
+            handles.push(
+                std::thread::Builder::new()
+                    .stack_size(PARALLEL_LOG_METADATA_STACK_BYTES)
+                    .spawn_scoped(scope, move || {
+                        let packed_first_store = worker_store.packed_first();
+                        let mut author_identity_pool = AuthorIdentityPool::new();
+                        for hint in hints.iter().skip(worker_index).step_by(workers) {
+                            let metadata = read_commit_author_metadata_with_hints(
+                                &packed_first_store,
+                                &hint.id,
+                                plan,
+                                CommitRenderMetadataHints {
+                                    parents: Some(hint.parents.clone()),
+                                    committer_timestamp: Some(hint.committer_timestamp),
+                                },
+                            )
+                            .map(|mut metadata| {
+                                intern_commit_author_metadata(
+                                    &mut author_identity_pool,
+                                    &mut metadata,
+                                );
+                                metadata
+                            });
+                            if sender.send(metadata).is_err() {
+                                break;
+                            }
+                        }
+                    })?,
+            );
+        }
+
+        for index in 0..hints.len() {
+            let metadata = receivers[index % workers].recv().map_err(|_| {
+                CliError::Message("parallel log author metadata worker stopped early".into())
+            })??;
+            let rendered = render_log_format_author_metadata(
+                pattern,
+                &metadata.id,
+                &metadata,
+                abbrev_len,
+                decorations,
+            )?;
+            out.write_all(rendered.as_bytes())?;
+            if terminate_last || index + 1 < hints.len() {
+                out.write_all(record_terminator)?;
+            }
+        }
+        for handle in handles {
+            handle.join().map_err(|_| {
+                CliError::Message("parallel log author metadata worker panicked".into())
+            })?;
+        }
+        Ok(())
+    })
+}
+
+fn log_format_supports_metadata_only(pattern: &str) -> bool {
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            continue;
+        }
+        let Some(atom) = chars.next() else {
+            return false;
+        };
+        match atom {
+            '%' | 'H' | 'h' | 'P' | 'd' | 'D' => {}
+            'x' => {
+                let Some(high) = chars.next() else {
+                    return false;
+                };
+                let Some(low) = chars.next() else {
+                    return false;
+                };
+                if !high.is_ascii_hexdigit() || !low.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+            'a' | 'c' => match chars.next() {
+                Some('n' | 'e' | 'd' | 't') => {}
+                _ => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn render_log_format_metadata(
+    pattern: &str,
+    id: &ObjectId,
+    commit: &CollectedCommitMetadata,
+    abbrev_len: usize,
+    decorations: &LogDecorations,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    let mut out = String::new();
+    let mut chars = pattern.chars();
+    let mut author_name = None;
+    let mut author_email = None;
+    let mut author_timestamp = None;
+    let mut author_formatted_date = None;
+    let mut committer_name = None;
+    let mut committer_email = None;
+    let mut committer_timestamp = None;
+    let mut committer_formatted_date = None;
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        let Some(atom) = chars.next() else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "unterminated log format placeholder".into(),
+            });
+        };
+        match atom {
+            '%' => out.push('%'),
+            'H' => out.push_str(&id.to_hex()),
+            'h' => out.push_str(&short_object_id_len(id, abbrev_len)),
+            'P' => {
+                for (index, parent) in commit.parents.iter().enumerate() {
+                    if index > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&parent.to_hex());
+                }
+            }
+            'd' => out.push_str(&render_log_decorations(decorations, id, true)),
+            'D' => out.push_str(&render_log_decorations(decorations, id, false)),
+            'x' => {
+                let high = chars.next();
+                let low = chars.next();
+                match (high, low) {
+                    (Some(high), Some(low))
+                        if high.is_ascii_hexdigit() && low.is_ascii_hexdigit() =>
+                    {
+                        let hex = format!("{high}{low}");
+                        let byte = u8::from_str_radix(&hex, 16).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: format!("invalid log format escape '%x{hex}'"),
+                        })?;
+                        out.push(char::from(byte));
+                    }
+                    _ => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "unterminated log format hex escape".into(),
+                        });
+                    }
+                }
+            }
+            'a' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated author log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'n' => out.push_str(
+                        author_name.get_or_insert_with(|| signature_name(&commit.author)),
+                    ),
+                    'e' => out.push_str(
+                        author_email.get_or_insert_with(|| signature_email(&commit.author)),
+                    ),
+                    'd' => out.push_str(
+                        author_formatted_date
+                            .get_or_insert(format_log_date(&commit.author, date_mode)?),
+                    ),
+                    't' => out.push_str(
+                        &author_timestamp
+                            .get_or_insert_with(|| signature_timestamp(&commit.author).unwrap_or(0))
+                            .to_string(),
+                    ),
+                    _ => unreachable!("metadata-only log format validation mismatch"),
+                }
+            }
+            'c' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated committer log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'n' => out.push_str(
+                        committer_name.get_or_insert_with(|| signature_name(&commit.committer)),
+                    ),
+                    'e' => out.push_str(
+                        committer_email.get_or_insert_with(|| signature_email(&commit.committer)),
+                    ),
+                    'd' => out.push_str(
+                        committer_formatted_date
+                            .get_or_insert(format_log_date(&commit.committer, date_mode)?),
+                    ),
+                    't' => out.push_str(
+                        &committer_timestamp
+                            .get_or_insert_with(|| {
+                                signature_timestamp(&commit.committer).unwrap_or(0)
+                            })
+                            .to_string(),
+                    ),
+                    _ => unreachable!("metadata-only log format validation mismatch"),
+                }
+            }
+            _ => unreachable!("metadata-only log format validation mismatch"),
+        }
+    }
+    Ok(out)
+}
+
+fn render_log_format_author_metadata(
+    pattern: &str,
+    id: &ObjectId,
+    commit: &CollectedCommitAuthorMetadata,
+    abbrev_len: usize,
+    decorations: &LogDecorations,
+) -> Result<String> {
+    let mut out = String::with_capacity(
+        pattern.len()
+            + commit.author_name.as_ref().map_or(0, |value| value.len())
+            + commit.author_email.as_ref().map_or(0, |value| value.len())
+            + commit.parents.len().saturating_mul(41)
+            + decorations.wrapped(id).map_or(0, str::len),
+    );
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        let Some(atom) = chars.next() else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "unterminated log format placeholder".into(),
+            });
+        };
+        match atom {
+            '%' => out.push('%'),
+            'H' => out.push_str(&id.to_hex()),
+            'h' => out.push_str(&short_object_id_len(id, abbrev_len)),
+            'P' => {
+                for (index, parent) in commit.parents.iter().enumerate() {
+                    if index > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&parent.to_hex());
+                }
+            }
+            'd' => out.push_str(&render_log_decorations(decorations, id, true)),
+            'D' => out.push_str(&render_log_decorations(decorations, id, false)),
+            'x' => {
+                let high = chars.next();
+                let low = chars.next();
+                match (high, low) {
+                    (Some(high), Some(low))
+                        if high.is_ascii_hexdigit() && low.is_ascii_hexdigit() =>
+                    {
+                        let hex = format!("{high}{low}");
+                        let byte = u8::from_str_radix(&hex, 16).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: format!("invalid log format escape '%x{hex}'"),
+                        })?;
+                        out.push(char::from(byte));
+                    }
+                    _ => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "unterminated log format hex escape".into(),
+                        });
+                    }
+                }
+            }
+            'a' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated author log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'n' => out.push_str(commit.author_name.as_deref().unwrap_or_default()),
+                    'e' => out.push_str(commit.author_email.as_deref().unwrap_or_default()),
+                    't' => out.push_str(&commit.author_timestamp.unwrap_or_default().to_string()),
+                    _ => unreachable!("author-only log format validation mismatch"),
+                }
+            }
+            'c' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated committer log format placeholder".into(),
+                    });
+                };
+                match next {
+                    't' => out.push_str(&commit.committer_timestamp.to_string()),
+                    _ => unreachable!("author-only log format validation mismatch"),
+                }
+            }
+            _ => unreachable!("author-only log format validation mismatch"),
+        }
+    }
+    Ok(out)
+}
+
+fn render_log_format_render_metadata(
+    pattern: &str,
+    id: &ObjectId,
+    commit: &CollectedCommitRenderMetadata,
+    abbrev_len: usize,
+    decorations: &LogDecorations,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    let mut out = String::new();
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        let Some(atom) = chars.next() else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "unterminated log format placeholder".into(),
+            });
+        };
+        match atom {
+            '%' => out.push('%'),
+            'H' => out.push_str(&id.to_hex()),
+            'h' => out.push_str(&short_object_id_len(id, abbrev_len)),
+            'P' => {
+                for (index, parent) in commit.parents.iter().enumerate() {
+                    if index > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&parent.to_hex());
+                }
+            }
+            'd' => out.push_str(&render_log_decorations(decorations, id, true)),
+            'D' => out.push_str(&render_log_decorations(decorations, id, false)),
+            'x' => {
+                let high = chars.next();
+                let low = chars.next();
+                match (high, low) {
+                    (Some(high), Some(low))
+                        if high.is_ascii_hexdigit() && low.is_ascii_hexdigit() =>
+                    {
+                        let hex = format!("{high}{low}");
+                        let byte = u8::from_str_radix(&hex, 16).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: format!("invalid log format escape '%x{hex}'"),
+                        })?;
+                        out.push(char::from(byte));
+                    }
+                    _ => {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "unterminated log format hex escape".into(),
+                        });
+                    }
+                }
+            }
+            'a' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated author log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'n' => out.push_str(commit.author_name.as_deref().unwrap_or("")),
+                    'e' => out.push_str(commit.author_email.as_deref().unwrap_or("")),
+                    'd' => out.push_str(&format_log_date(
+                        commit.author_signature.as_deref().unwrap_or_default(),
+                        date_mode,
+                    )?),
+                    't' => out.push_str(&commit.author_timestamp.unwrap_or_default().to_string()),
+                    _ => unreachable!("metadata-only log format validation mismatch"),
+                }
+            }
+            'c' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated committer log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'n' => out.push_str(commit.committer_name.as_deref().unwrap_or("")),
+                    'e' => out.push_str(commit.committer_email.as_deref().unwrap_or("")),
+                    'd' => out.push_str(&format_log_date(
+                        commit.committer_signature.as_deref().unwrap_or_default(),
+                        date_mode,
+                    )?),
+                    't' => {
+                        out.push_str(&commit.committer_timestamp.unwrap_or_default().to_string())
+                    }
+                    _ => unreachable!("metadata-only log format validation mismatch"),
+                }
+            }
+            _ => unreachable!("metadata-only log format validation mismatch"),
+        }
+    }
+    Ok(out)
+}
+
 fn parent_suffix(commit: &zmin_git_core::CommitObject, parents: bool) -> String {
     if !parents {
         return String::new();
@@ -9954,16 +13826,15 @@ fn render_log_format(
                     out.push_str(&parent.to_hex());
                 }
             }
-            'D' => {
-                if let Some(items) = decorations.get(id) {
-                    out.push_str(&items.join(", "));
-                }
-            }
+            'd' => out.push_str(&render_log_decorations(decorations, id, true)),
+            'D' => out.push_str(&render_log_decorations(decorations, id, false)),
             'N' => {
                 if let Some(note) = notes.get(id) {
                     out.push_str(&String::from_utf8_lossy(note));
                 }
             }
+            'b' => out.push_str(&commit_body(&commit.message)),
+            'B' => out.push_str(&String::from_utf8_lossy(&commit.message)),
             's' => out.push_str(&commit_subject(&commit.message)),
             'x' => {
                 let high = chars.next();
@@ -10056,6 +13927,18 @@ fn render_log_format(
     Ok(out)
 }
 
+fn commit_body(message: &[u8]) -> String {
+    let Some(newline) = message.iter().position(|byte| *byte == b'\n') else {
+        return String::new();
+    };
+    let body = &message[newline + 1..];
+    let body = body
+        .strip_prefix(b"\r\n")
+        .or_else(|| body.strip_prefix(b"\n"))
+        .unwrap_or(body);
+    String::from_utf8_lossy(body).into_owned()
+}
+
 fn log_notes_enabled(
     format: &LogFormat<'_>,
     notes: bool,
@@ -10126,6 +14009,64 @@ fn history_raw_date_arg(
         }
     }
     selected.or(fallback)
+}
+
+fn observed_log_root_ids_exact_family(
+    _repo: &GitRepo,
+    store: &LooseObjectStore,
+    requested_revs: &[String],
+    ref_snapshot: Option<&RevListRefSnapshot>,
+) -> Result<Option<Vec<ObjectId>>> {
+    let Some(snapshot) = ref_snapshot else {
+        return Ok(None);
+    };
+    if requested_revs.is_empty() {
+        return Ok(None);
+    }
+    let mut include_head = false;
+    let mut include_branches = false;
+    let mut include_remotes = false;
+    let mut include_tags = false;
+    for rev in requested_revs {
+        match rev.as_str() {
+            "HEAD" => include_head = true,
+            "--branches" | "--heads" => include_branches = true,
+            "--remotes" => include_remotes = true,
+            "--tags" => include_tags = true,
+            _ => return Ok(None),
+        }
+    }
+    if !include_head || !include_branches || !include_remotes || !include_tags {
+        return Ok(None);
+    }
+
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(head_id) = &snapshot.head_id
+        && seen.insert(head_id.clone())
+    {
+        roots.push(head_id.clone());
+    }
+    for row in &snapshot.refs {
+        let include = row.ref_name.starts_with("refs/heads/")
+            || row.ref_name.starts_with("refs/remotes/")
+            || row.ref_name.starts_with("refs/tags/");
+        if !include {
+            continue;
+        }
+        let id = if row.ref_name.starts_with("refs/tags/") {
+            peel_to_commit(store, row.id.clone())?.ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("revision '{}' is not a commit", row.ref_name),
+            })?
+        } else {
+            row.id.clone()
+        };
+        if seen.insert(id.clone()) {
+            roots.push(id);
+        }
+    }
+    Ok(Some(roots))
 }
 
 fn rev_list_supports_notes_display(
@@ -10370,6 +14311,7 @@ fn collect_history_boundary_ids(
 #[derive(Debug, Clone)]
 pub(crate) struct ShowOptions<'a> {
     pub(crate) no_patch: bool,
+    pub(crate) patch: bool,
     pub(crate) oneline: bool,
     pub(crate) zero: bool,
     pub(crate) stat: bool,
@@ -10381,6 +14323,9 @@ pub(crate) struct ShowOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) name_only: bool,
     pub(crate) name_status: bool,
+    pub(crate) find_renames: Option<&'a str>,
+    pub(crate) find_copies: Option<&'a str>,
+    pub(crate) find_copies_harder: bool,
     pub(crate) encoding: Option<&'a str>,
     pub(crate) expand_tabs: bool,
     pub(crate) no_expand_tabs: bool,
@@ -10391,26 +14336,36 @@ pub(crate) struct ShowOptions<'a> {
     pub(crate) standard_notes: bool,
     pub(crate) no_standard_notes: bool,
     pub(crate) show_signature: bool,
+    pub(crate) abbrev: Option<&'a str>,
+    pub(crate) no_abbrev: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
+    pub(crate) parents: bool,
     pub(crate) root: bool,
     pub(crate) combined: bool,
     pub(crate) separate_merges: bool,
     pub(crate) first_parent: bool,
+    pub(crate) diff_merges: Option<&'a str>,
+    pub(crate) no_diff_merges: bool,
+    pub(crate) do_walk: bool,
+    pub(crate) no_walk: Option<&'a str>,
     pub(crate) format: Option<&'a str>,
+    pub(crate) max_count: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
+    pub(crate) stdin: bool,
     pub(crate) args: Vec<String>,
+    pub(crate) raw_args: &'a [String],
 }
 
 impl ShowOptions<'_> {
     fn diff_format(&self) -> ShowDiffFormat {
-        if self.patch_with_raw && self.summary {
+        if (self.patch_with_raw || (self.patch && self.raw)) && self.summary {
             ShowDiffFormat::PatchWithRawSummary
-        } else if self.patch_with_raw {
+        } else if self.patch_with_raw || (self.patch && self.raw) {
             ShowDiffFormat::PatchWithRaw
-        } else if self.patch_with_stat && self.summary {
+        } else if (self.patch_with_stat || (self.patch && self.stat)) && self.summary {
             ShowDiffFormat::PatchWithStatSummary
-        } else if self.patch_with_stat {
+        } else if self.patch_with_stat || (self.patch && self.stat) {
             ShowDiffFormat::PatchWithStat
         } else if self.stat && self.summary {
             ShowDiffFormat::StatSummary
@@ -10432,6 +14387,32 @@ impl ShowOptions<'_> {
             ShowDiffFormat::Patch
         }
     }
+}
+
+fn show_additive_diff_formats(options: &ShowOptions<'_>) -> Vec<ShowDiffFormat> {
+    let mut formats = Vec::new();
+    if options.raw {
+        formats.push(ShowDiffFormat::Raw);
+    }
+    if options.numstat {
+        formats.push(ShowDiffFormat::Numstat);
+    }
+    if options.shortstat {
+        formats.push(ShowDiffFormat::Shortstat);
+    }
+    formats
+}
+
+fn show_supports_additive_diff_formats(options: &ShowOptions<'_>) -> bool {
+    let formats = show_additive_diff_formats(options);
+    formats.len() > 1
+        && !options.patch
+        && !options.patch_with_raw
+        && !options.patch_with_stat
+        && !options.stat
+        && !options.summary
+        && !options.name_only
+        && !options.name_status
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -10464,18 +14445,57 @@ pub(crate) fn show(options: ShowOptions<'_>) -> Result<()> {
     show_with_options(options)
 }
 
-fn show_merge_diff_mode(options: &ShowOptions<'_>) -> LogMergeDiffMode {
-    if options.first_parent {
-        LogMergeDiffMode::FirstParent
-    } else if options.separate_merges {
-        LogMergeDiffMode::Separate
-    } else {
-        LogMergeDiffMode::Combined
+fn show_merge_diff_mode(options: &ShowOptions<'_>) -> Result<LogMergeDiffMode> {
+    if options.no_diff_merges {
+        return Ok(LogMergeDiffMode::Off);
     }
+    if let Some(value) = options.diff_merges {
+        return parse_log_diff_merges_arg(value, None);
+    }
+    if options.first_parent {
+        Ok(LogMergeDiffMode::FirstParent)
+    } else if options.separate_merges {
+        Ok(LogMergeDiffMode::Separate)
+    } else {
+        Ok(LogMergeDiffMode::Combined)
+    }
+}
+
+fn show_effective_merge_diff_mode(options: &ShowOptions<'_>) -> Result<LogMergeDiffMode> {
+    if raw_arg_present_before_dashdash(options.raw_args, "--no-diff-merges") {
+        return Ok(LogMergeDiffMode::Off);
+    }
+    if let Some(value) = raw_arg_last_value(options.raw_args, &["--diff-merges"]) {
+        return parse_log_diff_merges_arg(value, None);
+    }
+    show_merge_diff_mode(options)
+}
+
+fn show_effective_parents(options: &ShowOptions<'_>) -> bool {
+    options.parents || raw_arg_present_before_dashdash(options.raw_args, "--parents")
+}
+
+fn show_effective_decoration_mode(options: &ShowOptions<'_>) -> Result<Option<LogDecorationMode>> {
+    if raw_arg_last_toggle(options.raw_args, "--decorate", "--no-decorate") == Some(false) {
+        return Ok(None);
+    }
+    if let Some(value) = raw_arg_last_value(options.raw_args, &["--decorate"]) {
+        return parse_log_decoration_mode(Some(value));
+    }
+    if raw_arg_present_before_dashdash(options.raw_args, "--decorate") {
+        return parse_log_decoration_mode(Some(""));
+    }
+    Ok(None)
+}
+
+fn show_default_abbrev_len(repo: &GitRepo, store: &LooseObjectStore) -> Result<usize> {
+    configured_default_abbrev_len(repo, store)
 }
 
 fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
     let _accepted_show_signature = options.show_signature;
+    let detect_renames = parse_find_renames_option(options.find_renames)?;
+    let detect_copies = parse_find_copies_option(options.find_copies)?;
     let selected_formats = [
         options.patch_with_raw,
         options.patch_with_stat,
@@ -10493,7 +14513,10 @@ fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
     let valid_combined_format = selected_formats == 2
         && options.summary
         && (options.stat || options.patch_with_stat || options.patch_with_raw);
-    if selected_formats > 1 && !valid_combined_format {
+    if selected_formats > 1
+        && !valid_combined_format
+        && !show_supports_additive_diff_formats(&options)
+    {
         return Err(CliError::Fatal {
             code: 129,
             message:
@@ -10507,21 +14530,85 @@ fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
             message: "`show --format=raw` cannot be combined with --oneline or --pretty".into(),
         });
     }
-    if show_should_use_log_pipeline(&options) {
-        return show_via_log(options);
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
+    let resolved_revs = history_revs_with_stdin(&positional_revs, options.stdin)?;
+    if let Some(argument) = resolved_revs
+        .iter()
+        .find(|argument| argument.starts_with('-') && !show_revision_selector_is_known(argument))
+    {
+        return Err(log_unrecognized_argument(argument));
     }
-    let objectish = options
-        .args
+    if (options.name_only || options.name_status)
+        && show_should_use_log_pipeline(&repo, &resolved_revs, options.stdin, &options)
+    {
+        return show_via_log(options, resolved_revs, detect_renames, detect_copies);
+    }
+    if show_should_use_multi_object_renderer(&repo, &resolved_revs, options.stdin, &options) {
+        return show_multi_objects(options, resolved_revs, detect_renames, detect_copies);
+    }
+    if show_raw_format_requested(&options)
+        && show_should_use_log_pipeline(&repo, &resolved_revs, options.stdin, &options)
+    {
+        return show_raw_multi(options, resolved_revs, detect_renames, detect_copies);
+    }
+    if show_should_use_log_pipeline(&repo, &resolved_revs, options.stdin, &options) {
+        return show_via_log(options, resolved_revs, detect_renames, detect_copies);
+    }
+    let objectish = resolved_revs
         .first()
         .cloned()
         .unwrap_or_else(|| "HEAD".to_owned());
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let id =
-        resolve_objectish(&repo, &objectish).map_err(|_| ambiguous_revision_error(&objectish))?;
+    let id = resolve_objectish(&repo, &objectish).map_err(|_| show_revision_error(&objectish))?;
     let object = store.read_object(&id)?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
-    show_object(&store, &objectish, &object, options, show_root)
+    let mut object_options = options;
+    object_options.stdin = false;
+    object_options.args = vec![objectish.clone()];
+    if !paths.is_empty() {
+        object_options.args.push("--".to_owned());
+        object_options.args.extend(paths);
+    }
+    show_object(
+        &store,
+        &objectish,
+        &object,
+        object_options,
+        show_root,
+        None,
+        detect_renames,
+        detect_copies,
+    )
+}
+
+fn show_revision_selector_is_known(argument: &str) -> bool {
+    matches!(
+        argument,
+        "--all"
+            | "--alternate-refs"
+            | "--bisect"
+            | "--do-walk"
+            | "--ignore-missing"
+            | "--indexed-objects"
+            | "--not"
+            | "--objects"
+            | "--objects-edge"
+            | "--objects-edge-aggressive"
+            | "--reflog"
+            | "--single-worktree"
+            | "--unpacked"
+    ) || [
+        "--branches=",
+        "--exclude=",
+        "--exclude-hidden=",
+        "--glob=",
+        "--remotes=",
+        "--tags=",
+    ]
+    .iter()
+    .any(|prefix| argument.starts_with(prefix))
+        || matches!(argument, "--branches" | "--remotes" | "--tags")
 }
 
 fn log_showroot_enabled(repo: &GitRepo) -> Result<bool> {
@@ -10537,18 +14624,191 @@ fn log_showroot_enabled(repo: &GitRepo) -> Result<bool> {
     })
 }
 
-fn show_should_use_log_pipeline(options: &ShowOptions<'_>) -> bool {
-    options.args.len() > 1 || options.args.iter().any(|arg| arg == "--")
+fn show_should_use_log_pipeline(
+    repo: &GitRepo,
+    revs: &[String],
+    stdin: bool,
+    options: &ShowOptions<'_>,
+) -> bool {
+    stdin
+        || options.max_count.is_some_and(|value| value != "1")
+        || revs.len() > 1
+        || revs.iter().any(|rev| resolve_objectish(repo, rev).is_err())
+        || options.diff_merges.is_some()
+        || options.no_diff_merges
+        || options.do_walk
+        || options.no_walk.is_some()
+}
+
+fn show_should_use_multi_object_renderer(
+    repo: &GitRepo,
+    revs: &[String],
+    stdin: bool,
+    options: &ShowOptions<'_>,
+) -> bool {
+    if options.do_walk || revs.is_empty() {
+        return false;
+    }
+    if !stdin
+        && revs.len() <= 1
+        && options.no_walk.is_none()
+        && options.diff_merges.is_none()
+        && !options.no_diff_merges
+    {
+        return false;
+    }
+    revs.iter().all(|rev| resolve_objectish(repo, rev).is_ok())
 }
 
 fn show_raw_format_requested(options: &ShowOptions<'_>) -> bool {
     options.format == Some("raw") || options.pretty == Some("raw")
 }
 
-fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
-    if options.name_only {
-        return show_name_only_multi(options);
+fn show_diff_format_needs_raw_abbrev_len(format: ShowDiffFormat) -> bool {
+    matches!(
+        format,
+        ShowDiffFormat::Raw | ShowDiffFormat::PatchWithRaw | ShowDiffFormat::PatchWithRawSummary
+    )
+}
+
+fn show_format_needs_commit_abbrev_len(
+    format: &LogFormat<'_>,
+    default_commit_abbrev: bool,
+    parents: usize,
+) -> bool {
+    format.uses_abbreviated_object_id()
+        || default_commit_abbrev
+        || (matches!(
+            format,
+            LogFormat::Default | LogFormat::Full | LogFormat::Fuller
+        ) && parents > 1)
+}
+
+fn show_multi_objects(
+    options: ShowOptions<'_>,
+    mut revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
+    if revs.is_empty() {
+        revs = positional_revs;
     }
+    if revs.is_empty() {
+        revs.push("HEAD".to_owned());
+    }
+    let show_root = options.root || log_showroot_enabled(&repo)?;
+    let prepared = prepare_show_context(&repo, &store, &options)?;
+    let separate_objects = show_raw_format_requested(&options)
+        || options.patch
+        || options.patch_with_raw
+        || options.patch_with_stat
+        || options.stat
+        || options.shortstat
+        || options.raw;
+    for (idx, objectish) in revs.iter().enumerate() {
+        if idx > 0 && separate_objects {
+            io::stdout().write_all(b"\n")?;
+        }
+        let id = resolve_objectish(&repo, objectish).map_err(|_| show_revision_error(objectish))?;
+        let object = store.read_object(&id)?;
+        let mut object_options = options.clone();
+        object_options.stdin = false;
+        object_options.args = vec![objectish.clone()];
+        if !paths.is_empty() {
+            object_options.args.push("--".to_owned());
+            object_options.args.extend(paths.iter().cloned());
+        }
+        show_object(
+            &store,
+            objectish,
+            &object,
+            object_options,
+            show_root,
+            Some(&prepared),
+            detect_renames,
+            detect_copies,
+        )?;
+    }
+    Ok(())
+}
+
+fn show_raw_multi(
+    options: ShowOptions<'_>,
+    mut revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
+    if revs.is_empty() {
+        revs = positional_revs;
+    }
+    if revs.is_empty() {
+        revs.push("HEAD".to_owned());
+    }
+    let show_root = options.root || log_showroot_enabled(&repo)?;
+    let prepared = prepare_show_context(&repo, &store, &options)?;
+    for (idx, objectish) in revs.iter().enumerate() {
+        if idx > 0 {
+            io::stdout().write_all(b"\n")?;
+        }
+        let id = resolve_objectish(&repo, objectish).map_err(|_| show_revision_error(objectish))?;
+        let object = store.read_object(&id)?;
+        let mut object_options = options.clone();
+        object_options.stdin = false;
+        object_options.args = vec![objectish.clone()];
+        if !paths.is_empty() {
+            object_options.args.push("--".to_owned());
+            object_options.args.extend(paths.iter().cloned());
+        }
+        show_object(
+            &store,
+            objectish,
+            &object,
+            object_options,
+            show_root,
+            Some(&prepared),
+            detect_renames,
+            detect_copies,
+        )?;
+    }
+    Ok(())
+}
+
+fn show_revision_error(objectish: &str) -> CliError {
+    if objectish.starts_with('-') {
+        log_unrecognized_argument(objectish)
+    } else {
+        ambiguous_revision_error(objectish)
+    }
+}
+
+fn show_via_log(
+    options: ShowOptions<'_>,
+    resolved_revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+) -> Result<()> {
+    if options.name_only {
+        return show_name_only_multi(options, resolved_revs, detect_renames, detect_copies);
+    }
+    if options.name_status {
+        return show_name_status_multi(options, resolved_revs, detect_renames, detect_copies);
+    }
+    let patch_with_raw = options.patch_with_raw || (options.patch && options.raw);
+    let patch_with_stat = options.patch_with_stat || (options.patch && options.stat);
+    let patch = options.patch
+        && !patch_with_raw
+        && !patch_with_stat
+        && !options.numstat
+        && !options.shortstat
+        && !options.summary
+        && !options.name_only
+        && !options.name_status;
     log(LogOptions {
         oneline: options.oneline,
         zero: options.zero,
@@ -10576,11 +14836,11 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         min_age: None,
         no_min_parents: false,
         no_merges: false,
-        parents: false,
+        parents: options.parents,
         first_parent: options.first_parent,
         follow: false,
-        no_diff_merges: false,
-        diff_merges: None,
+        no_diff_merges: options.no_diff_merges,
+        diff_merges: options.diff_merges,
         separate_merges: options.separate_merges,
         dd: false,
         reverse: false,
@@ -10611,14 +14871,15 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
             || options.raw
             || options.summary
             || options.name_only
-            || options.name_status),
-        patch_with_stat: options.patch_with_stat,
+            || options.name_status)
+            || patch,
+        patch_with_stat,
         combined: options.combined,
         dense_combined: false,
-        stat: options.stat,
+        stat: options.stat && !patch_with_stat,
         numstat: options.numstat,
         shortstat: options.shortstat,
-        raw: options.raw,
+        raw: options.raw && !patch_with_raw,
         summary: options.summary,
         name_only: options.name_only,
         name_status: options.name_status,
@@ -10660,8 +14921,8 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
         reflog: false,
-        do_walk: false,
-        no_walk: true,
+        do_walk: options.do_walk,
+        no_walk: options.no_walk.is_some(),
         grep_reflog: Vec::new(),
         grep: Vec::new(),
         invert_grep: false,
@@ -10680,7 +14941,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         use_mailmap: false,
         no_use_mailmap: false,
         source: false,
-        max_count: None,
+        max_count: options.max_count,
         since: None,
         since_as_filter: None,
         until: None,
@@ -10697,63 +14958,317 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         missing: false,
         use_bitmap_index: false,
         quiet: false,
-        raw_args: &[],
-        revs: options.args,
+        raw_args: options.raw_args,
+        revs: late_show_revs(
+            if resolved_revs.is_empty() {
+                options.args
+            } else {
+                resolved_revs
+            },
+            options.max_count,
+            detect_renames,
+            detect_copies,
+            options.find_copies_harder,
+        ),
     })
 }
 
-fn show_name_only_multi(options: ShowOptions<'_>) -> Result<()> {
-    let (revs, paths) = split_show_revs_and_paths(options.args);
-    let revs = if revs.is_empty() {
+fn late_show_revs(
+    mut revs: Vec<String>,
+    max_count: Option<&str>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
+) -> Vec<String> {
+    if let Some(value) = max_count {
+        revs.push(format!("--max-count={value}"));
+    }
+    if let Some(value) = detect_renames {
+        revs.push(format!("--find-renames={value}%"));
+    }
+    if let Some(value) = detect_copies {
+        revs.push(format!("--find-copies={value}%"));
+    }
+    if find_copies_harder {
+        revs.push("--find-copies-harder".to_owned());
+    }
+    revs
+}
+
+fn show_name_only_multi(
+    options: ShowOptions<'_>,
+    resolved_revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+) -> Result<()> {
+    show_named_diff_multi(
+        options,
+        resolved_revs,
+        detect_renames,
+        detect_copies,
+        NamedShowDiffFormat::NameOnly,
+    )
+}
+
+fn show_name_status_multi(
+    options: ShowOptions<'_>,
+    resolved_revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+) -> Result<()> {
+    show_named_diff_multi(
+        options,
+        resolved_revs,
+        detect_renames,
+        detect_copies,
+        NamedShowDiffFormat::NameStatus,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum NamedShowDiffFormat {
+    NameOnly,
+    NameStatus,
+}
+
+fn write_named_tree_diff<W: Write>(
+    out: &mut W,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    old_tree: Option<&ObjectId>,
+    new_tree: &ObjectId,
+    named_format: NamedShowDiffFormat,
+) -> Result<()> {
+    let mut started = false;
+    zmin_git_core::for_each_tree_diff(tree_cache, old_tree, new_tree, |entry| {
+        if !started {
+            out.write_all(b"\n")?;
+            started = true;
+        }
+        match named_format {
+            NamedShowDiffFormat::NameOnly => {
+                writeln!(out, "{}", diff_display_path(&entry.path, None))?
+            }
+            NamedShowDiffFormat::NameStatus => writeln!(
+                out,
+                "{}\t{}",
+                entry.status.name_status(),
+                diff_display_path(&entry.path, None)
+            )?,
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_object_parents_header<W: Write>(
+    out: &mut W,
+    id: &ObjectId,
+    parents: &[ObjectId],
+) -> io::Result<()> {
+    id.write_hex_io(&mut *out)?;
+    out.write_all(b" ")?;
+    for (index, parent) in parents.iter().enumerate() {
+        if index > 0 {
+            out.write_all(b" ")?;
+        }
+        parent.write_hex_io(&mut *out)?;
+    }
+    out.write_all(b"\n")
+}
+
+fn show_named_diff_multi(
+    options: ShowOptions<'_>,
+    resolved_revs: Vec<String>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    named_format: NamedShowDiffFormat,
+) -> Result<()> {
+    let _trace = phase_trace("show.named_multi");
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_transient_packed_object_reads()
+        .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES);
+    let show_root = options.root || log_showroot_enabled(&repo)?;
+    let merge_diff_mode = show_effective_merge_diff_mode(&options)?;
+    let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args);
+    let revs = if !resolved_revs.is_empty() {
+        resolved_revs
+    } else if positional_revs.is_empty() {
         vec!["HEAD".to_owned()]
     } else {
-        revs
+        positional_revs
     };
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
-    let tree_cache = TreeObjectCache::new(&store);
-    let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
-    let pathspecs = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+    // The materialized tree indexes below already retain everything needed
+    // across requested commits. Keeping every decoded tree at the same time
+    // duplicates paths and object ids, which is especially costly for GUI
+    // clients that feed several adjacent commits through `show --stdin`.
+    let tree_cache = TreeObjectCache::transient(&store);
+    let direct_object_parents_header = options.format == Some("%H %P")
+        && options.pretty.is_none()
+        && !options.oneline
+        && !options.parents
+        && !options.notes
+        && !options.show_notes
+        && !options.show_notes_by_default;
+    let format = if direct_object_parents_header {
+        None
+    } else {
+        Some(LogFormat::parse(
+            options.oneline,
+            options.format,
+            options.pretty,
+        )?)
+    };
+    let abbrev_len = if direct_object_parents_header {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        default_abbrev_len(&store)?
+    };
+    let pathspecs = paths
+        .iter()
+        .map(|path| normalize_git_path(path).map_err(CliError::Io))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .map(String::into_bytes)
+        .collect::<Vec<_>>();
+    let stream_tree_diff = pathspecs.is_empty()
+        && detect_renames.is_none()
+        && detect_copies.is_none()
+        && !options.find_copies_harder;
+    let tree_indexes = ShowTreeIndexCache::new();
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
+    let stdout = io::stdout();
+    let stdout = stdout.lock();
+    let mut out = io::BufWriter::new(stdout);
     for rev in revs {
         let id = resolve_objectish(&repo, &rev).map_err(|_| ambiguous_revision_error(&rev))?;
+        if direct_object_parents_header && stream_tree_diff {
+            let commit = commit_cache.read_commit_links(&id)?;
+            write_object_parents_header(&mut out, &id, &commit.parents)?;
+            if commit.parents.len() > 1 && !matches!(merge_diff_mode, LogMergeDiffMode::FirstParent)
+            {
+                continue;
+            }
+            let old_tree = if let Some(parent) = commit.parents.first() {
+                Some(commit_cache.read_commit_links(parent)?.tree.clone())
+            } else if show_root {
+                None
+            } else {
+                continue;
+            };
+            write_named_tree_diff(
+                &mut out,
+                &tree_cache,
+                old_tree.as_ref(),
+                &commit.tree,
+                named_format,
+            )?;
+            continue;
+        }
         let commit = commit_cache.read_commit(&id)?;
-        let rendered = format.render_with_context_default_date(
-            &id,
-            &commit,
-            false,
-            default_abbrev_len(&store)?,
-            None,
-            false,
-            true,
-            &LogDecorations::empty(),
-            &LogNotes::empty(),
-        )?;
-        io::stdout().write_all(rendered.as_bytes())?;
-        if format.terminates_lines() {
-            io::stdout().write_all(b"\n")?;
+        if let Some(format) = format.as_ref() {
+            let rendered = format.render_with_context_default_date(
+                &id,
+                &commit,
+                options.parents,
+                abbrev_len,
+                None,
+                false,
+                true,
+                &decorations,
+                &notes,
+            )?;
+            out.write_all(rendered.as_bytes())?;
+            if format.terminates_lines() {
+                out.write_all(b"\n")?;
+            }
+        } else {
+            write_object_parents_header(&mut out, &id, &commit.parents)?;
+        }
+        if commit.parents.len() > 1 && !matches!(merge_diff_mode, LogMergeDiffMode::FirstParent) {
+            continue;
+        }
+        if stream_tree_diff {
+            let old_tree = if let Some(parent) = commit.parents.first() {
+                Some(commit_cache.read_commit(parent)?.tree.clone())
+            } else if show_root {
+                None
+            } else {
+                continue;
+            };
+            write_named_tree_diff(
+                &mut out,
+                &tree_cache,
+                old_tree.as_ref(),
+                &commit.tree,
+                named_format,
+            )?;
+            continue;
         }
         let old_index = if let Some(parent) = commit.parents.first() {
             let parent_commit = commit_cache.read_commit(parent)?;
-            tree_cache.read_tree_to_index(&parent_commit.tree)?
-        } else if options.root {
-            GitIndex::new()
+            read_show_tree_index(&tree_cache, Some(&tree_indexes), &parent_commit.tree)?
+        } else if show_root {
+            Arc::new(GitIndex::new())
         } else {
             continue;
         };
-        let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
-        let entries =
-            filtered_diff_entries(&repo, &old_index, &new_index, &pathspecs, None, None, false)?;
+        let new_index = read_show_tree_index(&tree_cache, Some(&tree_indexes), &commit.tree)?;
+        let entries = filtered_diff_entries_pathspecs(
+            old_index.as_ref(),
+            new_index.as_ref(),
+            &pathspecs,
+            detect_renames,
+            detect_copies,
+            options.find_copies_harder,
+        )?;
+        let context = DiffIndexContext {
+            repo: &repo,
+            store: &store,
+            old_index: old_index.as_ref(),
+            new_index: new_index.as_ref(),
+            old_source: DiffSideSource::Index,
+            new_source: DiffSideSource::Index,
+        };
+        let entries = apply_similarity_detection(
+            &context,
+            entries,
+            SimilarityDetectionOptions {
+                rename_threshold: detect_renames,
+                copy_threshold: detect_copies,
+                find_copies_harder: options.find_copies_harder,
+            },
+        )?;
         if entries.is_empty() {
             continue;
         }
-        io::stdout().write_all(b"\n")?;
-        print_name_only_entries(&entries, None, false)?;
+        out.write_all(b"\n")?;
+        match named_format {
+            NamedShowDiffFormat::NameOnly => {
+                write_name_only_entries_buffered(&mut out, &entries, None, false)?
+            }
+            NamedShowDiffFormat::NameStatus => {
+                write_name_status_entries_buffered(&mut out, &entries, None, false)?
+            }
+        }
     }
     Ok(())
 }
 
-fn split_show_revs_and_paths(args: Vec<String>) -> (Vec<String>, Vec<String>) {
+fn split_show_revs_and_paths(
+    repo: &GitRepo,
+    _store: &LooseObjectStore,
+    args: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    fn is_late_show_option(arg: &str) -> bool {
+        matches!(arg, "--parents" | "--date" | "--decorate" | "-c" | "-r")
+            || arg.starts_with("--date=")
+            || arg.starts_with("--decorate=")
+            || arg.starts_with("--diff-merges=")
+    }
+
     let mut revs = Vec::new();
     let mut paths = Vec::new();
     let mut in_paths = false;
@@ -10762,11 +15277,82 @@ fn split_show_revs_and_paths(args: Vec<String>) -> (Vec<String>, Vec<String>) {
             in_paths = true;
         } else if in_paths {
             paths.push(arg);
+        } else if is_late_show_option(&arg) {
+            continue;
+        } else if resolve_objectish(repo, &arg).is_ok() {
+            revs.push(arg);
+        } else if !revs.is_empty() && repo.root.join(&arg).exists() {
+            in_paths = true;
+            paths.push(arg);
         } else {
             revs.push(arg);
         }
     }
     (revs, paths)
+}
+
+struct PreparedShowContext {
+    repo: GitRepo,
+    decorations: LogDecorations,
+    date_arg: Option<String>,
+    pathspecs: Vec<Vec<u8>>,
+    tree_indexes: ShowTreeIndexCache,
+}
+
+struct ShowTreeIndexCache {
+    indexes: RefCell<HashMap<ObjectId, Arc<GitIndex>>>,
+}
+
+impl ShowTreeIndexCache {
+    fn new() -> Self {
+        Self {
+            indexes: RefCell::new(HashMap::new()),
+        }
+    }
+}
+
+fn prepare_show_context(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    options: &ShowOptions<'_>,
+) -> Result<PreparedShowContext> {
+    let decoration_mode = show_effective_decoration_mode(options)?;
+    let decorations = LogDecorations::load(repo, store, decoration_mode, false, None)?;
+    let date_arg = history_raw_date_arg(options.raw_args, None, false);
+    let (_, paths) = split_show_revs_and_paths(repo, store, options.args.clone());
+    let pathspecs = paths
+        .iter()
+        .map(|path| normalize_git_path(path).map_err(CliError::Io))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .map(String::into_bytes)
+        .collect::<Vec<_>>();
+    Ok(PreparedShowContext {
+        repo: repo.clone(),
+        decorations,
+        date_arg,
+        pathspecs,
+        tree_indexes: ShowTreeIndexCache::new(),
+    })
+}
+
+fn read_show_tree_index(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    tree_indexes: Option<&ShowTreeIndexCache>,
+    tree_id: &ObjectId,
+) -> Result<Arc<GitIndex>> {
+    if let Some(tree_indexes) = tree_indexes {
+        if let Some(index) = tree_indexes.indexes.borrow().get(tree_id) {
+            return Ok(index.clone());
+        }
+        let index = Arc::new(tree_cache.read_tree_to_index(tree_id)?);
+        tree_indexes
+            .indexes
+            .borrow_mut()
+            .insert(tree_id.clone(), index.clone());
+        return Ok(index);
+    }
+    Ok(Arc::new(tree_cache.read_tree_to_index(tree_id)?))
 }
 
 fn show_object(
@@ -10775,7 +15361,49 @@ fn show_object(
     object: &LooseObject,
     options: ShowOptions<'_>,
     show_root: bool,
+    prepared: Option<&PreparedShowContext>,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
 ) -> Result<()> {
+    let fallback_repo;
+    let repo = if let Some(prepared) = prepared {
+        &prepared.repo
+    } else {
+        fallback_repo = find_repo_or_bare()?;
+        &fallback_repo
+    };
+    let effective_parents = show_effective_parents(&options);
+    let fallback_decorations;
+    let decorations = if let Some(prepared) = prepared {
+        &prepared.decorations
+    } else {
+        let decoration_mode = show_effective_decoration_mode(&options)?;
+        fallback_decorations = LogDecorations::load(repo, store, decoration_mode, false, None)?;
+        &fallback_decorations
+    };
+    let fallback_date_arg;
+    let date_arg = if let Some(prepared) = prepared {
+        prepared.date_arg.as_deref()
+    } else {
+        fallback_date_arg = history_raw_date_arg(options.raw_args, None, false);
+        fallback_date_arg.as_deref()
+    };
+    let date_mode = parse_log_date_mode(date_arg)?;
+    let fallback_pathspecs;
+    let pathspecs = if let Some(prepared) = prepared {
+        prepared.pathspecs.as_slice()
+    } else {
+        let (_, paths) = split_show_revs_and_paths(repo, store, options.args.clone());
+        fallback_pathspecs = paths
+            .iter()
+            .map(|path| normalize_git_path(path).map_err(CliError::Io))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(String::into_bytes)
+            .collect::<Vec<_>>();
+        fallback_pathspecs.as_slice()
+    };
+    let tree_indexes = prepared.map(|prepared| &prepared.tree_indexes);
     match object.kind {
         GitObjectKind::Blob => {
             io::stdout().write_all(&object.content)?;
@@ -10783,83 +15411,101 @@ fn show_object(
         }
         GitObjectKind::Tree => show_tree_object(store, objectish, &object.id),
         GitObjectKind::Commit => {
-            let commit = decode_commit(GitHashAlgorithm::Sha1, &object.content)?;
-            let repo = find_repo()?;
-            let notes = LogNotes::load(
-                &repo,
-                store,
-                show_notes_enabled(
-                    options.notes,
-                    options.no_notes,
-                    options.show_notes,
-                    options.show_notes_by_default,
-                    options.standard_notes,
-                    options.no_standard_notes,
-                ),
-            )?;
+            let commit = {
+                let _trace = phase_trace("show.decode_commit");
+                decode_commit(GitHashAlgorithm::Sha1, &object.content)?
+            };
+            let format = {
+                let _trace = phase_trace("show.format.parse");
+                LogFormat::parse(options.oneline, options.format, options.pretty)?
+            };
+            let diff_format = options.diff_format();
+            let additive_diff_formats = show_additive_diff_formats(&options);
+            let merge_diff_mode = show_effective_merge_diff_mode(&options)?;
+            let notes = {
+                let _trace = phase_trace("show.notes.load");
+                LogNotes::load(
+                    &repo,
+                    store,
+                    format.uses_notes_display()
+                        && show_notes_enabled(
+                            options.notes,
+                            options.no_notes,
+                            options.show_notes,
+                            options.show_notes_by_default,
+                            options.standard_notes,
+                            options.no_standard_notes,
+                        ),
+                )?
+            };
             let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
-            let abbrev_len = if options.no_abbrev_commit {
-                GitHashAlgorithm::Sha1.digest_len() * 2
+            let raw_abbrev_len = {
+                let _trace = phase_trace("show.abbrev.raw");
+                if show_diff_format_needs_raw_abbrev_len(diff_format) {
+                    parse_diff_abbrev_len(options.abbrev, options.no_abbrev)?
+                        .or(Some(show_default_abbrev_len(&repo, store)?))
+                } else {
+                    None
+                }
+            };
+            let abbrev_len = {
+                let _trace = phase_trace("show.abbrev.commit");
+                if options.no_abbrev_commit {
+                    GitHashAlgorithm::Sha1.digest_len() * 2
+                } else if show_format_needs_commit_abbrev_len(
+                    &format,
+                    default_commit_abbrev,
+                    commit.parents.len(),
+                ) {
+                    raw_abbrev_len.unwrap_or(show_default_abbrev_len(&repo, store)?)
+                } else {
+                    GitHashAlgorithm::Sha1.digest_len() * 2
+                }
+            };
+            let has_diff_entries = if pathspecs.is_empty() {
+                true
             } else {
-                default_abbrev_len(store)?
+                let _trace = phase_trace("show.pathspec.matches");
+                show_commit_matches_pathspec(
+                    repo,
+                    store,
+                    &commit,
+                    merge_diff_mode,
+                    show_root,
+                    empty_pickaxe_options(),
+                    pathspecs,
+                    tree_indexes,
+                )?
+            };
+            if !has_diff_entries {
+                return Ok(());
+            }
+            let visible_parent_ids = {
+                let _trace = phase_trace("show.visible_parents");
+                visible_show_parent_ids_for_pathspec(
+                    repo,
+                    store,
+                    &commit,
+                    show_root,
+                    pathspecs,
+                    tree_indexes,
+                )?
             };
             if options.no_patch {
                 if show_raw_format_requested(&options) {
-                    return show_raw_commit(&object.id, &object.content);
+                    return show_raw_commit(
+                        &object.id,
+                        &object.content,
+                        effective_parents,
+                        &visible_parent_ids,
+                    );
                 }
-                let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
-                let rendered = format.render_with_context_default_date(
-                    &object.id,
-                    &commit,
-                    false,
-                    abbrev_len,
-                    None,
-                    default_commit_abbrev,
-                    log_expand_tabs_enabled(
-                        options.encoding,
-                        options.expand_tabs,
-                        options.no_expand_tabs,
-                    ),
-                    &LogDecorations::empty(),
-                    &notes,
-                )?;
-                io::stdout().write_all(rendered.as_bytes())?;
-                if format.terminates_lines() {
-                    io::stdout().write_all(b"\n")?;
-                }
-                return Ok(());
-            }
-            if show_raw_format_requested(&options) {
-                show_raw_commit(&object.id, &object.content)?;
-                if commit.parents.is_empty() && !show_root {
-                    return Ok(());
-                }
-                io::stdout().write_all(b"\n")?;
-                return show_commit_diff(
-                    &repo,
-                    store,
-                    &commit,
-                    options.diff_format(),
-                    show_merge_diff_mode(&options),
-                    !options.combined,
-                    show_root,
-                    empty_pickaxe_options(),
-                    &[],
-                    &[],
-                    options.zero,
-                );
-            }
-            let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
-            if options.separate_merges && commit.parents.len() > 1 {
-                let decorations = LogDecorations::empty();
-                let diff_format = options.diff_format();
-                let mut out = io::stdout().lock();
-                for (idx, parent) in commit.parents.iter().enumerate() {
-                    let rendered = format.render_with_from_parent(
+                let rendered = {
+                    let _trace = phase_trace("show.render_header");
+                    format.render_with_context(
                         &object.id,
                         &commit,
-                        Some(parent),
-                        false,
+                        effective_parents,
                         abbrev_len,
                         None,
                         default_commit_abbrev,
@@ -10870,7 +15516,89 @@ fn show_object(
                         ),
                         &decorations,
                         &notes,
-                        LogDateMode::Builtin(BlameDateMode::Default),
+                        date_mode,
+                    )?
+                };
+                io::stdout().write_all(rendered.as_bytes())?;
+                if format.terminates_lines() {
+                    io::stdout().write_all(b"\n")?;
+                }
+                return Ok(());
+            }
+            if show_raw_format_requested(&options) {
+                show_raw_commit(
+                    &object.id,
+                    &object.content,
+                    effective_parents,
+                    &visible_parent_ids,
+                )?;
+                if visible_parent_ids.is_empty() && !show_root {
+                    return Ok(());
+                }
+                if matches!(
+                    options.diff_format(),
+                    ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
+                ) {
+                    io::stdout().write_all(b"---\n")?;
+                } else {
+                    io::stdout().write_all(b"\n")?;
+                }
+                if commit.parents.len() <= 1 {
+                    return show_commit_diff_against_optional_parent(
+                        repo,
+                        store,
+                        &commit,
+                        visible_parent_ids.first(),
+                        options.diff_format(),
+                        empty_pickaxe_options(),
+                        &[],
+                        pathspecs,
+                        tree_indexes,
+                        raw_abbrev_len,
+                        options.zero,
+                        detect_renames,
+                        detect_copies,
+                        options.find_copies_harder,
+                    );
+                }
+                return show_commit_diff(
+                    repo,
+                    store,
+                    &commit,
+                    options.diff_format(),
+                    merge_diff_mode,
+                    !options.combined,
+                    show_root,
+                    empty_pickaxe_options(),
+                    &[],
+                    pathspecs,
+                    tree_indexes,
+                    raw_abbrev_len,
+                    options.zero,
+                    detect_renames,
+                    detect_copies,
+                    options.find_copies_harder,
+                );
+            }
+            if options.separate_merges && commit.parents.len() > 1 {
+                let mut out = io::stdout().lock();
+                for (idx, parent) in commit.parents.iter().enumerate() {
+                    let rendered = format.render_with_from_parent(
+                        &object.id,
+                        &commit,
+                        Some(parent),
+                        effective_parents,
+                        abbrev_len,
+                        None,
+                        default_commit_abbrev,
+                        log_expand_tabs_enabled(
+                            options.encoding,
+                            options.expand_tabs,
+                            options.no_expand_tabs,
+                        ),
+                        &decorations,
+                        &notes,
+                        date_mode,
                     )?;
                     out.write_all(rendered.as_bytes())?;
                     if format.separates_patch()
@@ -10885,15 +15613,20 @@ fn show_object(
                     }
                     drop(out);
                     show_commit_diff_against_parent(
-                        &repo,
+                        repo,
                         store,
                         &commit,
                         diff_format,
                         idx,
                         empty_pickaxe_options(),
                         &[],
-                        &[],
+                        pathspecs,
+                        tree_indexes,
+                        raw_abbrev_len,
                         options.zero,
+                        detect_renames,
+                        detect_copies,
+                        options.find_copies_harder,
                     )?;
                     out = io::stdout().lock();
                     if idx + 1 < commit.parents.len() {
@@ -10902,41 +15635,43 @@ fn show_object(
                 }
                 return Ok(());
             }
-            let rendered = format.render_with_context_default_date(
-                &object.id,
-                &commit,
-                false,
-                abbrev_len,
-                None,
-                default_commit_abbrev,
-                log_expand_tabs_enabled(
-                    options.encoding,
-                    options.expand_tabs,
-                    options.no_expand_tabs,
-                ),
-                &LogDecorations::empty(),
-                &notes,
-            )?;
+            let rendered = {
+                let _trace = phase_trace("show.render_header");
+                format.render_with_context(
+                    &object.id,
+                    &commit,
+                    effective_parents,
+                    abbrev_len,
+                    None,
+                    default_commit_abbrev,
+                    log_expand_tabs_enabled(
+                        options.encoding,
+                        options.expand_tabs,
+                        options.no_expand_tabs,
+                    ),
+                    &decorations,
+                    &notes,
+                    date_mode,
+                )?
+            };
+            let zero_diff_header = options.zero
+                && matches!(
+                    diff_format,
+                    ShowDiffFormat::NameStatus
+                        | ShowDiffFormat::NameOnly
+                        | ShowDiffFormat::Numstat
+                        | ShowDiffFormat::Raw
+                );
             io::stdout().write_all(rendered.as_bytes())?;
+            if zero_diff_header {
+                io::stdout().write_all(b"\0")?;
+            }
             if format.terminates_lines() {
                 io::stdout().write_all(b"\n")?;
             }
             if commit.parents.is_empty() && !show_root {
                 return Ok(());
             }
-            let diff_format = options.diff_format();
-            let has_diff_entries = if commit.parents.len() <= 1 {
-                show_commit_diff_has_entries(
-                    &find_repo()?,
-                    store,
-                    &commit,
-                    show_root,
-                    empty_pickaxe_options(),
-                    &[],
-                )?
-            } else {
-                true
-            };
             if format.separates_patch()
                 && matches!(
                     diff_format,
@@ -10946,24 +15681,47 @@ fn show_object(
                 if has_diff_entries {
                     io::stdout().write_all(b"---\n")?;
                 }
-            } else if format.separates_patch() && has_diff_entries {
+            } else if format.separates_patch() && has_diff_entries && !zero_diff_header {
                 io::stdout().write_all(b"\n")?;
             }
             if commit.parents.len() > 1 && format.terminates_lines() && !format.separates_patch() {
                 io::stdout().write_all(b"\n")?;
             }
+            if additive_diff_formats.len() > 1 {
+                return show_commit_diff_sequence(
+                    repo,
+                    store,
+                    &commit,
+                    &additive_diff_formats,
+                    &visible_parent_ids,
+                    merge_diff_mode,
+                    show_root,
+                    pathspecs,
+                    tree_indexes,
+                    raw_abbrev_len,
+                    options.zero,
+                    detect_renames,
+                    detect_copies,
+                    options.find_copies_harder,
+                );
+            }
             show_commit_diff(
-                &repo,
+                repo,
                 store,
                 &commit,
                 diff_format,
-                show_merge_diff_mode(&options),
+                merge_diff_mode,
                 !options.combined,
                 show_root,
                 empty_pickaxe_options(),
                 &[],
-                &[],
+                pathspecs,
+                tree_indexes,
+                raw_abbrev_len,
                 options.zero,
+                detect_renames,
+                detect_copies,
+                options.find_copies_harder,
             )
         }
         GitObjectKind::Tag => show_tag_object(store, &object.content, options, show_root),
@@ -10977,6 +15735,7 @@ fn show_commit_diff_has_entries(
     include_root_diff: bool,
     pickaxe_options: PickaxeOptions<'_>,
     pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
 ) -> Result<bool> {
     if commit.parents.len() > 1 {
         return Ok(true);
@@ -10985,13 +15744,13 @@ fn show_commit_diff_has_entries(
     let tree_cache = TreeObjectCache::new(store);
     let old_index = if let Some(parent) = commit.parents.first() {
         let parent_commit = commit_cache.read_commit(parent)?;
-        tree_cache.read_tree_to_index(&parent_commit.tree)?
+        read_show_tree_index(&tree_cache, tree_indexes, &parent_commit.tree)?
     } else if include_root_diff {
-        GitIndex::new()
+        Arc::new(GitIndex::new())
     } else {
         return Ok(false);
     };
-    let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+    let new_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
     let entries = diff_indexes(&old_index, &new_index)?
         .into_iter()
         .filter(|entry| diff_entry_matches_pathspec(entry, pathspecs))
@@ -11005,6 +15764,95 @@ fn show_commit_diff_has_entries(
         new_source: DiffSideSource::Index,
     };
     Ok(!apply_pickaxe_filter(&context, entries, pickaxe_options)?.is_empty())
+}
+
+fn show_commit_matches_pathspec(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    merge_diff_mode: LogMergeDiffMode,
+    include_root_diff: bool,
+    pickaxe_options: PickaxeOptions<'_>,
+    pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+) -> Result<bool> {
+    if pathspecs.is_empty() {
+        return Ok(true);
+    }
+    let literal_paths = (!pickaxe_options.enabled())
+        .then(|| visible_show_literal_paths(pathspecs))
+        .flatten();
+    if commit.parents.len() <= 1 {
+        if let Some(paths) = literal_paths.as_deref() {
+            let commit_cache = CommitObjectCache::new(store);
+            return commit_touches_literal_paths(
+                store,
+                &commit_cache,
+                commit,
+                include_root_diff,
+                paths,
+            );
+        }
+        return show_commit_diff_has_entries(
+            repo,
+            store,
+            commit,
+            include_root_diff,
+            pickaxe_options,
+            pathspecs,
+            tree_indexes,
+        );
+    }
+    if matches!(merge_diff_mode, LogMergeDiffMode::Off) {
+        return Ok(false);
+    }
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let mut literal_path_cache = LiteralTreePathIdentityCache::default();
+    let new_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
+
+    for parent_id in &commit.parents {
+        let parent = commit_cache.read_commit(parent_id)?;
+        if let Some(paths) = literal_paths.as_deref() {
+            if literal_tree_entry_identities_cached(
+                &tree_cache,
+                &mut literal_path_cache,
+                &commit.tree,
+                paths,
+            )? != literal_tree_entry_identities_cached(
+                &tree_cache,
+                &mut literal_path_cache,
+                &parent.tree,
+                paths,
+            )? {
+                return Ok(true);
+            }
+            if matches!(merge_diff_mode, LogMergeDiffMode::FirstParent) {
+                break;
+            }
+            continue;
+        }
+        let old_index = read_show_tree_index(&tree_cache, tree_indexes, &parent.tree)?;
+        let entries = diff_indexes(&old_index, &new_index)?
+            .into_iter()
+            .filter(|entry| diff_entry_matches_pathspec(entry, pathspecs))
+            .collect::<Vec<_>>();
+        let context = DiffIndexContext {
+            repo,
+            store,
+            old_index: &old_index,
+            new_index: &new_index,
+            old_source: DiffSideSource::Index,
+            new_source: DiffSideSource::Index,
+        };
+        if !apply_pickaxe_filter(&context, entries, pickaxe_options)?.is_empty() {
+            return Ok(true);
+        }
+        if matches!(merge_diff_mode, LogMergeDiffMode::FirstParent) {
+            break;
+        }
+    }
+    Ok(false)
 }
 
 fn show_notes_enabled(
@@ -11036,7 +15884,12 @@ fn show_tree_object(store: &LooseObjectStore, objectish: &str, tree_id: &ObjectI
     Ok(())
 }
 
-fn show_raw_commit(id: &ObjectId, content: &[u8]) -> Result<()> {
+fn show_raw_commit(
+    id: &ObjectId,
+    content: &[u8],
+    parents: bool,
+    visible_parents: &[ObjectId],
+) -> Result<()> {
     let message_start = content
         .windows(2)
         .position(|window| window == b"\n\n")
@@ -11048,13 +15901,23 @@ fn show_raw_commit(id: &ObjectId, content: &[u8]) -> Result<()> {
     let headers = &content[..message_start - 2];
     let message = &content[message_start..];
     let mut out = io::stdout().lock();
-    writeln!(out, "commit {}", id.to_hex())?;
+    write!(out, "commit {}", id.to_hex())?;
+    if parents {
+        for parent in visible_parents {
+            write!(out, " {}", parent.to_hex())?;
+        }
+    }
+    writeln!(out)?;
     out.write_all(headers)?;
     out.write_all(b"\n\n")?;
     write_indented_message(&mut out, message)
 }
 
-fn write_rev_list_header_record(out: &mut dyn io::Write, id: &ObjectId, content: &[u8]) -> Result<()> {
+fn write_rev_list_header_record(
+    out: &mut dyn io::Write,
+    id: &ObjectId,
+    content: &[u8],
+) -> Result<()> {
     let message_start = content
         .windows(2)
         .position(|window| window == b"\n\n")
@@ -11084,13 +15947,45 @@ fn show_commit_diff(
     pickaxe_options: PickaxeOptions<'_>,
     ignore_matching_lines: &[Regex],
     pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+    raw_abbrev_len: Option<usize>,
     nul_terminated: bool,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
 ) -> Result<()> {
+    let _trace = phase_trace("show.commit_diff");
     if commit.parents.len() > 1 && matches!(merge_diff_mode, LogMergeDiffMode::Off) {
         return Ok(());
     }
     let commit_cache = CommitObjectCache::new(store);
     let tree_cache = TreeObjectCache::new(store);
+    if matches!(format, ShowDiffFormat::Raw)
+        && commit.parents.len() <= 1
+        && !pickaxe_options.enabled()
+        && detect_renames.is_none()
+        && detect_copies.is_none()
+        && !find_copies_harder
+    {
+        let _trace = phase_trace("show.commit_diff.raw");
+        let old_tree = if let Some(parent) = commit.parents.first() {
+            let _trace = phase_trace("show.commit_diff.raw.read_parent_commit");
+            Some(commit_cache.read_commit(parent)?.tree.clone())
+        } else if include_root_diff {
+            None
+        } else {
+            return Ok(());
+        };
+        return print_tree_raw_entries(
+            store,
+            old_tree.as_ref(),
+            &commit.tree,
+            pathspecs,
+            raw_abbrev_len,
+            None,
+            nul_terminated,
+        );
+    }
     if commit.parents.len() > 1 {
         if matches!(merge_diff_mode, LogMergeDiffMode::FirstParent) {
             return show_commit_diff_against_parent(
@@ -11102,20 +15997,23 @@ fn show_commit_diff(
                 pickaxe_options,
                 ignore_matching_lines,
                 pathspecs,
+                tree_indexes,
+                raw_abbrev_len,
                 nul_terminated,
+                detect_renames,
+                detect_copies,
+                find_copies_harder,
             );
         }
         let parent_indexes =
             diff_commands::combined_diff_tree_parent_indexes(commit, &commit_cache, &tree_cache)?;
-        let result_index = tree_cache
-            .read_tree_to_index(&commit.tree)
-            .map_err(CliError::Io)?;
+        let result_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
         match format {
             ShowDiffFormat::Patch => {
                 diff_commands::print_combined_diff_tree_patches(
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
                     diff_commands::CombinedPatchRenderOptions {
                         abbrev_len: None,
@@ -11131,16 +16029,16 @@ fn show_commit_diff(
                 diff_commands::print_combined_diff_tree_raw_entries(
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
-                    None,
+                    raw_abbrev_len,
                     None,
                     nul_terminated,
                 )?;
                 if matches!(format, ShowDiffFormat::PatchWithRawSummary) {
                     diff_commands::print_combined_diff_tree_summary(
                         &parent_indexes,
-                        &result_index,
+                        result_index.as_ref(),
                         pathspecs,
                         None,
                     )?;
@@ -11149,7 +16047,7 @@ fn show_commit_diff(
                 diff_commands::print_combined_diff_tree_patches(
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
                     diff_commands::CombinedPatchRenderOptions {
                         abbrev_len: None,
@@ -11166,7 +16064,7 @@ fn show_commit_diff(
                     repo,
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
                     diff_commands::CombinedStatRenderOptions {
                         relative_prefix: None,
@@ -11179,7 +16077,7 @@ fn show_commit_diff(
                 if matches!(format, ShowDiffFormat::PatchWithStatSummary) {
                     diff_commands::print_combined_diff_tree_summary(
                         &parent_indexes,
-                        &result_index,
+                        result_index.as_ref(),
                         pathspecs,
                         None,
                     )?;
@@ -11188,7 +16086,7 @@ fn show_commit_diff(
                 diff_commands::print_combined_diff_tree_patches(
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
                     diff_commands::CombinedPatchRenderOptions {
                         abbrev_len: None,
@@ -11205,7 +16103,7 @@ fn show_commit_diff(
                     repo,
                     store,
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     pathspecs,
                     diff_commands::CombinedStatRenderOptions {
                         relative_prefix: None,
@@ -11218,52 +16116,69 @@ fn show_commit_diff(
                 if matches!(format, ShowDiffFormat::StatSummary) {
                     diff_commands::print_combined_diff_tree_summary(
                         &parent_indexes,
-                        &result_index,
+                        result_index.as_ref(),
                         pathspecs,
                         None,
                     )?;
                 }
             }
             ShowDiffFormat::Shortstat => {
-                diff_commands::print_combined_diff_tree_stat(
+                return show_commit_diff_against_parent(
                     repo,
                     store,
-                    &parent_indexes,
-                    &result_index,
+                    commit,
+                    format,
+                    0,
+                    pickaxe_options,
+                    ignore_matching_lines,
                     pathspecs,
-                    diff_commands::CombinedStatRenderOptions {
-                        relative_prefix: None,
-                        whitespace_mode: DiffWhitespaceMode::None,
-                        ignore_matching_lines,
-                        ignore_blank_lines: false,
-                        shortstat: true,
-                    },
-                )?;
+                    tree_indexes,
+                    raw_abbrev_len,
+                    nul_terminated,
+                    detect_renames,
+                    detect_copies,
+                    find_copies_harder,
+                );
             }
             ShowDiffFormat::Summary => {
                 diff_commands::print_combined_diff_tree_summary(
                     &parent_indexes,
-                    &result_index,
+                    result_index.as_ref(),
                     &pathspecs,
                     None,
                 )?;
             }
-            ShowDiffFormat::Numstat
-            | ShowDiffFormat::Raw
-            | ShowDiffFormat::NameOnly
-            | ShowDiffFormat::NameStatus => {}
+            ShowDiffFormat::Raw | ShowDiffFormat::NameOnly | ShowDiffFormat::NameStatus => {}
+            ShowDiffFormat::Numstat => {
+                return show_commit_diff_against_parent(
+                    repo,
+                    store,
+                    commit,
+                    format,
+                    0,
+                    pickaxe_options,
+                    ignore_matching_lines,
+                    pathspecs,
+                    tree_indexes,
+                    raw_abbrev_len,
+                    nul_terminated,
+                    detect_renames,
+                    detect_copies,
+                    find_copies_harder,
+                );
+            }
         }
         return Ok(());
     }
     let old_index = if let Some(parent) = commit.parents.first() {
         let parent_commit = commit_cache.read_commit(parent)?;
-        tree_cache.read_tree_to_index(&parent_commit.tree)?
+        read_show_tree_index(&tree_cache, tree_indexes, &parent_commit.tree)?
     } else if include_root_diff {
-        GitIndex::new()
+        Arc::new(GitIndex::new())
     } else {
         return Ok(());
     };
-    let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+    let new_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
     show_diff_between_indexes(
         repo,
         store,
@@ -11273,7 +16188,75 @@ fn show_commit_diff(
         pickaxe_options,
         ignore_matching_lines,
         pathspecs,
+        raw_abbrev_len,
         nul_terminated,
+        detect_renames,
+        detect_copies,
+        find_copies_harder,
+    )
+}
+
+fn show_commit_diff_against_optional_parent(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    parent_id: Option<&ObjectId>,
+    format: ShowDiffFormat,
+    pickaxe_options: PickaxeOptions<'_>,
+    ignore_matching_lines: &[Regex],
+    pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+    raw_abbrev_len: Option<usize>,
+    nul_terminated: bool,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
+) -> Result<()> {
+    if matches!(format, ShowDiffFormat::Raw)
+        && !pickaxe_options.enabled()
+        && detect_renames.is_none()
+        && detect_copies.is_none()
+        && !find_copies_harder
+    {
+        let old_tree = if let Some(parent_id) = parent_id {
+            let commit_cache = CommitObjectCache::new(store);
+            Some(commit_cache.read_commit(parent_id)?.tree.clone())
+        } else {
+            None
+        };
+        return print_tree_raw_entries(
+            store,
+            old_tree.as_ref(),
+            &commit.tree,
+            pathspecs,
+            raw_abbrev_len,
+            None,
+            nul_terminated,
+        );
+    }
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let old_index = if let Some(parent_id) = parent_id {
+        let parent = commit_cache.read_commit(parent_id)?;
+        read_show_tree_index(&tree_cache, tree_indexes, &parent.tree)?
+    } else {
+        Arc::new(GitIndex::new())
+    };
+    let new_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
+    show_diff_between_indexes(
+        repo,
+        store,
+        &old_index,
+        &new_index,
+        format,
+        pickaxe_options,
+        ignore_matching_lines,
+        pathspecs,
+        raw_abbrev_len,
+        nul_terminated,
+        detect_renames,
+        detect_copies,
+        find_copies_harder,
     )
 }
 
@@ -11286,8 +16269,14 @@ fn show_commit_diff_against_parent(
     pickaxe_options: PickaxeOptions<'_>,
     ignore_matching_lines: &[Regex],
     pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+    raw_abbrev_len: Option<usize>,
     nul_terminated: bool,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
 ) -> Result<()> {
+    let _trace = phase_trace("show.commit_diff_against_parent");
     let parent_id = commit
         .parents
         .get(parent_index)
@@ -11295,22 +16284,284 @@ fn show_commit_diff_against_parent(
             code: 128,
             message: "merge parent index out of range".into(),
         })?;
-    let commit_cache = CommitObjectCache::new(store);
-    let tree_cache = TreeObjectCache::new(store);
-    let parent = commit_cache.read_commit(parent_id)?;
-    let old_index = tree_cache.read_tree_to_index(&parent.tree)?;
-    let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
-    show_diff_between_indexes(
+    show_commit_diff_against_optional_parent(
         repo,
         store,
-        &old_index,
-        &new_index,
+        commit,
+        Some(parent_id),
         format,
         pickaxe_options,
         ignore_matching_lines,
         pathspecs,
+        tree_indexes,
+        raw_abbrev_len,
         nul_terminated,
+        detect_renames,
+        detect_copies,
+        find_copies_harder,
     )
+}
+
+fn show_commit_diff_sequence(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    formats: &[ShowDiffFormat],
+    visible_parent_ids: &[ObjectId],
+    merge_diff_mode: LogMergeDiffMode,
+    show_root: bool,
+    pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+    raw_abbrev_len: Option<usize>,
+    nul_terminated: bool,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
+) -> Result<()> {
+    for format in formats {
+        if commit.parents.len() <= 1 {
+            show_commit_diff_against_optional_parent(
+                repo,
+                store,
+                commit,
+                visible_parent_ids.first(),
+                *format,
+                empty_pickaxe_options(),
+                &[],
+                pathspecs,
+                tree_indexes,
+                raw_abbrev_len,
+                nul_terminated,
+                detect_renames,
+                detect_copies,
+                find_copies_harder,
+            )?;
+        } else {
+            show_commit_diff(
+                repo,
+                store,
+                commit,
+                *format,
+                merge_diff_mode,
+                true,
+                show_root,
+                empty_pickaxe_options(),
+                &[],
+                pathspecs,
+                tree_indexes,
+                raw_abbrev_len,
+                nul_terminated,
+                detect_renames,
+                detect_copies,
+                find_copies_harder,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn visible_show_parent_ids_for_pathspec(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    include_root_diff: bool,
+    pathspecs: &[Vec<u8>],
+    tree_indexes: Option<&ShowTreeIndexCache>,
+) -> Result<Vec<ObjectId>> {
+    if pathspecs.is_empty() || commit.parents.len() != 1 {
+        return Ok(commit.parents.clone());
+    }
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let literal_paths = visible_show_literal_paths(pathspecs);
+    if let Some(paths) = literal_paths.as_deref() {
+        let mut literal_path_cache = LiteralTreePathIdentityCache::default();
+        let mut current_parent_id = commit.parents[0].clone();
+        let mut current_parent = commit_cache.read_commit(&current_parent_id)?;
+        let mut current_entries = literal_tree_entry_identities_cached(
+            &tree_cache,
+            &mut literal_path_cache,
+            &current_parent.tree,
+            paths,
+        )?;
+        loop {
+            let Some(next_parent_id) = current_parent.parents.first().cloned() else {
+                if include_root_diff && current_entries.iter().any(Option::is_some) {
+                    return Ok(vec![current_parent_id]);
+                }
+                return Ok(Vec::new());
+            };
+            let next_parent = commit_cache.read_commit(&next_parent_id)?;
+            let next_entries = literal_tree_entry_identities_cached(
+                &tree_cache,
+                &mut literal_path_cache,
+                &next_parent.tree,
+                paths,
+            )?;
+            if current_entries != next_entries {
+                return Ok(vec![current_parent_id]);
+            }
+            current_parent_id = next_parent_id;
+            current_parent = next_parent;
+            current_entries = next_entries;
+        }
+    }
+    let mut current_parent = commit.parents.first().cloned();
+    while let Some(parent_id) = current_parent {
+        let parent_commit = commit_cache.read_commit(&parent_id)?;
+        let has_entries = show_commit_diff_has_entries(
+            repo,
+            store,
+            parent_commit.as_ref(),
+            include_root_diff,
+            empty_pickaxe_options(),
+            pathspecs,
+            tree_indexes,
+        )?;
+        if has_entries {
+            return Ok(vec![parent_id]);
+        }
+        current_parent = parent_commit.parents.first().cloned();
+    }
+    Ok(Vec::new())
+}
+
+fn visible_show_literal_paths(pathspecs: &[Vec<u8>]) -> Option<Vec<Vec<u8>>> {
+    let mut paths = Vec::with_capacity(pathspecs.len());
+    for raw in pathspecs {
+        let rule = parse_pathspec_rule(raw);
+        if rule.exclude || rule.options.icase || rule.pattern.is_empty() {
+            return None;
+        }
+        if rule
+            .pattern
+            .iter()
+            .any(|byte| matches!(*byte, b'*' | b'?' | b'['))
+        {
+            return None;
+        }
+        paths.push(rule.pattern.to_vec());
+    }
+    Some(paths)
+}
+
+fn commit_touches_literal_paths(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    commit: &zmin_git_core::CommitObject,
+    include_root_diff: bool,
+    paths: &[Vec<u8>],
+) -> Result<bool> {
+    let tree_cache = TreeObjectCache::new(store);
+    let mut literal_path_cache = LiteralTreePathIdentityCache::default();
+    commit_touches_literal_paths_with_tree_cache(
+        &tree_cache,
+        &mut literal_path_cache,
+        commit_cache,
+        commit,
+        include_root_diff,
+        paths,
+    )
+}
+
+fn commit_touches_literal_paths_with_tree_cache(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    literal_path_cache: &mut LiteralTreePathIdentityCache,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    commit: &zmin_git_core::CommitObject,
+    include_root_diff: bool,
+    paths: &[Vec<u8>],
+) -> Result<bool> {
+    let parent_commit = commit
+        .parents
+        .first()
+        .map(|parent_id| commit_cache.read_commit(parent_id))
+        .transpose()?;
+    if parent_commit.is_none() && !include_root_diff {
+        return Ok(false);
+    }
+    let current =
+        literal_tree_entry_identities_cached(tree_cache, literal_path_cache, &commit.tree, paths)?;
+    let parent = parent_commit
+        .as_ref()
+        .map(|parent| {
+            literal_tree_entry_identities_cached(
+                tree_cache,
+                literal_path_cache,
+                &parent.tree,
+                paths,
+            )
+        })
+        .transpose()?;
+    Ok(current != parent.unwrap_or_else(|| vec![None; paths.len()]))
+}
+
+fn literal_tree_entry_identities_cached(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    literal_path_cache: &mut LiteralTreePathIdentityCache,
+    tree_id: &ObjectId,
+    paths: &[Vec<u8>],
+) -> Result<Vec<Option<(TreeMode, ObjectId)>>> {
+    paths
+        .iter()
+        .map(|path| {
+            literal_tree_entry_identity_cached(tree_cache, literal_path_cache, tree_id, path)
+        })
+        .collect()
+}
+
+#[derive(Default)]
+struct LiteralTreePathIdentityCache {
+    entries: HashMap<(ObjectId, Vec<u8>), Option<(TreeMode, ObjectId)>>,
+}
+
+fn literal_tree_entry_identity_cached(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    literal_path_cache: &mut LiteralTreePathIdentityCache,
+    tree_id: &ObjectId,
+    path: &[u8],
+) -> Result<Option<(TreeMode, ObjectId)>> {
+    if path.is_empty() {
+        return Ok(None);
+    }
+    let key = (tree_id.clone(), path.to_vec());
+    if let Some(cached) = literal_path_cache.entries.get(&key) {
+        return Ok(cached.clone());
+    }
+
+    let result =
+        literal_tree_entry_identity_uncached(tree_cache, literal_path_cache, tree_id, path)?;
+    literal_path_cache.entries.insert(key, result.clone());
+    Ok(result)
+}
+
+fn literal_tree_entry_identity_uncached(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    literal_path_cache: &mut LiteralTreePathIdentityCache,
+    tree_id: &ObjectId,
+    path: &[u8],
+) -> Result<Option<(TreeMode, ObjectId)>> {
+    let mut components = path.splitn(2, |byte| *byte == b'/');
+    let component = components.next().unwrap_or_default();
+    if component.is_empty() {
+        return Ok(None);
+    }
+    let remainder = components.next();
+    let entry = tree_cache
+        .read_tree(tree_id)?
+        .iter()
+        .find(|entry| entry.name == component)
+        .cloned();
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    let Some(remainder) = remainder else {
+        return Ok(Some((entry.mode, entry.id)));
+    };
+    if entry.mode != TreeMode::Tree {
+        return Ok(None);
+    }
+    literal_tree_entry_identity_cached(tree_cache, literal_path_cache, &entry.id, remainder)
 }
 
 fn show_diff_between_indexes(
@@ -11322,12 +16573,22 @@ fn show_diff_between_indexes(
     pickaxe_options: PickaxeOptions<'_>,
     ignore_matching_lines: &[Regex],
     pathspecs: &[Vec<u8>],
+    raw_abbrev_len: Option<usize>,
     nul_terminated: bool,
+    detect_renames: Option<u8>,
+    detect_copies: Option<u8>,
+    find_copies_harder: bool,
 ) -> Result<()> {
-    let entries = diff_indexes(&old_index, &new_index)?
-        .into_iter()
-        .filter(|entry| diff_entry_matches_pathspec(entry, pathspecs))
-        .collect::<Vec<_>>();
+    let entries = diff_entries_for_indexes(
+        old_index,
+        new_index,
+        detect_renames,
+        detect_copies,
+        find_copies_harder,
+    )?
+    .into_iter()
+    .filter(|entry| diff_entry_matches_pathspec(entry, pathspecs))
+    .collect::<Vec<_>>();
     let context = DiffIndexContext {
         repo,
         store,
@@ -11336,6 +16597,15 @@ fn show_diff_between_indexes(
         old_source: DiffSideSource::Index,
         new_source: DiffSideSource::Index,
     };
+    let entries = apply_similarity_detection(
+        &context,
+        entries,
+        SimilarityDetectionOptions {
+            rename_threshold: detect_renames,
+            copy_threshold: detect_copies,
+            find_copies_harder,
+        },
+    )?;
     let entries = apply_pickaxe_filter(&context, entries, pickaxe_options)?;
     let stat_options = DiffStatOptions {
         whitespace_mode: DiffWhitespaceMode::None,
@@ -11352,14 +16622,16 @@ fn show_diff_between_indexes(
             &old_index,
             &new_index,
             &entries,
-            PatchFormatOptions::cached().with_ignore_matching_lines(ignore_matching_lines.to_vec()),
+            PatchFormatOptions::cached()
+                .with_abbrev_len(raw_abbrev_len)
+                .with_ignore_matching_lines(ignore_matching_lines.to_vec()),
         ),
         ShowDiffFormat::PatchWithRaw | ShowDiffFormat::PatchWithRawSummary => {
             print_raw_entries(
                 &context,
                 &entries,
                 RawPrintOptions {
-                    abbrev_len: None,
+                    abbrev_len: raw_abbrev_len,
                     relative_prefix: None,
                     nul_terminated,
                 },
@@ -11377,6 +16649,7 @@ fn show_diff_between_indexes(
                 &new_index,
                 &entries,
                 PatchFormatOptions::cached()
+                    .with_abbrev_len(raw_abbrev_len)
                     .with_ignore_matching_lines(ignore_matching_lines.to_vec()),
             )
         }
@@ -11395,6 +16668,7 @@ fn show_diff_between_indexes(
                 &new_index,
                 &entries,
                 PatchFormatOptions::cached()
+                    .with_abbrev_len(raw_abbrev_len)
                     .with_ignore_matching_lines(ignore_matching_lines.to_vec()),
             )
         }
@@ -11418,7 +16692,7 @@ fn show_diff_between_indexes(
             &context,
             &entries,
             RawPrintOptions {
-                abbrev_len: None,
+                abbrev_len: raw_abbrev_len,
                 relative_prefix: None,
                 nul_terminated,
             },
@@ -11464,7 +16738,16 @@ fn show_tag_object(
     drop(out);
 
     let target = store.read_object(&tag.target)?;
-    show_object(store, &tag.target.to_hex(), &target, options, show_root)
+    show_object(
+        store,
+        &tag.target.to_hex(),
+        &target,
+        options,
+        show_root,
+        None,
+        None,
+        None,
+    )
 }
 
 fn write_indented_message(out: &mut (impl Write + ?Sized), message: &[u8]) -> Result<()> {
@@ -11590,7 +16873,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) disk_usage: bool,
     pub(crate) progress: bool,
     pub(crate) no_filter: bool,
-    pub(crate) missing: bool,
+    pub(crate) missing: Option<&'a str>,
     pub(crate) use_bitmap_index: bool,
     pub(crate) quiet: bool,
     pub(crate) format: Option<&'a str>,
@@ -11766,6 +17049,7 @@ enum RevListObjectFilter {
 }
 
 pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
+    let _trace = phase_trace("rev_list.total");
     let history_order = rev_list_history_order(&options);
     let RevListOptions {
         oneline,
@@ -11908,7 +17192,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let _accepted_exclude_promisor_objects = exclude_promisor_objects;
     let _accepted_filter_print_omitted = filter_print_omitted;
     let _accepted_use_bitmap_index = use_bitmap_index;
-    if progress || missing {
+    let missing_mode = parse_rev_list_missing_mode(missing)?;
+    if progress {
         return Err(rev_list_usage_error());
     }
     if merge {
@@ -11990,11 +17275,6 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     };
     let date_mode = parse_log_date_mode(date.as_deref())?;
     let expand_tabs = false;
-    let abbrev_len = if no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
-    } else {
-        7
-    };
     let default_commit_abbrev = abbrev_commit && !no_abbrev_commit;
     let (min_parents, max_parents) = parse_log_parent_bounds(
         min_parents,
@@ -12024,8 +17304,25 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     if revs.is_empty() && !all {
         return Err(CliError::Message("`rev-list` requires a revision".into()));
     }
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+        .with_stable_pack_snapshot()
+        .with_packed_objects_first()
+        .with_transient_packed_object_reads()
+        .with_trusted_packed_object_reads()
+        .with_buffered_pack_reads()
+        .with_packed_object_read_cache_byte_limit(REV_LIST_PACK_OBJECT_CACHE_BYTES);
+    let abbrev_len = if no_abbrev_commit {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else if default_commit_abbrev
+        || rendered_format
+            .as_ref()
+            .is_some_and(LogFormat::uses_abbreviated_object_id)
+    {
+        configured_default_abbrev_len(&repo, &store)?
+    } else {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    };
     let commit_cache = CommitObjectCache::new(&store);
     if walk_reflogs {
         if quiet {
@@ -12056,7 +17353,64 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             &grep_reflog,
         );
     }
-    let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
+    let mut revs = collect_rev_list_revs(&repo, &store, all, revs)?;
+    let promisor_objects = if exclude_promisor_objects {
+        collect_promisor_object_ids(&repo, &store)?
+    } else {
+        HashSet::new()
+    };
+    let promised_missing = if matches!(missing_mode, Some(RevListMissingMode::AllowPromisor))
+        || matches!(missing_mode, Some(RevListMissingMode::Print))
+    {
+        collect_promised_missing_object_ids(&repo, &store)?
+    } else {
+        HashSet::new()
+    };
+    let mut policy_promised_objects = HashSet::with_capacity(
+        promisor_objects
+            .len()
+            .saturating_add(promised_missing.len()),
+    );
+    policy_promised_objects.extend(promisor_objects.iter().cloned());
+    policy_promised_objects.extend(promised_missing.iter().cloned());
+    sanitize_rev_list_promised_inputs(
+        &repo,
+        &store,
+        &mut revs,
+        &policy_promised_objects,
+        exclude_promisor_objects,
+        ignore_missing,
+    )?;
+    let tree_missing_policy = RevListTreeMissingPolicy {
+        allow_any: matches!(missing_mode, Some(RevListMissingMode::AllowAny)),
+        exclude_promisor_objects,
+        emit_missing_objects: matches!(missing_mode, Some(RevListMissingMode::Print)),
+        promised_objects: (!policy_promised_objects.is_empty()).then_some(&policy_promised_objects),
+    };
+    let mut promised_commit_excludes = Vec::new();
+    let mut promised_excluded_commits = Vec::new();
+    for id in &policy_promised_objects {
+        match store.object_header_hint(id)? {
+            Some((GitObjectKind::Commit, _)) => {
+                promised_commit_excludes.push(id.to_hex());
+                promised_excluded_commits.push(id.clone());
+            }
+            Some(_) => {}
+            None => {
+                promised_excluded_commits.push(id.clone());
+            }
+        }
+    }
+    let revs_with_promisor_commit_excludes = (!promised_commit_excludes.is_empty()).then(|| {
+        let mut exclude = revs.exclude.clone();
+        exclude.extend(promised_commit_excludes);
+        RevListRevs {
+            include: revs.include.clone(),
+            exclude,
+            extra_objects: revs.extra_objects.clone(),
+            symmetric_diff: revs.symmetric_diff.clone(),
+        }
+    });
     if quiet
         && !objects
         && !count
@@ -12071,13 +17425,35 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     if objects && no_object_names && object_filter.is_some() {
         let filter = object_filter.expect("checked filter");
-        let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
-            &repo,
-            &store,
-            &revs,
-            expand_history_max_count(max_count, skip),
-        )?;
+        let mut excluded_commits =
+            collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
+        excluded_commits.extend(promised_excluded_commits.iter().cloned());
+        let mut commit_trees = if policy_promised_objects.is_empty() {
+            let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
+            collect_commit_trees_with_exclusions_uncached(
+                &repo,
+                &store,
+                traversal_revs,
+                expand_history_max_count(max_count, skip),
+            )?
+        } else {
+            let mut roots = Vec::with_capacity(revs.include.len());
+            let mut seen = HashSet::with_capacity(revs.include.len());
+            for rev in &revs.include {
+                let id = resolve_commitish(&repo, &store, rev)?;
+                if seen.insert(id.clone()) {
+                    roots.push(id);
+                }
+            }
+            let excluded = excluded_commits.iter().cloned().collect::<HashSet<_>>();
+            collect_commit_trees_from_ids_uncached_with_excluded(
+                &repo,
+                &store,
+                &roots,
+                expand_history_max_count(max_count, skip),
+                &excluded,
+            )?
+        };
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
@@ -12089,7 +17465,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             .iter()
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
-        let mut out = io::stdout().lock();
+        let mut out =
+            io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
         let mut count_value = 0usize;
         for commit in &commit_trees {
             if rev_list_filter_includes(&store, &commit.id, filter)? {
@@ -12119,14 +17496,36 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
         return Ok(());
     }
-    if objects && (no_object_names || count) {
-        let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
-            &repo,
-            &store,
-            &revs,
-            expand_history_max_count(max_count, skip),
-        )?;
+    if objects && count {
+        let mut excluded_commits =
+            collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
+        excluded_commits.extend(promised_excluded_commits.iter().cloned());
+        let mut commit_trees = if policy_promised_objects.is_empty() {
+            let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
+            collect_commit_trees_with_exclusions_uncached(
+                &repo,
+                &store,
+                traversal_revs,
+                expand_history_max_count(max_count, skip),
+            )?
+        } else {
+            let mut roots = Vec::with_capacity(revs.include.len());
+            let mut seen = HashSet::with_capacity(revs.include.len());
+            for rev in &revs.include {
+                let id = resolve_commitish(&repo, &store, rev)?;
+                if seen.insert(id.clone()) {
+                    roots.push(id);
+                }
+            }
+            let excluded = excluded_commits.iter().cloned().collect::<HashSet<_>>();
+            collect_commit_trees_from_ids_uncached_with_excluded(
+                &repo,
+                &store,
+                &roots,
+                expand_history_max_count(max_count, skip),
+                &excluded,
+            )?
+        };
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
@@ -12139,6 +17538,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 &commit_trees,
                 &revs.extra_objects,
                 &excluded_commits,
+                tree_missing_policy,
             )?;
             println!("{}", commit_trees.len() + object_count);
             return Ok(());
@@ -12148,7 +17548,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             .iter()
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
-        let mut out = io::stdout().lock();
+        let mut out =
+            io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
         for commit in &commit_trees {
             writeln!(out, "{}", commit.id)?;
         }
@@ -12157,58 +17558,158 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             &commit_trees,
             &extra_object_ids,
             &excluded_commits,
+            tree_missing_policy,
             &mut out,
         )?;
         return Ok(());
     }
     if count && !objects && !post_collection_filters {
-        let count_value = count_commits_with_exclusions(
-            &repo,
-            &store,
-            &revs,
-            expand_history_max_count(max_count, skip),
-        )?;
+        let count_value = if policy_promised_objects.is_empty() {
+            count_commits_with_exclusions(
+                &repo,
+                &store,
+                &revs,
+                expand_history_max_count(max_count, skip),
+            )?
+        } else {
+            let mut roots = Vec::with_capacity(revs.include.len());
+            let mut seen = HashSet::with_capacity(revs.include.len());
+            for rev in &revs.include {
+                let id = resolve_commitish(&repo, &store, rev)?;
+                if seen.insert(id.clone()) {
+                    roots.push(id);
+                }
+            }
+            let mut excluded = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?
+                .into_iter()
+                .collect::<HashSet<_>>();
+            excluded.extend(policy_promised_objects.iter().cloned());
+            collect_commits_from_ids_cached_with_excluded(
+                &repo,
+                &commit_cache,
+                &roots,
+                expand_history_max_count(max_count, skip),
+                &excluded,
+            )?
+            .len()
+        };
         println!("{}", count_value.saturating_sub(skip.unwrap_or(0)));
         return Ok(());
     }
 
     if objects && !parents && !children {
-        let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
-            &repo,
-            &store,
-            &revs,
-            expand_history_max_count(max_count, skip),
-        )?;
+        let _branch_trace = phase_trace("rev_list.objects");
+        let mut traversal_excluded_commits = {
+            let _trace = phase_trace("rev_list.objects.collect_excluded");
+            collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?
+        };
+        traversal_excluded_commits.extend(promised_excluded_commits.iter().cloned());
+        let excluded = traversal_excluded_commits
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        let object_walk_excluded_commits = if exclude_promisor_objects {
+            collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?
+        } else {
+            traversal_excluded_commits.clone()
+        };
+        let traversal_revs = if policy_promised_objects.is_empty() {
+            revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs)
+        } else {
+            &revs
+        };
+        let mut commit_trees = {
+            let _trace = phase_trace("rev_list.objects.collect_commits");
+            if policy_promised_objects.is_empty() {
+                collect_commit_trees_with_exclusions_uncached(
+                    &repo,
+                    &store,
+                    traversal_revs,
+                    expand_history_max_count(max_count, skip),
+                )?
+            } else {
+                let mut roots = Vec::with_capacity(revs.include.len());
+                let mut seen = HashSet::with_capacity(revs.include.len());
+                for rev in &revs.include {
+                    let id = resolve_commitish(&repo, &store, rev)?;
+                    if seen.insert(id.clone()) {
+                        roots.push(id);
+                    }
+                }
+                collect_commits_from_ids_cached_with_excluded(
+                    &repo,
+                    &commit_cache,
+                    &roots,
+                    expand_history_max_count(max_count, skip),
+                    &excluded,
+                )?
+                .into_iter()
+                .map(|id| {
+                    Ok(CollectedCommitTree {
+                        tree: read_commit_tree_uncached(&store, &id)?,
+                        id,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?
+            }
+        };
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
         if reverse {
             commit_trees.reverse();
         }
-        let mut out = io::stdout().lock();
-        for commit in &commit_trees {
-            writeln!(out, "{}", commit.id)?;
+        let mut out =
+            io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
+        let mut deferred_missing_ids = Vec::new();
+        {
+            let _trace = phase_trace("rev_list.objects.write_commits");
+            for commit in &commit_trees {
+                writeln!(out, "{}", commit.id)?;
+            }
         }
-        for_each_rev_list_object_line_with_trees(
-            &store,
-            &commit_trees,
-            &revs.extra_objects,
-            &excluded_commits,
-            |id, name| {
-                if let Some(filter) = object_filter {
-                    if !rev_list_filter_includes(&store, id, filter)? {
+        {
+            let _trace = phase_trace("rev_list.objects.walk_trees");
+            for_each_rev_list_object_line_with_trees(
+                &store,
+                &commit_trees,
+                &revs.extra_objects,
+                &object_walk_excluded_commits,
+                tree_missing_policy,
+                |id, kind, name| {
+                    if matches!(missing_mode, Some(RevListMissingMode::Print))
+                        && !store.contains_object(id).map_err(CliError::Io)?
+                    {
+                        deferred_missing_ids.push(id.clone());
+                        let _ = name;
                         return Ok(());
                     }
-                }
-                write!(out, "{id}")?;
-                if let Some(name) = name {
-                    write!(out, " {}", String::from_utf8_lossy(name))?;
-                }
-                writeln!(out)?;
-                Ok(())
-            },
-        )?;
+                    if let Some(filter) = object_filter {
+                        if !rev_list_filter_includes_known_kind(&store, id, kind, filter)? {
+                            return Ok(());
+                        }
+                    }
+                    let name = if no_object_names { None } else { name };
+                    write_rev_list_object_output(&store, &mut out, id, name, missing_mode)?;
+                    Ok(())
+                },
+            )?;
+        }
+        if phase_trace_enabled() {
+            let (entries, bytes) = store.packed_object_read_cache_usage()?;
+            phase_trace_emit(
+                "rev_list.objects.pack_cache",
+                0.0,
+                &[
+                    ("entries", entries.to_string()),
+                    ("bytes", bytes.to_string()),
+                ],
+            );
+        }
+        for id in deferred_missing_ids {
+            write_rev_list_object_output(&store, &mut out, &id, None, missing_mode)?;
+        }
+        out.flush()?;
         return Ok(());
     }
 
@@ -12331,7 +17832,30 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             .map(|entry| entry.id)
             .collect()
         } else {
-            collect_commits_with_exclusions(&repo, &store, &revs, collect_max_count)?
+            if policy_promised_objects.is_empty() {
+                collect_commits_with_exclusions(&repo, &store, &revs, collect_max_count)?
+            } else {
+                let mut roots = Vec::with_capacity(revs.include.len());
+                let mut seen = HashSet::with_capacity(revs.include.len());
+                for rev in &revs.include {
+                    let id = resolve_commitish(&repo, &store, rev)?;
+                    if seen.insert(id.clone()) {
+                        roots.push(id);
+                    }
+                }
+                let mut excluded =
+                    collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?
+                        .into_iter()
+                        .collect::<HashSet<_>>();
+                excluded.extend(policy_promised_objects.iter().cloned());
+                collect_commits_from_ids_cached_with_excluded(
+                    &repo,
+                    &commit_cache,
+                    &roots,
+                    collect_max_count,
+                    &excluded,
+                )?
+            }
         }
     };
     if ancestry_path {
@@ -12339,8 +17863,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             filter_commit_ids_by_ancestry_path(&repo, &store, &commit_cache, &revs, commit_ids)?;
     }
     if simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo)?;
-        commit_ids.retain(|id| decorated.contains(&id.to_hex()));
+        let decorated = collect_default_log_decoration_ids(&repo, None)?;
+        commit_ids.retain(|id| decorated.contains(id));
     }
     let traversal = collect_history_traversal_decoration(
         &repo,
@@ -12381,12 +17905,19 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         commit_ids.reverse();
     }
     let excluded_commits = if objects {
-        collect_rev_list_excluded_commits(&repo, &store, &revs)?
+        let mut excluded_commits = collect_rev_list_excluded_commits(&repo, &store, &revs)?;
+        if !exclude_promisor_objects {
+            excluded_commits.extend(promised_excluded_commits.iter().cloned());
+        }
+        excluded_commits
     } else {
         Vec::new()
     };
     if disk_usage {
-        println!("{}", rev_list_disk_usage_bytes(&repo, &store, &commit_ids, no_walk, all)?);
+        println!(
+            "{}",
+            rev_list_disk_usage_bytes(&repo, &store, &commit_ids, no_walk, all)?
+        );
         return Ok(());
     }
     let show_traversal_markers = left_right || cherry || cherry_mark || boundary;
@@ -12403,12 +17934,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
     if bisect_all {
-        let decorations = LogDecorations::load(
-            &repo,
-            &store,
-            Some(LogDecorationMode::Short),
-            false,
-        )?;
+        let decorations =
+            LogDecorations::load(&repo, &store, Some(LogDecorationMode::Short), false, None)?;
         let last_distance = commit_ids.len().saturating_sub(1);
         for (index, id) in commit_ids.iter().rev().enumerate() {
             let distance = last_distance.saturating_sub(index);
@@ -12524,20 +18051,28 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
     }
     if objects {
+        let mut deferred_missing_ids = Vec::new();
         for_each_rev_list_object_line_with(
             &store,
             &commit_ids,
             &revs.extra_objects,
             &excluded_commits,
-            |id, name| {
-                write!(out, "{id}")?;
-                if let Some(name) = name {
-                    write!(out, " {}", String::from_utf8_lossy(name))?;
+            tree_missing_policy,
+            |id, _, name| {
+                if matches!(missing_mode, Some(RevListMissingMode::Print))
+                    && !store.contains_object(id).map_err(CliError::Io)?
+                {
+                    deferred_missing_ids.push(id.clone());
+                    let _ = name;
+                    return Ok(());
                 }
-                writeln!(out)?;
+                write_rev_list_object_output(&store, &mut out, id, name, missing_mode)?;
                 Ok(())
             },
         )?;
+        for id in deferred_missing_ids {
+            write_rev_list_object_output(&store, &mut out, &id, None, missing_mode)?;
+        }
     }
     Ok(())
 }
@@ -12822,6 +18357,96 @@ fn parse_rev_list_filter(value: &str) -> Result<RevListObjectFilter> {
     })
 }
 
+fn parse_rev_list_missing_mode(value: Option<&str>) -> Result<Option<RevListMissingMode>> {
+    match value {
+        None => Ok(None),
+        Some("") => Err(rev_list_usage_error()),
+        Some("allow-any") => Ok(Some(RevListMissingMode::AllowAny)),
+        Some("allow-promisor") => Ok(Some(RevListMissingMode::AllowPromisor)),
+        Some("print") => Ok(Some(RevListMissingMode::Print)),
+        Some(_) => Err(rev_list_usage_error()),
+    }
+}
+
+fn sanitize_rev_list_promised_inputs(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &mut RevListRevs,
+    promised_missing: &HashSet<ObjectId>,
+    exclude_promisor_objects: bool,
+    ignore_missing: bool,
+) -> Result<()> {
+    if !exclude_promisor_objects && !ignore_missing {
+        return Ok(());
+    }
+
+    let mut include = Vec::with_capacity(revs.include.len());
+    for rev in std::mem::take(&mut revs.include) {
+        let Ok(id) = resolve_objectish(repo, &rev) else {
+            include.push(rev);
+            continue;
+        };
+        let missing_locally = !store.contains_object(&id).map_err(CliError::Io)?;
+        if missing_locally
+            && (ignore_missing || promised_missing.contains(&id) || exclude_promisor_objects)
+        {
+            if ignore_missing {
+                continue;
+            }
+            if exclude_promisor_objects {
+                return Err(ambiguous_revision_error(&rev));
+            }
+        }
+        include.push(rev);
+    }
+    revs.include = include;
+
+    let mut extra_objects = Vec::with_capacity(revs.extra_objects.len());
+    for (id, name) in std::mem::take(&mut revs.extra_objects) {
+        let missing_locally = !store.contains_object(&id).map_err(CliError::Io)?;
+        if missing_locally
+            && (ignore_missing || promised_missing.contains(&id) || exclude_promisor_objects)
+        {
+            if ignore_missing {
+                continue;
+            }
+            if exclude_promisor_objects {
+                let display = if name.is_empty() { id.to_hex() } else { name };
+                return Err(ambiguous_revision_error(&display));
+            }
+        }
+        extra_objects.push((id, name));
+    }
+    revs.extra_objects = extra_objects;
+
+    Ok(())
+}
+
+fn write_rev_list_object_output<W: std::io::Write>(
+    store: &LooseObjectStore,
+    out: &mut W,
+    id: &ObjectId,
+    name: Option<&[u8]>,
+    missing_mode: Option<RevListMissingMode>,
+) -> Result<()> {
+    if matches!(missing_mode, Some(RevListMissingMode::Print)) {
+        let present = store.contains_object(id).map_err(CliError::Io)?;
+        if !present {
+            out.write_all(b"?")?;
+            id.write_hex_io(out)?;
+            out.write_all(b"\n")?;
+            return Ok(());
+        }
+    }
+    id.write_hex_io(out)?;
+    if let Some(name) = name {
+        out.write_all(b" ")?;
+        out.write_all(name)?;
+    }
+    out.write_all(b"\n")?;
+    Ok(())
+}
+
 fn parse_rev_list_blob_limit_filter(value: &str) -> Result<RevListObjectFilter> {
     let (number, multiplier) = match value.as_bytes().last().copied() {
         Some(b'k') | Some(b'K') => (&value[..value.len() - 1], 1024usize),
@@ -12853,6 +18478,25 @@ fn rev_list_filter_includes(
     Ok(match filter {
         RevListObjectFilter::BlobNone => kind != GitObjectKind::Blob,
         RevListObjectFilter::BlobLimit(limit) => kind != GitObjectKind::Blob || size <= limit,
+        RevListObjectFilter::ObjectType(expected) => kind == expected,
+    })
+}
+
+fn rev_list_filter_includes_known_kind(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    kind: Option<GitObjectKind>,
+    filter: RevListObjectFilter,
+) -> Result<bool> {
+    let Some(kind) = kind else {
+        return rev_list_filter_includes(store, id, filter);
+    };
+    Ok(match filter {
+        RevListObjectFilter::BlobNone => kind != GitObjectKind::Blob,
+        RevListObjectFilter::BlobLimit(limit) if kind == GitObjectKind::Blob => store
+            .object_header_hint(id)?
+            .is_some_and(|(_, size)| size <= limit),
+        RevListObjectFilter::BlobLimit(_) => true,
         RevListObjectFilter::ObjectType(expected) => kind == expected,
     })
 }
@@ -12895,7 +18539,14 @@ where
     F: FnMut(&ObjectId) -> Result<()>,
 {
     let mut out = Vec::new();
-    write_rev_list_object_ids_uncached(store, commits, extra_objects, excluded_commits, &mut out)?;
+    write_rev_list_object_ids_uncached(
+        store,
+        commits,
+        extra_objects,
+        excluded_commits,
+        RevListTreeMissingPolicy::default(),
+        &mut out,
+    )?;
     for line in out.split(|byte| *byte == b'\n') {
         if line.is_empty() {
             continue;
@@ -13290,6 +18941,10 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
             )?;
             worktree_commands::add(
                 true,
+                false,
+                false,
+                false,
+                false,
                 false,
                 false,
                 false,
@@ -14243,7 +19898,9 @@ fn encode_raw_commit(
 mod tests {
     use super::*;
 
+    use std::cell::Cell;
     use tempfile::TempDir;
+    use zmin_git_core::object_store::PrefixOrFullObject;
     use zmin_git_core::{CommitBuilder, GitObjectSink, Signature, encode_tree};
 
     #[test]
@@ -14331,6 +19988,84 @@ mod tests {
         assert_eq!(heads.len(), 1);
         assert_eq!(heads[0].id, live);
         assert!(heads[0].current);
+    }
+
+    #[test]
+    fn author_metadata_with_full_hints_uses_prefix_object_read_path() {
+        struct CountingStore {
+            object: LooseObject,
+            full_reads: Cell<usize>,
+            prefix_reads: Cell<usize>,
+        }
+
+        impl GitObjectStore for CountingStore {
+            fn read_object(&self, _id: &ObjectId) -> io::Result<LooseObject> {
+                self.full_reads.set(self.full_reads.get() + 1);
+                Ok(self.object.clone())
+            }
+
+            fn read_object_prefix_or_full(
+                &self,
+                _id: &ObjectId,
+                _max_bytes: usize,
+            ) -> io::Result<PrefixOrFullObject> {
+                self.prefix_reads.set(self.prefix_reads.get() + 1);
+                Ok(PrefixOrFullObject {
+                    object: self.object.clone(),
+                    is_complete: true,
+                })
+            }
+        }
+
+        let author = Signature::new("Example User", "user@example.test", 1716200000, "+0300")
+            .expect("author");
+        let committer = Signature::new("Commit User", "commit@example.test", 1716200100, "+0300")
+            .expect("committer");
+        let tree = ObjectId::from_hex(GitHashAlgorithm::Sha1, &"1".repeat(40)).expect("tree id");
+        let commit_bytes = CommitBuilder::new(tree, author, committer)
+            .message("subject\n".to_owned())
+            .expect("message")
+            .encode()
+            .expect("encode commit");
+        let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, &"2".repeat(40)).expect("object id");
+        let parent =
+            ObjectId::from_hex(GitHashAlgorithm::Sha1, &"3".repeat(40)).expect("parent id");
+        let store = CountingStore {
+            object: LooseObject {
+                id: id.clone(),
+                kind: GitObjectKind::Commit,
+                content: commit_bytes,
+            },
+            full_reads: Cell::new(0),
+            prefix_reads: Cell::new(0),
+        };
+
+        let metadata = read_commit_author_metadata_with_hints(
+            &store,
+            &id,
+            LogMetadataRenderPlan {
+                needs_parents: false,
+                needs_author_name: true,
+                needs_author_email: true,
+                needs_author_signature: false,
+                needs_author_timestamp: false,
+                needs_committer_name: false,
+                needs_committer_email: false,
+                needs_committer_signature: false,
+                needs_committer_timestamp: false,
+            },
+            CommitRenderMetadataHints {
+                parents: Some(Arc::from([parent.clone()])),
+                committer_timestamp: Some(1716200100),
+            },
+        )
+        .expect("metadata");
+
+        assert_eq!(metadata.author_name.as_deref(), Some("Example User"));
+        assert_eq!(metadata.author_email.as_deref(), Some("user@example.test"));
+        assert_eq!(metadata.parents.as_ref(), [parent].as_slice());
+        assert_eq!(store.full_reads.get(), 0);
+        assert_eq!(store.prefix_reads.get(), 1);
     }
 
     fn write_history_test_commit(

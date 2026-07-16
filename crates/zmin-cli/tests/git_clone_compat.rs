@@ -90,6 +90,225 @@ fn clone_relative_dot_records_fetchable_remote_url_like_stock_git() {
 }
 
 #[test]
+fn t1050_clone_file_transport_keeps_a_verifiable_pack_like_stock_git() {
+    let root = TempDir::new().expect("temp dir");
+    let source = create_clone_source(root.path(), "source");
+    let source_url = format!("file://{}", source.display());
+    let git_root = root.path().join("git-root");
+    let zmin_root = root.path().join("zmin-root");
+    fs::create_dir(&git_root).expect("create git clone root");
+    fs::create_dir(&zmin_root).expect("create zmin clone root");
+
+    let git_output = command_output(
+        common::stock_git_bin()
+            .to_str()
+            .expect("stock git path utf8"),
+        &git_root,
+        &["clone", &source_url, "client"],
+        "git file clone",
+    );
+    let zmin_output = command_output(
+        zmin_bin(),
+        &zmin_root,
+        &["clone", &source_url, "client"],
+        "zmin file clone",
+    );
+    assert_eq!(zmin_output, git_output);
+
+    let git_packs = clone_pack_files(&git_root.join("client/.git"));
+    let zmin_packs = clone_pack_files(&zmin_root.join("client/.git"));
+    assert_eq!(zmin_packs.len(), git_packs.len());
+    assert_eq!(zmin_packs.len(), 1);
+    for pack in git_packs.iter().chain(&zmin_packs) {
+        let output = Command::new(common::stock_git_bin())
+            .arg("--git-dir=non-existent")
+            .args(["index-pack", "--object-format=sha1", "--strict", "--verify"])
+            .arg(pack)
+            .current_dir(root.path())
+            .output()
+            .expect("verify clone pack");
+        assert!(
+            output.status.success(),
+            "index-pack failed for {}: {}",
+            pack.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn clone_pack_files(git_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut packs = fs::read_dir(git_dir.join("objects/pack"))
+        .expect("read clone pack directory")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "pack")
+        })
+        .collect::<Vec<_>>();
+    packs.sort();
+    packs
+}
+
+#[test]
+fn clone_url_insteadof_rewrites_transport_but_preserves_stored_remote_url() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = create_clone_source(dir.path(), "source");
+    let git_config = dir.path().join("gitconfig");
+    fs::write(
+        &git_config,
+        format!(
+            "[url \"file://{}/\"]\n\tinsteadOf = https://example.test/\n",
+            dir.path().display()
+        ),
+    )
+    .expect("write gitconfig");
+
+    let typed_url = "https://example.test/source";
+    let git_clone = command_output_with_env(
+        common::stock_git_bin().to_str().expect("stock git utf8"),
+        dir.path(),
+        &["clone", typed_url, "git-alias"],
+        &[(
+            "GIT_CONFIG_GLOBAL",
+            git_config.to_str().expect("gitconfig path utf8"),
+        )],
+        "git clone with insteadOf",
+    );
+    assert_eq!(git_clone.0, 0, "stock clone failed: {:?}", git_clone);
+
+    let zmin_clone = command_output_with_env(
+        zmin_bin(),
+        dir.path(),
+        &["clone", typed_url, "zmin-alias"],
+        &[(
+            "GIT_CONFIG_GLOBAL",
+            git_config.to_str().expect("gitconfig path utf8"),
+        )],
+        "zmin clone with insteadOf",
+    );
+    assert_eq!(zmin_clone.0, 0, "zmin clone failed: {:?}", zmin_clone);
+
+    let git_repo = dir.path().join("git-alias");
+    let zmin_repo = dir.path().join("zmin-alias");
+    assert_eq!(
+        git_args_with_env(
+            &git_repo,
+            &["config", "--get", "remote.origin.url"],
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                git_config.to_str().expect("gitconfig path utf8"),
+            )],
+        ),
+        git_args_with_env(
+            &zmin_repo,
+            &["config", "--get", "remote.origin.url"],
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                git_config.to_str().expect("gitconfig path utf8"),
+            )],
+        )
+    );
+    assert_eq!(
+        git_args_with_env(
+            &zmin_repo,
+            &["config", "--get", "remote.origin.url"],
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                git_config.to_str().expect("gitconfig path utf8"),
+            )],
+        ),
+        typed_url
+    );
+    assert_eq!(
+        git_args_with_env(
+            &git_repo,
+            &["remote", "get-url", "origin"],
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                git_config.to_str().expect("gitconfig path utf8"),
+            )],
+        ),
+        git_args_with_env(
+            &zmin_repo,
+            &["remote", "get-url", "origin"],
+            &[(
+                "GIT_CONFIG_GLOBAL",
+                git_config.to_str().expect("gitconfig path utf8"),
+            )],
+        )
+    );
+
+    fs::write(source.join("README.md"), b"aliased update\n").expect("update source");
+    git(&source, ["commit", "-am", "aliased update"]);
+    command_output_with_env(
+        common::stock_git_bin().to_str().expect("stock git utf8"),
+        &git_repo,
+        &["fetch", "origin"],
+        &[(
+            "GIT_CONFIG_GLOBAL",
+            git_config.to_str().expect("gitconfig path utf8"),
+        )],
+        "git fetch with insteadOf",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_repo,
+        &["fetch", "origin"],
+        &[(
+            "GIT_CONFIG_GLOBAL",
+            git_config.to_str().expect("gitconfig path utf8"),
+        )],
+        "zmin fetch with insteadOf",
+    );
+    assert_eq!(
+        git(&zmin_repo, ["rev-parse", "refs/remotes/origin/main"]),
+        git(&git_repo, ["rev-parse", "refs/remotes/origin/main"])
+    );
+}
+
+#[test]
+fn clone_empty_template_bare_from_dot_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = create_clone_source(dir.path(), "source");
+
+    git(
+        &source,
+        ["clone", "--template=", "--bare", ".", "git-bare-dot.git"],
+    );
+    run_zmin(
+        &source,
+        ["clone", "--template=", "--bare", ".", "zmin-bare-dot.git"],
+    );
+
+    let git_clone = source.join("git-bare-dot.git");
+    let zmin_clone = source.join("zmin-bare-dot.git");
+    assert_eq!(
+        git(&zmin_clone, ["rev-parse", "--is-bare-repository"]),
+        git(&git_clone, ["rev-parse", "--is-bare-repository"])
+    );
+    assert_eq!(
+        git(&zmin_clone, ["symbolic-ref", "HEAD"]),
+        git(&git_clone, ["symbolic-ref", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_clone, ["show-ref"]),
+        git(&git_clone, ["show-ref"])
+    );
+    assert_eq!(
+        git_clone.join("info").exists(),
+        zmin_clone.join("info").exists()
+    );
+    assert_eq!(
+        git_clone.join("hooks").exists(),
+        zmin_clone.join("hooks").exists()
+    );
+    assert_eq!(
+        git_clone.join("description").exists(),
+        zmin_clone.join("description").exists()
+    );
+}
+
+#[test]
 fn clone_instant_local_repo_marks_worktree_first_without_changing_git_state() {
     let dir = TempDir::new().expect("temp dir");
     let source = create_clone_source(dir.path(), "source");
@@ -1239,6 +1458,38 @@ fn clone_local_repo_matches_stock_git_state() {
         );
     }
 
+    for (label, source_arg) in [
+        (
+            "path",
+            git_file_clone
+                .to_str()
+                .expect("shallow source utf8")
+                .to_owned(),
+        ),
+        ("file", format!("file://{}", git_file_clone.display())),
+    ] {
+        let git_cwd = dir.path().join(format!("git-shallow-local-{label}"));
+        let zmin_cwd = dir.path().join(format!("zmin-shallow-local-{label}"));
+        fs::create_dir(&git_cwd).expect("create git shallow cwd");
+        fs::create_dir(&zmin_cwd).expect("create zmin shallow cwd");
+        let git_output = command_output("git", &git_cwd, &["clone", &source_arg, "dst"], "git");
+        let zmin_output = command_output(
+            zmin_bin(),
+            &zmin_cwd,
+            &["clone", &source_arg, "dst"],
+            "zmin",
+        );
+        assert_eq!(
+            zmin_output, git_output,
+            "shallow local clone mismatch for {label}"
+        );
+        assert_eq!(
+            zmin_cwd.join("dst").exists(),
+            git_cwd.join("dst").exists(),
+            "destination existence mismatch for {label}"
+        );
+    }
+
     git(
         dir.path(),
         [
@@ -2040,7 +2291,10 @@ fn clone_documented_local_tail_matches_stock_git() {
             command_output("git", &git_root, &git_args_vec, "git"),
             command_output(zmin_bin(), &zmin_root, &zmin_args_vec, "zmin")
         );
-        assert!(!git_root.join(name).exists(), "git failure should not create {name}");
+        assert!(
+            !git_root.join(name).exists(),
+            "git failure should not create {name}"
+        );
         assert!(
             !zmin_root.join(name).exists(),
             "zmin failure should not create {name}"
@@ -2053,17 +2307,33 @@ fn clone_documented_local_tail_matches_stock_git() {
             ["--upload-pack=git-upload-pack"].as_slice(),
             false,
         ),
-        ("upload-pack-short", ["-u", "git-upload-pack"].as_slice(), false),
+        (
+            "upload-pack-short",
+            ["-u", "git-upload-pack"].as_slice(),
+            false,
+        ),
         ("server-option", ["--server-option=trace"].as_slice(), false),
         ("filter", ["--filter=blob:none"].as_slice(), false),
-        ("shallow-since", ["--shallow-since=2024-01-01"].as_slice(), false),
-        ("shallow-exclude", ["--shallow-exclude=main"].as_slice(), false),
+        (
+            "shallow-since",
+            ["--shallow-since=2024-01-01"].as_slice(),
+            false,
+        ),
+        (
+            "shallow-exclude",
+            ["--shallow-exclude=main"].as_slice(),
+            false,
+        ),
         (
             "bundle-uri",
             ["--bundle-uri=file:///tmp/missing.bundle"].as_slice(),
             false,
         ),
-        ("no-remote-submodules", ["--no-remote-submodules"].as_slice(), false),
+        (
+            "no-remote-submodules",
+            ["--no-remote-submodules"].as_slice(),
+            false,
+        ),
         (
             "no-shallow-submodules",
             ["--no-shallow-submodules"].as_slice(),
@@ -2140,6 +2410,350 @@ fn configure_identity(cwd: &std::path::Path) {
     git(cwd, ["config", "user.name", "Bench"]);
     git(cwd, ["config", "user.email", "bench@example.test"]);
     git(cwd, ["config", "commit.gpgsign", "false"]);
+}
+
+#[test]
+fn clone_from_partial_local_promisor_matches_stock_git_lazy_fetch_contract() {
+    fn setup_partial_promisor_source() -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join("tmp");
+        let evil = dir.path().join("evil");
+        git(
+            dir.path(),
+            ["init", "-b", "main", source.to_str().expect("source path")],
+        );
+        fs::write(source.join("a"), b"a\n").expect("write source file");
+        git(&source, ["add", "a"]);
+        git_with_env(&source, ["commit", "-m", "a"]);
+        git(&source, ["config", "uploadpack.allowfilter", "1"]);
+        git(
+            dir.path(),
+            [
+                "clone",
+                "--filter=blob:none",
+                "--no-local",
+                "--no-checkout",
+                source.to_str().expect("source path"),
+                evil.to_str().expect("evil path"),
+            ],
+        );
+        let fake_upload_pack = dir.path().join("fake-upload-pack");
+        fs::write(
+            &fake_upload_pack,
+            b"#!/bin/sh\necho >&2 \"fake-upload-pack running\"\n>\"$TRASH_DIRECTORY/script-executed\"\nexit 1\n",
+        )
+        .expect("write fake upload-pack");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&fake_upload_pack)
+                .expect("fake upload-pack metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&fake_upload_pack, permissions).expect("chmod fake upload-pack");
+        }
+        git(
+            &evil,
+            [
+                "config",
+                "remote.origin.uploadpack",
+                "\"$TRASH_DIRECTORY/fake-upload-pack\"",
+            ],
+        );
+        fs::write(evil.join(".git/shallow"), b"").expect("write shallow marker");
+        (dir, evil)
+    }
+
+    fn clone_with_env(
+        command: &str,
+        label: &str,
+        envs: &[(&str, &str)],
+    ) -> (i32, String, String, bool) {
+        let (dir, _evil) = setup_partial_promisor_source();
+        let script_executed = dir.path().join("script-executed");
+        let mut merged_envs = Vec::with_capacity(envs.len() + 1);
+        let trash_directory = dir.path().to_str().expect("trash dir utf8").to_owned();
+        merged_envs.push(("TRASH_DIRECTORY", trash_directory.as_str()));
+        merged_envs.extend_from_slice(envs);
+        let output = command_output_with_env(
+            command,
+            dir.path(),
+            &["clone", "evil", label],
+            &merged_envs,
+            label,
+        );
+        let script_present = script_executed.exists();
+        (output.0, output.1, output.2, script_present)
+    }
+
+    let git_no_lazy = clone_with_env(
+        common::stock_git_bin().to_str().expect("stock git utf8"),
+        "git-no-lazy",
+        &[("GIT_TEST_PACK_PATH_WALK", "0")],
+    );
+    let zmin_no_lazy = clone_with_env(
+        zmin_bin(),
+        "zmin-no-lazy",
+        &[("GIT_TEST_PACK_PATH_WALK", "0")],
+    );
+    assert_eq!(zmin_no_lazy.0, git_no_lazy.0, "default no-lazy exit code");
+    assert_eq!(zmin_no_lazy.1, git_no_lazy.1, "default no-lazy stdout");
+    assert_eq!(
+        zmin_no_lazy.3, git_no_lazy.3,
+        "default no-lazy script execution parity"
+    );
+    assert!(
+        git_no_lazy.2.contains("lazy fetching disabled"),
+        "stock Git stderr missing lazy-fetch warning: {:?}",
+        git_no_lazy
+    );
+    assert!(
+        zmin_no_lazy.2.contains("lazy fetching disabled"),
+        "Zmin stderr missing lazy-fetch warning: {:?}",
+        zmin_no_lazy
+    );
+
+    let git_lazy_ok = clone_with_env(
+        common::stock_git_bin().to_str().expect("stock git utf8"),
+        "git-lazy-ok",
+        &[("GIT_NO_LAZY_FETCH", "0")],
+    );
+    let zmin_lazy_ok = clone_with_env(zmin_bin(), "zmin-lazy-ok", &[("GIT_NO_LAZY_FETCH", "0")]);
+    assert_eq!(zmin_lazy_ok.0, git_lazy_ok.0, "lazy-ok exit code");
+    assert_eq!(zmin_lazy_ok.1, git_lazy_ok.1, "lazy-ok stdout");
+    assert_eq!(
+        zmin_lazy_ok.3, git_lazy_ok.3,
+        "lazy-ok script execution parity"
+    );
+    assert!(
+        git_lazy_ok.2.contains("fake-upload-pack running"),
+        "stock Git stderr missing fake upload-pack marker: {:?}",
+        git_lazy_ok
+    );
+    assert!(
+        zmin_lazy_ok.2.contains("fake-upload-pack running"),
+        "Zmin stderr missing fake upload-pack marker: {:?}",
+        zmin_lazy_ok
+    );
+
+    let (dir, _evil) = setup_partial_promisor_source();
+    let script_executed = dir.path().join("script-executed");
+    let git_pack = command_output_with_env_and_stdin(
+        common::stock_git_bin().to_str().expect("stock git utf8"),
+        dir.path(),
+        &["-C", "evil", "pack-objects", "--revs", "--stdout"],
+        &[(
+            "TRASH_DIRECTORY",
+            dir.path().to_str().expect("trash dir utf8"),
+        )],
+        "HEAD\n",
+        "git pack-objects partial promisor",
+    );
+    let git_pack_script = script_executed.exists();
+    fs::remove_file(&script_executed).expect("remove git script marker");
+    let zmin_pack = command_output_with_env_and_stdin(
+        zmin_bin(),
+        dir.path(),
+        &["-C", "evil", "pack-objects", "--revs", "--stdout"],
+        &[(
+            "TRASH_DIRECTORY",
+            dir.path().to_str().expect("trash dir utf8"),
+        )],
+        "HEAD\n",
+        "zmin pack-objects partial promisor",
+    );
+    let zmin_pack_script = script_executed.exists();
+    assert_eq!(zmin_pack.0, git_pack.0, "pack-objects exit code");
+    assert_eq!(zmin_pack.1, git_pack.1, "pack-objects stdout");
+    assert_eq!(
+        zmin_pack_script, git_pack_script,
+        "pack-objects script execution parity"
+    );
+    assert!(
+        git_pack.2.contains("fake-upload-pack running"),
+        "stock Git stderr missing fake upload-pack marker for pack-objects: {:?}",
+        git_pack
+    );
+    assert!(
+        zmin_pack.2.contains("fake-upload-pack running"),
+        "Zmin stderr missing fake upload-pack marker for pack-objects: {:?}",
+        zmin_pack
+    );
+}
+
+#[test]
+fn clone_filter_empty_file_repo_matches_stock_git() {
+    let git_root = TempDir::new().expect("git root");
+    let zmin_root = TempDir::new().expect("zmin root");
+    let git_source = git_root.path().join("source");
+    let zmin_source = zmin_root.path().join("source");
+
+    git(
+        git_root.path(),
+        [
+            "init",
+            "--bare",
+            git_source.to_str().expect("git source path"),
+        ],
+    );
+    git(
+        zmin_root.path(),
+        [
+            "init",
+            "--bare",
+            zmin_source.to_str().expect("zmin source path"),
+        ],
+    );
+
+    let git_output = command_output(
+        "git",
+        git_root.path(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            &format!("file://{}", git_source.display()),
+            "client",
+        ],
+        "git clone filter empty file repo",
+    );
+    let zmin_output = command_output(
+        zmin_bin(),
+        zmin_root.path(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            &format!("file://{}", zmin_source.display()),
+            "client",
+        ],
+        "zmin clone filter empty file repo",
+    );
+
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git_root.path().join("client").exists(),
+        zmin_root.path().join("client").exists()
+    );
+    assert_eq!(
+        git(
+            &git_root.path().join("client"),
+            ["rev-parse", "--is-shallow-repository"]
+        ),
+        git(
+            &zmin_root.path().join("client"),
+            ["rev-parse", "--is-shallow-repository"]
+        )
+    );
+
+    let git_client = git_root.path().join("client");
+    let zmin_client = zmin_root.path().join("client");
+    git(
+        &git_client,
+        ["config", "--unset", "remote.origin.partialclonefilter"],
+    );
+    run_zmin(
+        &zmin_client,
+        ["config", "--unset", "remote.origin.partialclonefilter"],
+    );
+
+    let git_fetch = command_output("git", &git_client, &["fetch", "origin"], "git fetch origin");
+    let zmin_fetch = command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "origin"],
+        "zmin fetch origin",
+    );
+    assert_eq!(zmin_fetch, git_fetch);
+    assert_eq!(
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD")
+    );
+}
+
+#[test]
+fn clone_filter_nonempty_file_repo_matches_stock_git() {
+    let git_root = TempDir::new().expect("git root");
+    let zmin_root = TempDir::new().expect("zmin root");
+    let git_source = git_root.path().join("source");
+    let zmin_source = zmin_root.path().join("source");
+
+    git(
+        git_root.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            git_source.to_str().expect("git source path"),
+        ],
+    );
+    configure_identity(&git_source);
+    fs::write(git_source.join("server1.t"), b"one\n").expect("write git source file");
+    git(&git_source, ["add", "-A"]);
+    git_with_env(&git_source, ["commit", "-m", "server1"]);
+    git(&git_source, ["config", "uploadpack.allowfilter", "1"]);
+    git(
+        &git_source,
+        ["config", "uploadpack.allowanysha1inwant", "1"],
+    );
+
+    run_zmin(
+        zmin_root.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_source.to_str().expect("zmin source path"),
+        ],
+    );
+    configure_identity(&zmin_source);
+    fs::write(zmin_source.join("server1.t"), b"one\n").expect("write zmin source file");
+    run_zmin(&zmin_source, ["add", "-A"]);
+    run_zmin(&zmin_source, ["commit", "-m", "server1"]);
+    run_zmin(&zmin_source, ["config", "uploadpack.allowfilter", "1"]);
+    run_zmin(
+        &zmin_source,
+        ["config", "uploadpack.allowanysha1inwant", "1"],
+    );
+
+    let git_output = command_output(
+        "git",
+        git_root.path(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            &format!("file://{}", git_source.display()),
+            "client",
+        ],
+        "git clone filter nonempty file repo",
+    );
+    let zmin_output = command_output(
+        zmin_bin(),
+        zmin_root.path(),
+        &[
+            "clone",
+            "--filter=blob:none",
+            &format!("file://{}", zmin_source.display()),
+            "client",
+        ],
+        "zmin clone filter nonempty file repo",
+    );
+
+    assert_eq!(zmin_output, git_output);
+
+    let git_client = git_root.path().join("client");
+    let zmin_client = zmin_root.path().join("client");
+    assert_eq!(
+        git(&zmin_client, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_client, ["status", "--porcelain=v1", "--branch"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join("server1.t")).expect("zmin checkout file"),
+        fs::read_to_string(git_client.join("server1.t")).expect("git checkout file")
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-t", "HEAD^{tree}"]),
+        git(&git_client, ["cat-file", "-t", "HEAD^{tree}"])
+    );
 }
 
 fn create_clone_source(root: &std::path::Path, name: &str) -> std::path::PathBuf {
@@ -2281,6 +2895,47 @@ fn git_with_stdin(cwd: &std::path::Path, args: &[&str], input: &str) -> String {
         .to_owned()
 }
 
+fn command_output_with_env_and_stdin(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    input: &str,
+    label: &str,
+) -> (i32, String, String) {
+    use std::io::Write;
+
+    let mut child = Command::new(common::test_command_program(command))
+        .args(args)
+        .envs(envs.iter().copied())
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("run {label}: {err}"));
+    child
+        .stdin
+        .as_mut()
+        .expect("command stdin")
+        .write_all(input.as_bytes())
+        .unwrap_or_else(|err| panic!("write stdin for {label}: {err}"));
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|err| panic!("wait {label}: {err}"));
+    (
+        output.status.code().expect("process exit code"),
+        String::from_utf8(output.stdout)
+            .expect("stdout utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("stderr utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
 #[cfg(unix)]
 fn case_insensitive_filesystem(root: &std::path::Path) -> bool {
     let probe = root.join("case-insensitive-probe");
@@ -2318,8 +2973,13 @@ fn git<const N: usize>(cwd: &std::path::Path, args: [&str; N]) -> String {
 }
 
 fn git_args(cwd: &std::path::Path, args: &[&str]) -> String {
+    git_args_with_env(cwd, args, &[])
+}
+
+fn git_args_with_env(cwd: &std::path::Path, args: &[&str], envs: &[(&str, &str)]) -> String {
     let output = Command::new(common::stock_git_bin())
         .args(args)
+        .envs(envs.iter().copied())
         .current_dir(cwd)
         .output()
         .expect("run git");
