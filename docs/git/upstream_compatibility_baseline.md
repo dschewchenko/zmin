@@ -16,11 +16,25 @@ manifest is green.
 The final offset-`0` run used the current debug binary after the worktree,
 ignore, CRLF, cache-tree, split-index, and interactive-patch fixes. Its summary
 reported `total=50`, `passed=50`, and `failed=0`. A fresh offset-`100`, limit-`50`
-replay reported `total=50`, `passed=39`, and `failed=11`; the current release
+replay reported `total=50`, `passed=40`, and `failed=10`; the current release
 binary has SHA-256
-`0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c`.
+`f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632`.
 The focused `t1502-rev-parse-parseopt.sh` replay is green at `37/37` after
 closing the complete usage/specification and shell-eval compatibility cluster.
+The focused `t1416-ref-transaction-hooks.sh` replay is green at `9/9` after
+matching Git's transaction phases, queued symref input, and non-atomic push
+hook interleaving. The focused rev-parse replays pass
+  `t1508-at-combinations.sh` at `35/35`, while `t1506-rev-parse-diagnosis.sh`
+  is `29/30` and `t1507-rev-parse-upstream.sh` is now green at `29/29`.
+Additional current `v2.55.0` targeted runs are green for the early
+conversion/CRLF/encoding files (`t0021`, `t0022`, `t0024`, `t0025`, `t0027`
+at `2600/2600`, and `t0028`), text/safety/filesystem edge cases (`t0030`,
+`t0031`, `t0035`, `t0050`, `t0055`), credential helpers (`t0301`, `t0302`),
+partial clone (`t0410`, `t0411`), and reffiles backend (`t0600`, `t0601`).
+The remaining `t0602` difference is an explicit version decision: Git
+`v2.55.0` accepts a loose `refs/heads/@` entry, while Zmin targets the
+supported Git `v2.47`-family behavior and keeps the local differential gate's
+`badRefName` result.
 The upstream suite remains the authoritative compatibility denominator; the
 closed command catalog and local differential tests do not imply universal Git
 parity.
@@ -298,18 +312,35 @@ cluster:
   pointed at an older `compat`-profile `zmin` path. The runner now rewrites
   that wrapper against the current `ZMIN_BIN` on every non-Windows prepare,
   and the focused reruns below have since closed the quartet
-- `t0301` and `t0302`: credential cache/store helper behavior still diverges
-  from stock Git in upstream shell coverage
-- `t0410` and `t0411`: partial-clone broad upstream suites remain red beyond
-  the locally verified bounded demand-hydration scenarios
+- `t0301` and `t0302`: credential cache/store helper behavior is now green in
+  current pinned-v2.55.0 focused replays
+- `t0410` and `t0411`: partial-clone suites are now green in current focused
+  replays, including clone-from-partial hydration
 - `t0450`: generated help/docs parity is still incomplete for upstream
   text-doc versus help validation
-- `t0600` to `t0602`: reffiles backend broad shell coverage remains red
+- `t0600` and `t0601`: reffiles backend and packed-ref suites are now green;
+  `t0602` retains the documented v2.55-only loose-`@` semantic delta
 
 Focused replay evidence now also closes the bugreport shell suite:
 
 - `t0091-bugreport.sh`: green at `1/1` in
   `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0091-check5.qLx6XE/summary.tsv`
+
+The current pinned-v2.55.0 `t0450-txt-doc-vs-help.sh` replay (2026-07-17)
+reports `20` failures among `815` non-expected assertions. Those failures are
+not one shared help renderer defect: the v2.55 documentation adds or changes
+usage forms for commands that Zmin deliberately exposes at the supported
+Git-v2.47.1 surface (for example `add`, `backfill`, `cat-file`, and
+`update-ref`). The run remains useful as a drift detector, but it is not a
+release gate until the upstream documentation tag is pinned to the same
+compatibility version; changing the help text to satisfy v2.55 would regress
+the local v2.47.1 differential fixtures.
+
+A pinned Git-v2.47.1 replay of `t1090-sparse-checkout-scope.sh` is green at
+`7/7`. The fixes cover sparse-pattern reapplication when switching between
+branches at the same commit, the selected-index-bit behavior of
+`checkout-index --ignore-skip-worktree-bits`, and local promisor backfill for
+the partial-clone lazy-fetch case.
 
 ## Trace2 oracle status
 

@@ -250,10 +250,50 @@ pub(crate) fn read_branch_upstream(repo: &GitRepo, branch: &str) -> Result<Optio
         }));
     }
     let short_merge = short_ref_name(&merge);
+    let ref_name = if remote_fetch_maps_branch(repo, &remote, &short_merge)? {
+        format!("refs/remotes/{remote}/{short_merge}")
+    } else {
+        merge
+    };
     Ok(Some(BranchUpstream {
         display: format!("{remote}/{short_merge}"),
-        ref_name: format!("refs/remotes/{remote}/{short_merge}"),
+        ref_name,
     }))
+}
+
+fn remote_fetch_maps_branch(repo: &GitRepo, remote: &str, branch: &str) -> io::Result<bool> {
+    let fetches = read_common_config_entries(repo)?
+        .into_iter()
+        .filter(|entry| {
+            entry.section == "remote" && entry.subsection == remote && entry.key == "fetch"
+        })
+        .map(|entry| entry.value.trim_start_matches('+').to_owned())
+        .collect::<Vec<_>>();
+    if fetches.is_empty() {
+        return Ok(true);
+    }
+    let source = format!("refs/heads/{branch}");
+    let destination = format!("refs/remotes/{remote}/{branch}");
+    Ok(fetches
+        .iter()
+        .any(|refspec| refspec_maps_ref(refspec, &source, &destination)))
+}
+
+fn refspec_maps_ref(refspec: &str, source: &str, destination: &str) -> bool {
+    let Some((from, to)) = refspec.split_once(':') else {
+        return false;
+    };
+    match (from.split_once('*'), to.split_once('*')) {
+        (Some((from_prefix, from_suffix)), Some((to_prefix, to_suffix))) => {
+            source
+                .strip_prefix(from_prefix)
+                .and_then(|wildcard| wildcard.strip_suffix(from_suffix))
+                .is_some_and(|wildcard| {
+                    destination == format!("{to_prefix}{wildcard}{to_suffix}")
+                })
+        }
+        _ => from == source && to == destination,
+    }
 }
 
 pub(crate) fn upstream_counts(

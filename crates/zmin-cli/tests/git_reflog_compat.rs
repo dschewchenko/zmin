@@ -70,6 +70,33 @@ fn reflog_shorthand_ref_and_invalid_ref_match_stock_git() {
 }
 
 #[test]
+fn log_reflog_upstream_selectors_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
+        let head = git(repo, ["rev-parse", "HEAD"]);
+        git(repo, ["branch", "other"]);
+        git(repo, ["update-ref", "--create-reflog", "refs/remotes/origin/main", &head]);
+        git(repo, ["config", "branch.other.remote", "origin"]);
+        git(repo, ["config", "branch.other.merge", "refs/heads/main"]);
+        git(repo, ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    }
+
+    for args in [
+        ["log", "-g", "-1", "--format=%H", "other@{u}"].as_slice(),
+        ["log", "-g", "-1", "--format=%H", "other@{u}@{now}"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn reflog_show_date_modes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

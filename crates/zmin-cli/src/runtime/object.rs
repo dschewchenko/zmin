@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::path::PathBuf;
 
 use regex::bytes::Regex;
 use zmin_git_core::{
@@ -41,17 +42,24 @@ pub(crate) fn print_rev_parse_object(
     verify: bool,
     quiet: bool,
 ) -> Result<()> {
-    let id = resolve_objectish_with_reflog_warnings(repo, rev, !quiet).map_err(|_| {
+    let id = resolve_objectish_with_reflog_warnings(repo, rev, !quiet).map_err(|error| {
         if verify && quiet {
             return CliError::Exit(1);
         }
         if verify {
             CliError::Fatal {
                 code: 128,
-                message: "Needed a single revision".to_owned(),
+                message: if rev.contains("@{") {
+                    rev_parse_failure_message(repo, rev, &error)
+                } else {
+                    "Needed a single revision".to_owned()
+                },
             }
         } else {
-            CliError::Message(format!("unknown revision `{rev}`"))
+            CliError::Fatal {
+                code: 128,
+                message: rev_parse_failure_message(repo, rev, &error),
+            }
         }
     })?;
     if let Some(length) = short {
@@ -66,6 +74,193 @@ pub(crate) fn print_rev_parse_object(
         println!("{id}");
     }
     Ok(())
+}
+
+fn rev_parse_failure_message(repo: &GitRepo, rev: &str, error: &io::Error) -> String {
+    let error_text = error.to_string();
+    if error_text.starts_with("no upstream configured")
+        || error_text.starts_with("no such branch:")
+        || error_text.starts_with("upstream branch ")
+    {
+        return error_text;
+    }
+    if error_text == "HEAD is not a branch" {
+        return "HEAD does not point to a branch".to_owned();
+    }
+    if let Some((base, path)) = split_objectish_path(rev) {
+        let stage = path.as_bytes().first().and_then(|byte| {
+            (b'0'..=b'3')
+                .contains(byte)
+                .then(|| path.as_bytes().get(1) == Some(&b':'))
+                .and_then(|is_stage| is_stage.then_some(*byte - b'0'))
+        });
+        let raw_path = stage.map(|_| path.get(2..).unwrap_or(path)).unwrap_or(path);
+        let display_path =
+            normalize_repo_object_path(repo, raw_path).unwrap_or_else(|_| raw_path.to_owned());
+        if base.is_empty() {
+            let cwd_prefix = std::env::current_dir()
+                .ok()
+                .and_then(|cwd| repo_relative_path(&repo.root, &cwd).ok())
+                .map(|relative| PathBuf::from(String::from_utf8_lossy(&relative).into_owned()))
+                .unwrap_or_default();
+            let candidate_path = repo.root.join(&cwd_prefix).join(&display_path);
+            let candidate_display = candidate_path
+                .strip_prefix(&repo.root)
+                .unwrap_or(&candidate_path)
+                .display()
+                .to_string();
+            if let Ok(index) = read_index_with_algorithm(
+                &repo.index_path,
+                repo_hash_algorithm_from_config(repo).unwrap_or(GitHashAlgorithm::Sha1),
+            ) {
+                if stage.is_none()
+                    && let Some(entry) = index.entries().iter().find(|entry| {
+                        entry
+                            .path
+                            .strip_prefix(display_path.as_bytes())
+                            .is_none()
+                            && entry.path.ends_with(display_path.as_bytes())
+                            && entry.path.len() > display_path.len()
+                    })
+                {
+                    let candidate_display = String::from_utf8_lossy(&entry.path);
+                    return format!(
+                        "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
+                    );
+                }
+                if stage.is_none()
+                    && candidate_display != display_path
+                    && index
+                        .entries()
+                        .iter()
+                        .any(|entry| entry.path.as_slice() == candidate_display.as_bytes())
+                {
+                    return format!(
+                        "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
+                    );
+                }
+                if let Some(entry) = index.entries().iter().find(|entry| {
+                    (entry.path.as_slice() == display_path.as_bytes()
+                        || entry.path.as_slice() == candidate_display.as_bytes())
+                        && stage.is_some_and(|requested| requested != entry.stage)
+                }) {
+                    let requested = stage.unwrap_or(0);
+                    let use_candidate = entry.path.as_slice() == candidate_display.as_bytes()
+                        && candidate_display != display_path;
+                    let shown_path = if use_candidate {
+                        candidate_display.as_str()
+                    } else {
+                        display_path.as_str()
+                    };
+                    let hint_path = if use_candidate {
+                        format!("':0:{candidate_display}' aka ':0:./{display_path}'")
+                    } else {
+                        format!("':0:{display_path}'")
+                    };
+                    if use_candidate {
+                        return format!(
+                            "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean {hint_path}?"
+                        );
+                    }
+                    return format!(
+                        "path '{shown_path}' is in the index, but not at stage {requested}\n\
+hint: Did you mean {hint_path}?"
+                    );
+                }
+            }
+            if stage.is_none()
+                && !cwd_prefix.as_os_str().is_empty()
+                && candidate_display != display_path
+            {
+                return format!(
+                    "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
+                );
+            }
+            if stage.is_none() && !display_path.contains('/') {
+                if let Ok(entries) = fs::read_dir(&repo.root) {
+                    for entry in entries.flatten() {
+                        let candidate = entry.path().join(&display_path);
+                        if !candidate.is_file() {
+                            continue;
+                        }
+                        let Ok(relative) = candidate.strip_prefix(&repo.root) else {
+                            continue;
+                        };
+                        let candidate_display = relative.display();
+                        return format!(
+                            "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
+                        );
+                    }
+                }
+                if let Ok(cwd) = std::env::current_dir()
+                    && let Some(component) = cwd.file_name().and_then(|name| name.to_str())
+                    && cwd
+                        .parent()
+                        .is_some_and(|parent| {
+                            parent.join(&display_path).is_file()
+                                || parent
+                                    .join(component)
+                                    .join(&display_path)
+                                    .is_file()
+                        })
+                {
+                    let candidate_display = format!("{component}/{display_path}");
+                    return format!(
+                        "path '{candidate_display}' is in the index, but not '{display_path}'\n\
+hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
+                    );
+                }
+            }
+            if repo.root.join(&display_path).exists() {
+                return format!("path '{display_path}' exists on disk, but not in the index");
+            }
+            return format!(
+                "path '{display_path}' does not exist (neither on disk nor in the index)"
+            );
+        }
+        if error.to_string().contains("relative path syntax") {
+            return error.to_string();
+        }
+        if path.contains("..") || error.to_string().contains("outside") {
+            return format!("path '{display_path}' is outside repository");
+        }
+        if resolve_objectish(repo, base).is_err() {
+            return format!("invalid object name '{base}'.");
+        }
+        if !repo.root.join(&display_path).exists() {
+            let cwd_prefix = std::env::current_dir()
+                .ok()
+                .and_then(|cwd| repo_relative_path(&repo.root, &cwd).ok())
+                .map(|relative| PathBuf::from(String::from_utf8_lossy(&relative).into_owned()))
+                .unwrap_or_default();
+            let candidate = repo.root.join(&cwd_prefix).join(raw_path);
+            if candidate.exists() {
+                let candidate_display = candidate
+                    .strip_prefix(&repo.root)
+                    .unwrap_or(&candidate)
+                    .display();
+                return format!(
+                    "path '{candidate_display}' exists, but not '{display_path}'\n\
+hint: Did you mean '{base}:{candidate_display}' aka '{base}:./{display_path}'?"
+                );
+            }
+            return format!("path '{display_path}' does not exist in '{base}'");
+        }
+        return format!("path '{display_path}' exists on disk, but not in '{base}'");
+    }
+    if rev.contains("@{") && error.to_string().contains("reflog") {
+        return format!("log for '{rev}' only has 0 entries");
+    }
+    format!(
+        "ambiguous argument '{rev}': unknown revision or path not in the working tree.\n\
+Use '--' to separate paths from revisions, like this:\n\
+'git <command> [<revision>...] -- [<file>...]'"
+    )
 }
 
 pub(crate) fn resolve_objectish(repo: &GitRepo, objectish: &str) -> io::Result<ObjectId> {
@@ -109,7 +304,7 @@ fn resolve_objectish_with_mode_and_reflog_warnings(
         if base.is_empty() {
             return resolve_index_object_path_with_mode(repo, path);
         }
-        let path = normalize_git_path(path)?;
+        let path = normalize_repo_object_path(repo, path)?;
         let tree_id = resolve_treeish(repo, &store, base)?;
         if path.is_empty() {
             return Ok(resolved_without_mode(tree_id));
@@ -267,7 +462,7 @@ fn resolve_index_object_path_with_mode(
         [stage @ b'0'..=b'3', b':', ..] => (stage - b'0', &raw_path[2..]),
         _ => (0, raw_path),
     };
-    let path = normalize_git_path(path)?;
+    let path = normalize_repo_object_path(repo, path)?;
     let algorithm = repo_hash_algorithm_from_config(repo)?;
     let raw_index = read_index_with_algorithm(&repo.index_path, algorithm)?;
     if let Some(resolved) = raw_index
@@ -469,7 +664,9 @@ fn promisor_pack_contains_object(repo: &GitRepo, id: &ObjectId) -> io::Result<bo
 fn split_upstream_suffix(objectish: &str) -> Option<&str> {
     let base = objectish.strip_suffix('}')?;
     let (base, selector) = base.rsplit_once("@{")?;
-    matches!(selector, "u" | "upstream").then_some(base)
+    selector.eq_ignore_ascii_case("u")
+        .then_some(base)
+        .or_else(|| selector.eq_ignore_ascii_case("upstream").then_some(base))
 }
 
 fn split_push_suffix(objectish: &str) -> Option<&str> {
@@ -561,6 +758,11 @@ fn map_push_refspec(refspec: &str, source: &str) -> Option<String> {
 }
 
 fn resolve_upstream_suffix(repo: &GitRepo, base: &str) -> io::Result<ObjectId> {
+    let ref_name = upstream_ref_name(repo, base)?;
+    resolve_repo_ref(repo, &ref_name)
+}
+
+pub(crate) fn upstream_ref_name(repo: &GitRepo, base: &str) -> io::Result<String> {
     let refs = common_ref_store(repo)?;
     let resolved_previous = resolve_previous_checkout_name(repo, base)?;
     let base = resolved_previous.as_deref().unwrap_or(base);
@@ -597,7 +799,17 @@ fn resolve_upstream_suffix(repo: &GitRepo, base: &str) -> io::Result<ObjectId> {
                 format!("no upstream configured for branch '{branch}'"),
             )
         })?;
-    resolve_repo_ref(repo, &upstream.ref_name)
+    match refs.read_ref(&upstream.ref_name) {
+        Ok(_) => Ok(upstream.ref_name),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "upstream branch '{}' not stored as a remote-tracking branch",
+                upstream.ref_name
+            ),
+        )),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn is_valid_pseudoref_name(name: &str) -> bool {
@@ -662,6 +874,9 @@ enum ReflogSelector<'a> {
 fn split_reflog_selector_suffix(objectish: &str) -> Option<(&str, ReflogSelector<'_>)> {
     let base = objectish.strip_suffix('}')?;
     let (base, selector) = base.rsplit_once("@{")?;
+    if selector.starts_with('-') || selector.contains("@{") {
+        return None;
+    }
     if let Ok(index) = selector.parse::<usize>() {
         return Some((base, ReflogSelector::Index(index)));
     }
@@ -675,7 +890,10 @@ fn resolve_reflog_selector(
     selector: ReflogSelector<'_>,
     warnings: bool,
 ) -> io::Result<ObjectId> {
-    let reflog_name = reflog_ref_name(repo, base)?;
+    let resolved_base = split_upstream_suffix(base)
+        .map(|upstream| upstream_ref_name(repo, upstream))
+        .transpose()?;
+    let reflog_name = reflog_ref_name(repo, resolved_base.as_deref().unwrap_or(base))?;
     let common_dir = read_common_git_dir(&repo.git_dir).map_err(cli_error_to_io)?;
     let algorithm = super::repo_hash_algorithm_from_config(repo)?;
     let common_refs = RefStore::new(&common_dir, algorithm);
@@ -731,12 +949,16 @@ fn resolve_reflog_selector(
         Err(error) => return Err(error),
     };
     match selector {
-        ReflogSelector::Index(index) => contents
-            .lines()
-            .rev()
-            .filter_map(reflog_line_new_id)
-            .nth(index)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")),
+        ReflogSelector::Index(index) => {
+            let entries = contents.lines().filter_map(parse_reflog_line).collect::<Vec<_>>();
+            if let Some(entry) = entries.iter().rev().nth(index) {
+                return Ok(entry.new_id.clone());
+            }
+            if index == 0 {
+                return resolve_plain_objectish(repo, store, &reflog_name);
+            }
+            Err(io::Error::new(io::ErrorKind::NotFound, "reflog entry not found"))
+        }
         ReflogSelector::Date(raw) => {
             resolve_reflog_date_selector(repo, store, base, &reflog_name, &contents, raw, warnings)
         }
@@ -881,7 +1103,17 @@ fn parse_reflog_timezone_offset(value: &str) -> Option<i32> {
 fn reflog_ref_name(repo: &GitRepo, base: &str) -> io::Result<String> {
     let resolved_previous = resolve_previous_checkout_name(repo, base)?;
     let base = resolved_previous.as_deref().unwrap_or(base);
-    if base.is_empty() || base == "HEAD" {
+    if base.is_empty() {
+        if let Some(ref_name) = fs::read_to_string(repo.git_dir.join("HEAD"))?
+            .strip_prefix("ref: ")
+            .map(str::trim)
+            .filter(|name| name.starts_with("refs/heads/"))
+        {
+            return Ok(ref_name.to_owned());
+        }
+        return Ok("HEAD".to_owned());
+    }
+    if base == "HEAD" {
         return Ok("HEAD".to_owned());
     }
     if base == "stash" {
@@ -901,12 +1133,6 @@ fn reflog_ref_name(repo: &GitRepo, base: &str) -> io::Result<String> {
         Err(error) => return Err(error),
     }
     Ok(base.to_owned())
-}
-
-fn reflog_line_new_id(line: &str) -> Option<ObjectId> {
-    let mut fields = line.split_whitespace();
-    fields.next()?;
-    ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()
 }
 
 fn split_peel_suffix(objectish: &str) -> Option<(&str, &str)> {
@@ -1052,6 +1278,41 @@ pub(crate) fn normalize_git_path(path: &str) -> io::Result<String> {
         ));
     }
     Ok(normalized)
+}
+
+fn normalize_repo_object_path(repo: &GitRepo, path: &str) -> io::Result<String> {
+    if !path.starts_with("./") && !path.starts_with("../") {
+        return normalize_git_path(path);
+    }
+    let cwd = std::env::current_dir()?;
+    let relative_cwd = cwd.strip_prefix(&repo.root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "relative path syntax can't be used outside working tree",
+        )
+    })?;
+    let mut components = relative_cwd
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for component in path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                if components.pop().is_none() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "path is outside repository",
+                    ));
+                }
+            }
+            component => components.push(component.to_owned()),
+        }
+    }
+    Ok(components.join("/"))
 }
 
 pub(crate) fn resolve_named_ref(repo: &GitRepo, name: &str) -> io::Result<Option<ObjectId>> {

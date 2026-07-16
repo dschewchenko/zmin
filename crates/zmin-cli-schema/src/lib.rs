@@ -4002,7 +4002,7 @@ pub enum Command {
         ignore_other_worktrees: bool,
         #[arg(long = "ignore-skip-worktree-bits", action = ArgAction::SetTrue)]
         ignore_skip_worktree_bits: bool,
-        #[arg(short = 't', long = "track", num_args = 0..=1, require_equals = true, default_missing_value = "direct")]
+        #[arg(short = 't', long = "track", num_args = 0..=1, default_missing_value = "direct")]
         track: Option<String>,
         #[arg(long = "no-track", action = ArgAction::SetTrue)]
         no_track: bool,
@@ -6701,7 +6701,6 @@ pub enum Command {
         format: Option<String>,
         #[arg(long = "pretty")]
         pretty: Option<String>,
-        #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
     MergeBase {
@@ -7385,6 +7384,8 @@ pub struct ReflogDropArgs {
 #[derive(Subcommand, Debug)]
 pub enum RemoteCommand {
     Add {
+        #[arg(short = 't')]
+        branches: Vec<String>,
         #[arg(short = 'm')]
         master: Option<String>,
         name: String,

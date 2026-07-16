@@ -3576,6 +3576,12 @@ fn backfill_promisor_objects_with_remotes(
                 ),
             });
         };
+        if filter.is_none() {
+            match transport_commands::copy_local_promisor_objects(repo, &source_path, roots) {
+                Ok(()) => continue,
+                Err(_) => {}
+            }
+        }
         match backfill_local_promisor_remote(
             repo,
             remote,

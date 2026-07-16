@@ -1986,11 +1986,13 @@ fn update_ref_validate_stdin_name(name: &str) -> std::result::Result<(), String>
 }
 
 fn update_ref_name_is_valid(name: &str) -> bool {
-    name == "HEAD" || update_ref_name_is_pseudoref(name) || check_ref_format(name, false)
+    name == "HEAD" || update_ref_name_is_pseudoref(name) || check_ref_format(name, true)
 }
 
 fn update_ref_delete_name_is_valid(name: &str) -> bool {
-    update_ref_name_is_valid(name)
+    (name == "HEAD"
+        || update_ref_name_is_pseudoref(name)
+        || check_ref_format(name, false))
         || (name.starts_with("refs/")
             && !name
                 .split('/')
@@ -2371,9 +2373,10 @@ fn update_ref_run_transaction_hook_with_input(
 fn update_ref_transaction_hook_input(
     refs: &RefStore,
     ops: &[UpdateRefStdinOp],
-    dereference_names: bool,
+    _dereference_names: bool,
 ) -> Result<String> {
     let mut input = String::new();
+    let mut emitted_names = BTreeSet::new();
     for op in ops {
         let row = match op {
             UpdateRefStdinOp::Update {
@@ -2382,40 +2385,36 @@ fn update_ref_transaction_hook_input(
                 old_id,
                 no_deref,
             } => {
-                let hook_name = if dereference_names {
-                    update_ref_effective_name(refs, name, *no_deref)
-                } else {
-                    name.clone()
-                };
                 Some((
                     old_id
                         .as_ref()
                         .map(ObjectId::to_hex)
                         .unwrap_or_else(|| zero_object_id().to_hex()),
                     new_id.to_hex(),
-                    hook_name,
+                    name.clone(),
+                    !*no_deref,
                 ))
             }
-            UpdateRefStdinOp::Create { name, new_id, .. } => {
-                Some((zero_object_id().to_hex(), new_id.to_hex(), name.clone()))
+            UpdateRefStdinOp::Create {
+                name,
+                new_id,
+                no_deref,
+            } => {
+                Some((zero_object_id().to_hex(), new_id.to_hex(), name.clone(), !*no_deref))
             }
             UpdateRefStdinOp::Delete {
                 name,
                 old_id,
                 no_deref,
             } => {
-                let hook_name = if dereference_names {
-                    update_ref_effective_name(refs, name, *no_deref)
-                } else {
-                    name.clone()
-                };
                 Some((
                     old_id
                         .as_ref()
                         .map(ObjectId::to_hex)
                         .unwrap_or_else(|| zero_object_id().to_hex()),
                     zero_object_id().to_hex(),
-                    hook_name,
+                    name.clone(),
+                    !*no_deref,
                 ))
             }
             UpdateRefStdinOp::SymrefCreate {
@@ -2424,6 +2423,7 @@ fn update_ref_transaction_hook_input(
                 zero_object_id().to_hex(),
                 format!("ref:{new_target}"),
                 name.clone(),
+                false,
             )),
             UpdateRefStdinOp::SymrefUpdate {
                 name, new_target, ..
@@ -2431,21 +2431,32 @@ fn update_ref_transaction_hook_input(
                 update_ref_symbolic_hook_old_value(refs, name),
                 format!("ref:{new_target}"),
                 name.clone(),
+                false,
             )),
             UpdateRefStdinOp::SymrefDelete { name, .. } => Some((
                 update_ref_symbolic_hook_old_value(refs, name),
                 zero_object_id().to_hex(),
                 name.clone(),
+                false,
             )),
             UpdateRefStdinOp::SymrefVerify { name, .. } => Some((
                 update_ref_symbolic_hook_old_value(refs, name),
                 zero_object_id().to_hex(),
                 name.clone(),
+                false,
             )),
             UpdateRefStdinOp::Verify { .. } => None,
         };
-        if let Some((old, new, name)) = row {
-            input.push_str(&format!("{old} {new} {name}\n"));
+        if let Some((old, new, name, include_deref)) = row {
+            if emitted_names.insert(name.clone()) {
+                input.push_str(&format!("{old} {new} {name}\n"));
+            }
+            if include_deref {
+                let effective_name = update_ref_effective_name(refs, &name, false);
+                if effective_name != name && emitted_names.insert(effective_name.clone()) {
+                    input.push_str(&format!("{old} {new} {effective_name}\n"));
+                }
+            }
         }
     }
     Ok(input)
@@ -3729,8 +3740,8 @@ fn refs_verify_collect_dir(
             continue;
         }
         // The files backend checks each loose-ref basename independently.
-        // This notably rejects a nested `@` component even though the full
-        // refname (for example `refs/heads/@`) passes check-ref-format.
+        // This intentionally rejects a nested `@` component even though the
+        // full refname (for example `refs/heads/@`) passes check-ref-format.
         if !check_ref_format(&name, true) {
             refs_verify_push(
                 findings,
@@ -7965,8 +7976,13 @@ pub(crate) fn remote_command(verbose: bool, command: Option<RemoteCommand>) -> R
     let repo = find_repo_or_bare()?;
     match command {
         None => list_remotes(&repo, verbose),
-        Some(RemoteCommand::Add { master, name, url }) => {
-            remote_add(&repo, &name, &url, master.as_deref())
+        Some(RemoteCommand::Add {
+            branches,
+            master,
+            name,
+            url,
+        }) => {
+            remote_add(&repo, &name, &url, &branches, master.as_deref())
         }
         Some(RemoteCommand::GetUrl { name }) => remote_get_url(&repo, &name),
         Some(RemoteCommand::SetUrl {
@@ -8006,7 +8022,13 @@ fn list_remotes(repo: &GitRepo, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-fn remote_add(repo: &GitRepo, name: &str, url: &str, master: Option<&str>) -> Result<()> {
+fn remote_add(
+    repo: &GitRepo,
+    name: &str,
+    url: &str,
+    branches: &[String],
+    master: Option<&str>,
+) -> Result<()> {
     validate_remote_name(name)?;
     if remote_exists(repo, name)? {
         return Err(CliError::Fatal {
@@ -8015,11 +8037,21 @@ fn remote_add(repo: &GitRepo, name: &str, url: &str, master: Option<&str>) -> Re
         });
     }
     set_config_value(repo, &format!("remote.{name}.url"), url)?;
-    set_config_value(
-        repo,
-        &format!("remote.{name}.fetch"),
-        &format!("+refs/heads/*:refs/remotes/{name}/*"),
-    )?;
+    if branches.is_empty() {
+        set_config_value(
+            repo,
+            &format!("remote.{name}.fetch"),
+            &format!("+refs/heads/*:refs/remotes/{name}/*"),
+        )?;
+    } else {
+        for branch in branches {
+            append_config_value(
+                repo,
+                &format!("remote.{name}.fetch"),
+                &format!("+refs/heads/{branch}:refs/remotes/{name}/{branch}"),
+            )?;
+        }
+    }
     if let Some(master) = master {
         let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
         refs.write_symbolic_ref(
@@ -9681,10 +9713,11 @@ fn branch(options: BranchOptions) -> Result<()> {
             }
         }
         let explicit_upstream = if let Some(track_mode) = options.track.as_deref() {
+            let tracking_start = branch_tracking_start_target(&repo, &start)?;
             let upstream = if track_mode == "inherit" {
-                parse_inherited_tracking_upstream(&repo, &refs, &start)?
+                parse_inherited_tracking_upstream(&repo, &refs, &tracking_start)?
             } else {
-                parse_tracking_start_upstream(&repo, &refs, &start)?
+                parse_tracking_start_upstream(&repo, &refs, &tracking_start)?
             };
             ensure_upstream_matches_remote_fetch(&repo, &upstream)?;
             Some(upstream)
@@ -10474,7 +10507,15 @@ fn branch_delete(
     let commit_cache = store.as_ref().map(CommitObjectCache::new);
 
     for name in names {
-        let name = resolve_previous_checkout_name(repo, &name)?.unwrap_or(name);
+        let name = if let Some(base) = branch_delete_upstream_suffix(&name) {
+            let upstream = upstream_ref_name(repo, base).map_err(CliError::Io)?;
+            upstream
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&upstream)
+                .to_owned()
+        } else {
+            resolve_previous_checkout_name(repo, &name)?.unwrap_or(name)
+        };
         let ref_name = existing_branch_ref_name(&name)?;
         let display_name = branch_display_name(&ref_name);
         if current.as_deref() == Some(ref_name.as_str()) {
@@ -10562,6 +10603,20 @@ fn branch_delete(
             text: errors,
         })
     }
+}
+
+fn branch_delete_upstream_suffix(value: &str) -> Option<&str> {
+    let value = value.strip_suffix('}')?;
+    let (base, selector) = value.rsplit_once("@{")?;
+    (selector.eq_ignore_ascii_case("u") || selector.eq_ignore_ascii_case("upstream"))
+        .then_some(base)
+}
+
+fn branch_tracking_start_target(repo: &GitRepo, value: &str) -> Result<String> {
+    if let Some(base) = branch_delete_upstream_suffix(value) {
+        return upstream_ref_name(repo, base).map_err(CliError::Io);
+    }
+    Ok(value.to_owned())
 }
 
 fn branch_edit_description(repo: &GitRepo, refs: &RefStore, branch: Option<&str>) -> Result<()> {
@@ -12709,6 +12764,10 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         options.is_inside_work_tree,
         options.is_bare_repository,
         options.is_shallow_repository,
+        raw_args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--" || arg == "--end-of-options"),
     ]
     .into_iter()
     .filter(|mode| *mode)
@@ -12782,16 +12841,125 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
     };
     let repo = find_repo_or_bare()?;
     validate_rev_parse_repository_extensions(&repo)?;
+    if options.revs.len() > 1
+        && options
+            .revs
+            .iter()
+            .any(|rev| !rev.contains(':') && repo.root.join(rev).is_file())
+        && let Some(path_rev) = options.revs.iter().find(|rev| rev.contains(':'))
+    {
+        for rev in &options.revs {
+            println!("{rev}");
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "{path_rev}: no such path in the working tree.\n\
+Use 'git <command> -- <path>...' to specify paths that do not exist locally."
+            ),
+        });
+    }
     for rev in &options.revs {
+        if rev.contains(":../")
+            && std::env::current_dir().ok().as_ref() == Some(&repo.root)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "path is outside repository".into(),
+            });
+        }
+        if rev_range_separator_is_revision(rev, "...")
+            && let Some((left, right)) = rev.split_once("...")
+        {
+            if right.contains("...") {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("not a valid object name: '{rev}'"),
+                });
+            }
+            let left_name = if left.is_empty() { "HEAD" } else { left };
+            let right_name = if right.is_empty() { "HEAD" } else { right };
+            let left_id = resolve_objectish(&repo, left_name).map_err(CliError::Io)?;
+            let right_id = resolve_objectish(&repo, right_name).map_err(CliError::Io)?;
+            let store = LooseObjectStore::new(
+                &repo.objects_dir,
+                repo_hash_algorithm_from_config(&repo).map_err(CliError::Io)?,
+            );
+            let left_commit = resolve_commitish(&repo, &store, left_name)?;
+            let right_commit = resolve_commitish(&repo, &store, right_name)?;
+            let commit_cache = CommitObjectCache::new(&store);
+            let merge_base = best_merge_base_cached(&commit_cache, &left_commit, &right_commit)?
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!("no merge base for '{rev}'"),
+                })?;
+            println!("{left_id}");
+            println!("{right_id}");
+            println!("^{merge_base}");
+            continue;
+        }
+        if rev_range_separator_is_revision(rev, "..")
+            && let Some((left, right)) = rev.split_once("..")
+            && !rev.contains("...")
+        {
+            if left.is_empty() && right.is_empty() {
+                println!("..");
+                continue;
+            }
+            let left = if left.is_empty() { "HEAD" } else { left };
+            let right = if right.is_empty() { "HEAD" } else { right };
+            let left_id = resolve_objectish(&repo, left).map_err(CliError::Io)?;
+            let right_id = resolve_objectish(&repo, right).map_err(CliError::Io)?;
+            println!("{left_id}");
+            println!("^{right_id}");
+            continue;
+        }
         if options.symbolic_full_name {
             if let Some(ref_name) = symbolic_full_ref_name(&repo, rev)? {
                 println!("{ref_name}");
+            } else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("unknown revision or path not in the working tree: {rev}"),
+                });
             }
+        } else if has_unescaped_rev_parse_wildcard(rev)
+            && resolve_objectish(&repo, rev).is_err()
+        {
+            println!("{rev}");
+        } else if options.revs.len() > 1
+            && !options.verify
+            && resolve_objectish(&repo, rev).is_err()
+        {
+            println!("{rev}");
         } else {
             print_rev_parse_object(&repo, rev, options.short, options.verify, options.quiet)?;
         }
     }
     Ok(())
+}
+
+fn rev_range_separator_is_revision(value: &str, separator: &str) -> bool {
+    let Some(separator_index) = value.find(separator) else {
+        return false;
+    };
+    value
+        .find(':')
+        .is_none_or(|colon_index| colon_index > separator_index)
+}
+
+fn has_unescaped_rev_parse_wildcard(value: &str) -> bool {
+    let mut escaped = false;
+    for byte in value.bytes() {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if matches!(byte, b'*' | b'?' | b'[') {
+            return true;
+        }
+    }
+    false
 }
 
 fn rev_parse_repo_context() -> Result<RevParseRepoContext> {
@@ -12862,6 +13030,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
     let mut pending_exclude_hidden = None;
     let mut outputs = Vec::new();
     let mut saw_end_of_options = false;
+    let mut saw_dashdash = false;
     let include_revlist_flags = !options.no_flags && !options.no_revs;
     let include_revisions = !options.no_revs;
     let include_other = !options.revs_only && !options.flags;
@@ -12876,6 +13045,31 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
     };
     while index < raw_args.len() {
         let arg = &raw_args[index];
+        if saw_dashdash {
+            if output_options.include_other {
+                outputs.push(rev_parse_prefix_arg(output_options.prefix, arg));
+            }
+            index += 1;
+            continue;
+        }
+        if saw_end_of_options && arg != "--" {
+            let resolved_rev = rev_parse_prefix_revision(output_options.prefix, arg);
+            let arg_kind = rev_parse_classify_end_of_options_arg(
+                &mut repo_context,
+                &resolved_rev,
+                options,
+            )?;
+            rev_parse_emit_arg(
+                &mut repo_context,
+                &mut outputs,
+                &resolved_rev,
+                arg_kind,
+                options,
+                &output_options,
+            )?;
+            index += 1;
+            continue;
+        }
         match arg.as_str() {
             "--all" => {
                 let _accepted_exclude_hidden = pending_exclude_hidden.take();
@@ -13144,8 +13338,14 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             "--short" => {}
             "--abbrev-ref" => {}
-            "--" => {
+            "--end-of-options" => {
                 saw_end_of_options = true;
+                if output_options.include_other && !options.verify {
+                    outputs.push("--end-of-options".to_owned());
+                }
+            }
+            "--" => {
+                saw_dashdash = true;
                 if output_options.include_other {
                     outputs.push("--".to_owned());
                 }
@@ -13282,15 +13482,45 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             other if other.starts_with("--short=") || other.starts_with("--abbrev-ref=") => {}
             other if other.starts_with('-') => {
-                if saw_end_of_options && output_options.include_other {
+                if saw_dashdash && output_options.include_other {
                     outputs.push(rev_parse_prefix_arg(output_options.prefix, other));
+                } else if saw_end_of_options {
+                    let resolved_rev = rev_parse_prefix_revision(output_options.prefix, other);
+                    let arg_kind = rev_parse_classify_end_of_options_arg(
+                        &mut repo_context,
+                        &resolved_rev,
+                        options,
+                    )?;
+                    rev_parse_emit_arg(
+                        &mut repo_context,
+                        &mut outputs,
+                        &resolved_rev,
+                        arg_kind,
+                        options,
+                        &output_options,
+                    )?;
                 }
             }
             rev => {
-                if saw_end_of_options {
+                if saw_dashdash {
                     if output_options.include_other {
                         outputs.push(rev_parse_prefix_arg(output_options.prefix, rev));
                     }
+                } else if saw_end_of_options {
+                    let resolved_rev = rev_parse_prefix_revision(output_options.prefix, rev);
+                    let arg_kind = rev_parse_classify_end_of_options_arg(
+                        &mut repo_context,
+                        &resolved_rev,
+                        options,
+                    )?;
+                    rev_parse_emit_arg(
+                        &mut repo_context,
+                        &mut outputs,
+                        &resolved_rev,
+                        arg_kind,
+                        options,
+                        &output_options,
+                    )?;
                 } else {
                     let resolved_rev = rev_parse_prefix_revision(output_options.prefix, rev);
                     let arg_kind = rev_parse_classify_arg(
@@ -13299,6 +13529,14 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         options.verify,
                         options,
                     )?;
+                    if raw_args.iter().skip(index + 1).any(|value| value == "--")
+                        && matches!(arg_kind, RevParseArgKind::Other)
+                    {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: format!("bad revision '{rev}'"),
+                        });
+                    }
                     rev_parse_emit_arg(
                         &mut repo_context,
                         &mut outputs,
@@ -13366,6 +13604,33 @@ fn rev_parse_classify_arg(
                 Ok(RevParseArgKind::Other)
             }
         }
+    }
+}
+
+fn rev_parse_classify_end_of_options_arg(
+    repo_context: &mut Option<RevParseRepoContext>,
+    arg: &str,
+    options: &RevParseOptions,
+) -> Result<RevParseArgKind> {
+    let objectish = if options.not {
+        arg.strip_prefix('^').unwrap_or(arg)
+    } else {
+        arg
+    };
+    let ctx = cached_rev_parse_repo_context(repo_context)?;
+    if options.symbolic_full_name && symbolic_full_ref_name(&ctx.repo, objectish)?.is_some() {
+        return Ok(RevParseArgKind::Revision);
+    }
+    if options.abbrev_ref.is_some() {
+        abbrev_ref_name(&ctx.repo, objectish)?;
+        return Ok(RevParseArgKind::Revision);
+    }
+    match resolve_objectish(&ctx.repo, objectish) {
+        Ok(_) => Ok(RevParseArgKind::Revision),
+        Err(_) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("bad revision '{arg}'"),
+        }),
     }
 }
 

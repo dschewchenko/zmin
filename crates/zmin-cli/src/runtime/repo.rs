@@ -939,17 +939,27 @@ fn repo_search_ceiling_dirs() -> Result<Vec<PathBuf>> {
         return Ok(Vec::new());
     };
     let cwd = std::env::current_dir()?;
-    Ok(std::env::split_paths(&raw)
-        .map(|path| {
-            let path = normalize_windows_input_path(path);
-            let absolute = if path.is_absolute() {
-                path
-            } else {
-                cwd.join(path)
-            };
+    let mut preserve_symlinks = false;
+    let mut ceilings = Vec::new();
+    for path in std::env::split_paths(&raw) {
+        let path = normalize_windows_input_path(path);
+        if path.as_os_str().is_empty() {
+            preserve_symlinks = true;
+            continue;
+        }
+        let absolute = if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        };
+        ceilings.push(if preserve_symlinks {
+            absolute
+        } else {
             canonical_or_absolute(absolute)
-        })
-        .collect())
+        });
+        preserve_symlinks = false;
+    }
+    Ok(ceilings)
 }
 
 fn repo_search_stops_before_parent(dir: &std::path::Path, ceiling_dirs: &[PathBuf]) -> bool {

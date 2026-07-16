@@ -2853,6 +2853,7 @@ fn reflog_human_date(entry: &ReflogEntry) -> Result<String> {
 }
 
 fn reflog_path(repo: &GitRepo, ref_name: &str) -> Result<PathBuf> {
+    let ref_name = resolve_reflog_target_name(repo, ref_name)?;
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     if ref_name == "main-worktree/HEAD" {
         return Ok(common_git_dir.join("logs/HEAD"));
@@ -2865,13 +2866,27 @@ fn reflog_path(repo: &GitRepo, ref_name: &str) -> Result<PathBuf> {
             .join(worktree)
             .join("logs/HEAD"));
     }
-    let normalized = normalized_reflog_name(repo, ref_name)?;
+    let normalized = normalized_reflog_name(repo, &ref_name)?;
     let git_dir = if is_per_worktree_ref(&normalized) {
         repo.git_dir.clone()
     } else {
         common_git_dir
     };
     Ok(git_dir.join("logs").join(normalized))
+}
+
+fn resolve_reflog_target_name(repo: &GitRepo, target: &str) -> Result<String> {
+    let Some(base) = split_upstream_reflog_suffix(target) else {
+        return Ok(target.to_owned());
+    };
+    upstream_ref_name(repo, base).map_err(CliError::Io)
+}
+
+fn split_upstream_reflog_suffix(value: &str) -> Option<&str> {
+    let value = value.strip_suffix('}')?;
+    let (base, selector) = value.rsplit_once("@{")?;
+    (selector.eq_ignore_ascii_case("u") || selector.eq_ignore_ascii_case("upstream"))
+        .then_some(base)
 }
 
 fn normalized_reflog_name(repo: &GitRepo, ref_name: &str) -> Result<String> {
@@ -10710,6 +10725,9 @@ fn parse_log_reflog_target(target: &str) -> Result<(String, LogReflogTargetSelec
     let Some((base, raw)) = prefix.rsplit_once("@{") else {
         return Ok((target.to_owned(), LogReflogTargetSelector::None));
     };
+    if raw.eq_ignore_ascii_case("u") || raw.eq_ignore_ascii_case("upstream") {
+        return Ok((target.to_owned(), LogReflogTargetSelector::None));
+    }
     let base = if base.is_empty() { "HEAD" } else { base }.to_owned();
     if let Ok(index) = raw.parse::<usize>() {
         return Ok((base, LogReflogTargetSelector::Index(index)));
@@ -10725,6 +10743,9 @@ fn log_reflog_target_date(target: &str) -> Result<Option<i64>> {
     let Some((_, raw)) = prefix.rsplit_once("@{") else {
         return Ok(None);
     };
+    if raw.eq_ignore_ascii_case("u") || raw.eq_ignore_ascii_case("upstream") {
+        return Ok(None);
+    }
     if raw.parse::<usize>().is_ok() {
         return Ok(None);
     }
@@ -10976,16 +10997,26 @@ fn normalize_reflog_display_target(repo: &GitRepo, target: &str) -> Result<Strin
         .ok()
         .flatten();
     let target = resolved_previous.as_deref().unwrap_or(target);
-    if target == "HEAD" || target.starts_with("refs/") {
-        return Ok(target.to_owned());
+    let target = resolve_reflog_target_name(repo, target)?;
+    if target == "HEAD" {
+        return Ok(target);
+    }
+    if let Some(name) = target.strip_prefix("refs/heads/") {
+        return Ok(name.to_owned());
+    }
+    if let Some(name) = target.strip_prefix("refs/remotes/") {
+        return Ok(name.to_owned());
+    }
+    if target.starts_with("refs/") {
+        return Ok(target);
     }
     if target == "stash" {
         return Ok("stash".to_owned());
     }
-    if let Some(ref_name) = branch_checkout_ref(&refs, target)? {
+    if let Some(ref_name) = branch_checkout_ref(&refs, &target)? {
         return Ok(branch_display_name(&ref_name));
     }
-    Ok(target.to_owned())
+    Ok(target)
 }
 
 fn log_reflog_branch_patterns(revs: &[String]) -> Option<Vec<String>> {
@@ -11705,7 +11736,10 @@ impl<'a> LogFormat<'a> {
                 "fuller" => Ok(Self::Fuller),
                 "oneline" => Ok(Self::FullOneline),
                 pattern => Ok(Self::Custom {
-                    pattern: pattern.strip_prefix("format:").unwrap_or(pattern),
+                    pattern: pattern
+                        .strip_prefix("format:")
+                        .or_else(|| pattern.strip_prefix("tformat:"))
+                        .unwrap_or(pattern),
                     terminates_lines: !pattern.starts_with("format:"),
                 }),
             };
@@ -11723,7 +11757,10 @@ impl<'a> LogFormat<'a> {
             "fuller" => Ok(Self::Fuller),
             "oneline" => Ok(Self::FullOneline),
             pattern => Ok(Self::Custom {
-                pattern: pattern.strip_prefix("format:").unwrap_or(pattern),
+                pattern: pattern
+                    .strip_prefix("format:")
+                    .or_else(|| pattern.strip_prefix("tformat:"))
+                    .unwrap_or(pattern),
                 terminates_lines: !pattern.starts_with("format:"),
             }),
         }
@@ -17664,8 +17701,10 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         let mut deferred_missing_ids = Vec::new();
         {
             let _trace = phase_trace("rev_list.objects.write_commits");
-            for commit in &commit_trees {
-                writeln!(out, "{}", commit.id)?;
+            if !quiet {
+                for commit in &commit_trees {
+                    writeln!(out, "{}", commit.id)?;
+                }
             }
         }
         {
@@ -17676,10 +17715,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 &revs.extra_objects,
                 &object_walk_excluded_commits,
                 tree_missing_policy,
-                |id, kind, name| {
-                    if matches!(missing_mode, Some(RevListMissingMode::Print))
-                        && !store.contains_object(id).map_err(CliError::Io)?
-                    {
+            |id, kind, name| {
+                    let missing = !store.contains_object(id).map_err(CliError::Io)?;
+                    if quiet && !missing {
+                        return Ok(());
+                    }
+                    if matches!(missing_mode, Some(RevListMissingMode::Print)) && missing {
                         deferred_missing_ids.push(id.clone());
                         let _ = name;
                         return Ok(());
@@ -17977,6 +18018,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let notes = LogNotes::empty();
     let mut out = io::stdout().lock();
     for id in &commit_ids {
+        if quiet && objects {
+            continue;
+        }
         let marker = show_traversal_markers
             .then(|| traversal.markers.get(id).copied())
             .flatten();
@@ -18059,9 +18103,11 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             &excluded_commits,
             tree_missing_policy,
             |id, _, name| {
-                if matches!(missing_mode, Some(RevListMissingMode::Print))
-                    && !store.contains_object(id).map_err(CliError::Io)?
-                {
+                let missing = !store.contains_object(id).map_err(CliError::Io)?;
+                if quiet && !missing {
+                    return Ok(());
+                }
+                if matches!(missing_mode, Some(RevListMissingMode::Print)) && missing {
                     deferred_missing_ids.push(id.clone());
                     let _ = name;
                     return Ok(());

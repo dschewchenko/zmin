@@ -6553,7 +6553,7 @@ fn sparse_checkout_checkout_index(index: &GitIndex) -> Result<GitIndex> {
     )?)
 }
 
-fn apply_repo_sparse_checkout_bits(repo: &GitRepo, index: &mut GitIndex) -> Result<bool> {
+pub(crate) fn apply_repo_sparse_checkout_bits(repo: &GitRepo, index: &mut GitIndex) -> Result<bool> {
     if !repo_sparse_checkout_active(repo)? {
         return Ok(false);
     }
@@ -6793,6 +6793,18 @@ mod tests {
 
         entry.size = 1;
         assert!(index_entry_has_stat_cache(&entry));
+    }
+
+    #[test]
+    fn sparse_patterns_match_root_files_like_git() {
+        let full = GitIgnore::parse("/*\n");
+        assert!(repo_sparse_path_matches(b"a", &full, false));
+        assert!(repo_sparse_path_matches(b"nested/a", &full, false));
+
+        let selective = GitIgnore::parse("!/*\n/a\n/c\n");
+        assert!(repo_sparse_path_matches(b"a", &selective, false));
+        assert!(!repo_sparse_path_matches(b"b", &selective, false));
+        assert!(repo_sparse_path_matches(b"c", &selective, false));
     }
 
     #[cfg(unix)]

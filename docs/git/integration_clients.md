@@ -58,8 +58,8 @@ git status
 git fetch --prune --no-tags
 ```
 
-Current macOS checkpoint (2026-07-16): release SHA-256
-`0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c`
+Current macOS checkpoint (2026-07-17): release SHA-256
+`f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632`
 passes the replacement smoke and the observed-client differential tests.
 The 20-repeat real-workspace replay is byte-exact for exit status, stdout, and
 stderr across all ten GUI lanes. It uses less p95 RSS in all ten lanes; on this
@@ -71,7 +71,7 @@ and p95 RSS in all seven operations.
 The current release replay (20 repeats, `init`, `status`, `log`, `rev-list`,
 `merge-base`, `pack-objects`, and `index-pack`) remained semantically exact and
 below Git on both gates in all seven lanes; the slowest median-time ratio was
-`0.988x` for `index-pack`, and the worst p95 RSS ratio was `0.982x`.
+`0.990x` for `index-pack`, and the worst p95 RSS ratio was `0.985x`.
 
 The version line must start with the Git 2.47 compatibility baseline, currently
 `git version 2.47.1.zmin`, and include the real Zmin package version after it. Some

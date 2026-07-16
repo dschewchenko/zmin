@@ -681,6 +681,22 @@ fn update_ref_pseudoref_matches_stock_git_and_resolves_revision() {
 }
 
 #[test]
+fn update_ref_accepts_one_level_names_like_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    git(git_repo.path(), ["update-ref", "referrent", "HEAD"]);
+    run_zmin(zmin_repo.path(), ["update-ref", "referrent", "HEAD"]);
+
+    assert_eq!(
+        fs::read_to_string(git_repo.path().join(".git/referrent"))
+            .expect("read stock one-level ref"),
+        fs::read_to_string(zmin_repo.path().join(".git/referrent"))
+            .expect("read zmin one-level ref")
+    );
+}
+
+#[test]
 fn refs_verify_matches_stock_git_for_healthy_repository() {
     let repo = git_init();
     configure_identity(repo.path());

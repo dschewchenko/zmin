@@ -259,6 +259,10 @@ pub(crate) fn abbrev_ref_name(repo: &GitRepo, rev: &str) -> Result<String> {
             .unwrap_or(&ref_name)
             .to_owned());
     }
+    if let Some(base) = split_upstream_suffix_name(rev) {
+        let ref_name = super::upstream_ref_name(repo, base).map_err(CliError::Io)?;
+        return Ok(short_ref_name(&ref_name));
+    }
     if contains_revision_suffix(rev) {
         resolve_objectish(repo, rev).map_err(CliError::Io)?;
         return Ok(rev.to_owned());
@@ -290,6 +294,11 @@ pub(crate) fn symbolic_full_ref_name(repo: &GitRepo, rev: &str) -> Result<Option
             .map(Some)
             .map_err(CliError::Io);
     }
+    if let Some(base) = split_upstream_suffix_name(rev) {
+        return super::upstream_ref_name(repo, base)
+            .map(Some)
+            .map_err(CliError::Io);
+    }
     if contains_revision_suffix(rev) {
         resolve_objectish(repo, rev).map_err(CliError::Io)?;
         return Ok(None);
@@ -313,6 +322,16 @@ fn split_push_suffix_name(value: &str) -> Option<&str> {
     let base = value.strip_suffix('}')?;
     let (base, selector) = base.rsplit_once("@{")?;
     selector.eq_ignore_ascii_case("push").then_some(base)
+}
+
+fn split_upstream_suffix_name(value: &str) -> Option<&str> {
+    let base = value.strip_suffix('}')?;
+    let (base, selector) = base.rsplit_once("@{")?;
+    if base.starts_with("refs/") {
+        return None;
+    }
+    (selector.eq_ignore_ascii_case("u") || selector.eq_ignore_ascii_case("upstream"))
+        .then_some(base)
 }
 
 pub(crate) fn remote_branch_display(

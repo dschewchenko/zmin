@@ -1,6 +1,6 @@
 # Git Compatibility Evidence Matrix
 
-Date: 2026-07-16
+Date: 2026-07-17
 
 ## Reading this matrix
 
@@ -11,17 +11,40 @@ parity. Upstream Git test-suite status is tracked separately in
 
 ## Latest local replacement checkpoint
 
-- Final 2026-07-16 release SHA-256:
-  `0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c`.
+- Final 2026-07-17 release SHA-256:
+  `f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632`.
   The current targeted integration set passed `295/295`
   (`git_history_query_compat`, `git_ls_files_compat`,
   `git_observed_client_compat`, and `git_status_compat`), and the release
   replacement dogfood smoke passed. A fresh pinned Git `v2.47.1`
   `all-nondeprecated` offset-`0`, limit-`50` run passed `50/50` files; the
-  offset-`100`, limit-`50` slice passed `39/50` files. The focused
+  offset-`100`, limit-`50` slice passed `40/50` files. The focused
   `t1502-rev-parse-parseopt.sh` replay is now green at `37/37`, covering
   usage rendering, option-spec parsing, short/long and optional arguments,
   negation, abbreviation diagnostics, and shell-eval output.
+  The focused `t1416-ref-transaction-hooks.sh` replay is green at `9/9`,
+  covering Git's transaction phases, queued symbolic updates, and non-atomic
+  push hook interleaving. The focused rev-parse replays now pass
+  `t1508-at-combinations.sh` at `35/35`, with `t1506-rev-parse-diagnosis.sh`
+  at `29/30` and `t1507-rev-parse-upstream.sh` now at `29/29`.
+- Current pinned Git `v2.55.0` targeted closures also pass the early
+  conversion/CRLF/encoding cluster (`t0021`, `t0022`, `t0024`, `t0025`,
+  `t0027` with `2600/2600` assertions, and `t0028`), text/safety/filesystem
+  edge cases (`t0030`, `t0031`, `t0035`, `t0050`, `t0055`), credential helpers
+  (`t0301`, `t0302`), partial clone (`t0410`, `t0411`), and reffiles backend
+  (`t0600`, `t0601`). `t0602` remains an explicit Git `v2.55.0` semantic
+  delta: that version accepts a loose `refs/heads/@` entry while the
+  supported Git `v2.47`-family behavior (and local differential gate) reports
+  it as `badRefName`.
+- The pinned-v2.55.0 `t0450-txt-doc-vs-help.sh` replay reports `20` failures
+  among `815` non-expected assertions. This is a documentation-version drift
+  signal (v2.55 usage forms versus Zmin's supported v2.47.1 help fixtures),
+  not a release-gate failure; the local v2.47.1 help differential remains the
+  compatibility contract.
+- The pinned-v2.47.1 `t1090-sparse-checkout-scope.sh` replay is now green at
+  `7/7`, including same-revision sparse reapplication, the
+  `checkout-index --ignore-skip-worktree-bits` contract, and the partial-clone
+  lazy-fetch object set.
 - The next offset-`150` slice initially passed `9/50`; focused reruns now pass
   `t1511-rev-parse-caret.sh`, `t1513-rev-parse-prefix.sh`,
   `t1514-rev-parse-push.sh`, `t1515-rev-parse-outside-repo.sh`,
@@ -41,12 +64,12 @@ parity. Upstream Git test-suite status is tracked separately in
   time ratios ranged from `0.615x` (`init`) to `0.935x` (`index-pack`); p95 RSS
   ratios ranged from `0.888x` to `0.997x`.
 - A fresh 20-repeat standard corpus against release SHA
-  `0999d3981bf6eff5a6a821912b0e03e133a587d26eaf298725c4d4b2a13b8d8c` kept all
+  `f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632` kept all
   semantic checks green and stayed below stock Git on median time and p95 RSS
-  for all `7/7` operations. Median time ratios were `0.583x` (`init`),
-  `0.742x` (`status`), `0.722x` (`log`), `0.694x` (`rev-list`),
-  `0.681x` (`merge-base`), `0.645x` (`pack-objects`), and `0.988x`
-  (`index-pack`); p95 RSS ratios ranged from `0.878x` to `0.982x`.
+  for all `7/7` operations. Median time ratios were `0.539x` (`init`),
+  `0.750x` (`status`), `0.708x` (`log`), `0.682x` (`rev-list`),
+  `0.655x` (`merge-base`), `0.623x` (`pack-objects`), and `0.990x`
+  (`index-pack`); p95 RSS ratios ranged from `0.875x` to `0.985x`.
 - The final 20-repeat observed-client corpus matched exit status, stdout, and
   stderr on every repeat, and Zmin was faster by median in all `10/10` lanes.
   All ten lanes had lower p95 RSS; the worst ratio was `0.997x` for

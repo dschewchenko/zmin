@@ -3165,6 +3165,14 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
     }
 
     let include_cached = include_all_cached || options.cached;
+    let sparse_expect_files_outside = if config_bool_enabled(
+        &repo,
+        "sparse.expectFilesOutsideOfPatterns",
+    )? {
+        SparsePathScope::load(&repo)?
+    } else {
+        None
+    };
     let mut records = Vec::new();
     let mut seen_records = BTreeSet::new();
     if include_all_cached || show_stage_format {
@@ -3208,7 +3216,13 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                     &mut records,
                     &mut seen_records,
                     entry.path.to_vec(),
-                    ls_files_tag(entry, &options, &with_tree_paths).unwrap_or(b'H'),
+                    ls_files_tag(
+                        entry,
+                        &options,
+                        &with_tree_paths,
+                        sparse_expect_files_outside.as_ref(),
+                    )
+                    .unwrap_or(b'H'),
                     &options,
                 );
             }
@@ -3240,7 +3254,13 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                 &mut records,
                 &mut seen_records,
                 entry.path.to_vec(),
-                ls_files_tag(entry, &options, &with_tree_paths).unwrap_or(b'H'),
+                ls_files_tag(
+                    entry,
+                    &options,
+                    &with_tree_paths,
+                    sparse_expect_files_outside.as_ref(),
+                )
+                .unwrap_or(b'H'),
                 &options,
             );
         }
@@ -3690,6 +3710,7 @@ fn ls_files_tag(
     entry: &IndexEntry,
     options: &LsFilesOptions,
     with_tree_paths: &HashSet<Vec<u8>>,
+    sparse_scope: Option<&SparsePathScope>,
 ) -> Option<u8> {
     if with_tree_paths.contains(entry.path.as_slice()) {
         return (options.tagged || options.lowercase_assume_valid || options.fsmonitor_clean)
@@ -3699,7 +3720,7 @@ fn ls_files_tag(
         return (options.tagged || options.lowercase_assume_valid || options.fsmonitor_clean)
             .then_some(b'M');
     }
-    if entry.skip_worktree() {
+    if entry.skip_worktree() || sparse_scope.is_some_and(|scope| !scope.contains(&entry.path)) {
         return (options.tagged || options.lowercase_assume_valid || options.fsmonitor_clean)
             .then_some(b'S');
     }
@@ -3820,7 +3841,7 @@ fn ls_files_stage_record(
     store: Option<&LooseObjectStore>,
     attrs: Option<&GitAttributes>,
 ) -> Result<String> {
-    let tag = ls_files_tag(entry, options, &HashSet::new())
+    let tag = ls_files_tag(entry, options, &HashSet::new(), None)
         .map(|tag| format!("{} ", tag as char))
         .unwrap_or_default();
     if options.eol {
@@ -6485,7 +6506,9 @@ fn read_tree_prefetch_missing_objects(
     let object_ids = index
         .entries()
         .iter()
-        .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Gitlink)
+        .filter(|entry| {
+            entry.stage == 0 && !entry.skip_worktree() && entry.mode != IndexMode::Gitlink
+        })
         .map(|entry| entry.id.clone())
         .collect::<Vec<_>>();
     let mut missing = store
@@ -6499,6 +6522,22 @@ fn read_tree_prefetch_missing_objects(
     missing.sort_by_key(ObjectId::to_hex);
     super::admin_commands::backfill_promisor_objects(repo, &missing)?;
     Ok(())
+}
+
+fn prefetch_checkout_missing_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+) -> Result<()> {
+    if !super::transport_commands::lazy_fetch_allowed() || !partial_clone_enabled(repo)? {
+        return Ok(());
+    }
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let target_commit = commit_cache.read_commit(target_id)?;
+    let mut target_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    apply_repo_sparse_checkout_bits(repo, &mut target_index)?;
+    read_tree_prefetch_missing_objects(repo, store, &target_index)
 }
 
 fn read_tree_validate_update_worktree(
@@ -7465,6 +7504,13 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
         }
         return Err(error);
     }
+    if ignore_skip_worktree_bits
+        && prefix_is_none
+        && matches!(stage_mode, CheckoutIndexStageMode::Normal)
+    {
+        clear_checkout_index_skip_worktree_bits(&mut index, &selected_index)?;
+        index.write_to_path(&repo.index_path)?;
+    }
     if update_index && prefix_is_none && matches!(stage_mode, CheckoutIndexStageMode::Normal) {
         let selected_paths = selected_index
             .entries()
@@ -7473,6 +7519,26 @@ pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Re
             .collect::<Vec<_>>();
         refresh_tracked_index_metadata_matching(&repo, &mut index, &selected_paths)?;
         index.write_to_path(&repo.index_path)?;
+    }
+    Ok(())
+}
+
+fn clear_checkout_index_skip_worktree_bits(
+    index: &mut GitIndex,
+    selected: &GitIndex,
+) -> Result<()> {
+    for entry in selected.entries() {
+        if entry.stage != 0 || !entry.skip_worktree() {
+            continue;
+        }
+        let Some(mut current) = index.entry(&entry.path, entry.stage).cloned() else {
+            continue;
+        };
+        if !current.skip_worktree() {
+            continue;
+        }
+        current.set_skip_worktree(false);
+        index.upsert(current)?;
     }
     Ok(())
 }
@@ -14648,7 +14714,17 @@ fn stash_branch(args: &[String]) -> Result<()> {
             message: "stash commit has no base parent".into(),
         });
     };
-    checkout_new_branch(false, branch, &base.to_hex(), false, false, false, false)?;
+    checkout_new_branch(
+        false,
+        branch,
+        &base.to_hex(),
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+    )?;
     let repo = find_repo()?;
     let tree_cache = TreeObjectCache::new(&store);
     if !stash_apply_can_preserve_dirty_paths(&repo, &store, &commit_cache, &tree_cache, &id)? {
@@ -15346,7 +15422,7 @@ pub(crate) fn checkout(
             message: "'--detach' cannot be used with '-b/-B/--orphan'".into(),
         });
     }
-    if track.is_some() || no_track {
+    if (track.is_some() || no_track) && create.is_none() && reset_create.is_none() {
         let message = if checkout_raw_args_have_separator() {
             "--track needs a branch name"
         } else {
@@ -15372,6 +15448,8 @@ pub(crate) fn checkout(
             start,
             explicit_start.is_none(),
             false,
+            track.is_some(),
+            no_track,
             create_reflog,
             false,
         );
@@ -15391,6 +15469,8 @@ pub(crate) fn checkout(
             start,
             explicit_start.is_none(),
             true,
+            track.is_some(),
+            no_track,
             create_reflog,
             false,
         );
@@ -15649,6 +15729,7 @@ fn checkout_current_head(force: bool) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let target_id = refs.resolve("HEAD")?;
+    prefetch_checkout_missing_objects(&repo, &store, &target_id)?;
     let checkout_metadata = WorktreeCheckoutMetadata {
         ref_name: current_branch_ref(&refs)?,
         treeish: Some(target_id.clone()),
@@ -15713,10 +15794,25 @@ fn checkout_target_exists(target: &str) -> Result<bool> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(common_git_dir, algorithm);
-    if branch_checkout_ref(&refs, target)?.is_some() {
+    if checkout_target_branch_ref(&repo, &refs, target)?.is_some() {
         return Ok(true);
     }
     Ok(resolve_commitish(&repo, &store, target).is_ok())
+}
+
+fn checkout_target_branch_ref(
+    repo: &GitRepo,
+    refs: &RefStore,
+    target: &str,
+) -> Result<Option<String>> {
+    if let Some(base) = checkout_upstream_suffix(target) {
+        let upstream = upstream_ref_name(repo, base).map_err(CliError::Io)?;
+        if upstream.starts_with("refs/heads/") && ref_exists(refs, &upstream)? {
+            return Ok(Some(upstream));
+        }
+        return Ok(None);
+    }
+    branch_checkout_ref(refs, target)
 }
 
 fn checkout_worktree_path_exists(target: &str) -> Result<bool> {
@@ -15838,6 +15934,8 @@ fn checkout_new_branch(
     start: &str,
     default_start: bool,
     reset_existing: bool,
+    explicit_track: bool,
+    no_track: bool,
     create_reflog: bool,
     switch_reset_message: bool,
 ) -> Result<()> {
@@ -15885,6 +15983,12 @@ fn checkout_new_branch(
     } else {
         refs.write_ref(&ref_name, &id)?;
     }
+    if !no_track
+        && let Some((remote, merge)) = checkout_tracking_upstream(&repo, &refs, start, explicit_track)?
+    {
+        set_config_value(&repo, &format!("branch.{branch}.remote"), &remote)?;
+        set_config_value(&repo, &format!("branch.{branch}.merge"), &merge)?;
+    }
     if let Some(old_id) = reset_current_branch_old_id {
         append_reflog(&repo, "HEAD", &old_id, &id, &branch_reflog_message)?;
     }
@@ -15902,6 +16006,58 @@ fn checkout_new_branch(
             checkout_existing_with_message(force, branch, CheckoutBranchMessage::NewBranch, true)
         }
     }
+}
+
+fn checkout_tracking_upstream(
+    repo: &GitRepo,
+    refs: &RefStore,
+    start: &str,
+    explicit_track: bool,
+) -> Result<Option<(String, String)>> {
+    let upstream_ref = if let Some(base) = checkout_upstream_suffix(start) {
+        Some(upstream_ref_name(repo, base).map_err(CliError::Io)?)
+    } else if explicit_track {
+        checkout_tracking_ref(refs, start)?
+    } else {
+        None
+    };
+    let Some(upstream_ref) = upstream_ref else {
+        return Ok(None);
+    };
+    if let Some(merge) = upstream_ref.strip_prefix("refs/heads/") {
+        return Ok(Some((".".to_owned(), format!("refs/heads/{merge}"))));
+    }
+    if let Some(rest) = upstream_ref.strip_prefix("refs/remotes/")
+        && let Some((remote, branch)) = rest.split_once('/')
+    {
+        return Ok(Some((remote.to_owned(), format!("refs/heads/{branch}"))));
+    }
+    Ok(None)
+}
+
+fn checkout_tracking_ref(refs: &RefStore, start: &str) -> Result<Option<String>> {
+    if start.starts_with("refs/heads/") {
+        return Ok(ref_exists(refs, start)?.then_some(start.to_owned()));
+    }
+    if start.starts_with("refs/remotes/") {
+        return Ok(ref_exists(refs, start)?.then_some(start.to_owned()));
+    }
+    let local = format!("refs/heads/{start}");
+    if ref_exists(refs, &local)? {
+        return Ok(Some(local));
+    }
+    let remote = format!("refs/remotes/{start}");
+    if ref_exists(refs, &remote)? {
+        return Ok(Some(remote));
+    }
+    Ok(None)
+}
+
+fn checkout_upstream_suffix(value: &str) -> Option<&str> {
+    let value = value.strip_suffix('}')?;
+    let (base, selector) = value.rsplit_once("@{")?;
+    (selector.eq_ignore_ascii_case("u") || selector.eq_ignore_ascii_case("upstream"))
+        .then_some(base)
 }
 
 fn checkout_branch_reflog_enabled(repo: &GitRepo) -> Result<bool> {
@@ -15967,6 +16123,28 @@ pub(crate) fn checkout_existing(force: bool, target: &str) -> Result<()> {
     checkout_existing_with_message(force, target, CheckoutBranchMessage::ExistingBranch, true)
 }
 
+fn sparse_checkout_needs_reapply(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target_id: &ObjectId,
+) -> Result<bool> {
+    if !sparse_checkout_active(repo)? {
+        return Ok(false);
+    }
+    let current_index = expand_sparse_index(repo, &read_repo_index(repo)?)?;
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let target_commit = commit_cache.read_commit(target_id)?;
+    let mut target_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    apply_sparse_checkout_bits_to_index(repo, &mut target_index)?;
+    Ok(target_index.entries().iter().any(|target| {
+        target.stage == 0
+            && current_index
+                .entry(&target.path, 0)
+                .is_none_or(|current| current.skip_worktree() != target.skip_worktree())
+    }))
+}
+
 fn checkout_existing_with_message(
     force: bool,
     target: &str,
@@ -15980,19 +16158,27 @@ fn checkout_existing_with_message(
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(common_git_dir, algorithm);
     let head_refs = RefStore::new(&repo.git_dir, algorithm);
-    let target_branch_ref = branch_checkout_ref(&refs, target)?;
+    let target_branch_ref = checkout_target_branch_ref(&repo, &refs, target)?;
     let target_id = if let Some(ref_name) = target_branch_ref.as_deref() {
         refs.resolve(ref_name)?
     } else {
         resolve_commitish(&repo, &store, target)?
     };
+    prefetch_checkout_missing_objects(&repo, &store, &target_id)?;
     let current_id = head_refs.resolve("HEAD").ok();
     let index_exists = repo.index_path.exists();
+    let sparse_checkout_reapply = current_id.as_ref() == Some(&target_id)
+        && sparse_checkout_needs_reapply(&repo, &store, &target_id)?;
     let force_transition = matches!(
         branch_message,
         CheckoutBranchMessage::ResetBranch | CheckoutBranchMessage::SwitchResetBranch
     );
-    if force || force_transition || current_id.as_ref() != Some(&target_id) || !index_exists {
+    if force
+        || force_transition
+        || current_id.as_ref() != Some(&target_id)
+        || !index_exists
+        || sparse_checkout_reapply
+    {
         let checkout_metadata = WorktreeCheckoutMetadata {
             ref_name: target_branch_ref.clone(),
             treeish: Some(target_id.clone()),
@@ -16334,7 +16520,17 @@ pub(crate) fn switch(
             });
         }
         let start = target.as_deref().unwrap_or("HEAD");
-        return checkout_new_branch(force, &branch, start, target.is_none(), true, false, true);
+        return checkout_new_branch(
+            force,
+            &branch,
+            start,
+            target.is_none(),
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
     }
 
     if let Some(branch) = create {

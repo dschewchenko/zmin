@@ -6924,6 +6924,23 @@ pub(crate) fn copy_reachable_objects(
     Ok(seen)
 }
 
+pub(crate) fn copy_local_promisor_objects(
+    destination_repo: &GitRepo,
+    source_path: &Path,
+    roots: &[ObjectId],
+) -> Result<()> {
+    let source = local_clone_source(source_path)?;
+    let source_repo = local_clone_source_repo(&source);
+    let source_store =
+        LooseObjectStore::new(source_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let destination_store =
+        LooseObjectStore::new(destination_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    for root in roots {
+        copy_reachable_objects(&source_repo, &source_store, &destination_store, root)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn pack_reachable_objects(
     repo: &GitRepo,
     source: &LooseObjectStore,
@@ -12668,7 +12685,7 @@ fn fetch_multiple_refspecs_from_http_remote(
         if !quiet && destination_ref_missing(&destination_refs, &destination)? {
             update_rows.push(fetch_update_row(&row.name, &destination));
         }
-        write_fetch_destination_ref(&destination_refs, &destination, &row.id, Some(remote))?;
+        write_fetch_destination_ref(repo, &destination_refs, &destination, &row.id, Some(remote))?;
     }
     print_fetch_update_rows(url, &update_rows);
     write_http_explicit_fetch_head_file(repo, url, &resolved)
@@ -12822,7 +12839,7 @@ where
         if !quiet && destination_ref_missing(&destination_refs, &destination)? {
             update_rows.push(fetch_update_row(&row.name, &destination));
         }
-        write_fetch_destination_ref(&destination_refs, &destination, &row.id, Some(remote))?;
+        write_fetch_destination_ref(repo, &destination_refs, &destination, &row.id, Some(remote))?;
     }
     print_fetch_update_rows(url, &update_rows);
     if prune {
@@ -13903,14 +13920,12 @@ pub(crate) fn run_push(
     let destination_repo = local_clone_source_repo(&destination);
     for status in &statuses {
         run_receive_update_hook(&destination_repo, status)?;
-    }
-    let transaction_input = local_push_transaction_hook_input(&statuses);
-    run_reference_transaction_hook_with_stdin(
-        &destination_repo,
-        "prepared",
-        transaction_input.as_bytes(),
-    )?;
-    for status in &statuses {
+        let transaction_input = local_push_transaction_hook_input(std::slice::from_ref(status));
+        run_reference_transaction_hook_with_stdin(
+            &destination_repo,
+            "prepared",
+            transaction_input.as_bytes(),
+        )?;
         let push_ref = &status.push_ref;
         {
             let _trace = phase_trace("push.local.update_ref");
@@ -13931,12 +13946,12 @@ pub(crate) fn run_push(
                 upstream_branches.push(branch.to_owned());
             }
         }
+        let _ = run_reference_transaction_hook_with_stdin(
+            &destination_repo,
+            "committed",
+            transaction_input.as_bytes(),
+        );
     }
-    let _ = run_reference_transaction_hook_with_stdin(
-        &destination_repo,
-        "committed",
-        transaction_input.as_bytes(),
-    );
     {
         let _trace = phase_trace("push.local.render");
         write_local_push_status_report(&url, &statuses, &remote, &upstream_branches)?;
@@ -15408,7 +15423,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         if set_upstream {
             set_fetch_upstream_config(&repo, &remote, branch)?;
         }
-        write_fetch_destination_ref(&destination_refs, &destination_ref, &id, Some(&remote))?;
+        write_fetch_destination_ref(&repo, &destination_refs, &destination_ref, &id, Some(&remote))?;
         if atomic {
             run_reference_transaction_hook(&repo, "committed", &atomic_updates)?;
         }
@@ -17841,6 +17856,7 @@ fn apply_configured_fetch_refspecs(
                 }
                 let write_result = match target {
                     RefTarget::Direct(id) => write_fetch_destination_ref_with_force(
+                        repo,
                         destination_refs,
                         &destination_ref,
                         &id,
@@ -17870,6 +17886,7 @@ fn apply_configured_fetch_refspecs(
         let destination_ref = destination_fetch_ref_name(destination)?;
         match resolve_fetch_refspec_source_id(source_refs, source) {
             Ok(id) => match write_fetch_destination_ref_with_force(
+                repo,
                 destination_refs,
                 &destination_ref,
                 &id,
@@ -17908,12 +17925,14 @@ fn apply_configured_fetch_refspecs(
 }
 
 fn write_fetch_destination_ref(
+    repo: &GitRepo,
     destination_refs: &RefStore,
     destination: &str,
     id: &ObjectId,
     remote_hint: Option<&str>,
 ) -> Result<()> {
     write_fetch_destination_ref_with_force(
+        repo,
         destination_refs,
         destination,
         id,
@@ -17924,11 +17943,12 @@ fn write_fetch_destination_ref(
 }
 
 fn write_fetch_destination_ref_with_force(
+    repo: &GitRepo,
     destination_refs: &RefStore,
     destination: &str,
     id: &ObjectId,
     remote_hint: Option<&str>,
-    _force: bool,
+    force: bool,
     written_destinations: &[String],
 ) -> Result<()> {
     if let Some(remote) = remote_hint
@@ -17946,8 +17966,24 @@ fn write_fetch_destination_ref_with_force(
     {
         return Err(fetch_refname_conflict_error(remote));
     }
+    let old_id = if destination.starts_with("refs/remotes/") {
+        destination_refs.resolve(destination).ok()
+    } else {
+        None
+    };
     match destination_refs.write_ref(destination, id) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            if automatic_reflog_enabled(repo)?
+                && old_id.as_ref().is_none_or(|old_id| old_id != id)
+            {
+                let action = if force { "forced-update" } else { "fast-forward" };
+                let remote = remote_hint.unwrap_or("remote");
+                let old_id = old_id.unwrap_or_else(zero_object_id);
+                let message = format!("fetch {remote}: {action}");
+                append_reflog_if_identity_available(repo, destination, &old_id, id, &message)?;
+            }
+            Ok(())
+        }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             Err(fetch_lock_ref_error(destination_refs, destination, error))
         }
@@ -24124,6 +24160,7 @@ fn fetch_with_local_remote_filter_blob_none(
             );
         }
         write_fetch_destination_ref(
+            &repo,
             &destination_refs,
             destination_ref,
             target.id(),
@@ -24369,7 +24406,7 @@ fn fetch_with_local_remote_filter_blob_none_depth(
     } else {
         eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
     }
-    write_fetch_destination_ref(&destination_refs, &destination_ref, &id, Some(&remote))?;
+    write_fetch_destination_ref(&repo, &destination_refs, &destination_ref, &id, Some(&remote))?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
