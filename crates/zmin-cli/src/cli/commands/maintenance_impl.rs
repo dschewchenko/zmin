@@ -1,6 +1,6 @@
 use super::*;
 use crate::cli::commands::core_commands::refresh_shared_repository_permissions;
-use crate::runtime::{current_unix_timestamp, parse_git_date};
+use crate::runtime::{PackOperationLock, current_unix_timestamp, parse_git_date};
 
 const REPACK_CANDIDATE_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const MIN_CRUFT_PACK_SIZE_BYTES: u64 = 1_048_576;
@@ -620,6 +620,14 @@ fn maintenance_prefetch_ssh_remote(repo: &GitRepo, remote: &str, url: &str) -> R
 fn maintenance_prefetch_http_remote(repo: &GitRepo, remote: &str, url: &str) -> Result<()> {
     let parsed_url = transport_commands::ParsedHttpUrl::parse(url)?;
     let mut helper = transport_commands::RemoteHttpHelperSession::spawn_for_url(url)?;
+    let pack_policy = transport_commands::FetchPackPolicy::resolve(
+        repo,
+        transport_commands::ForceIndexReasons::default(),
+    )?;
+    let pack_hash = transport_commands::SmartTransportHash::for_objects_dir_with_policy(
+        &repo.objects_dir,
+        pack_policy,
+    )?;
     let rows = transport_commands::http_ls_remote_rows_with_helper(
         &parsed_url,
         &mut helper,
@@ -644,12 +652,13 @@ fn maintenance_prefetch_http_remote(repo: &GitRepo, remote: &str, url: &str) -> 
     let roots = write_prefetch_refs_from_rows(repo, remote, &rows)?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
-    let pack_fetched = transport_commands::http_fetch_smart_pack_with_helper(
+    let pack_fetched = transport_commands::http_fetch_smart_pack_with_helper_with_hash(
         &parsed_url,
         &mut helper,
         &repo.objects_dir,
         &roots,
         &haves,
+        pack_hash,
     )?;
     if !pack_fetched {
         let commit_cache = CommitObjectCache::new(&store);
@@ -1661,7 +1670,6 @@ fn repack(options: RepackOptions) -> Result<()> {
         options.no_reuse_object,
         options.threads,
         options.delta_islands,
-        options.pack_kept_objects,
         options.expire_to.as_deref(),
         max_pack_size,
         max_cruft_size,
@@ -1669,12 +1677,20 @@ fn repack(options: RepackOptions) -> Result<()> {
         write_bitmap_index,
     );
     let repo = find_repo_or_bare()?;
+    let pack_kept_objects_entry = read_config_entry(&repo, "repack.packKeptObjects")?;
+    let pack_kept_objects = resolve_repack_pack_kept_objects(
+        options.pack_kept_objects,
+        pack_kept_objects_entry.as_ref(),
+    )?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     validate_repack_filter_spec(&repo, &store, options.filter.as_deref())?;
     let old_pack_names =
         PackedObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1).pack_names()?;
     let pack_dir = repo.objects_dir.join("pack");
-    let keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
+    let mut keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
+    if !pack_kept_objects {
+        keep_pack_names.extend(automatic_keep_pack_names(&pack_dir, &old_pack_names)?);
+    }
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
     let promisor_object_ids = repack_promisor_object_ids(&repo.objects_dir, &keep_pack_names)?;
     let promised_missing_object_ids = collect_promised_missing_object_ids(&repo, &store)?;
@@ -1762,6 +1778,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         options.window,
         options.depth,
         "pack-repack.pack",
+        false,
     )?;
     let promisor_pack_name = if promisor_ids.is_empty() {
         None
@@ -1773,6 +1790,7 @@ fn repack(options: RepackOptions) -> Result<()> {
             options.window,
             options.depth,
             "pack-repack-promisor.pack",
+            true,
         )?)
     };
     let cruft_pack_name = if cruft_ids.is_empty() {
@@ -1785,6 +1803,7 @@ fn repack(options: RepackOptions) -> Result<()> {
             options.window,
             options.depth,
             "pack-repack-cruft.pack",
+            false,
         )?)
     };
     if expire_unreachable_now
@@ -1806,6 +1825,7 @@ fn repack(options: RepackOptions) -> Result<()> {
     let replace_old_packs = options.delete_redundant && all_reachable;
     if options.delete_redundant {
         if replace_old_packs {
+            let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
             let mut keep_old_pack_names = keep_pack_names.clone();
             keep_old_pack_names.extend(preserved_promisor_pack_names);
             let mut keep_new_pack_names = vec![format!("{pack_name}.pack")];
@@ -1838,10 +1858,6 @@ fn repack(options: RepackOptions) -> Result<()> {
         update_server_info()?;
     }
     let _ = options.quiet;
-    if let Some(promisor_pack_name) = &promisor_pack_name {
-        fs::write(pack_dir.join(format!("{promisor_pack_name}.promisor")), b"")
-            .map_err(CliError::Io)?;
-    }
     refresh_shared_repository_permissions(&repo.git_dir)?;
     Ok(())
 }
@@ -1853,6 +1869,7 @@ fn write_repack_pack(
     window: Option<usize>,
     depth: Option<usize>,
     temp_name: &str,
+    write_promisor: bool,
 ) -> Result<String> {
     let packed_first_store = store.packed_first();
     let temp_pack = unique_temp_sibling(&pack_dir.join(temp_name));
@@ -1883,6 +1900,7 @@ fn write_repack_pack(
         }
     };
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+    let _pack_lock = PackOperationLock::acquire(pack_dir).map_err(CliError::Io)?;
     install_temp_repack_file(
         &pack_dir.join(format!("{pack_name}.pack")),
         &temp_pack,
@@ -1893,6 +1911,9 @@ fn write_repack_pack(
         &pack_dir.join(format!("{pack_name}.rev")),
         &indexed.reverse_index,
     )?;
+    if write_promisor {
+        fs::write(pack_dir.join(format!("{pack_name}.promisor")), b"").map_err(CliError::Io)?;
+    }
     Ok(pack_name)
 }
 
@@ -2341,7 +2362,25 @@ fn normalize_keep_pack_names(keep_pack: &[String]) -> HashSet<String> {
         .collect()
 }
 
+fn automatic_keep_pack_names(
+    pack_dir: &std::path::Path,
+    pack_names: &[String],
+) -> Result<HashSet<String>> {
+    let mut kept = HashSet::new();
+    for pack_name in pack_names {
+        match fs::symlink_metadata(pack_dir.join(pack_name).with_extension("keep")) {
+            Ok(_) => {
+                kept.insert(pack_name.clone());
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(kept)
+}
+
 fn remove_multi_pack_index(pack_dir: &std::path::Path) -> Result<()> {
+    let _pack_lock = PackOperationLock::acquire(pack_dir).map_err(CliError::Io)?;
     match fs::remove_file(pack_dir.join("multi-pack-index")) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -2362,6 +2401,11 @@ fn remove_replaced_pack_files(
             continue;
         }
         let pack_path = pack_dir.join(pack_name);
+        match fs::symlink_metadata(pack_path.with_extension("keep")) {
+            Ok(_) => continue,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
         for path in [
             pack_path.clone(),
             pack_path.with_extension("idx"),
@@ -3100,6 +3144,103 @@ mod tests {
         );
         assert_eq!(repack_candidate_initial_capacity(2), 2);
         assert_eq!(repack_candidate_initial_capacity(0), 0);
+    }
+
+    #[test]
+    fn replaced_pack_family_respects_any_keep_sibling() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        let pack_name = "pack-keep-test.pack";
+        for suffix in ["pack", "idx", "rev", "promisor"] {
+            std::fs::write(pack_dir.join(format!("pack-keep-test.{suffix}")), suffix)
+                .expect("pack member");
+        }
+        std::fs::create_dir(pack_dir.join("pack-keep-test.keep")).expect("directory sentinel");
+        remove_replaced_pack_files(&pack_dir, &[pack_name.to_owned()], &[], &HashSet::new())
+            .expect("kept family");
+        for suffix in ["pack", "idx", "rev", "promisor", "keep"] {
+            assert!(pack_dir.join(format!("pack-keep-test.{suffix}")).exists());
+        }
+    }
+
+    #[test]
+    fn automatic_keep_pack_names_protects_existing_keep_siblings() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        std::fs::write(pack_dir.join("pack-regular.pack"), b"pack").expect("pack");
+        std::fs::write(pack_dir.join("pack-regular.keep"), b"keep").expect("keep");
+        std::fs::write(pack_dir.join("pack-other.pack"), b"pack").expect("pack");
+
+        let kept = automatic_keep_pack_names(
+            &pack_dir,
+            &["pack-regular.pack".to_owned(), "pack-other.pack".to_owned()],
+        )
+        .expect("automatic keeps");
+
+        assert_eq!(kept, HashSet::from(["pack-regular.pack".to_owned()]));
+        let explicit = normalize_keep_pack_names(&["pack-other.pack".to_owned()]);
+        assert!(explicit.contains("pack-other.pack"));
+    }
+
+    #[test]
+    fn repack_pack_kept_objects_uses_cli_precedence_and_git_boolean_values() {
+        for (value, expected) in [
+            ("true", true),
+            ("yes", true),
+            ("on", true),
+            ("1", true),
+            ("-1", true),
+            ("false", false),
+            ("no", false),
+            ("off", false),
+            ("0", false),
+        ] {
+            let entry = ConfigEntry {
+                section: "repack".to_owned(),
+                raw_section: "repack".to_owned(),
+                subsection: String::new(),
+                key: "packkeptobjects".to_owned(),
+                raw_key: "packKeptObjects".to_owned(),
+                value: value.to_owned(),
+                comment: None,
+                implicit_bool: false,
+                scope: ConfigScope::Local,
+                origin: "file:test".to_owned(),
+                line: Some(1),
+            };
+            assert_eq!(
+                resolve_repack_pack_kept_objects(false, Some(&entry)).expect("config bool"),
+                expected,
+                "config value {value}"
+            );
+        }
+
+        let implicit = ConfigEntry {
+            section: "repack".to_owned(),
+            raw_section: "repack".to_owned(),
+            subsection: String::new(),
+            key: "packkeptobjects".to_owned(),
+            raw_key: "packKeptObjects".to_owned(),
+            value: String::new(),
+            comment: None,
+            implicit_bool: true,
+            scope: ConfigScope::Local,
+            origin: "file:test".to_owned(),
+            line: Some(1),
+        };
+        assert!(resolve_repack_pack_kept_objects(false, Some(&implicit)).expect("implicit bool"));
+        assert!(resolve_repack_pack_kept_objects(true, Some(&implicit)).expect("CLI bool"));
+
+        let invalid = ConfigEntry {
+            value: "maybe".to_owned(),
+            implicit_bool: false,
+            ..implicit
+        };
+        assert!(resolve_repack_pack_kept_objects(false, Some(&invalid)).is_err());
+        assert!(resolve_repack_pack_kept_objects(true, Some(&invalid)).expect("CLI precedence"));
+        assert!(!resolve_repack_pack_kept_objects(false, None).expect("default policy"));
     }
 
     fn duplicate_packed_head_as_loose(repo: &TempDir) -> String {

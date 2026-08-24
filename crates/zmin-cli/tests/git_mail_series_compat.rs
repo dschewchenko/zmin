@@ -1,15 +1,20 @@
 mod common;
 
 use std::fs;
+use std::io::Write;
 use std::process::Command;
 
+use flate2::{Compression, write::ZlibEncoder};
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_output_with_env,
-    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_status_args,
-    git_with_env, read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output,
-    run_zmin_status, run_zmin_status_args, run_zmin_with_env, write_file, zmin_bin,
+    command_raw_output, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status, git_status_args, git_with_env, pinned_git_args, pinned_git_init_sha256,
+    pinned_git_with_env, read_named_files, required_pinned_stock_git, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_status_args, run_zmin_with_env, write_file,
+    zmin_bin,
 };
 
 fn format_patch_fixture_repo() -> TempDir {
@@ -26,6 +31,47 @@ fn format_patch_fixture_repo() -> TempDir {
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "update alpha"]);
     repo
+}
+
+fn write_mail_collision_object(repo: &std::path::Path, kind: &str, content: &[u8]) -> String {
+    let mut object = format!("{kind} {}\0", content.len()).into_bytes();
+    object.extend_from_slice(content);
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&object);
+    let id = hasher.finalize().to_hex();
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&object).expect("compress loose object");
+    let compressed = encoder.finish().expect("finish loose object");
+    let object_dir = repo.join(".git/objects").join(&id[..2]);
+    fs::create_dir_all(&object_dir).expect("create loose object directory");
+    fs::write(object_dir.join(&id[2..]), compressed).expect("write loose object");
+    id
+}
+
+fn write_mail_collision_tree(repo: &std::path::Path, blob_id: &str) -> String {
+    let mut tree = b"100644 ".to_vec();
+    tree.extend_from_slice(b"path.txt");
+    tree.push(0);
+    tree.extend(
+        blob_id
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|chunk| u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap()),
+    );
+    write_mail_collision_object(repo, "tree", &tree)
+}
+
+fn write_mail_collision_commit(
+    repo: &std::path::Path,
+    tree_id: &str,
+    parent: Option<&str>,
+    message: &str,
+) -> String {
+    let parent_line = parent.map_or(String::new(), |id| format!("parent {id}\n"));
+    let content = format!(
+        "tree {tree_id}\n{parent_line}author Mail Collision <mail@example.test> 1700000000 +0000\ncommitter Mail Collision <mail@example.test> 1700000000 +0000\n\n{message}\n"
+    );
+    write_mail_collision_object(repo, "commit", content.as_bytes())
 }
 
 fn range_diff_fixture_repo() -> TempDir {
@@ -487,6 +533,141 @@ fn format_patch_handles_merge_commit_like_stock_git_first_parent_patch() {
         run_zmin_status(repo.path(), ["format-patch", "--stdout", "-1", "HEAD"]),
         git_status(repo.path(), ["format-patch", "--stdout", "-1", "HEAD"])
     );
+}
+
+#[test]
+fn format_patch_raw_extends_seed_width_for_colliding_blob_objects() {
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    let repo = git_init();
+    let left = write_mail_collision_object(repo.path(), "blob", b"abbrev-sha1-collision-006687");
+    let right = write_mail_collision_object(repo.path(), "blob", b"abbrev-sha1-collision-040110");
+    assert_eq!(
+        &left[..7],
+        &right[..7],
+        "fixture must collide at seed width"
+    );
+    let left_tree = write_mail_collision_tree(repo.path(), &left);
+    let right_tree = write_mail_collision_tree(repo.path(), &right);
+    let base = write_mail_collision_commit(repo.path(), &left_tree, None, "base");
+    let head = write_mail_collision_commit(repo.path(), &right_tree, Some(&base), "change");
+    git(repo.path(), ["update-ref", "refs/heads/main", &head]);
+    for value in ["7", "12", "4", "no"] {
+        let config = format!("core.abbrev={value}");
+        let args = [
+            "-c",
+            config.as_str(),
+            "format-patch",
+            "--stdout",
+            "--no-signature",
+            "--raw",
+            "-1",
+            &head,
+        ];
+        let zmin = command_raw_output(zmin_bin(), repo.path(), &args, "zmin");
+        let stock = command_raw_output(stock, repo.path(), &args, "stock Git");
+        assert_eq!(zmin, stock, "core.abbrev={value}");
+        let minimum = value.parse::<usize>().unwrap_or(40);
+        let stdout = String::from_utf8(stock.stdout.clone()).expect("stock format-patch stdout");
+        let index_ranges = stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("index "))
+            .filter_map(|line| line.split_whitespace().next())
+            .flat_map(|range| range.split_once(".."))
+            .flat_map(|(old, new)| [old, new]);
+        let mut saw_index = false;
+        for id in index_ranges {
+            saw_index = true;
+            assert!(id.len() >= minimum, "core.abbrev={value}: {id}");
+            if value == "no" {
+                assert_eq!(id.len(), 40, "core.abbrev=no");
+            }
+        }
+        assert!(saw_index, "raw format-patch must contain an index line");
+    }
+
+}
+
+#[test]
+fn sha256_format_patch_abbrev_matches_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    pinned_git_args(repo.path(), &["config", "user.name", "Bench"]);
+    pinned_git_args(repo.path(), &["config", "user.email", "bench@example.test"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "base"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+    );
+    write_file(repo.path(), "base.txt", "changed\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "changed"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000001 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000001 +0000"),
+        ],
+    );
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for (args, expected_width) in [
+        (
+            [
+                "-c",
+                "core.abbrev=12",
+                "format-patch",
+                "--stdout",
+                "--no-signature",
+                "--raw",
+                "-1",
+                "HEAD",
+            ]
+            .as_slice(),
+            12,
+        ),
+        (
+            [
+                "-c",
+                "core.abbrev=no",
+                "format-patch",
+                "--stdout",
+                "--no-signature",
+                "--raw",
+                "-1",
+                "HEAD",
+            ]
+            .as_slice(),
+            64,
+        ),
+    ] {
+        let zmin = command_raw_output(zmin_bin(), repo.path(), args, "zmin");
+        let stock_result = command_raw_output(stock, repo.path(), args, "stock Git");
+        assert_eq!(zmin, stock_result, "SHA-256 format-patch tuple: {args:?}");
+        let output =
+            String::from_utf8(stock_result.stdout.clone()).expect("SHA-256 format-patch output");
+        let index = output
+            .lines()
+            .find_map(|line| line.strip_prefix("index "))
+            .and_then(|line| line.split_whitespace().next())
+            .expect("raw format-patch index line")
+            .split_once("..")
+            .expect("raw format-patch index range");
+        assert_eq!(index.0.len(), expected_width, "SHA-256 old object name");
+        assert_eq!(index.1.len(), expected_width, "SHA-256 new object name");
+    }
 }
 
 #[test]
@@ -3408,6 +3589,71 @@ fn range_diff_documented_tail_matches_stock_git() {
             run_zmin_args(repo.path(), args),
             git_args(repo.path(), args),
             "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn sha256_range_diff_abbrev_matches_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    pinned_git_args(repo.path(), &["config", "user.name", "Bench"]);
+    pinned_git_args(repo.path(), &["config", "user.email", "bench@example.test"]);
+    pinned_git_args(repo.path(), &["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "base"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+    );
+    pinned_git_args(repo.path(), &["checkout", "-b", "old"]);
+    write_file(repo.path(), "old.txt", "old\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "old"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000001 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000001 +0000"),
+        ],
+    );
+    pinned_git_args(repo.path(), &["checkout", "main"]);
+    pinned_git_args(repo.path(), &["checkout", "-b", "new"]);
+    write_file(repo.path(), "new.txt", "new\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "new"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000002 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000002 +0000"),
+        ],
+    );
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for args in [
+        ["range-diff", "main..old", "main..new"].as_slice(),
+        ["range-diff", "--no-dual-color", "main..old", "main..new"].as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-256 range-diff tuple: {args:?}"
         );
     }
 }

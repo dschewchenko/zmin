@@ -1,6 +1,14 @@
 # Git Compatibility Inventory
 
-This is the source of truth for counting Git compatibility work.
+> Historical evidence note: this document retains Git v2.47.1
+> inventory/evidence only. It is not the current compatibility denominator or
+> a drop-in claim; current scope is defined by
+> `docs/git/upstream_compatibility_baseline.md` and
+> `tools/git-upstream-compat-contract.tsv`.
+
+This is a historical v2.47.1 inventory source only. Current counting authority
+is `tools/git-upstream-compat-contract.tsv`, with the generated current
+projection in `docs/cli/census/`.
 
 Command presence is not enough. Parser presence is not enough. Test presence is
 not enough. A closed item is one behavior variant checked against stock Git.
@@ -106,7 +114,7 @@ focused parity evidence checks the same surface.
 - `docs/cli/git_compatibility_census.md` is the current census entry point.
 - `docs/cli/census/*.tsv` are the generated bucket lists for verified rows,
   invalid-input parity, implemented-but-unverified schema surfaces, remaining
-  fix/verify work, Zmin-only/deferred scope, oracle evidence and hard-fail
+  fix/verify work, Zmin-only extension scope, oracle evidence and hard-fail
   scans.
 - `tools/git-command-gap.sh` checks command entry points only.
 - `tools/git-compat-option-inventory.sh` extracts a seed option list from Git

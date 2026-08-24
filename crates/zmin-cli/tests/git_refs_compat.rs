@@ -1,7 +1,11 @@
 mod common;
 
-use std::fs;
-use std::process::Command;
+use std::{
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use tempfile::TempDir;
 
@@ -9,8 +13,56 @@ use common::{
     command_any_output, command_any_output_with_stdin, command_failure_output_with_env,
     command_output_with_env, configure_identity, git, git_args, git_failure_output, git_init,
     git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, write_file, zmin_bin,
+    run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
 };
+
+fn pinned_stock_git_bin() -> PathBuf {
+    let path = std::env::var_os("ZMIN_STOCK_GIT")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            panic!("refs verify differential requires ZMIN_STOCK_GIT to select pinned Git 2.55.0")
+        });
+    let version = Command::new(&path)
+        .arg("--version")
+        .output()
+        .unwrap_or_else(|error| panic!("run ZMIN_STOCK_GIT --version: {error}"));
+    let reported = String::from_utf8_lossy(&version.stdout);
+    let reported = reported.trim_end_matches(|character| character == '\r' || character == '\n');
+    assert!(
+        version.status.success() && reported == "git version 2.55.0",
+        "ZMIN_STOCK_GIT must report exactly `git version 2.55.0`, got status {:?} and stdout {:?}",
+        version.status.code(),
+        reported
+    );
+    assert_eq!(stock_git_bin(), path.as_path());
+    path
+}
+
+fn raw_command_output(
+    program: impl AsRef<OsStr>,
+    cwd: &Path,
+    args: &[&str],
+    label: &str,
+) -> (i32, Vec<u8>, Vec<u8>) {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|error| panic!("run {label}: {error}"));
+    (
+        output.status.code().expect("process exit code"),
+        output.stdout,
+        output.stderr,
+    )
+}
+
+fn assert_refs_verify_matches_pinned_stock(repo: &Path, stock_git: &Path, label: &str) {
+    let args = ["refs", "verify"];
+    let stock = raw_command_output(stock_git, repo, &args, "pinned Git refs verify");
+    let zmin = raw_command_output(zmin_bin(), repo, &args, "Zmin refs verify");
+    assert_eq!(zmin, stock, "refs verify differs for {label}");
+}
 
 fn committed_repo() -> TempDir {
     let repo = git_init();
@@ -720,26 +772,58 @@ fn refs_verify_matches_stock_git_for_healthy_repository() {
 }
 
 #[test]
-fn refs_verify_matches_v2_47_loose_ref_basename_rules() {
-    let repo = committed_repo();
-    let git_dir = repo.path().join(".git");
-    let head = fs::read(git_dir.join("refs/heads/main")).expect("read main ref");
-    let nested_tags = git_dir.join("refs/tags/nested");
-    fs::create_dir_all(&nested_tags).expect("create nested tags directory");
-    fs::write(git_dir.join("refs/heads/@"), &head).expect("write invalid branch ref");
-    fs::write(nested_tags.join("@"), &head).expect("write invalid nested tag ref");
-    fs::write(nested_tags.join("transient.lock"), &head).expect("write lockfile");
+fn refs_verify_matches_pinned_v2_55_loose_at_and_collision_rules() {
+    let stock_git = pinned_stock_git_bin();
 
-    let args = ["refs", "verify"];
+    let accepted = committed_repo();
+    let accepted_git_dir = accepted.path().join(".git");
+    let head = fs::read(accepted_git_dir.join("refs/heads/main")).expect("read main ref");
+    let nested_tags = accepted_git_dir.join("refs/tags/nested");
+    fs::create_dir_all(&nested_tags).expect("create nested tags directory");
+    fs::write(accepted_git_dir.join("refs/heads/@"), &head).expect("write loose @ branch ref");
+    fs::write(nested_tags.join("@"), &head).expect("write nested loose @ tag ref");
+    fs::write(nested_tags.join("transient.lock"), &head).expect("write ignored lockfile");
+    assert_refs_verify_matches_pinned_stock(accepted.path(), &stock_git, "loose @ files");
     assert_eq!(
-        command_any_output(zmin_bin(), repo.path(), &args, "zmin refs verify"),
-        (
-            1,
-            String::new(),
-            "error: refs/heads/@: badRefName: invalid refname format\n\
-error: refs/tags/nested/@: badRefName: invalid refname format"
-                .to_owned(),
-        )
+        fs::read(accepted_git_dir.join("refs/heads/@")).expect("read loose @ branch ref"),
+        head
+    );
+
+    let qualified = committed_repo();
+    let qualified_git_dir = qualified.path().join(".git");
+    let head = fs::read(qualified_git_dir.join("refs/heads/main")).expect("read main ref");
+    let at_directory = qualified_git_dir.join("refs/heads/@");
+    fs::create_dir_all(&at_directory).expect("create @ ref directory");
+    fs::write(at_directory.join("child"), &head).expect("write qualified @ ref");
+    assert_refs_verify_matches_pinned_stock(qualified.path(), &stock_git, "qualified @ component");
+    assert_eq!(
+        fs::read(at_directory.join("child")).expect("read qualified @ ref"),
+        head
+    );
+
+    let rejected = committed_repo();
+    let rejected_git_dir = rejected.path().join(".git");
+    let head = fs::read(rejected_git_dir.join("refs/heads/main")).expect("read main ref");
+    fs::write(rejected_git_dir.join("refs/heads/.bad"), &head).expect("write dot ref");
+    fs::write(rejected_git_dir.join("refs/tags/~bad"), &head).expect("write tilde ref");
+    fs::write(rejected_git_dir.join("refs/tags/.lock"), &head).expect("write dot lockfile");
+    fs::write(rejected_git_dir.join("refs/tags/ignored.lock"), &head)
+        .expect("write ignored lockfile");
+    let args = ["refs", "verify"];
+    let stock = raw_command_output(&stock_git, rejected.path(), &args, "pinned Git refs verify");
+    assert_ne!(stock.0, 0, "pinned Git accepted invalid ref components");
+    assert!(
+        !stock.2.is_empty(),
+        "pinned Git emitted no invalid-ref diagnostics"
+    );
+    let zmin = raw_command_output(zmin_bin(), rejected.path(), &args, "Zmin refs verify");
+    assert_eq!(
+        zmin, stock,
+        "refs verify differs for rejected ref components"
+    );
+    assert_eq!(
+        fs::read(rejected_git_dir.join("refs/tags/ignored.lock")).expect("read ignored lockfile"),
+        head
     );
 }
 

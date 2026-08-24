@@ -14,30 +14,31 @@ use flate2::{
 };
 use regex::bytes::Regex;
 use zmin_git_core::{
-    AttributeValue, CheckoutIndexOptions, CommitBuilder, CommitObject, CommitObjectCache,
-    GitAttributes, GitHashAlgorithm, GitIgnore, GitIndex, GitObjectHash, GitObjectKind,
-    GitObjectStore, IndexDiffEntry, IndexDiffStatus, IndexEntry, IndexMode, InitRepositoryOptions,
-    LooseObject, LooseObjectStore, MergeFileLabels, ObjectId, PackEncodeOptions, PackIndexEntry,
-    PackIndexVersion, PackRefsOptions, PackedObjectStore, RefStore, RefTarget, ReftableLogRecord,
-    ResolveUndoStage, Signature, TagBuilder, TreeEntry, TreeMode, TreeObjectCache,
-    check_ref_format, checkout_index, checkout_index_fresh, checkout_index_fresh_into_metadata,
-    checkout_index_fresh_with_metadata,
+    AttributeValue, CheckoutIndexOptions, CommitBuilder, CommitLinksCache, CommitObject,
+    CommitObjectCache, GitAttributes, GitHashAlgorithm, GitIgnore, GitIndex, GitObjectHash,
+    GitObjectKind, GitObjectStore, IndexDiffEntry, IndexDiffStatus, IndexEntry, IndexMode,
+    InitRepositoryOptions, LooseObject, LooseObjectStore, MergeFileLabels, ObjectId,
+    PackEncodeOptions, PackIndexEntry, PackIndexVersion, PackRefsOptions, PackedObjectStore,
+    RefStore, RefTarget, ReftableLogRecord, ResolveUndoStage, Signature, TagBuilder, TreeEntry,
+    TreeMode, TreeObjectCache, check_ref_format, checkout_index, checkout_index_fresh,
+    checkout_index_fresh_into_metadata, checkout_index_fresh_with_metadata,
     collect_reachable_objects_from_roots as collect_reachable_object_ids_from_roots, decode_commit,
-    decode_pack_index, decode_pack_index_from_path, decode_pack_index_object_ids,
-    decode_pack_index_object_ids_from_path, decode_tag, decode_tree, diff_indexes,
-    diff_indexes_with_exact_renames, diff_indexes_with_exact_renames_and_copies,
+    decode_commit_links, decode_pack_index, decode_pack_index_from_path,
+    decode_pack_index_object_ids, decode_pack_index_object_ids_from_path, decode_tag, decode_tree,
+    diff_indexes, diff_indexes_with_exact_renames, diff_indexes_with_exact_renames_and_copies,
     encode_loose_object, encode_pack_from_store_with_options, encode_tree, find_tree_entry,
     for_each_pack_index_entry, for_each_pack_index_entry_from_path,
-    for_each_pack_index_object_id_from_path, for_each_pack_object_file, hash_literal_object,
-    hash_object, index_pack_bytes, index_pack_bytes_with_store, index_pack_bytes_with_version,
-    index_pack_file, index_pack_file_index_only, index_pack_file_index_only_with_version,
-    index_pack_file_with_store, index_pack_file_with_version, init_repository,
-    merge_file as merge_file_core, merge_file_diff3 as merge_file_diff3_core,
-    pack_index_object_count, pack_index_object_ids_all_from_path,
-    pack_index_object_ids_are_subset_from_paths, read_index, read_index_with_algorithm, read_tree,
-    repair_thin_pack_file_to_path, unpack_pack_file_to_loose, unpack_pack_to_loose,
-    validate_pack_index_file, validate_pack_reverse_index_file, verify_pack_file,
-    write_pack_from_store_with_options, write_tree_from_index, write_undeltified_pack_from_store,
+    for_each_pack_index_object_id_from_path, for_each_pack_object_file, for_each_tree_object_ref,
+    hash_literal_object, hash_object, index_pack_bytes, index_pack_bytes_with_store,
+    index_pack_bytes_with_version, index_pack_file, index_pack_file_index_only,
+    index_pack_file_index_only_with_version, index_pack_file_with_store,
+    index_pack_file_with_version, init_repository, merge_file as merge_file_core,
+    merge_file_diff3 as merge_file_diff3_core, pack_index_object_count,
+    pack_index_object_ids_all_from_path, pack_index_object_ids_are_subset_from_paths, read_index,
+    read_index_with_algorithm, read_tree, repair_thin_pack_file_to_path, unpack_pack_file_to_loose,
+    unpack_pack_to_loose, validate_pack_index_file, validate_pack_reverse_index_file,
+    verify_pack_file, write_pack_from_store_with_options, write_tree_from_index,
+    write_undeltified_pack_from_store,
 };
 
 pub(crate) mod admin;
@@ -88,6 +89,11 @@ pub(crate) mod history_commands;
 pub(crate) mod import_commands;
 #[path = "lfs_impl.rs"]
 pub(crate) mod lfs_commands;
+#[path = "lfs_reachability_adapter.rs"]
+pub(crate) mod lfs_reachability_adapter;
+#[cfg(windows)]
+#[path = "lfs_windows_fs.rs"]
+pub(crate) mod lfs_windows_fs;
 #[path = "mail_impl.rs"]
 pub(crate) mod mail_commands;
 #[path = "maintenance_impl.rs"]

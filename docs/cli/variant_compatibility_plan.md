@@ -1,5 +1,11 @@
 # Variant Compatibility Plan
 
+> Historical evidence note: this document retains Git v2.47.1
+> inventory/evidence only. It is not the current compatibility denominator or
+> a drop-in claim; current scope is defined by
+> `docs/git/upstream_compatibility_baseline.md` and
+> `tools/git-upstream-compat-contract.tsv`.
+
 Command-name coverage is not full Git compatibility. Option spelling coverage
 is not full Git compatibility. A supported item must be counted as a behavior
 variant:
@@ -19,7 +25,13 @@ Start each resume from `docs/cli/git_compatibility_execution_plan.md`. This
 file remains the detailed live handoff for counting rules, slice queues, guard
 mappings and latest completed slices.
 
-## Current Slice Pointer
+## Historical Snapshot Pointer
+
+All command lines in this retained v2.47.1 timeline are historical evidence,
+not current execution instructions. In particular, the old
+`--zmin-schema-json` spelling is non-runnable; current census execution uses
+`--historical-zmin-schema-json` and the validated v2.55.0 environment recipe
+in `docs/cli/census/README.md`.
 
 As of 2026-07-16 the active slice is the pinned Git `v2.47.1` upstream frontier
 after closing the measured GUI and standard-corpus memory gaps. The generated
@@ -5418,7 +5430,7 @@ Use these files as the handoff map:
 | `docs/cli/git_compatibility_census.md` | census-first entry point and generated bucket-list index |
 | `docs/cli/census/*.tsv` | machine-readable verified, invalid-input, implemented-unverified, remaining, extension/deferred and evidence-layer lists |
 | `docs/cli/git_compatibility_inventory.md` | compatibility counting model and current denominator layers |
-| `docs/cli/variant_compatibility_plan.md` | operating plan, active queue, current slice pointer and guard mappings |
+| `docs/cli/variant_compatibility_plan.md` | historical snapshot pointer, active queue and guard mappings |
 | `docs/cli/existing_oracle_test_inventory.tsv` | generated inventory of stock-oracle test functions; evidence layer only |
 | `docs/cli/matrix_row_growth_audit.md` | row-count growth audit and required predeclared row-growth budget |
 | `docs/cli/matrices/*_v2_47.tsv` | row-level command/option/value/state/transport evidence |
@@ -5554,24 +5566,19 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is the census-tail closure for the built-in `git lfs`
-local foundation surface. The generated census had reached a misleading state
+This historical slice recorded the census-tail closure for the then-local
+`git lfs` foundation surface. The generated census had reached a misleading state
 where Git `2.47.1` behavior rows were fully closed, but one additional schema
 command (`lfs`) still appeared as implemented-but-unverified and one
 `lfs pull` remote guard remained unclassified. The fix did not change runtime
 behavior; it repaired the durable tracking boundary:
 
-- `docs/cli/zmin_extensions_inventory.md` now classifies `git lfs` as a
-  deferred non-baseline local-foundation surface with explicit evidence for
-  discovery, local hook takeover, pointer checkout, and local/file-based pull.
-- `docs/cli/oracle_test_deferrals.md` now classifies the
-  `unsupported built-in zmin lfs pull remote: {url}` guard as an intentional
-  current-scope deferral for non-local/authenticated/custom-transfer Git LFS
-  transport.
-- `tools/git-compat-census.py` now recognizes deferred nested `git ...`
-  surfaces from the extension inventory, so future census refreshes keep the
-  `lfs` schema tail out of the Git `2.47.1` denominator instead of resurrecting
-  it as an unverified row.
+- The later authoritative extension contract supersedes that deferral:
+  `command.lfs` is now one stable primary row backed by local and HTTP Batch
+  network evidence. It remains outside both Git denominators.
+- The retained explicit boundary is configured mTLS/client identity, which
+  fails before network access. Custom transfer adapters and untracked Git LFS
+  commands are not part of the bounded extension row.
 
 Focused gates were `cargo test -q -p zmin-cli --test git_observed_client_compat
 -- --nocapture` and `python3 tools/git-compat-census.py --root .`.
@@ -5586,8 +5593,8 @@ baseline denominator is currently fully classified.
 The next default follow-up should therefore pivot away from command/docs census
 expansion and onto replace-git readiness outside the denominator:
 
-- broader built-in Git LFS transport coverage beyond the current local
-  foundation and local/file pull lanes
+- the explicit Git LFS mTLS/client-identity exclusion, custom transfer adapters,
+  and untracked ecosystem commands
 - real observed IDE/client latency and RSS gaps that still exist on practical
   replacement-binary dogfood
 - additional replacement-binary/plugin traces on real repositories

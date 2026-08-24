@@ -1,0 +1,22 @@
+name: Compatibility contract
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Verify frozen Git contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Verify pinned source, denominator and exclusions
+        run: tools/git-upstream-compat-contract-gate.sh prepare-and-check
+
+      - name: Verify fail-closed evidence classification
+        run: tools/test-git-upstream-compat-contract-gate.sh

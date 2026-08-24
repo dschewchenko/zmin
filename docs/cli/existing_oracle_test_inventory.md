@@ -1,5 +1,11 @@
 # Existing Oracle Test Inventory
 
+> Historical evidence note: this document retains Git v2.47.1
+> inventory/evidence only. It is not the current compatibility denominator or
+> a drop-in claim; current scope is defined by
+> `docs/git/upstream_compatibility_baseline.md` and
+> `tools/git-upstream-compat-contract.tsv`.
+
 This inventory prevents compatibility rows from being imported opportunistically.
 It lists focused tests that already compare Zmin behavior with stock Git, then
 shows whether the test function is already referenced by a behavior matrix row,
@@ -9,7 +15,19 @@ Generated TSV:
 
 `docs/cli/existing_oracle_test_inventory.tsv`
 
-Generator:
+This TSV is a frozen historical v2.47.1 evidence snapshot: 1466 functions
+found, 1248 represented or classified, and 218 missing or unclassified. It is
+not regenerated as current v2.55.0 authority; current scope comes from the
+upstream contract and current census.
+
+Live inventory command:
+
+The command below generates an inventory for the currently checked-out tree;
+it does not reproduce the frozen TSV from this mutable worktree. Reproducing
+that snapshot requires the exact pinned historical source commit/worktree
+used for it. This document does not invent or assert that pin, so without it
+the checked-in TSV remains retained evidence rather than reproducible current
+output, and current authority remains the upstream contract and census.
 
 ```bash
 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv

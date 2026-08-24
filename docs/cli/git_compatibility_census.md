@@ -1,103 +1,89 @@
 # Git Compatibility Census
 
-This is the census-first checkpoint for Git `2.47.1` compatibility work.
+## Current authority
 
-Do not add more behavior rows from `docs/cli/existing_oracle_test_inventory.tsv`
-until this census has been refreshed and the next slice is selected from the
-generated checklist. The oracle inventory is now an evidence layer, not the
-primary backlog or source of truth.
+The machine-readable current contract is
+`tools/git-upstream-compat-contract.tsv`; the canonical explanation is
+`docs/git/upstream_compatibility_baseline.md`. It freezes Git `v2.55.0` at
+commit `e9019fcafe0040228b8631c30f97ae1adb61bcdc` and defines
+`all-nondeprecated` as 1045 of 1046 top-level shell tests. The sole whole-file
+exclusion is `t5323-pack-redundant.sh`. The current external groups
+git-svn, git-cvsserver, gitweb, cvsimport and git-p4 remain included. Mixed
+deprecated assertions inside retained files remain in scope.
 
-## Source Layers
+The separate machine contract `tools/zmin-extensions-contract.tsv` contains
+40 stable primary rows and 7 relationship-neutral rows: 47 tracked contract
+rows in total. These are not 47 Git APIs or a claim of arbitrary Git LFS
+ecosystem parity. The relationship projection is
+`docs/cli/census/zmin_api_relationships.tsv`; neither relationships nor
+Zmin-only rows inflate the Git denominator. The Markdown extension inventory
+is a human projection only. The one `command.lfs` primary row covers its
+defined Git LFS v3.7.1-compatible slice; its explicit mTLS/client-identity
+transport exclusion fails before network access and is not a Git-denominator
+exclusion.
 
-`tools/git-compat-census.py` builds the census from these sources:
+`100%` is a target definition for the entire frozen current/nondeprecated
+surface. A local census, command seed, selected oracle evidence, or `26/26`
+historical test run does not claim that target is achieved. Historical
+v2.47.1 tables and matrices remain retained evidence below and are not current
+authority.
 
-- upstream Git `v2.47.1` `command-list.txt`
-- upstream Git `Documentation/git-*.txt` option spellings, including includes
-- Zmin CLI schema from `zmin compat --profile v2-47 --format json`
-- existing `docs/cli/matrices/*_v2_47.tsv` behavior rows
-- existing stock-oracle test inventory as an evidence layer
-- `docs/cli/zmin_extensions_inventory.md`
-- `docs/cli/oracle_test_deferrals.md`
-- source hard-fail scan for `unsupported`, `not supported yet` and
-  `not implemented yet`
+## Source layers
+
+`tools/git-compat-census.py` consumes the current contracts directly, the
+pinned Git v2.55.0 `command-list.txt` and `Documentation`, the historical
+v2.47 schema JSON and matrix rows, the existing oracle inventory as evidence,
+and source hard-fail scans. `tools/git-existing-oracle-inventory.py` is an
+evidence indexer over historical matrices/classification docs; it does not
+classify the current contract.
 
 ## Refresh
 
-Normal refresh:
+Use the validated offline source and an explicit historical schema input. This
+is the same fail-closed recipe used by the option inventory: no download,
+fallback or implicit v2.47 source is allowed.
 
 ```bash
-python3 tools/git-compat-census.py --root .
+CACHE_ROOT="${ZMIN_UPSTREAM_GIT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zmin/git-upstream}"
+SOURCE_ROOT="$CACHE_ROOT/git-v2.55.0"
+COMMAND_LIST="$SOURCE_ROOT/command-list.txt"
+HISTORICAL_ZMIN_SCHEMA_JSON=/path/to/historical-v2-47-schema.json
+ARCHIVE_SHA256="$(awk -F '\t' '$1 == "upstream_archive_sha256" { print $2; exit }' \
+  tools/git-upstream-compat-contract.tsv)"
+test -d "$SOURCE_ROOT/Documentation"
+test -f "$COMMAND_LIST" -a -f "$HISTORICAL_ZMIN_SCHEMA_JSON"
+test -n "$ARCHIVE_SHA256"
+ZMIN_UPSTREAM_GIT_CACHE="$CACHE_ROOT" \
+ZMIN_GIT_BASELINE=v2.55.0 \
+ZMIN_GIT_DOC_CACHE="$SOURCE_ROOT" \
+ZMIN_GIT_COMMAND_LIST="$COMMAND_LIST" \
+ZMIN_GIT_SOURCE_ARCHIVE_SHA256="$ARCHIVE_SHA256" \
+python3 tools/git-compat-census.py --root . \
+  --historical-zmin-schema-json "$HISTORICAL_ZMIN_SCHEMA_JSON" \
+  --out-dir docs/cli/census
 ```
 
-If the worktree has unrelated Rust WIP, capture the Zmin schema from a clean
-worktree and pass it explicitly:
+The generator must fail closed for missing or mismatched v2.55.0 source
+identity. It must not invoke the contract gate, audit, manifest, network, or a
+v2.47 source fallback.
 
-```bash
-cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-compat-v2-47.json
-python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-v2-47.json
-```
+The checked-in `docs/cli/existing_oracle_test_inventory.tsv` remains a frozen
+historical 1466/1248/218 evidence snapshot (found/represented or classified/
+missing or unclassified). `docs/cli/census/oracle_evidence_layer.tsv` is the
+corresponding 1466-row historical projection, not current v2.55.0 authority.
 
-## Generated Files
+## Generated projection
 
-| File | Purpose |
-| --- | --- |
-| `docs/cli/census/summary.tsv` | top-level counts for source layers and buckets |
-| `docs/cli/census/command_progress.tsv` | per-command progress counts plus seed coverage, classified-row percentages and verified-row percentages |
-| `docs/cli/census/all_items.tsv` | union of generated census rows |
-| `docs/cli/census/reviewed_complete_command_matrices.tsv` | reviewed commands whose full behavior matrix is finished |
-| `docs/cli/census/reviewed_complete_doc_option_pairs.tsv` | reviewed documented option pairs whose full behavior matrix is finished |
-| `docs/cli/census/verified_behavior.tsv` | exact verified behavior rows safe to skip unless code or evidence changes |
-| `docs/cli/census/invalid_input_parity.tsv` | exact invalid-input rows where stock Git and Zmin rejections match |
-| `docs/cli/census/exact_open_oracle_gaps.tsv` | exact open rows blocked by a missing local stock-Git oracle command/tool |
-| `docs/cli/census/implemented_but_unverified.tsv` | Zmin schema surfaces with parser/handler presence but no exact stock-Git row evidence |
-| `docs/cli/census/remaining_to_fix_or_verify.tsv` | command/doc-option expansion, exact open rows and unclassified hard-fail guards |
-| `docs/cli/census/zmin_extension_or_deferred.tsv` | Zmin-only additions and deferred/non-Git-2.47.1 evidence |
-| `docs/cli/census/oracle_evidence_layer.tsv` | existing focused stock-oracle tests, evidence only |
-| `docs/cli/census/hard_fail_scan.tsv` | source guard scan with documented/unclassified status |
+See `docs/cli/census/README.md` for the generated file map. The current
+contract-derived summary includes the Git tag/commit, the 1045 denominator,
+the current command seed, 40 stable primary extension rows, and 7 relationship-
+neutral rows (47 tracked contract rows). Generated behavior counts remain
+evidence/checklist metrics, not a parity percentage.
 
-## Current Snapshot
+## Historical v2.47.1 evidence retained
 
-Generated on 2026-06-24 from the current branch census inputs.
-
-| Metric | Count | Meaning |
-| --- | ---: | --- |
-| Git `2.47.1` commands | `151` | upstream command-list seed |
-| Git doc option seed rows | `3175` | documented option spelling seed, not final denominator |
-| Zmin schema baseline commands | `151` | command entry points present in schema |
-| Zmin schema additional commands | `52` | outside Git `2.47.1` baseline |
-| Existing matrix rows | `4692` | evidence layer, not full denominator |
-| Complete command matrices | `40` | reviewed commands whose full behavior matrix is finished |
-| Complete doc option pairs | `87` | reviewed documented command-option pairs whose full behavior matrix is finished |
-| Verified exact rows | `4062` | closed exact behavior rows safe to skip exactly |
-| Invalid-input parity rows | `608` | stock-compatible rejection variants |
-| Exact open or partial matrix rows | `21` | rows exist but are not closed |
-| Implemented but unverified rows | `0` | schema args without exact matrix evidence |
-| Remaining checklist rows | `3109` | doc-option expansion, exact opens and unclassified guards |
-| Zmin-only or deferred rows | `58` | extension and deferral classifications outside the denominator |
-| Oracle evidence layer rows | `969` | existing tests, not the primary backlog |
-| Source hard-fail rows | `92` | raw guard hits in source scan |
-| Unclassified hard-fail rows | `0` | source guard hits not matched to classification docs |
-
-## Bucket Rules
-
-- `verified`: exact command/option/value/combination/state/transport/platform
-  rows with stock-Git evidence. These may be skipped in future work unless the
-  implementation or evidence changes.
-- `implemented but unverified`: parser or handler surface appears in the Zmin
-  schema, but no exact stock-Git oracle row closes it.
-- `not implemented / broken / open`: exact open/partial rows, documented Git
-  option seeds still needing expansion, command matrices not started, or source
-  guards not yet classified.
-- `invalid-input parity`: stock Git rejects the input and Zmin rejection is
-  verified for the exact row.
-- `Zmin-only extension or deferred/non-Git-2.47.1 scope`: outside the Git
-  compatibility denominator unless explicitly reclassified.
-
-## Next Work
-
-Future fix/verify slices should start from
-`docs/cli/census/remaining_to_fix_or_verify.tsv`. Select one exact row or one
-small coherent expansion group, then add stock-Git evidence and matrix rows.
-Only after that selection should `docs/cli/existing_oracle_test_inventory.tsv`
-be consulted to find whether an existing focused oracle test can serve as
-evidence for the chosen row shape.
+The older v2.47.1 census tables, selected oracle rows and historical counts are
+retained for traceability. They are not the current denominator, do not
+reclassify the seven current Git names `backfill`, `diff-pairs`, `format-rev`,
+`history`, `last-modified`, `repo`, and `url-parse`, and do not establish a
+drop-in claim.

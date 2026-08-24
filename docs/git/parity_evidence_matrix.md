@@ -9,7 +9,39 @@ repository-state handoff. It does not by itself prove full upstream Git behavior
 parity. Upstream Git test-suite status is tracked separately in
 `docs/git/upstream_compatibility_baseline.md`.
 
-## Latest local replacement checkpoint
+Everything below is a dated historical snapshot from 2026-07-17, including
+compatibility counts, replacement checkpoints, and performance observations.
+It is non-authoritative for current completion, compatibility, speed, or RSS;
+words such as “current” and “latest” refer only to that snapshot. The canonical
+current compatibility scope/status is
+`docs/git/upstream_compatibility_baseline.md`; new performance claims must pass
+`docs/git/performance_evidence_contract.md`.
+
+The W5 authoritative performance scope is authenticated by two ordered
+manifests: standard has exactly `init,status,log,rev-list,merge-base,pack-objects,index-pack`
+and observed has exactly the ten existing `observed_*` lanes. A subset is a
+non-authoritative pilot only. Standard authoritative evidence also requires
+retained per-pair exit/stdout/stderr equivalence records; passing one harness
+does not establish speed or RSS superiority, and a universal claim requires
+both complete corpora.
+
+The current compatibility denominator is defined separately by the canonical
+baseline: `100% of current Git v2.55.0` means 100% of the current Git v2.55.0
+contract excluding deprecated/removed API. It has `1045` included top-level
+tests out of `1046`, with only the whole-file `t5323-pack-redundant.sh`
+(`git pack-redundant`) excluded. Current external groups `git-svn`,
+`git-cvsserver`, `gitweb`, `cvsimport` and `git-p4` remain included, as do
+deprecated assertions inside retained mixed tests. Zmin's
+separate extension contract has 40 stable primary rows and 7 relationship-
+neutral rows, or 47 tracked contract rows; that is not 47 Git APIs, and those
+rows do not change the Git denominator. The `command.lfs` row describes a
+bounded Git LFS v3.7.1-compatible extension slice rather than arbitrary
+ecosystem parity. Configured mTLS/client identity is a fail-before-network
+extension transport exclusion, not a Git-denominator exclusion. The status
+remains `compatibility_claim=unverified`, so this matrix does not claim
+completed parity.
+
+## Historical local replacement checkpoint
 
 - Final 2026-07-17 release SHA-256:
   `f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632`.
@@ -132,8 +164,8 @@ parity. Upstream Git test-suite status is tracked separately in
 
 | Surface | Command | Result |
 | --- | --- | --- |
-| Command baseline (v2.32.0) | `ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh` | `145/145`, `100.0%`, `0` gaps |
-| Command baseline (v2.47.1) | `ZMIN_GIT_BASELINE=v2.47.1 ./tools/git-command-gap.sh` | `150/150`, `100.0%`, `0` gaps |
+| Historical command baseline (v2.32.0; retained evidence only) | `ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh` | `145/145`; not current Git v2.55.0 evidence |
+| Historical command baseline (v2.47.1; retained evidence only) | `ZMIN_GIT_BASELINE=v2.47.1 ./tools/git-command-gap.sh` | `150/150`; not current Git v2.55.0 evidence |
 | CLI compatibility suite | `cargo test -p zmin-cli --all-targets` | `486/486` passing tests |
 | Core primitive suite | `cargo test -p zmin-git-core --all-targets` | `66/66` passing tests |
 
@@ -656,13 +688,20 @@ same canonical `.git` repository state.
   repositories without promisor remotes keep the previous missing-object
   behavior.
 - `zmin hooks` is additive Zmin-managed hook porcelain over standard Git hook
-  files. It supports `hooks init`, `hooks add [--force] <hook> <command>`,
-  `hooks list`, and `hooks remove <hook>` for `pre-commit`, `commit-msg`,
-  `pre-push`, `post-checkout`, and `post-merge`. It stores multi-value commands
-  in `.git/config` under `zmin.hooks.<hook>`, generates an executable
-  `.git/hooks/<hook>` shell runner, preserves manual hooks unless `--force` is
-  requested, forwards normal hook arguments, and stops at the first failing
-  managed command.
+  files. It supports `hooks init`, `hooks add [--force] [--staged-runner]
+  [--ext <extensions>] <hook> <command>`, `hooks list`, `hooks run <hook>
+  --staged [--ext <extensions>] [--list] [--dry-run] ...`, and `hooks remove
+  <hook>` for `pre-commit`, `commit-msg`, `pre-push`, `post-checkout`, and
+  `post-merge`. The staged runner supports index-backed selection, extension
+  and pathspec filtering, listing, dry-run previews, command execution, and
+  the managed pre-commit wrapper. It stores multi-value commands in `.git/config`
+  under `zmin.hooks.<hook>`, generates an executable `.git/hooks/<hook>` shell
+  runner, preserves manual hooks unless `--force` is requested, forwards normal
+  hook arguments, and stops at the first failing managed command. The five
+  neutral managed-hook relationships are `hooks -> init`, `hooks -> add`,
+  `hooks -> list`, `hooks -> remove`, and `hooks -> run`; the `repo -> info` and
+  `repo -> structure` relationships are current-Git evidence. All seven remain
+  separate from the 40 primary Zmin rows and the 1045-test Git denominator.
 - CMS-like Zmin porcelain is additive and currently covers `save`, `changes`,
   `publish`, `update`, `undo`, `timeline`, and `recover`. These commands compose
   existing Git-compatible repository operations (`add`, `commit`, `status`,
@@ -678,8 +717,10 @@ same canonical `.git` repository state.
   managed_hooks_add_list_remove_and_protect_manual_hooks` (`1/1`), and
   Windows/Git-for-Windows
   `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
-  file git_cms_porcelain_compat` (`4/4`; Windows refresh still pending the two
-  newer additive CMS cases currently verified on macOS).
+  file git_cms_porcelain_compat`. The source suite contains six CMS test
+  functions and the captured macOS evidence is `6/6`; the captured native
+  Windows evidence for this file remains a `4/4` subset, so this matrix makes no
+  six-case Windows claim and does not infer an unrecorded platform run.
 - Validation for the smart HTTP, git-daemon, and SSH slices:
   `cargo fmt --all -- --check`,
   `cargo test -p zmin-cli --test git_transport_http_compat
@@ -765,10 +806,11 @@ same canonical `.git` repository state.
   clone_worktree_first_rejects_non_worktree_or_remote_modes -- --nocapture`
   passed `1/1`, and macOS `cargo test -p zmin-cli --test
   git_transport_http_compat clone_instant_ -- --nocapture` passed `9/9`.
-  Windows/Git-for-Windows refresh passed CMS porcelain `4/4`, managed hooks
-  `1/1`, and exact smart HTTP / git-daemon / SSH `clone_instant_*` materialize,
+  Windows/Git-for-Windows refresh recorded the CMS porcelain `4/4` captured
+  subset, managed hooks `1/1`, and exact smart HTTP / git-daemon / SSH `clone_instant_*` materialize,
   background-fetch, and demand-hydrate tests `9/9` through
-  `tools/parallels-windows-runner.sh validate targeted`. The refresh also fixed
+  `tools/parallels-windows-runner.sh validate targeted`; this does not establish
+  six-case Windows CMS evidence. The refresh also fixed
   the test helper contract for smart HTTP demand hydration: missing
   `zmin-git-remote-http` is built in a separate test-only target directory and
   copied beside the test `zmin.exe`, avoiding a nested Cargo target-lock hang on

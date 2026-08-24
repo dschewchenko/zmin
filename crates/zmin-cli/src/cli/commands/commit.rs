@@ -137,6 +137,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_missing,
             batch,
             no_batch,
+            trailing_args: _,
         } => super::commit_commands::mktree_command(
             nul_terminated > 0,
             missing > 0 && no_missing == 0,

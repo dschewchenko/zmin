@@ -1,7 +1,18 @@
 # Git Compatibility Execution Plan
 
+> Historical evidence note: this document retains Git v2.47.1
+> inventory/evidence only. It is not the current compatibility denominator or
+> a drop-in claim; current scope is defined by
+> `docs/git/upstream_compatibility_baseline.md` and
+> `tools/git-upstream-compat-contract.tsv`.
+
+All `--zmin-schema-json` command lines in the retained timeline below are
+historical and non-runnable. Current census runs use
+`--historical-zmin-schema-json` with the validated v2.55.0 environment recipe
+in `docs/cli/census/README.md`.
+
 This is the step-by-step operating plan for taking Zmin from command dispatch
-coverage to real Git `2.47.1` compatibility.
+coverage to the frozen current-Git compatibility contract.
 
 Use this file as the entry point when resuming work. The detailed counting
 model lives in `docs/cli/git_compatibility_inventory.md`; the live slice queue,
@@ -28,14 +39,17 @@ Use these files instead of chat history:
 | `docs/cli/existing_oracle_test_inventory.tsv` | evidence layer of stock-oracle test functions; not the primary backlog |
 | `docs/cli/matrix_row_growth_audit.md` | audited explanation of row-count growth and the required predeclared row-growth budget for future imports |
 | `docs/cli/matrices/*_v2_47.tsv` | per-command behavior rows with command, option, value, combinations, state, transport, expected behavior and evidence |
-| `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the Git `2.47.1` denominator |
+| `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the frozen current-Git denominator |
 | `tools/git-upstream-compat-tests-core.txt` | default upstream Git core-suite allowlist for replace-git validation |
 | `tools/git-upstream-compat-manifest.sh` | generates full-core, all-top-level, or all-nondeprecated upstream shell-suite manifests from the pinned cache without vendoring `t/` |
 | `tools/git-upstream-compat-materialize.sh` | exports a runnable scratch `t/` subtree for all-top-level, all-nondeprecated, full-core, or fully excluded deprecated upstream shells without copying them into this repository |
 | `tools/git-upstream-sync.sh` | syncs a local gitignored upstream shell-suite snapshot under `.upstream-snapshots/` for sustained in-repo work without tracking upstream files |
 | `tools/git-upstream-compat-audit.sh` | audits top-level upstream test families and verifies explicit legacy/external excludes against the pinned cache |
-| `tools/git-upstream-deprecated-audit.sh` | separates fully excluded deprecated families from mixed deprecated assertions that must stay in upstream full-core |
-| `tools/git-upstream-compat-tests-legacy-excludes.tsv` | explicit upstream legacy/external families excluded from the core suite |
+| `tools/git-upstream-compat-contract.tsv` | authoritative Git `v2.55.0` source identity, denominator, evidence and count contract |
+| `tools/git-upstream-compat-contract-gate.sh` | fail-closed CI gate for source identity, exact exclusions, manifest counts and evidence-scope labeling |
+| `tools/test-git-upstream-compat-contract-gate.sh` | lightweight drift and exploratory-run regression fixtures |
+| `tools/git-upstream-deprecated-audit.sh` | separates the one fully excluded deprecated group from mixed deprecated assertions that stay in the current `all-nondeprecated` contract |
+| `tools/git-upstream-compat-tests-legacy-excludes.tsv` | classified core-only exclusions; current external groups remain in the authoritative `all-nondeprecated` denominator |
 | `tools/git-upstream-compat-tests-file-excludes.tsv` | optional per-file upstream exclusions when a whole file is intentionally out of scope |
 | `tools/git-compat-test-topology.sh` | classifies upstream-authoritative scope versus intentionally retained local Rust compat suites |
 | `/Users/dschewchenko/work/private/.knowledge/projects/skron-core.md` | cross-session project memory that points back to the active execution plan |
@@ -73,10 +87,11 @@ memory gates below.
 5. Prefer the pinned upstream Git suite and generated manifests over copying
    upstream tests into tracked repository files. If a local in-worktree copy is
    useful, sync a gitignored snapshot with `tools/git-upstream-sync.sh`.
-6. Do not drop an upstream shell test from full-core just because it contains
+6. Do not drop an upstream shell test from the current contract just because it contains
    deprecated assertions. Use `tools/git-upstream-deprecated-audit.sh audit`
-   and exclude only whole deprecated/external families or explicit per-file
-   rows that are truly out of the Git `2.47.1` replace-git contract.
+   and exclude only whole deprecated/removed groups from the current contract.
+   External-but-current groups may be excluded from `full-core` only as a
+   named core-only convenience and must remain in `all-nondeprecated`.
 7. Keep local Rust compat files intentionally small-scope: focused stock-Git
    oracle regression checks, invalid-input parity, observed IDE/client traces,
    replace-git dogfood, bounded LFS workflow probes, or Zmin-only surfaces.
@@ -86,9 +101,15 @@ memory gates below.
 9. Do not publish support percentages from command dispatch, parser acceptance,
    represented option pairs or written-row pass rates.
 10. Keep Zmin-only features in `docs/cli/zmin_extensions_inventory.md`, outside
-   the Git `2.47.1` compatibility denominator.
+   the frozen current-Git compatibility denominator. The tracked `*_v2_47.tsv`
+   matrices are a historical census/evidence layer, not the current contract.
 11. Commit each completed slice locally before starting a different command,
    option class or extension. Push only on explicit request.
+
+12. Run the contract gate before any compatibility/readiness claim. The gate
+    itself always reports `compatibility_claim=unverified`; only complete
+    unbounded upstream metadata may be classified as authoritative upstream
+    evidence, while custom, bounded or failed runs remain exploratory.
 
 ## Resume Procedure
 
@@ -127,10 +148,10 @@ python3 tools/git-compat-census.py --root .
 awk -F '\t' 'NR > 1 { print }' docs/cli/census/summary.tsv
 ```
 
-If the worktree has unrelated Rust WIP, produce
-`zmin compat --profile v2-47 --format json` from a clean worktree and pass it
-with `--zmin-schema-json`. Do not let unrelated WIP change the committed
-census outputs.
+If the worktree has unrelated Rust WIP, use an already-produced historical
+schema JSON and pass it with `--historical-zmin-schema-json`, together with the
+validated v2.55.0 environment recipe in `docs/cli/census/README.md`. Do not
+let unrelated WIP change the committed census outputs.
 
 The current census snapshot reports:
 
@@ -141,14 +162,15 @@ The current census snapshot reports:
 - `0` implemented-but-unverified schema rows
 - `0` remaining rows to fix, expand or verify
 
-This means the current Git `2.47.1` census/checklist is closed for the rows
-that are written down and classified in the generated inventory. It does not by
-itself prove practical replace-git readiness. The next default work no longer
-comes from `remaining_to_fix_or_verify.tsv`; it comes from real replace-git
-lanes outside the Git `2.47.1` denominator, such as broader Git LFS transport
-coverage, observed IDE/client performance and memory gaps, replacement-binary
-dogfood on real repositories, and Zmin-only snapshot-clone / hooks / CMS
-surfaces.
+This means the local Git `2.47.1` census/checklist is closed for the rows that
+are written down and classified in the generated inventory. It does not by
+itself prove practical replace-git readiness or close the frozen current-Git
+contract. The next default work no longer comes from
+`remaining_to_fix_or_verify.tsv`; it comes from real replace-git lanes outside
+the current contract evidence, such as the explicit Git LFS mTLS/client-
+identity exclusion and untracked ecosystem commands, observed IDE/client
+performance and memory gaps, replacement-binary dogfood on real repositories,
+and Zmin-only snapshot-clone / hooks / CMS surfaces.
 
 These are checklist counts, not a compatibility percentage. The generated
 catalog is `151/151` command matrices and `3212/3212` documented option pairs;
@@ -287,7 +309,7 @@ classified as one of:
 
 ### M4: Full Matrix Expansion
 
-For each Git `2.47.1` command, expand documented options into values,
+For each command in the frozen current-Git contract, expand documented options into values,
 negations, repeated forms, order-sensitive combinations, positional modes,
 repository states, transports, platforms, upstream tests and real tool traces.
 

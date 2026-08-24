@@ -2,7 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-git_bin="${GIT_BIN:-$(command -v git)}"
+source "$repo_root/tools/benchmark-environment.sh"
+git_bin="${GIT_BIN:-}"
 zmin_bin="${ZMIN_BIN:-$repo_root/target/release/zmin}"
 gix_bin="${GIX_BIN:-$(command -v gix 2>/dev/null || true)}"
 commits="${ZMIN_BENCH_COMMITS:-90}"
@@ -13,14 +14,91 @@ write_files="${ZMIN_BENCH_WRITE_FILES:-1800}"
 dirty_files="${ZMIN_BENCH_DIRTY_FILES:-200}"
 fetch_batch_files="${ZMIN_BENCH_FETCH_BATCH_FILES:-2400}"
 push_batch_files="${ZMIN_BENCH_PUSH_BATCH_FILES:-2400}"
-repeats="${ZMIN_BENCH_REPEATS:-10}"
+evidence_mode="${ZMIN_BENCH_EVIDENCE_MODE:-exploratory}"
+if [[ "$evidence_mode" == "authoritative" && -z "$git_bin" ]]; then
+  printf 'authoritative benchmark runs require an explicit pinned GIT_BIN\n' >&2
+  exit 1
+fi
+if [[ -z "$git_bin" ]]; then
+  git_bin="$(command -v git)"
+fi
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  warmups="${ZMIN_BENCH_WARMUPS:-3}"
+  repeats="${ZMIN_BENCH_REPEATS:-30}"
+  cold_starts="${ZMIN_BENCH_COLD_STARTS:-10}"
+else
+  warmups="${ZMIN_BENCH_WARMUPS:-0}"
+  repeats="${ZMIN_BENCH_REPEATS:-10}"
+  cold_starts="${ZMIN_BENCH_COLD_STARTS:-0}"
+fi
+gix_enabled=0
+if [[ -x "$gix_bin" && "$evidence_mode" != "authoritative" ]]; then
+  gix_enabled=1
+fi
+run_count=$((warmups + repeats + cold_starts))
 seed="${ZMIN_BENCH_SEED:-1700000000}"
 repack_max_pack_size="${ZMIN_BENCH_REPACK_MAX_PACK_SIZE:-}"
 ops="${ZMIN_BENCH_OPS:-}"
 out_dir="${ZMIN_BENCH_OUT_DIR:-}"
+out_dir_explicit=0
+if [[ -n "$out_dir" ]]; then
+  out_dir_explicit=1
+fi
 phase_trace_dir="${ZMIN_BENCH_PHASE_TRACE_DIR:-}"
 ssh_trace_dir="${ZMIN_BENCH_SSH_TRACE_DIR:-}"
 ssh_packet_trace_dir="${ZMIN_BENCH_SSH_PACKET_TRACE_DIR:-}"
+benchmark_authoritative_trace_preflight "$evidence_mode" \
+  "$phase_trace_dir" "$ssh_trace_dir" "$ssh_packet_trace_dir"
+python_bin="$(benchmark_resolve_python "$evidence_mode")"
+if [[ "$evidence_mode" == "authoritative" && -z "${ZMIN_BIN:-}" ]]; then
+  printf 'authoritative benchmark runs require an explicit prebuilt ZMIN_BIN release binary\n' >&2
+  exit 1
+fi
+if [[ "$evidence_mode" == "authoritative" && -z "${ZMIN_BENCH_MAKE:-}" ]]; then
+  printf 'authoritative benchmark requires explicit ZMIN_BENCH_MAKE\n' >&2
+  exit 1
+fi
+make_bin="${ZMIN_BENCH_MAKE:-$(command -v make)}"
+make_bin="$(cd "$(dirname "$make_bin")" && pwd -P)/$(basename "$make_bin")"
+[[ -x "$make_bin" && ! -L "$make_bin" ]] || {
+  printf 'benchmark Make binary is not a canonical executable: %s\n' "$make_bin" >&2
+  exit 1
+}
+
+artifact_cli() {
+  "$python_bin" "$repo_root/tools/performance_contract.py" "$@"
+}
+
+artifact_preflight_root() {
+  local root="$1"; shift
+  artifact_cli artifact-preflight --root "$root" "$@"
+}
+
+artifact_write_root() {
+  local root="$1" identity="$2" name="$3" data="$4"
+  printf '%s' "$data" | artifact_cli artifact-write \
+    --root "$root" --root-identity "$identity" --name "$name"
+}
+
+artifact_append_root() {
+  local root="$1" identity="$2" name="$3" data="$4"
+  printf '%s' "$data" | artifact_cli artifact-write \
+    --root "$root" --root-identity "$identity" --name "$name" --append
+}
+
+artifact_read_root() {
+  local root="$1" identity="$2" name="$3"
+  artifact_cli artifact-read --root "$root" --root-identity "$identity" --name "$name"
+}
+
+artifact_copy_root() {
+  local root="$1" identity="$2" name="$3" source="$4"
+  artifact_cli artifact-copy \
+    --root "$root" --root-identity "$identity" --name "$name" --source "$source"
+}
+
+export GIT_CONFIG_NOSYSTEM="${GIT_CONFIG_NOSYSTEM:-1}"
+export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/dev/null}"
 
 known_ops=(
   init
@@ -48,6 +126,15 @@ known_ops=(
   fetch-incremental
   fetch-batch
 )
+standard_mandatory_ops=(
+  init
+  status
+  log
+  rev-list
+  merge-base
+  pack-objects
+  index-pack
+)
 
 op_in_list() {
   local needle="$1"
@@ -70,10 +157,33 @@ if [[ -n "${ops//[[:space:],;]/}" ]]; then
         "$op" "${known_ops[*]}" >&2
       exit 1
     fi
+    if [[ "$evidence_mode" == "authoritative" && "${#selected_ops[@]}" -gt 0 ]] \
+      && op_in_list "$op" "${selected_ops[@]}"; then
+      printf 'authoritative benchmark operation list contains a duplicate lane: %s\n' "$op" >&2
+      exit 1
+    fi
     if [[ "${#selected_ops[@]}" -eq 0 ]] || ! op_in_list "$op" "${selected_ops[@]}"; then
       selected_ops+=("$op")
     fi
   done < <(printf '%s\n' "$ops" | tr ',;' '\n\n' | tr '[:space:]' '\n')
+fi
+
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  if [[ "${#selected_ops[@]}" -eq 0 ]]; then
+    selected_ops=("${standard_mandatory_ops[@]}")
+  fi
+  if [[ "${#selected_ops[@]}" -ne "${#standard_mandatory_ops[@]}" ]]; then
+    printf 'authoritative standard scope requires exactly these lanes in order: %s\n' \
+      "${standard_mandatory_ops[*]}" >&2
+    exit 1
+  fi
+  for index in "${!standard_mandatory_ops[@]}"; do
+    if [[ "${selected_ops[$index]}" != "${standard_mandatory_ops[$index]}" ]]; then
+      printf 'authoritative standard scope requires exact lane order: %s\n' \
+        "${standard_mandatory_ops[*]}" >&2
+      exit 1
+    fi
+  done
 fi
 
 selected_ops_label() {
@@ -103,20 +213,36 @@ any_benchmark_op_enabled() {
 }
 
 shell_quote() {
-  local value="${1//\'/\'\\\'\'}"
-  printf "'%s'" "$value"
+  printf '%q' "$1"
 }
+
+if [[ "${ZMIN_BENCH_QUOTE_TEST:-0}" == "1" ]]; then
+  quoted_path="$(shell_quote "${ZMIN_BENCH_QUOTE_PATH:?ZMIN_BENCH_QUOTE_PATH is required}")"
+  round_trip="$(bash -c "printf '%s' $quoted_path")"
+  [[ "$round_trip" == "$ZMIN_BENCH_QUOTE_PATH" ]] || {
+    printf 'shell quote regression: %s != %s\n' "$round_trip" "$ZMIN_BENCH_QUOTE_PATH" >&2
+    exit 1
+  }
+  exit 0
+fi
 
 if [[ "${#selected_ops[@]}" -gt 0 ]]; then
   printf 'selected_ops=%s\n' "$(selected_ops_label)" >&2
 fi
 
-if [[ -z "${ZMIN_BIN:-}" ]]; then
-  cargo build --manifest-path "$repo_root/Cargo.toml" --release -p zmin-cli --bin zmin >/dev/null
+if [[ "$evidence_mode" == "authoritative" && -z "${ZMIN_BIN:-}" ]]; then
+  printf 'authoritative benchmark runs require an explicit prebuilt ZMIN_BIN release binary\n' >&2
+  exit 1
 fi
 if [[ ! -x "$zmin_bin" ]]; then
   printf 'zmin release binary was not found or is not executable: %s\n' "$zmin_bin" >&2
   exit 1
+fi
+zmin_bin="$(cd "$(dirname "$zmin_bin")" && pwd)/$(basename "$zmin_bin")"
+git_bin="$(cd "$(dirname "$git_bin")" && pwd)/$(basename "$git_bin")"
+comparator_bundle=""
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  comparator_bundle="$(benchmark_validate_authoritative_git_comparator "$repo_root" "$git_bin")" || exit 1
 fi
 
 if [[ -n "$phase_trace_dir" ]]; then
@@ -131,11 +257,8 @@ if [[ -n "$ssh_packet_trace_dir" ]]; then
   mkdir -p "$ssh_packet_trace_dir"
 fi
 
-if [[ -n "$out_dir" ]]; then
-  mkdir -p "$out_dir"
-fi
-
-tmp_dir="$(mktemp -d)"
+tmp_dir="$(mktemp -d /tmp/zmin-performance-bench.XXXXXX)"
+tmp_artifact_identity="$(artifact_preflight_root "$tmp_dir" --name bench.tsv --name validation.tsv)"
 daemon_pid=""
 cleanup() {
   if [[ -n "${daemon_pid:-}" ]]; then
@@ -146,15 +269,49 @@ cleanup() {
 }
 trap cleanup EXIT
 
+benchmark_sanitize_environment "$tmp_dir" "$git_bin" "$zmin_bin" "$python_bin"
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  export ZMIN_BENCH_GIT_COMPARATOR_STATUS=validated
+  export ZMIN_BENCH_GIT_COMPARATOR_BUNDLE="$comparator_bundle"
+  export ZMIN_BENCH_GIT_COMPARATOR_CONTRACT='v2.55.0;e9019fcafe0040228b8631c30f97ae1adb61bcdc;72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49'
+fi
+if [[ "$evidence_mode" == "authoritative" && ( "$out_dir_explicit" != "1" || "$out_dir" != /* ) ]]; then
+  printf 'authoritative benchmark runs require an explicit absolute ZMIN_BENCH_OUT_DIR\n' >&2
+  exit 1
+fi
+if [[ -z "$out_dir" ]]; then
+  out_dir="$(mktemp -d /tmp/zmin-performance-bench-evidence.XXXXXX)"
+fi
+prepare_results_args=(
+  --path "$out_dir"
+)
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  prepare_results_args+=(--require-existing)
+fi
+out_dir="$(
+  "$python_bin" "$repo_root/tools/performance_contract.py" prepare-results-dir \
+    "${prepare_results_args[@]}"
+)"
+evidence_artifact_identity="$(artifact_preflight_root "$out_dir" \
+  --name metadata.json --name evidence.json --name bench.tsv --name checks.tsv \
+  --name equivalence.tsv \
+  --name summary.csv --name comparison.csv --name superiority.tsv)"
+
 out="$tmp_dir/bench.tsv"
 validation_out="$tmp_dir/validation.tsv"
 src="$tmp_dir/src"
 remote="$tmp_dir/remote.git"
-printf 'tool\top\treal\tuser\tsys\trss_bytes\texit\textra\n' >"$out"
-printf 'check\tstatus\tdetails\n' >"$validation_out"
+artifact_write_root "$tmp_dir" "$tmp_artifact_identity" bench.tsv \
+  $'tool\top\tsample_kind\tpair_id\torder_index\treal\tuser\tsys\trss_bytes\tjob_commit_bytes\tmajor_page_faults\tminor_page_faults\tread_bytes\twrite_bytes\tmemory_metric\tmemory_semantics\tmemory_scope\tmemory_unit\tmetrics_availability\texit\textra\n'
+artifact_write_root "$tmp_dir" "$tmp_artifact_identity" validation.tsv $'check\tstatus\tdetails\n'
+artifact_write_root "$out_dir" "$evidence_artifact_identity" equivalence.tsv \
+  $'lane\tsample_kind\tphase\tpair_id\tpair_index\tgit_order_index\tzmin_order_index\tgit_exit\tzmin_exit\tgit_stdout_sha256\tzmin_stdout_sha256\tgit_stderr_sha256\tzmin_stderr_sha256\texit_equal\tstdout_equal\tstderr_equal\n'
 
 record_validation() {
-  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$validation_out"
+  local validation_row="$1"$'\t'"$2"$'\t'"$3"
+  validation_row+=$'\n'
+  artifact_append_root "$tmp_dir" "$tmp_artifact_identity" validation.tsv \
+    "$validation_row"
 }
 
 phase_trace_file_for() {
@@ -193,13 +350,68 @@ ssh_packet_trace_file_for() {
     "$(date +%s%N)"
 }
 
+reset_pair_equivalence() {
+  pair_git_exit=""
+  pair_git_order=""
+  pair_git_stdout_sha256=""
+  pair_git_stderr_sha256=""
+  pair_zmin_exit=""
+  pair_zmin_order=""
+  pair_zmin_stdout_sha256=""
+  pair_zmin_stderr_sha256=""
+  pair_git_stdout_file=""
+  pair_git_stderr_file=""
+  pair_git_metrics_file=""
+  pair_zmin_stdout_file=""
+  pair_zmin_stderr_file=""
+  pair_zmin_metrics_file=""
+}
+
+retain_pair_artifacts() {
+  local source
+  for source in \
+    "$pair_git_stdout_file" "$pair_git_stderr_file" "$pair_git_metrics_file" \
+    "$pair_zmin_stdout_file" "$pair_zmin_stderr_file" "$pair_zmin_metrics_file"; do
+    if [[ -f "$source" ]]; then
+      artifact_copy_root "$out_dir" "$evidence_artifact_identity" \
+        "$(basename "$source")" "$source"
+    fi
+  done
+}
+
+record_pair_equivalence() {
+  if [[ -z "$pair_git_exit" || -z "$pair_zmin_exit" ]]; then
+    return
+  fi
+  local exit_equal=false stdout_equal=false stderr_equal=false
+  [[ "$pair_git_exit" == "$pair_zmin_exit" ]] && exit_equal=true
+  [[ "$pair_git_stdout_sha256" == "$pair_zmin_stdout_sha256" ]] && stdout_equal=true
+  [[ "$pair_git_stderr_sha256" == "$pair_zmin_stderr_sha256" ]] && stderr_equal=true
+  if [[ "$exit_equal" != true || "$stdout_equal" != true || "$stderr_equal" != true ]]; then
+    retain_pair_artifacts
+    printf 'Git/Zmin output equivalence mismatch for %s\n' "$pair_id" >&2
+    exit 1
+  fi
+  local equivalence_row
+  local phase="$sample_kind"
+  [[ "$sample_kind" == cold ]] && phase=process-cold
+  equivalence_row="$op"$'\t'"$sample_kind"$'\t'"$phase"$'\t'"$pair_id"$'\t'"${pair_id##*-}"$'\t'"$pair_git_order"$'\t'"$pair_zmin_order"$'\t'"$pair_git_exit"$'\t'"$pair_zmin_exit"$'\t'"$pair_git_stdout_sha256"$'\t'"$pair_zmin_stdout_sha256"$'\t'"$pair_git_stderr_sha256"$'\t'"$pair_zmin_stderr_sha256"$'\t'"$exit_equal"$'\t'"$stdout_equal"$'\t'"$stderr_equal"$'\n'
+  artifact_append_root "$out_dir" "$evidence_artifact_identity" equivalence.tsv \
+    "$equivalence_row"
+}
+
 measure_sh() {
-  local tool="$1" op="$2" extra="$3" script="$4"
-  local time_file="$tmp_dir/time-$tool-$op-$(date +%s%N).txt"
-  local trace_file=""
+  local tool="$1" op="$2" extra="$3" script="$4" sample_kind="$5" pair_id="$6" order_index="$7"
+  if [[ "$op" == "init" ]]; then
+    artifact_cli template-preflight \
+      --fixture-root "$src" \
+      --template-dir "$init_template_dir" \
+      --expected-identity "$init_template_identity" >/dev/null
+  fi
+  local metric_file="$tmp_dir/metrics-$tool-$op-$(date +%s%N).tsv"
+  local stdout_file="$tmp_dir/stdout-$tool-$op-$(date +%s%N).txt"
+  local stderr_file="$tmp_dir/stderr-$tool-$op-$(date +%s%N).txt"
   local trace_env=()
-  local time_args=(-lp)
-  local start_ns end_ns real_seconds
   if [[ "$tool" == "zmin" && -n "$phase_trace_dir" ]]; then
     trace_file="$(phase_trace_file_for "$tool" "$op" "$extra")"
     trace_env=(
@@ -221,57 +433,84 @@ measure_sh() {
       "GIT_TRACE_PACKET=$(ssh_packet_trace_file_for "$tool" "$op" "$extra")"
     )
   fi
-  if [[ "$(uname -s)" != "Darwin" ]]; then
-    time_args=(-p -v)
-  fi
   set +e
-  start_ns="$(date +%s%N)"
-  if [[ "${#trace_env[@]}" -gt 0 ]]; then
-    env "${trace_env[@]}" /usr/bin/time "${time_args[@]}" bash -lc "$script" >/dev/null 2>"$time_file"
+  if [[ "$op" == "init" ]]; then
+    if [[ "${#trace_env[@]}" -gt 0 ]]; then
+      env "${trace_env[@]}" "$python_bin" "$repo_root/tools/git-bench-process.py" \
+        --artifact-root "$tmp_dir" --artifact-root-identity "$tmp_artifact_identity" \
+        --stdout "$stdout_file" --stderr "$stderr_file" --metrics "$metric_file" \
+        --bound-directory-env GIT_TEMPLATE_DIR \
+        --bound-directory "$init_template_dir" \
+        --bound-directory-identity "$init_template_identity" \
+        -- bash -c "$script" --
+    else
+      "$python_bin" "$repo_root/tools/git-bench-process.py" \
+        --artifact-root "$tmp_dir" --artifact-root-identity "$tmp_artifact_identity" \
+        --stdout "$stdout_file" --stderr "$stderr_file" --metrics "$metric_file" \
+        --bound-directory-env GIT_TEMPLATE_DIR \
+        --bound-directory "$init_template_dir" \
+        --bound-directory-identity "$init_template_identity" \
+        -- bash -c "$script" --
+    fi
   else
-    /usr/bin/time "${time_args[@]}" bash -lc "$script" >/dev/null 2>"$time_file"
+    if [[ "${#trace_env[@]}" -gt 0 ]]; then
+      env "${trace_env[@]}" "$python_bin" "$repo_root/tools/git-bench-process.py" \
+        --artifact-root "$tmp_dir" --artifact-root-identity "$tmp_artifact_identity" \
+        --stdout "$stdout_file" --stderr "$stderr_file" --metrics "$metric_file" \
+        -- bash -c "$script" --
+    else
+      "$python_bin" "$repo_root/tools/git-bench-process.py" \
+        --artifact-root "$tmp_dir" --artifact-root-identity "$tmp_artifact_identity" \
+        --stdout "$stdout_file" --stderr "$stderr_file" --metrics "$metric_file" \
+        -- bash -c "$script" --
+    fi
   fi
   local status=$?
-  end_ns="$(date +%s%N)"
   set -e
-  real_seconds="$(python3 - "$start_ns" "$end_ns" <<'PY'
-import sys
-
-start = int(sys.argv[1])
-end = int(sys.argv[2])
-print(f"{(end - start) / 1_000_000_000:.6f}")
-PY
-  )"
-  local max_rss_raw max_rss_bytes
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    max_rss_raw="$(awk '/maximum resident set size/{print $1}' "$time_file" | tail -1)"
-    max_rss_bytes="${max_rss_raw:-0}"
-  else
-    max_rss_raw="$(awk -F ': *' 'tolower($0) ~ /maximum resident set size/ { print $NF }' "$time_file" | tail -1)"
-    max_rss_bytes="$(( ${max_rss_raw:-0} * 1024 ))"
+  local real_seconds user_seconds sys_seconds max_rss_bytes job_commit_bytes major_faults minor_faults read_bytes write_bytes memory_metric memory_semantics memory_scope memory_unit metrics_availability
+  local metrics
+  metrics="$(artifact_read_root "$tmp_dir" "$tmp_artifact_identity" "$(basename "$metric_file")")"
+  IFS=$'\t' read -r real_seconds user_seconds sys_seconds max_rss_bytes job_commit_bytes major_faults minor_faults read_bytes write_bytes memory_metric memory_semantics memory_scope memory_unit metrics_availability <<<"$metrics"
+  local row="$tool"$'\t'"$op"$'\t'"$sample_kind"$'\t'"$pair_id"$'\t'"$order_index"$'\t'"$real_seconds"$'\t'"$user_seconds"$'\t'"$sys_seconds"$'\t'"$max_rss_bytes"$'\t'"$job_commit_bytes"$'\t'"$major_faults"$'\t'"$minor_faults"$'\t'"$read_bytes"$'\t'"$write_bytes"$'\t'"$memory_metric"$'\t'"$memory_semantics"$'\t'"$memory_scope"$'\t'"$memory_unit"$'\t'"$metrics_availability"$'\t'"$status"$'\t'"$extra"
+  row+=$'\n'
+  artifact_append_root "$tmp_dir" "$tmp_artifact_identity" bench.tsv \
+    "$row"
+  local stdout_sha256 stderr_sha256
+  stdout_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$stdout_file")"
+  stderr_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$stderr_file")"
+  if [[ "$tool" == "git" ]]; then
+    pair_git_exit="$status"
+    pair_git_order="$order_index"
+    pair_git_stdout_sha256="$stdout_sha256"
+    pair_git_stderr_sha256="$stderr_sha256"
+    pair_git_stdout_file="$stdout_file"
+    pair_git_stderr_file="$stderr_file"
+    pair_git_metrics_file="$metric_file"
+  elif [[ "$tool" == "zmin" ]]; then
+    pair_zmin_exit="$status"
+    pair_zmin_order="$order_index"
+    pair_zmin_stdout_sha256="$stdout_sha256"
+    pair_zmin_stderr_sha256="$stderr_sha256"
+    pair_zmin_stdout_file="$stdout_file"
+    pair_zmin_stderr_file="$stderr_file"
+    pair_zmin_metrics_file="$metric_file"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$tool" \
-    "$op" \
-    "$real_seconds" \
-    "$(time_field user "$time_file")" \
-    "$(time_field sys "$time_file")" \
-    "$max_rss_bytes" \
-    "$status" \
-    "$extra" >>"$out"
+  record_pair_equivalence
 }
 
-time_field() {
-  local field="$1" time_file="$2"
-  awk -v field="$field" '{
-    gsub(/\033\[[0-9;]*[A-Za-z]/, " ")
-    gsub(/\r/, " ")
-    for (idx = 1; idx < NF; idx++) {
-      if ($idx == field) {
-        print $(idx + 1)
-      }
-    }
-  }' "$time_file" | tail -1
+set_sample_policy() {
+  local sample_index="$1"
+  if (( sample_index <= warmups )); then
+    BENCH_SAMPLE_KIND=warmup
+    BENCH_SAMPLE_ID="warmup-$sample_index"
+  elif (( sample_index <= warmups + repeats )); then
+    BENCH_SAMPLE_KIND=measured
+    BENCH_SAMPLE_ID="measured-$((sample_index - warmups))"
+  else
+    BENCH_SAMPLE_KIND=cold
+    BENCH_SAMPLE_ID="cold-$((sample_index - warmups - repeats))"
+  fi
+  export BENCH_SAMPLE_KIND BENCH_SAMPLE_ID
 }
 
 run_group() {
@@ -279,9 +518,14 @@ run_group() {
   shift 3
   local spec_file="$tmp_dir/spec-$op-$group_seed.tsv"
   printf '%s\n' "$@" >"$spec_file"
+  reset_pair_equivalence
+  local order_index=0
+  local sample_kind="${BENCH_SAMPLE_KIND:-measured}"
+  local pair_id="$op-${BENCH_SAMPLE_ID:-measured-1}"
   while IFS=$'\t' read -r tool script; do
-    measure_sh "$tool" "$op" "$extra" "$script"
-  done < <(python3 - "$group_seed" "$spec_file" <<'PY'
+    order_index=$((order_index + 1))
+    measure_sh "$tool" "$op" "$extra" "$script" "$sample_kind" "$pair_id" "$order_index"
+  done < <("$python_bin" - "$group_seed" "$spec_file" <<'PY'
 import random
 import sys
 
@@ -354,7 +598,7 @@ check_worktree_first_marker() {
 }
 
 unused_local_port() {
-  python3 - <<'PY'
+  "$python_bin" - <<'PY'
 import socket
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -519,71 +763,232 @@ if any_benchmark_op_enabled pack-objects index-pack; then
   validate_pack_output
 fi
 
-for n in $(seq 1 "$repeats"); do
+prepare_fetch_fixtures() {
+  if any_benchmark_op_enabled fetch-noop fetch-incremental; then
+    "$git_bin" init -q --bare "$remote"
+    "$git_bin" -C "$src" remote add origin "$remote"
+    "$git_bin" -C "$src" push -q origin main
+    "$git_bin" clone -q "$remote" "$tmp_dir/git-fetch"
+    "$zmin_bin" clone -q "$remote" "$tmp_dir/zmin-fetch" >/dev/null
+    if [[ "$gix_enabled" == "1" ]]; then
+      "$git_bin" clone -q "$remote" "$tmp_dir/gix-fetch"
+    fi
+
+    if benchmark_op_enabled fetch-incremental; then
+      fetch_incremental_src="$tmp_dir/fetch-incremental-source"
+      fetch_incremental_remote="$tmp_dir/fetch-incremental-remote.git"
+      "$git_bin" clone -q "$src" "$fetch_incremental_src"
+      "$git_bin" -C "$fetch_incremental_src" remote remove origin
+      "$git_bin" init -q --bare "$fetch_incremental_remote"
+      "$git_bin" -C "$fetch_incremental_src" remote add origin "$fetch_incremental_remote"
+      "$git_bin" -C "$fetch_incremental_src" push -q origin main
+      printf 'new\n' >"$fetch_incremental_src/new-file.txt"
+      "$git_bin" -C "$fetch_incremental_src" add new-file.txt
+      GIT_AUTHOR_DATE='1700099999 +0000' GIT_COMMITTER_DATE='1700099999 +0000' \
+        "$git_bin" -C "$fetch_incremental_src" commit -qm new
+      "$git_bin" -C "$fetch_incremental_src" push -q origin main
+    fi
+  fi
+
+  if benchmark_op_enabled fetch-batch; then
+    batch_src="$tmp_dir/batch-src"
+    batch_remote="$tmp_dir/batch-remote.git"
+    "$git_bin" init -q -b main "$batch_src"
+    configure_repo "$batch_src"
+    mkdir -p "$batch_src/base"
+    for i in $(seq 1 300); do
+      printf 'base %04d %04096d\n' "$i" 0 >"$batch_src/base/file-$i.txt"
+    done
+    "$git_bin" -C "$batch_src" add -A
+    GIT_AUTHOR_DATE='1700100000 +0000' GIT_COMMITTER_DATE='1700100000 +0000' \
+      "$git_bin" -C "$batch_src" commit -qm base
+    "$git_bin" init -q --bare "$batch_remote"
+    "$git_bin" -C "$batch_src" remote add origin "$batch_remote"
+    "$git_bin" -C "$batch_src" push -q origin main
+    "$git_bin" clone -q "$batch_remote" "$tmp_dir/git-fetch-batch-base"
+    "$zmin_bin" clone -q "$batch_remote" "$tmp_dir/zmin-fetch-batch-base" >/dev/null
+    if [[ "$gix_enabled" == "1" ]]; then
+      "$git_bin" clone -q "$batch_remote" "$tmp_dir/gix-fetch-batch-base"
+    fi
+    mkdir -p "$batch_src/batch"
+    for i in $(seq 1 "$fetch_batch_files"); do
+      printf 'batch %04d %04096d\n' "$i" 0 >"$batch_src/batch/file-$i.txt"
+    done
+    "$git_bin" -C "$batch_src" add -A
+    GIT_AUTHOR_DATE='1700100001 +0000' GIT_COMMITTER_DATE='1700100001 +0000' \
+      "$git_bin" -C "$batch_src" commit -qm batch
+    "$git_bin" -C "$batch_src" push -q origin main
+  fi
+}
+
+prepare_fetch_fixtures
+
+init_template_dir="$src/.zmin-bench-empty-template"
+mkdir "$init_template_dir"
+artifact_cli template-preflight \
+  --fixture-root "$src" \
+  --template-dir "$init_template_dir" >/dev/null
+init_template_dir="$(
+  cd -- "$init_template_dir"
+  pwd -P
+)"
+init_template_identity="$(
+  artifact_cli template-preflight \
+    --fixture-root "$src" \
+    --template-dir "$init_template_dir"
+)"
+export GIT_TEMPLATE_DIR="$init_template_dir"
+
+evidence_dir="${out_dir:-$tmp_dir/evidence}"
+metadata_path="$evidence_dir/metadata.json"
+mandatory_manifest="pilot"
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  mandatory_manifest="standard"
+fi
+command_corpus="git-performance-bench-v3:${mandatory_manifest}:$(selected_ops_label)"
+if [[ "$evidence_mode" == "authoritative" ]]; then
+  fixture_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" fixture-hash --root "$src" --git-bin "$git_bin" --template-dir "$init_template_dir" --template-identity "$init_template_identity" --strict-paths)"
+else
+  fixture_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" fixture-hash --root "$src" --git-bin "$git_bin" --template-dir "$init_template_dir" --template-identity "$init_template_identity")"
+fi
+git_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$git_bin")"
+zmin_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$zmin_bin")"
+git_version="$($git_bin --version)"
+zmin_version="$($zmin_bin --version)"
+python_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$python_bin")"
+python_version="$("$python_bin" --version 2>&1)"
+make_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$make_bin")"
+make_version="$("$make_bin" --version 2>&1 | sed -n '1p')"
+sidecar_path="$zmin_bin.identity.json"
+if [[ -f "$sidecar_path" ]]; then
+  sidecar_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$sidecar_path")"
+else
+  sidecar_sha256=missing
+fi
+harness_paths=(
+  "$repo_root/tools/git-performance-bench.sh"
+  "$repo_root/tools/git-bench-process.py"
+  "$repo_root/tools/benchmark-environment.sh"
+  "$repo_root/tools/performance_contract.py"
+)
+start_harness_args=()
+finish_anchor_args=(
+  --anchor-repo-root "$repo_root"
+  --anchor-fixture-root "$src"
+  --anchor-command-corpus "$command_corpus"
+  --anchor-fixture-sha256 "$fixture_sha256"
+  --anchor-git-bin "$git_bin"
+  --anchor-git-sha256 "$git_sha256"
+  --anchor-git-version "$git_version"
+  --anchor-zmin-bin "$zmin_bin"
+  --anchor-zmin-sha256 "$zmin_sha256"
+  --anchor-zmin-version "$zmin_version"
+  --anchor-python-bin "$python_bin"
+  --anchor-python-sha256 "$python_sha256"
+  --anchor-python-version "$python_version"
+  --anchor-make-bin "$make_bin"
+  --anchor-make-sha256 "$make_sha256"
+  --anchor-make-version "$make_version"
+  --anchor-build-profile release
+  --anchor-identity-sidecar "$sidecar_path"
+  --anchor-identity-sidecar-sha256 "$sidecar_sha256"
+)
+for harness_path in "${harness_paths[@]}"; do
+  harness_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$harness_path")"
+  start_harness_args+=(--harness "$harness_path")
+  finish_anchor_args+=(--anchor-harness "$harness_path" --anchor-harness-sha256 "$harness_sha256")
+done
+"$python_bin" "$repo_root/tools/performance_contract.py" start \
+  --repo-root "$repo_root" \
+  --git-bin "$git_bin" \
+  --zmin-bin "$zmin_bin" \
+  --python-bin "$python_bin" \
+  --make-bin "$make_bin" \
+  --fixture-root "$src" \
+  --results-dir "$evidence_dir" \
+  --output "$metadata_path" \
+  --mode "$evidence_mode" \
+  --build-profile release \
+  --command-corpus "$command_corpus" \
+  --mandatory-manifest "$mandatory_manifest" \
+  --mandatory-lanes "$(selected_ops_label)" \
+  --equivalence-manifest equivalence.tsv \
+  --warmups "$warmups" \
+  --measured-pairs "$repeats" \
+  --cold-starts "$cold_starts" \
+  --ordering interleaved-paired \
+  --seed "$seed" \
+  "${start_harness_args[@]}"
+start_metadata_sha256="$("$python_bin" "$repo_root/tools/performance_contract.py" hash-file --path "$metadata_path")"
+finish_anchor_args+=(--anchor-start-metadata-sha256 "$start_metadata_sha256")
+
+for n in $(seq 1 "$run_count"); do
+  set_sample_policy "$n"
   if benchmark_op_enabled init; then
     specs=(
-      $'git\t'"'$git_bin' init -q '$tmp_dir/git-init-$n'"
-      $'zmin\t'"'$zmin_bin' init '$tmp_dir/zmin-init-$n'"
+      $'git\t'"$(shell_quote "$git_bin") init -q $(shell_quote "$tmp_dir/git-init-$n")"
+      $'zmin\t'"$(shell_quote "$zmin_bin") init -q $(shell_quote "$tmp_dir/zmin-init-$n")"
     )
     run_group init "$n" "$((seed + n))" "${specs[@]}"
   fi
 
   if benchmark_op_enabled status; then
     specs=(
-      $'git\t'"cd '$src' && '$git_bin' status --porcelain=v1 --branch"
-      $'zmin\t'"cd '$src' && '$zmin_bin' status --porcelain=v1 --branch"
+      $'git\t'"cd $(shell_quote "$src") && $(shell_quote "$git_bin") status --porcelain=v1 --branch"
+      $'zmin\t'"cd $(shell_quote "$src") && $(shell_quote "$zmin_bin") status --porcelain=v1 --branch"
     )
-    if [[ -n "$gix_bin" ]]; then
-      specs+=($'gix\t'"'$gix_bin' -r '$src' status --format simplified")
+    if [[ "$gix_enabled" == "1" ]]; then
+      specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$src") status --format simplified")
     fi
     run_group status "$n" "$((seed + 100 + n))" "${specs[@]}"
   fi
 
   if benchmark_op_enabled log; then
     specs=(
-      $'git\t'"cd '$src' && '$git_bin' log --oneline --max-count '$commits'"
-      $'zmin\t'"cd '$src' && '$zmin_bin' log --oneline --max-count '$commits'"
+      $'git\t'"cd $(shell_quote "$src") && $(shell_quote "$git_bin") log --oneline --max-count $commits"
+      $'zmin\t'"cd $(shell_quote "$src") && $(shell_quote "$zmin_bin") log --oneline --max-count $commits"
     )
-    if [[ -n "$gix_bin" ]]; then
-      specs+=($'gix\t'"'$gix_bin' -r '$src' log")
+    if [[ "$gix_enabled" == "1" ]]; then
+      specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$src") log")
     fi
     run_group log "$n" "$((seed + 200 + n))" "${specs[@]}"
   fi
 
   if benchmark_op_enabled rev-list; then
     run_group rev-list "$n" "$((seed + 300 + n))" \
-      $'git\t'"cd '$src' && '$git_bin' rev-list --objects --all" \
-      $'zmin\t'"cd '$src' && '$zmin_bin' rev-list --objects --all"
+      $'git\t'"cd $(shell_quote "$src") && $(shell_quote "$git_bin") rev-list --objects --all" \
+      $'zmin\t'"cd $(shell_quote "$src") && $(shell_quote "$zmin_bin") rev-list --objects --all"
   fi
 
   if benchmark_op_enabled merge-base; then
     specs=(
-      $'git\t'"cd '$src' && '$git_bin' merge-base HEAD HEAD~$((commits / 2))"
-      $'zmin\t'"cd '$src' && '$zmin_bin' merge-base HEAD HEAD~$((commits / 2))"
+      $'git\t'"cd $(shell_quote "$src") && $(shell_quote "$git_bin") merge-base HEAD HEAD~$((commits / 2))"
+      $'zmin\t'"cd $(shell_quote "$src") && $(shell_quote "$zmin_bin") merge-base HEAD HEAD~$((commits / 2))"
     )
-    if [[ -n "$gix_bin" ]]; then
-      specs+=($'gix\t'"'$gix_bin' -r '$src' merge-base HEAD HEAD~$((commits / 2))")
+    if [[ "$gix_enabled" == "1" ]]; then
+      specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$src") merge-base HEAD HEAD~$((commits / 2))")
     fi
     run_group merge-base "$n" "$((seed + 400 + n))" "${specs[@]}"
   fi
 
   if benchmark_op_enabled pack-objects; then
     run_group pack-objects "$object_count objects" "$((seed + 500 + n))" \
-      $'git\t'"cd '$src' && '$git_bin' pack-objects --stdout < '$tmp_dir/objects.txt' > '$tmp_dir/git-$n.pack'" \
-      $'zmin\t'"cd '$src' && '$zmin_bin' pack-objects --stdout < '$tmp_dir/objects.txt' > '$tmp_dir/zmin-$n.pack'"
+      $'git\t'"cd $(shell_quote "$src") && $(shell_quote "$git_bin") pack-objects --stdout < $(shell_quote "$tmp_dir/objects.txt") > $(shell_quote "$tmp_dir/git-$n.pack")" \
+      $'zmin\t'"cd $(shell_quote "$src") && $(shell_quote "$zmin_bin") pack-objects --stdout < $(shell_quote "$tmp_dir/objects.txt") > $(shell_quote "$tmp_dir/zmin-$n.pack")"
   elif benchmark_op_enabled index-pack; then
     "$git_bin" -C "$src" pack-objects --stdout <"$tmp_dir/objects.txt" >"$tmp_dir/git-$n.pack"
   fi
 
   if benchmark_op_enabled index-pack; then
     run_group index-pack "$n" "$((seed + 600 + n))" \
-      $'git\t'"cd '$tmp_dir' && rm -rf git-index-$n && '$git_bin' init -q git-index-$n && '$git_bin' -C git-index-$n index-pack --stdin < '$tmp_dir/git-$n.pack'" \
-      $'zmin\t'"cd '$tmp_dir' && rm -rf zmin-index-$n && '$git_bin' init -q zmin-index-$n && cd zmin-index-$n && '$zmin_bin' index-pack --stdin < '$tmp_dir/git-$n.pack'"
+      $'git\t'"cd $(shell_quote "$tmp_dir") && rm -rf git-index-$n && $(shell_quote "$git_bin") init -q git-index-$n && $(shell_quote "$git_bin") -C git-index-$n index-pack --stdin < $(shell_quote "$tmp_dir/git-$n.pack")" \
+      $'zmin\t'"cd $(shell_quote "$tmp_dir") && rm -rf zmin-index-$n && $(shell_quote "$git_bin") init -q zmin-index-$n && cd zmin-index-$n && $(shell_quote "$zmin_bin") index-pack --stdin < $(shell_quote "$tmp_dir/git-$n.pack")"
   fi
 done
 
 if any_benchmark_op_enabled add commit add-dirty commit-dirty; then
-for n in $(seq 1 "$repeats"); do
+for n in $(seq 1 "$run_count"); do
+  set_sample_policy "$n"
   git_repo="$tmp_dir/git-write-$n"
   zmin_repo="$tmp_dir/zmin-write-$n"
   "$git_bin" init -q -b main "$git_repo"
@@ -595,8 +1000,8 @@ for n in $(seq 1 "$repeats"); do
 
   if benchmark_op_enabled add; then
     run_group add "$n/$write_files files" "$((seed + 700 + n))" \
-      $'git\t'"cd '$git_repo' && '$git_bin' add -A" \
-      $'zmin\t'"cd '$zmin_repo' && '$zmin_bin' add -A"
+      $'git\t'"cd $(shell_quote "$git_repo") && $(shell_quote "$git_bin") add -A" \
+      $'zmin\t'"cd $(shell_quote "$zmin_repo") && $(shell_quote "$zmin_bin") add -A"
   elif any_benchmark_op_enabled commit add-dirty commit-dirty; then
     "$git_bin" -C "$git_repo" add -A
     "$zmin_bin" -C "$zmin_repo" add -A
@@ -604,8 +1009,8 @@ for n in $(seq 1 "$repeats"); do
 
   if benchmark_op_enabled commit; then
     run_group commit "$n/$write_files files" "$((seed + 800 + n))" \
-      $'git\t'"cd '$git_repo' && GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' '$git_bin' commit -qm initial" \
-      $'zmin\t'"cd '$zmin_repo' && GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' '$zmin_bin' commit -qm initial"
+      $'git\t'"cd $(shell_quote "$git_repo") && GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' $(shell_quote "$git_bin") commit -qm initial" \
+      $'zmin\t'"cd $(shell_quote "$zmin_repo") && GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' $(shell_quote "$zmin_bin") commit -qm initial"
   elif any_benchmark_op_enabled add-dirty commit-dirty; then
     GIT_AUTHOR_DATE='1700000000 +0000' GIT_COMMITTER_DATE='1700000000 +0000' \
       "$git_bin" -C "$git_repo" commit -qm initial
@@ -625,16 +1030,16 @@ for n in $(seq 1 "$repeats"); do
     done
     if benchmark_op_enabled add-dirty; then
       run_group add-dirty "$n/$dirty_files files" "$((seed + 900 + n))" \
-        $'git\t'"cd '$git_repo' && '$git_bin' add -A" \
-        $'zmin\t'"cd '$zmin_repo' && '$zmin_bin' add -A"
+        $'git\t'"cd $(shell_quote "$git_repo") && $(shell_quote "$git_bin") add -A" \
+        $'zmin\t'"cd $(shell_quote "$zmin_repo") && $(shell_quote "$zmin_bin") add -A"
     elif benchmark_op_enabled commit-dirty; then
       "$git_bin" -C "$git_repo" add -A
       "$zmin_bin" -C "$zmin_repo" add -A
     fi
     if benchmark_op_enabled commit-dirty; then
       run_group commit-dirty "$n/$dirty_files files" "$((seed + 1000 + n))" \
-        $'git\t'"cd '$git_repo' && GIT_AUTHOR_DATE='1700000001 +0000' GIT_COMMITTER_DATE='1700000001 +0000' '$git_bin' commit -qm dirty" \
-        $'zmin\t'"cd '$zmin_repo' && GIT_AUTHOR_DATE='1700000001 +0000' GIT_COMMITTER_DATE='1700000001 +0000' '$zmin_bin' commit -qm dirty"
+        $'git\t'"cd $(shell_quote "$git_repo") && GIT_AUTHOR_DATE='1700000001 +0000' GIT_COMMITTER_DATE='1700000001 +0000' $(shell_quote "$git_bin") commit -qm dirty" \
+        $'zmin\t'"cd $(shell_quote "$zmin_repo") && GIT_AUTHOR_DATE='1700000001 +0000' GIT_COMMITTER_DATE='1700000001 +0000' $(shell_quote "$zmin_bin") commit -qm dirty"
       "$git_bin" -C "$zmin_repo" fsck --strict >/dev/null
       compare_trees "commit-dirty-$n" "$git_repo" "$zmin_repo" HEAD
     fi
@@ -649,14 +1054,15 @@ if benchmark_op_enabled clone-large; then
 fi
 
 if any_benchmark_op_enabled clone clone-large clone-instant; then
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     if benchmark_op_enabled clone; then
       clone_specs=(
-        $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-$n'"
-        $'zmin\t'"'$zmin_bin' clone -q '$src' '$tmp_dir/zmin-clone-$n'"
+        $'git\t'"$(shell_quote "$git_bin") clone -q $(shell_quote "$src") $(shell_quote "$tmp_dir/git-clone-$n")"
+        $'zmin\t'"$(shell_quote "$zmin_bin") clone -q $(shell_quote "$src") $(shell_quote "$tmp_dir/zmin-clone-$n")"
       )
-      if [[ -n "$gix_bin" ]]; then
-        clone_specs+=($'gix\t'"'$gix_bin' clone '$src' '$tmp_dir/gix-clone-$n'")
+      if [[ "$gix_enabled" == "1" ]]; then
+        clone_specs+=($'gix\t'"$(shell_quote "$gix_bin") clone $(shell_quote "$src") $(shell_quote "$tmp_dir/gix-clone-$n")")
       fi
       run_group clone "$n/local" "$((seed + 1100 + n))" "${clone_specs[@]}"
       compare_refs "clone-$n" "$tmp_dir/git-clone-$n" "$tmp_dir/zmin-clone-$n" HEAD
@@ -665,11 +1071,11 @@ if any_benchmark_op_enabled clone clone-large clone-instant; then
 
     if benchmark_op_enabled clone-large; then
       clone_large_specs=(
-        $'git\t'"'$git_bin' clone -q '$clone_large_src' '$tmp_dir/git-clone-large-$n'"
-        $'zmin\t'"'$zmin_bin' clone -q '$clone_large_src' '$tmp_dir/zmin-clone-large-$n'"
+        $'git\t'"$(shell_quote "$git_bin") clone -q $(shell_quote "$clone_large_src") $(shell_quote "$tmp_dir/git-clone-large-$n")"
+        $'zmin\t'"$(shell_quote "$zmin_bin") clone -q $(shell_quote "$clone_large_src") $(shell_quote "$tmp_dir/zmin-clone-large-$n")"
       )
-      if [[ -n "$gix_bin" ]]; then
-        clone_large_specs+=($'gix\t'"'$gix_bin' clone '$clone_large_src' '$tmp_dir/gix-clone-large-$n'")
+      if [[ "$gix_enabled" == "1" ]]; then
+        clone_large_specs+=($'gix\t'"$(shell_quote "$gix_bin") clone $(shell_quote "$clone_large_src") $(shell_quote "$tmp_dir/gix-clone-large-$n")")
       fi
       run_group clone-large "$n/$clone_large_commits commits/$clone_large_files_per_commit files" "$((seed + 1125 + n))" "${clone_large_specs[@]}"
       compare_refs "clone-large-$n" "$tmp_dir/git-clone-large-$n" "$tmp_dir/zmin-clone-large-$n" HEAD
@@ -678,8 +1084,8 @@ if any_benchmark_op_enabled clone clone-large clone-instant; then
 
     if benchmark_op_enabled clone-instant; then
       run_group clone-instant "$n/local" "$((seed + 1150 + n))" \
-        $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-instant-$n'" \
-        $'zmin\t'"'$zmin_bin' clone -q --instant '$src' '$tmp_dir/zmin-clone-instant-$n'"
+        $'git\t'"$(shell_quote "$git_bin") clone -q $(shell_quote "$src") $(shell_quote "$tmp_dir/git-clone-instant-$n")" \
+        $'zmin\t'"$(shell_quote "$zmin_bin") clone -q --instant $(shell_quote "$src") $(shell_quote "$tmp_dir/zmin-clone-instant-$n")"
       compare_refs "clone-instant-$n" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
       compare_trees "clone-instant-$n-tree" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
       check_worktree_first_marker "clone-instant-$n-marker" "$tmp_dir/zmin-clone-instant-$n"
@@ -704,11 +1110,12 @@ fake_ssh_git_exec_path="$("$git_bin" --exec-path)"
 fake_ssh_env="ZMIN_BENCH_FAKE_SSH_GIT_EXEC_PATH=$(shell_quote "$fake_ssh_git_exec_path") GIT_SSH_COMMAND=$(shell_quote "$fake_ssh")"
 ssh_url="ssh://example.test$ssh_remote"
 
-for n in $(seq 1 "$repeats"); do
+for n in $(seq 1 "$run_count"); do
+  set_sample_policy "$n"
   if benchmark_op_enabled clone-instant-git-daemon; then
     run_group clone-instant-git-daemon "$n/git-daemon" "$((seed + 1160 + n))" \
-      $'git\t'"'$git_bin' clone -q '$daemon_url' '$tmp_dir/git-daemon-instant-baseline-$n'" \
-      $'zmin\t'"'$zmin_bin' clone -q --instant '$daemon_url' '$tmp_dir/zmin-daemon-instant-$n'"
+      $'git\t'"$(shell_quote "$git_bin") clone -q $(shell_quote "$daemon_url") $(shell_quote "$tmp_dir/git-daemon-instant-baseline-$n")" \
+      $'zmin\t'"$(shell_quote "$zmin_bin") clone -q --instant $(shell_quote "$daemon_url") $(shell_quote "$tmp_dir/zmin-daemon-instant-$n")"
     "$git_bin" -C "$tmp_dir/zmin-daemon-instant-$n" fsck --strict >/dev/null
     compare_refs "clone-instant-git-daemon-$n" \
       "$tmp_dir/git-daemon-instant-baseline-$n" \
@@ -723,8 +1130,8 @@ for n in $(seq 1 "$repeats"); do
 
   if benchmark_op_enabled clone-instant-ssh; then
     run_group clone-instant-ssh "$n/ssh" "$((seed + 1170 + n))" \
-      $'git\t'"$fake_ssh_env '$git_bin' clone -q '$ssh_url' '$tmp_dir/git-ssh-instant-baseline-$n'" \
-      $'zmin\t'"$fake_ssh_env '$zmin_bin' clone -q --instant '$ssh_url' '$tmp_dir/zmin-ssh-instant-$n'"
+      $'git\t'"$fake_ssh_env $(shell_quote "$git_bin") clone -q $(shell_quote "$ssh_url") $(shell_quote "$tmp_dir/git-ssh-instant-baseline-$n")" \
+      $'zmin\t'"$fake_ssh_env $(shell_quote "$zmin_bin") clone -q --instant $(shell_quote "$ssh_url") $(shell_quote "$tmp_dir/zmin-ssh-instant-$n")"
     "$git_bin" -C "$tmp_dir/zmin-ssh-instant-$n" fsck --strict >/dev/null
     compare_refs "clone-instant-ssh-$n" \
       "$tmp_dir/git-ssh-instant-baseline-$n" \
@@ -750,10 +1157,11 @@ push_remote="$tmp_dir/push-remote.git"
 "$git_bin" -C "$tmp_dir/zmin-push-base" remote add origin "$push_remote"
 "$git_bin" -C "$tmp_dir/git-push-base" push -q origin main
 if benchmark_op_enabled push-noop; then
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     run_group push-noop "$n/remote" "$((seed + 1200 + n))" \
-      $'git\t'"cd '$tmp_dir/git-push-base' && '$git_bin' push origin main" \
-      $'zmin\t'"cd '$tmp_dir/zmin-push-base' && '$zmin_bin' push origin main"
+      $'git\t'"cd $(shell_quote "$tmp_dir/git-push-base") && $(shell_quote "$git_bin") push origin main" \
+      $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-push-base") && $(shell_quote "$zmin_bin") push origin main"
   done
 fi
 
@@ -767,10 +1175,11 @@ if benchmark_op_enabled push-incremental; then
   GIT_AUTHOR_DATE='1700080000 +0000' GIT_COMMITTER_DATE='1700080000 +0000' \
     "$zmin_bin" -C "$tmp_dir/zmin-push-base" commit -qm incremental >/dev/null
   compare_trees push-incremental-prep "$tmp_dir/git-push-base" "$tmp_dir/zmin-push-base" HEAD
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     run_group push-incremental "$n/remote" "$((seed + 1300 + n))" \
-      $'git\t'"cd '$tmp_dir/git-push-base' && '$git_bin' push origin HEAD:refs/heads/git-incremental-$n" \
-      $'zmin\t'"cd '$tmp_dir/zmin-push-base' && '$zmin_bin' push origin HEAD:refs/heads/zmin-incremental-$n"
+      $'git\t'"cd $(shell_quote "$tmp_dir/git-push-base") && $(shell_quote "$git_bin") push origin HEAD:refs/heads/git-incremental-$n" \
+      $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-push-base") && $(shell_quote "$zmin_bin") push origin HEAD:refs/heads/zmin-incremental-$n"
     "$git_bin" --git-dir "$push_remote" rev-parse "refs/heads/git-incremental-$n" >/dev/null
     "$git_bin" --git-dir "$push_remote" rev-parse "refs/heads/zmin-incremental-$n" >/dev/null
   done
@@ -788,7 +1197,8 @@ push_batch_remote="$tmp_dir/push-batch-remote.git"
 "$git_bin" -C "$tmp_dir/git-push-batch-base" remote add origin "$push_batch_remote"
 "$git_bin" -C "$tmp_dir/zmin-push-batch-base" remote add origin "$push_batch_remote"
 "$git_bin" -C "$tmp_dir/git-push-batch-base" push -q origin main
-for n in $(seq 1 "$repeats"); do
+for n in $(seq 1 "$run_count"); do
+  set_sample_policy "$n"
   cp -R "$tmp_dir/git-push-batch-base" "$tmp_dir/git-push-batch-$n"
   cp -R "$tmp_dir/zmin-push-batch-base" "$tmp_dir/zmin-push-batch-$n"
   mkdir -p "$tmp_dir/git-push-batch-$n/push-batch" "$tmp_dir/zmin-push-batch-$n/push-batch"
@@ -805,8 +1215,8 @@ for n in $(seq 1 "$repeats"); do
     "$zmin_bin" -C "$tmp_dir/zmin-push-batch-$n" commit -qm push-batch >/dev/null
   compare_trees "push-batch-prep-$n" "$tmp_dir/git-push-batch-$n" "$tmp_dir/zmin-push-batch-$n" HEAD
   run_group push-batch "$n/$push_batch_files files" "$((seed + 1400 + n))" \
-    $'git\t'"cd '$tmp_dir/git-push-batch-$n' && '$git_bin' push origin HEAD:refs/heads/git-push-batch-$n" \
-    $'zmin\t'"cd '$tmp_dir/zmin-push-batch-$n' && '$zmin_bin' push origin HEAD:refs/heads/zmin-push-batch-$n"
+    $'git\t'"cd $(shell_quote "$tmp_dir/git-push-batch-$n") && $(shell_quote "$git_bin") push origin HEAD:refs/heads/git-push-batch-$n" \
+    $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-push-batch-$n") && $(shell_quote "$zmin_bin") push origin HEAD:refs/heads/zmin-push-batch-$n"
 done
 record_validation push-batch ok refs_pushed
 fi
@@ -826,10 +1236,11 @@ configure_repo "$pull_src"
 configure_repo "$tmp_dir/git-pull-base"
 configure_repo "$tmp_dir/zmin-pull-base"
 if benchmark_op_enabled pull-noop; then
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     run_group pull-noop "$n/remote" "$((seed + 1450 + n))" \
-      $'git\t'"cd '$tmp_dir/git-pull-base' && '$git_bin' pull --ff-only" \
-      $'zmin\t'"cd '$tmp_dir/zmin-pull-base' && '$zmin_bin' pull --ff-only"
+      $'git\t'"cd $(shell_quote "$tmp_dir/git-pull-base") && $(shell_quote "$git_bin") pull --ff-only" \
+      $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-pull-base") && $(shell_quote "$zmin_bin") pull --ff-only"
   done
   compare_refs pull-noop "$tmp_dir/git-pull-base" "$tmp_dir/zmin-pull-base" HEAD
 fi
@@ -840,12 +1251,13 @@ if benchmark_op_enabled pull-incremental; then
   GIT_AUTHOR_DATE='1700085000 +0000' GIT_COMMITTER_DATE='1700085000 +0000' \
     "$git_bin" -C "$pull_src" commit -qm pull-incremental
   "$git_bin" -C "$pull_src" push -q origin main
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     cp -R "$tmp_dir/git-pull-base" "$tmp_dir/git-pull-incremental-$n"
     cp -R "$tmp_dir/zmin-pull-base" "$tmp_dir/zmin-pull-incremental-$n"
     run_group pull-incremental "$n/remote" "$((seed + 1475 + n))" \
-      $'git\t'"cd '$tmp_dir/git-pull-incremental-$n' && '$git_bin' pull --ff-only" \
-      $'zmin\t'"cd '$tmp_dir/zmin-pull-incremental-$n' && '$zmin_bin' pull --ff-only"
+      $'git\t'"cd $(shell_quote "$tmp_dir/git-pull-incremental-$n") && $(shell_quote "$git_bin") pull --ff-only" \
+      $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-pull-incremental-$n") && $(shell_quote "$zmin_bin") pull --ff-only"
     compare_refs "pull-incremental-$n" \
       "$tmp_dir/git-pull-incremental-$n" \
       "$tmp_dir/zmin-pull-incremental-$n" \
@@ -858,90 +1270,54 @@ if benchmark_op_enabled pull-incremental; then
 fi
 fi
 
-if any_benchmark_op_enabled fetch-noop fetch-incremental; then
-"$git_bin" init -q --bare "$remote"
-"$git_bin" -C "$src" remote add origin "$remote"
-"$git_bin" -C "$src" push -q origin main
-"$git_bin" clone -q "$remote" "$tmp_dir/git-fetch"
-"$zmin_bin" clone -q "$remote" "$tmp_dir/zmin-fetch" >/dev/null
-if [[ -n "$gix_bin" ]]; then
-  "$git_bin" clone -q "$remote" "$tmp_dir/gix-fetch"
-fi
 if benchmark_op_enabled fetch-noop; then
   specs=(
-    $'git\t'"cd '$tmp_dir/git-fetch' && '$git_bin' fetch origin"
-    $'zmin\t'"cd '$tmp_dir/zmin-fetch' && '$zmin_bin' fetch origin"
+    $'git\t'"cd $(shell_quote "$tmp_dir/git-fetch") && $(shell_quote "$git_bin") fetch origin"
+    $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-fetch") && $(shell_quote "$zmin_bin") fetch origin"
   )
-  if [[ -n "$gix_bin" ]]; then
-    specs+=($'gix\t'"'$gix_bin' -r '$tmp_dir/gix-fetch' fetch -r origin")
+  if [[ "$gix_enabled" == "1" ]]; then
+    specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$tmp_dir/gix-fetch") fetch -r origin")
   fi
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     run_group fetch-noop "$n/remote" "$((seed + 1500 + n))" "${specs[@]}"
   done
   compare_refs fetch-noop "$tmp_dir/git-fetch" "$tmp_dir/zmin-fetch" refs/remotes/origin/main
 fi
 
 if benchmark_op_enabled fetch-incremental; then
-  printf 'new\n' >"$src/new-file.txt"
-  "$git_bin" -C "$src" add new-file.txt
-  GIT_AUTHOR_DATE='1700099999 +0000' GIT_COMMITTER_DATE='1700099999 +0000' \
-  "$git_bin" -C "$src" commit -qm new
-  "$git_bin" -C "$src" push -q origin main
-  for n in $(seq 1 "$repeats"); do
+  for n in $(seq 1 "$run_count"); do
+    set_sample_policy "$n"
     cp -R "$tmp_dir/git-fetch" "$tmp_dir/git-fetch-incremental-$n"
     cp -R "$tmp_dir/zmin-fetch" "$tmp_dir/zmin-fetch-incremental-$n"
+    "$git_bin" -C "$tmp_dir/git-fetch-incremental-$n" remote set-url origin "$fetch_incremental_remote"
+    "$git_bin" -C "$tmp_dir/zmin-fetch-incremental-$n" remote set-url origin "$fetch_incremental_remote"
     specs=(
-      $'git\t'"cd '$tmp_dir/git-fetch-incremental-$n' && '$git_bin' fetch origin"
-      $'zmin\t'"cd '$tmp_dir/zmin-fetch-incremental-$n' && '$zmin_bin' fetch origin"
+      $'git\t'"cd $(shell_quote "$tmp_dir/git-fetch-incremental-$n") && $(shell_quote "$git_bin") fetch origin"
+      $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-fetch-incremental-$n") && $(shell_quote "$zmin_bin") fetch origin"
     )
-    if [[ -n "$gix_bin" ]]; then
+    if [[ "$gix_enabled" == "1" ]]; then
       cp -R "$tmp_dir/gix-fetch" "$tmp_dir/gix-fetch-incremental-$n"
-      specs+=($'gix\t'"'$gix_bin' -r '$tmp_dir/gix-fetch-incremental-$n' fetch -r origin")
+      "$git_bin" -C "$tmp_dir/gix-fetch-incremental-$n" remote set-url origin "$fetch_incremental_remote"
+      specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$tmp_dir/gix-fetch-incremental-$n") fetch -r origin")
     fi
     run_group fetch-incremental "$n/remote" "$((seed + 1600 + n))" "${specs[@]}"
     compare_refs "fetch-incremental-$n" "$tmp_dir/git-fetch-incremental-$n" "$tmp_dir/zmin-fetch-incremental-$n" refs/remotes/origin/main
   done
 fi
-fi
 
 if benchmark_op_enabled fetch-batch; then
-batch_src="$tmp_dir/batch-src"
-batch_remote="$tmp_dir/batch-remote.git"
-"$git_bin" init -q -b main "$batch_src"
-configure_repo "$batch_src"
-mkdir -p "$batch_src/base"
-for i in $(seq 1 300); do
-  printf 'base %04d %04096d\n' "$i" 0 >"$batch_src/base/file-$i.txt"
-done
-"$git_bin" -C "$batch_src" add -A
-GIT_AUTHOR_DATE='1700100000 +0000' GIT_COMMITTER_DATE='1700100000 +0000' \
-  "$git_bin" -C "$batch_src" commit -qm base
-"$git_bin" init -q --bare "$batch_remote"
-"$git_bin" -C "$batch_src" remote add origin "$batch_remote"
-"$git_bin" -C "$batch_src" push -q origin main
-"$git_bin" clone -q "$batch_remote" "$tmp_dir/git-fetch-batch-base"
-"$zmin_bin" clone -q "$batch_remote" "$tmp_dir/zmin-fetch-batch-base" >/dev/null
-if [[ -n "$gix_bin" ]]; then
-  "$git_bin" clone -q "$batch_remote" "$tmp_dir/gix-fetch-batch-base"
-fi
-mkdir -p "$batch_src/batch"
-for i in $(seq 1 "$fetch_batch_files"); do
-  printf 'batch %04d %04096d\n' "$i" 0 >"$batch_src/batch/file-$i.txt"
-done
-"$git_bin" -C "$batch_src" add -A
-GIT_AUTHOR_DATE='1700100001 +0000' GIT_COMMITTER_DATE='1700100001 +0000' \
-  "$git_bin" -C "$batch_src" commit -qm batch
-"$git_bin" -C "$batch_src" push -q origin main
-for n in $(seq 1 "$repeats"); do
+for n in $(seq 1 "$run_count"); do
+  set_sample_policy "$n"
   cp -R "$tmp_dir/git-fetch-batch-base" "$tmp_dir/git-fetch-batch-$n"
   cp -R "$tmp_dir/zmin-fetch-batch-base" "$tmp_dir/zmin-fetch-batch-$n"
   specs=(
-    $'git\t'"cd '$tmp_dir/git-fetch-batch-$n' && '$git_bin' fetch origin"
-    $'zmin\t'"cd '$tmp_dir/zmin-fetch-batch-$n' && '$zmin_bin' fetch origin"
+    $'git\t'"cd $(shell_quote "$tmp_dir/git-fetch-batch-$n") && $(shell_quote "$git_bin") fetch origin"
+    $'zmin\t'"cd $(shell_quote "$tmp_dir/zmin-fetch-batch-$n") && $(shell_quote "$zmin_bin") fetch origin"
   )
-  if [[ -n "$gix_bin" ]]; then
+  if [[ "$gix_enabled" == "1" ]]; then
     cp -R "$tmp_dir/gix-fetch-batch-base" "$tmp_dir/gix-fetch-batch-$n"
-    specs+=($'gix\t'"'$gix_bin' -r '$tmp_dir/gix-fetch-batch-$n' fetch -r origin")
+    specs+=($'gix\t'"$(shell_quote "$gix_bin") -r $(shell_quote "$tmp_dir/gix-fetch-batch-$n") fetch -r origin")
   fi
   run_group fetch-batch "$n/$fetch_batch_files files" "$((seed + 1700 + n))" "${specs[@]}"
   "$git_bin" -C "$tmp_dir/zmin-fetch-batch-$n" fsck --strict >/dev/null
@@ -949,8 +1325,8 @@ for n in $(seq 1 "$repeats"); do
 done
 fi
 
-cat "$out"
-cat "$validation_out"
+artifact_read_root "$tmp_dir" "$tmp_artifact_identity" bench.tsv
+artifact_read_root "$tmp_dir" "$tmp_artifact_identity" validation.tsv
 if [[ -f "$tmp_dir/git-1.pack" ]]; then
   printf 'pack_bytes\tgit\t%s\n' "$(wc -c <"$tmp_dir/git-1.pack" | tr -d ' ')"
 fi
@@ -963,40 +1339,63 @@ if [[ -n "$out_dir" ]]; then
   checks_path="$out_dir/checks.tsv"
   summary_path="$out_dir/summary.csv"
   comparison_path="$out_dir/comparison.csv"
-  cp "$out" "$rows_path"
-  cp "$validation_out" "$checks_path"
-  python3 - "$rows_path" "$summary_path" "$comparison_path" <<'PY'
+  artifact_copy_root "$out_dir" "$evidence_artifact_identity" bench.tsv "$out"
+  artifact_copy_root "$out_dir" "$evidence_artifact_identity" checks.tsv "$validation_out"
+  "$python_bin" - "$rows_path" "$summary_path" "$comparison_path" \
+    "$evidence_dir" "$evidence_artifact_identity" "$repo_root/tools" <<'PY'
 import csv
+import io
 import math
 import os
+import pathlib
 import statistics
 import sys
 from collections import defaultdict
 
-rows_path, summary_path, comparison_path = sys.argv[1:4]
+rows_path, summary_path, comparison_path, evidence_dir, evidence_identity, tools_dir = sys.argv[1:7]
+sys.path.insert(0, tools_dir)
+import performance_contract as contract
 
 rows_by_op_tool = defaultdict(list)
 rows_by_op_tool_extra = defaultdict(dict)
-rss_by_op_tool = defaultdict(list)
-with open(rows_path, encoding="utf-8", newline="") as handle:
-    reader = csv.DictReader(handle, delimiter="\t")
-    for row in reader:
-        tool = row.get("tool", "")
-        if tool not in {"git", "zmin", "gix"}:
-            continue
-        try:
-            seconds = float(row["real"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        op = row["op"]
-        rows_by_op_tool[(op, tool)].append(seconds)
-        rows_by_op_tool_extra[(op, tool)][row.get("extra", "")] = seconds
-        try:
-            rss_bytes = int(row["rss_bytes"])
-        except (KeyError, TypeError, ValueError):
-            rss_bytes = 0
-        if rss_bytes > 0:
-            rss_by_op_tool[(op, tool)].append(rss_bytes)
+memory_by_op_tool = defaultdict(list)
+memory_identity_by_op = {}
+rows_data = contract.artifact_read_bytes(
+    pathlib.Path(evidence_dir),
+    contract.artifact_relative_name(pathlib.Path(evidence_dir), pathlib.Path(rows_path)),
+    expected_directory_identity=contract.parse_artifact_identity(evidence_identity),
+).decode()
+for row in csv.DictReader(io.StringIO(rows_data), delimiter="\t"):
+    tool = row.get("tool", "")
+    if tool not in {"git", "zmin", "gix"}:
+        continue
+    if row.get("sample_kind", "measured") != "measured":
+        continue
+    try:
+        seconds = float(row["real"])
+    except (KeyError, TypeError, ValueError):
+        continue
+    op = row["op"]
+    rows_by_op_tool[(op, tool)].append(seconds)
+    rows_by_op_tool_extra[(op, tool)][row.get("extra", "")] = seconds
+    memory_metric = row.get("memory_metric", "")
+    memory_semantics = row.get("memory_semantics", "")
+    memory_scope = row.get("memory_scope", "")
+    memory_unit = row.get("memory_unit", "")
+    identity = (memory_metric, memory_semantics, memory_scope, memory_unit)
+    if identity not in {("peak_rss_bytes", "working_set_peak", "waited_child_processes", "bytes"), ("peak_job_commit_bytes", "job_commit_peak", "job_process_tree", "bytes")}:
+        continue
+    previous_identity = memory_identity_by_op.get(op)
+    if previous_identity is not None and previous_identity != identity:
+        raise SystemExit(f"inconsistent memory metric identity for {op}")
+    memory_identity_by_op[op] = identity
+    memory_field = "rss_bytes" if memory_metric == "peak_rss_bytes" else "job_commit_bytes"
+    try:
+        memory_bytes = int(row[memory_field])
+    except (KeyError, TypeError, ValueError):
+        memory_bytes = None
+    if memory_bytes is not None and memory_bytes > 0:
+        memory_by_op_tool[(op, tool)].append(memory_bytes)
 
 
 def rounded(value):
@@ -1029,7 +1428,8 @@ def paired_ratios(op, numerator_tool, denominator_tool):
 summary_rows = []
 for (op, tool), values in sorted(rows_by_op_tool.items()):
     values = sorted(values)
-    rss_values = sorted(rss_by_op_tool.get((op, tool), []))
+    memory_values = sorted(memory_by_op_tool.get((op, tool), []))
+    memory_identity = memory_identity_by_op.get(op, ("", "", "", ""))
     summary_rows.append(
         {
             "op": op,
@@ -1039,26 +1439,40 @@ for (op, tool), values in sorted(rows_by_op_tool.items()):
             "median_seconds": rounded(statistics.median(values)),
             "min_seconds": rounded(values[0]),
             "max_seconds": rounded(values[-1]),
-            "median_rss_bytes": "" if not rss_values else str(int(statistics.median(rss_values))),
-            "p95_rss_bytes": "" if not rss_values else str(percentile(rss_values, 0.95)),
+            "memory_metric": memory_identity[0],
+            "memory_semantics": memory_identity[1],
+            "memory_scope": memory_identity[2],
+            "memory_unit": memory_identity[3],
+            "median_memory_bytes": "" if not memory_values else str(int(statistics.median(memory_values))),
+            "p95_memory_bytes": "" if not memory_values else str(percentile(memory_values, 0.95)),
         }
     )
 
-with open(summary_path, "w", encoding="utf-8", newline="") as handle:
-    fieldnames = [
-        "op",
-        "tool",
-        "runs",
-        "mean_seconds",
-        "median_seconds",
-        "min_seconds",
-        "max_seconds",
-        "median_rss_bytes",
-        "p95_rss_bytes",
-    ]
-    writer = csv.DictWriter(handle, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(summary_rows)
+summary_buffer = io.StringIO(newline="")
+fieldnames = [
+    "op",
+    "tool",
+    "runs",
+    "mean_seconds",
+    "median_seconds",
+    "min_seconds",
+    "max_seconds",
+    "memory_metric",
+    "memory_semantics",
+    "memory_scope",
+    "memory_unit",
+    "median_memory_bytes",
+    "p95_memory_bytes",
+]
+writer = csv.DictWriter(summary_buffer, fieldnames=fieldnames)
+writer.writeheader()
+writer.writerows(summary_rows)
+contract.artifact_write_bytes(
+    pathlib.Path(evidence_dir),
+    contract.artifact_relative_name(pathlib.Path(evidence_dir), pathlib.Path(summary_path)),
+    summary_buffer.getvalue().encode(),
+    expected_directory_identity=contract.parse_artifact_identity(evidence_identity),
+)
 
 ops = sorted({op for op, _ in rows_by_op_tool})
 comparison_rows = []
@@ -1066,8 +1480,8 @@ for op in ops:
     git = sorted(rows_by_op_tool.get((op, "git"), []))
     zmin = sorted(rows_by_op_tool.get((op, "zmin"), []))
     gix = sorted(rows_by_op_tool.get((op, "gix"), []))
-    git_rss = sorted(rss_by_op_tool.get((op, "git"), []))
-    zmin_rss = sorted(rss_by_op_tool.get((op, "zmin"), []))
+    git_memory = sorted(memory_by_op_tool.get((op, "git"), []))
+    zmin_memory = sorted(memory_by_op_tool.get((op, "zmin"), []))
     if not git or not zmin:
         continue
     git_mean = statistics.mean(git)
@@ -1078,8 +1492,8 @@ for op in ops:
     gix_median = statistics.median(gix) if gix else None
     zmin_git_pairs = paired_ratios(op, "zmin", "git")
     zmin_gix_pairs = paired_ratios(op, "zmin", "gix")
-    git_rss_p95 = percentile(git_rss, 0.95) if git_rss else None
-    zmin_rss_p95 = percentile(zmin_rss, 0.95) if zmin_rss else None
+    git_memory_p95 = percentile(git_memory, 0.95) if git_memory else None
+    zmin_memory_p95 = percentile(zmin_memory, 0.95) if zmin_memory else None
     comparison_rows.append(
         {
             "op": op,
@@ -1116,43 +1530,57 @@ for op in ops:
             "zmin_vs_gix_pair_median_ratio": ""
             if not zmin_gix_pairs
             else rounded(statistics.median(zmin_gix_pairs)),
-            "git_p95_rss_bytes": "" if git_rss_p95 is None else str(git_rss_p95),
-            "zmin_p95_rss_bytes": "" if zmin_rss_p95 is None else str(zmin_rss_p95),
-            "zmin_vs_git_p95_rss_ratio": ""
-            if git_rss_p95 is None or zmin_rss_p95 is None
-            else ratio(zmin_rss_p95, git_rss_p95),
+            "memory_metric": memory_identity_by_op.get(op, ("", "", "", ""))[0],
+            "memory_semantics": memory_identity_by_op.get(op, ("", "", "", ""))[1],
+            "memory_scope": memory_identity_by_op.get(op, ("", "", "", ""))[2],
+            "memory_unit": memory_identity_by_op.get(op, ("", "", "", ""))[3],
+            "git_p95_memory_bytes": "" if git_memory_p95 is None else str(git_memory_p95),
+            "zmin_p95_memory_bytes": "" if zmin_memory_p95 is None else str(zmin_memory_p95),
+            "zmin_vs_git_p95_memory_ratio": ""
+            if git_memory_p95 is None or zmin_memory_p95 is None
+            else ratio(zmin_memory_p95, git_memory_p95),
         }
     )
 
-with open(comparison_path, "w", encoding="utf-8", newline="") as handle:
-    fieldnames = [
-        "op",
-        "runs",
-        "git_mean_seconds",
-        "zmin_mean_seconds",
-        "zmin_vs_git_mean_ratio",
-        "gix_mean_seconds",
-        "zmin_vs_gix_mean_ratio",
-        "git_median_seconds",
-        "zmin_median_seconds",
-        "zmin_vs_git_median_ratio",
-        "gix_median_seconds",
-        "zmin_vs_gix_median_ratio",
-        "zmin_vs_git_pair_count",
-        "zmin_vs_git_pair_mean_ratio",
-        "zmin_vs_git_pair_median_ratio",
-        "zmin_vs_git_pair_min_ratio",
-        "zmin_vs_git_pair_max_ratio",
-        "zmin_vs_gix_pair_count",
-        "zmin_vs_gix_pair_mean_ratio",
-        "zmin_vs_gix_pair_median_ratio",
-        "git_p95_rss_bytes",
-        "zmin_p95_rss_bytes",
-        "zmin_vs_git_p95_rss_ratio",
-    ]
-    writer = csv.DictWriter(handle, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(comparison_rows)
+comparison_buffer = io.StringIO(newline="")
+fieldnames = [
+    "op",
+    "runs",
+    "git_mean_seconds",
+    "zmin_mean_seconds",
+    "zmin_vs_git_mean_ratio",
+    "gix_mean_seconds",
+    "zmin_vs_gix_mean_ratio",
+    "git_median_seconds",
+    "zmin_median_seconds",
+    "zmin_vs_git_median_ratio",
+    "gix_median_seconds",
+    "zmin_vs_gix_median_ratio",
+    "zmin_vs_git_pair_count",
+    "zmin_vs_git_pair_mean_ratio",
+    "zmin_vs_git_pair_median_ratio",
+    "zmin_vs_git_pair_min_ratio",
+    "zmin_vs_git_pair_max_ratio",
+    "zmin_vs_gix_pair_count",
+    "zmin_vs_gix_pair_mean_ratio",
+    "zmin_vs_gix_pair_median_ratio",
+    "memory_metric",
+    "memory_semantics",
+    "memory_scope",
+    "memory_unit",
+    "git_p95_memory_bytes",
+    "zmin_p95_memory_bytes",
+    "zmin_vs_git_p95_memory_ratio",
+]
+writer = csv.DictWriter(comparison_buffer, fieldnames=fieldnames)
+writer.writeheader()
+writer.writerows(comparison_rows)
+contract.artifact_write_bytes(
+    pathlib.Path(evidence_dir),
+    contract.artifact_relative_name(pathlib.Path(evidence_dir), pathlib.Path(comparison_path)),
+    comparison_buffer.getvalue().encode(),
+    expected_directory_identity=contract.parse_artifact_identity(evidence_identity),
+)
 
 
 def max_ratio_from_env(name):
@@ -1197,9 +1625,9 @@ assert_max_ratio(
     "Zmin/Git paired median",
 )
 assert_max_ratio(
-    "zmin_vs_git_p95_rss_ratio",
-    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_P95_RSS_RATIO"),
-    "Zmin/Git p95 RSS",
+    "zmin_vs_git_p95_memory_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_P95_MEMORY_RATIO"),
+    "Zmin/Git p95 memory",
 )
 assert_max_ratio(
     "zmin_vs_gix_mean_ratio",
@@ -1217,8 +1645,59 @@ assert_max_ratio(
     "Zmin/Gitoxide paired median",
 )
 PY
+  if [[ "$evidence_mode" == "authoritative" ]]; then
+    artifact_cli superiority-summary \
+      --metadata "$metadata_path" \
+      --rows "$rows_path" \
+      --output "$out_dir/superiority.tsv" \
+      --results-dir "$out_dir" \
+      --root-identity "$evidence_artifact_identity"
+  fi
+  if [[ "$evidence_mode" == "authoritative" ]]; then
+    "$python_bin" "$repo_root/tools/performance_contract.py" finish \
+      --metadata "$metadata_path" \
+      --rows "$rows_path" \
+      --output "$evidence_dir/evidence.json" \
+      --results-dir "$evidence_dir" \
+      --require-authoritative \
+      "${finish_anchor_args[@]}"
+  else
+    "$python_bin" "$repo_root/tools/performance_contract.py" finish \
+      --metadata "$metadata_path" \
+      --rows "$rows_path" \
+      --output "$evidence_dir/evidence.json" \
+      --results-dir "$evidence_dir" \
+      "${finish_anchor_args[@]}"
+  fi
   printf 'rows=%s\n' "$rows_path" >&2
   printf 'checks=%s\n' "$checks_path" >&2
   printf 'summary=%s\n' "$summary_path" >&2
   printf 'comparison=%s\n' "$comparison_path" >&2
+  else
+  if [[ "$evidence_mode" == "authoritative" ]]; then
+    artifact_cli superiority-summary \
+      --metadata "$metadata_path" \
+      --rows "$out" \
+      --output "$evidence_dir/superiority.tsv" \
+      --results-dir "$evidence_dir" \
+      --root-identity "$evidence_artifact_identity"
+  fi
+  if [[ "$evidence_mode" == "authoritative" ]]; then
+    "$python_bin" "$repo_root/tools/performance_contract.py" finish \
+      --metadata "$metadata_path" \
+      --rows "$out" \
+      --output "$evidence_dir/evidence.json" \
+      --result "$out" \
+      --result "$validation_out" \
+      --require-authoritative \
+      "${finish_anchor_args[@]}"
+  else
+    "$python_bin" "$repo_root/tools/performance_contract.py" finish \
+      --metadata "$metadata_path" \
+      --rows "$out" \
+      --output "$evidence_dir/evidence.json" \
+      --result "$out" \
+      --result "$validation_out" \
+      "${finish_anchor_args[@]}"
+  fi
 fi

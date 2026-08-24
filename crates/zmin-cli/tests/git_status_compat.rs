@@ -8,10 +8,10 @@ use std::process::Command;
 #[cfg(not(windows))]
 use common::write_file;
 use common::{
-    configure_identity, corrupt_first_index_entry_ctime, corrupt_first_index_entry_extended_stat,
-    first_index_entry_device, git, git_args, git_failure_output, git_init, git_with_env, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_with_env, set_first_index_entry_device,
-    zmin_bin,
+    command_any_output, configure_identity, corrupt_first_index_entry_ctime,
+    corrupt_first_index_entry_extended_stat, first_index_entry_device, git, git_args,
+    git_failure_output, git_init, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output,
+    run_zmin_with_env, set_first_index_entry_device, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -169,6 +169,257 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
             git_args(repo.path(), args)
         );
     }
+}
+
+#[test]
+fn status_porcelain_resolves_sha1_sha256_and_reftable_heads() {
+    for (object_format, reftable) in status_format_cases() {
+        let repo = status_format_repo(object_format, reftable);
+        assert_eq!(
+            run_zmin(repo.path(), ["status", "--porcelain"]),
+            git(repo.path(), ["status", "--porcelain"]),
+            "status failed for object format {object_format}, reftable={reftable}"
+        );
+    }
+}
+
+#[test]
+fn status_human_and_branch_resolve_sha1_sha256_files_and_reftable() {
+    for (object_format, reftable) in status_format_cases() {
+        let repo = status_format_repo(object_format, reftable);
+        for args in [
+            ["status"].as_slice(),
+            ["status", "--porcelain=v1", "--branch"].as_slice(),
+            ["status", "--porcelain=v2", "--branch"].as_slice(),
+        ] {
+            assert_eq!(
+                run_zmin_args(repo.path(), args),
+                git_args(repo.path(), args),
+                "status mismatch for object format {object_format}, reftable={reftable}, args={args:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn status_show_stash_counts_sha1_and_sha256_reftable_logs() {
+    for object_format in ["sha1", "sha256"] {
+        let repo = status_format_repo(object_format, true);
+        fs::write(repo.path().join("tracked.txt"), b"first stash\n")
+            .expect("write first stash change");
+        git(repo.path(), ["stash", "push", "-m", "first"]);
+        fs::write(repo.path().join("tracked.txt"), b"second stash\n")
+            .expect("write second stash change");
+        git(repo.path(), ["stash", "push", "-m", "second"]);
+
+        let args = ["status", "--porcelain=v2", "--show-stash"];
+        assert_eq!(
+            run_zmin(repo.path(), args),
+            git(repo.path(), args),
+            "stash count mismatch for object format {object_format}"
+        );
+    }
+}
+
+#[test]
+fn status_show_stash_tolerates_broken_sha1_and_sha256_reftable_logs() {
+    for object_format in ["sha1", "sha256"] {
+        for truncate in [false, true] {
+            let repo = status_format_repo(object_format, true);
+            fs::write(repo.path().join("tracked.txt"), b"first stash\n")
+                .expect("write first stash change");
+            git(repo.path(), ["stash", "push", "-m", "first"]);
+            fs::write(repo.path().join("tracked.txt"), b"second stash\n")
+                .expect("write second stash change");
+            git(repo.path(), ["stash", "push", "-m", "second"]);
+            corrupt_reftable_status_log(&repo, truncate);
+
+            let args = ["status", "--porcelain=v2", "--show-stash"];
+            let (zmin_status, zmin_stdout, zmin_stderr) =
+                command_any_output(zmin_bin(), repo.path(), &args, "zmin");
+            let (git_status, git_stdout, git_stderr) =
+                command_any_output("git", repo.path(), &args, "git");
+            assert_eq!(
+                git_status, 0,
+                "stock status failed for object format {object_format}, truncate={truncate}: stdout={git_stdout:?} stderr={git_stderr:?}"
+            );
+            assert_eq!(
+                zmin_status, 0,
+                "zmin status failed for object format {object_format}, truncate={truncate}: stdout={zmin_stdout:?} stderr={zmin_stderr:?}"
+            );
+            assert_eq!(
+                zmin_stdout, git_stdout,
+                "broken reftable stash log mismatch for object format {object_format}, truncate={truncate}"
+            );
+            if truncate {
+                assert!(!zmin_stdout.lines().any(|line| line.starts_with("# stash ")));
+            }
+        }
+    }
+}
+
+#[test]
+fn status_reftable_head_corruption_matches_stock_branch_state() {
+    for object_format in ["sha1", "sha256"] {
+        for remove_tables_list in [false, true] {
+            let repo = status_format_repo(object_format, true);
+            fs::write(repo.path().join("tracked.txt"), b"worktree change\n")
+                .expect("write worktree status change");
+            fs::write(repo.path().join("staged.txt"), b"staged change\n")
+                .expect("write staged status change");
+            git(repo.path(), ["add", "staged.txt"]);
+            let reftable_dir = repo.path().join(".git/reftable");
+            if remove_tables_list {
+                fs::remove_file(reftable_dir.join("tables.list"))
+                    .expect("remove reftable tables.list");
+            } else {
+                let tables_content =
+                    fs::read_to_string(reftable_dir.join("tables.list")).expect("read tables.list");
+                let table_name = tables_content.lines().next().expect("active table");
+                let table_path = reftable_dir.join(table_name);
+                let table = fs::read(&table_path).expect("read active table");
+                fs::write(&table_path, &table[..table.len() - 1]).expect("truncate active table");
+            }
+
+            for args in [
+                ["status", "--porcelain=v2", "--branch"].as_slice(),
+                ["status", "--porcelain=v1", "--branch"].as_slice(),
+                ["status", "--porcelain=v1", "--branch", "-z"].as_slice(),
+                ["status", "-sb"].as_slice(),
+                ["status", "--porcelain=v1", "--branch", "--show-stash"].as_slice(),
+                ["status"].as_slice(),
+                ["status", "--verbose"].as_slice(),
+                ["status", "--verbose", "--branch"].as_slice(),
+            ] {
+                assert_eq!(
+                    run_zmin_args(repo.path(), args),
+                    git_args(repo.path(), args),
+                    "status mismatch for object format {object_format}, remove_tables_list={remove_tables_list}, args={args:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn status_reftable_filesystem_head_syntax_matches_stock() {
+    for object_format in ["sha1", "sha256"] {
+        let repo = status_format_repo(object_format, true);
+        let width = if object_format == "sha1" { 40 } else { 64 };
+        for raw_head in [
+            "not-a-valid-head".to_owned(),
+            "0".repeat(width),
+            "1".repeat(width),
+        ] {
+            fs::write(repo.path().join(".git/HEAD"), format!("{raw_head}\n"))
+                .expect("write filesystem HEAD");
+            for args in [
+                ["status"].as_slice(),
+                ["status", "--short"].as_slice(),
+                ["status", "--porcelain=v1", "--branch"].as_slice(),
+                ["status", "--porcelain=v2", "--branch"].as_slice(),
+                ["status", "-sb"].as_slice(),
+            ] {
+                let (zmin_status, zmin_stdout, zmin_stderr) =
+                    command_any_output(zmin_bin(), repo.path(), args, "zmin");
+                let (git_status, git_stdout, _) =
+                    command_any_output("git", repo.path(), args, "git");
+                assert_eq!(
+                    zmin_status, git_status,
+                    "filesystem HEAD status mismatch for object format {object_format}, raw={raw_head:?}, args={args:?}"
+                );
+                assert_eq!(
+                    zmin_stdout, git_stdout,
+                    "filesystem HEAD stdout mismatch for object format {object_format}, raw={raw_head:?}, args={args:?}"
+                );
+                if raw_head == "not-a-valid-head" {
+                    assert_eq!(zmin_status, 128);
+                    assert!(zmin_stdout.is_empty());
+                    assert_eq!(
+                        zmin_stderr,
+                        "fatal: not a git repository (or any of the parent directories): .git"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn status_bad_direct_head_fails_without_partial_branch_metadata() {
+    for object_format in ["sha1", "sha256"] {
+        let repo = status_format_repo(object_format, false);
+        let width = if object_format == "sha1" { 40 } else { 64 };
+        for all_zero in [false, true] {
+            let head = if all_zero {
+                "0".repeat(width)
+            } else {
+                "1".repeat(width)
+            };
+            fs::write(repo.path().join(".git/HEAD"), format!("{head}\n"))
+                .expect("write direct HEAD");
+            for args in [
+                ["status", "--porcelain=v2", "--branch"].as_slice(),
+                ["status", "--porcelain=v1", "--branch"].as_slice(),
+                ["status", "-sb"].as_slice(),
+            ] {
+                let (zmin_status, zmin_stdout, _) =
+                    command_any_output(zmin_bin(), repo.path(), args, "zmin");
+                let (git_status, _, _) = command_any_output("git", repo.path(), args, "git");
+                assert_ne!(
+                    git_status, 0,
+                    "stock accepted invalid direct HEAD: {args:?}"
+                );
+                assert_ne!(
+                    zmin_status, 0,
+                    "zmin accepted invalid direct HEAD: {args:?}"
+                );
+                assert!(
+                    !zmin_stdout
+                        .lines()
+                        .any(|line| line.starts_with("# branch.")),
+                    "zmin emitted branch metadata before rejecting direct HEAD: {zmin_stdout:?}"
+                );
+            }
+        }
+    }
+}
+
+fn corrupt_reftable_status_log(repo: &TempDir, truncate: bool) {
+    let reftable_dir = repo.path().join(".git/reftable");
+    let tables_list = reftable_dir.join("tables.list");
+    if !truncate {
+        fs::remove_file(tables_list).expect("remove reftable tables.list");
+        return;
+    }
+
+    let tables_content = fs::read_to_string(&tables_list).expect("read reftable tables.list");
+    let table_name = tables_content.lines().next().expect("reftable table entry");
+    let table_path = reftable_dir.join(table_name);
+    let table = fs::read(&table_path).expect("read reftable table");
+    assert!(table.len() > 1, "reftable table should not be empty");
+    fs::write(table_path, &table[..table.len() - 1]).expect("truncate reftable table");
+}
+
+fn status_format_cases() -> [(&'static str, bool); 3] {
+    [("sha1", false), ("sha256", false), ("sha256", true)]
+}
+
+fn status_format_repo(object_format: &str, reftable: bool) -> TempDir {
+    let repo = tempfile::TempDir::new().expect("temp status format repo");
+    let mut init_args = vec!["init"];
+    if object_format == "sha256" {
+        init_args.push("--object-format=sha256");
+    }
+    if reftable {
+        init_args.push("--ref-format=reftable");
+    }
+    git_args(repo.path(), &init_args);
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"status format\n").expect("write tracked file");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    repo
 }
 
 #[test]
@@ -1005,6 +1256,54 @@ fn status_verbose_modes_match_stock_git() {
             git_args(repo.path(), args),
             "args: {args:?}"
         );
+    }
+}
+
+#[test]
+fn status_verbose_branch_matches_stock_for_empty_and_staged_diffs() {
+    for (object_format, reftable) in status_format_cases() {
+        let repo = status_format_repo(object_format, reftable);
+        let args_list = [
+            ["status"].as_slice(),
+            ["status", "--verbose"].as_slice(),
+            ["status", "--verbose", "--branch"].as_slice(),
+        ];
+        for args in args_list {
+            assert_eq!(
+                run_zmin_args(repo.path(), args),
+                git_args(repo.path(), args),
+                "clean status mismatch for object format {object_format}, reftable={reftable}, args={args:?}"
+            );
+        }
+
+        fs::write(repo.path().join("tracked.txt"), b"worktree change\n")
+            .expect("write worktree change");
+        for args in args_list {
+            assert_eq!(
+                run_zmin_args(repo.path(), args),
+                git_args(repo.path(), args),
+                "unstaged status mismatch for object format {object_format}, reftable={reftable}, args={args:?}"
+            );
+        }
+
+        git(repo.path(), ["add", "tracked.txt"]);
+        for args in args_list {
+            assert_eq!(
+                run_zmin_args(repo.path(), args),
+                git_args(repo.path(), args),
+                "staged status mismatch for object format {object_format}, reftable={reftable}, args={args:?}"
+            );
+        }
+
+        fs::write(repo.path().join("tracked.txt"), b"staged and worktree\n")
+            .expect("write staged and worktree change");
+        for args in args_list {
+            assert_eq!(
+                run_zmin_args(repo.path(), args),
+                git_args(repo.path(), args),
+                "staged and worktree status mismatch for object format {object_format}, reftable={reftable}, args={args:?}"
+            );
+        }
     }
 }
 

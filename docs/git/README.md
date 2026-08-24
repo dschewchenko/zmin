@@ -9,6 +9,10 @@ This repository implements a Git-compatible core in Rust and exposes it as reusa
 - `zmin-cli`: command surface built on top of the same primitives.
 - `zmin-git-remote-http`: dedicated HTTP helper for remote flows.
 
+Release archives package `zmin-git-remote-http` beside `zmin` and record both
+binary hashes in `ZMIN-MANIFEST.tsv`; keep the sibling files together for
+HTTPS clone support.
+
 ## Repository compatibility
 
 The repository path stays in canonical Git form:

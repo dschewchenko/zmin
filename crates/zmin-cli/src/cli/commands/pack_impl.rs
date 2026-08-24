@@ -2,6 +2,7 @@ use super::*;
 use crate::cli::commands::reference_commands::{
     RefsVerifySeverity, refs_verify_collect_findings, refs_verify_print_findings,
 };
+use crate::runtime::PackOperationLock;
 
 const PACK_OBJECTS_STDIN_OBJECT_CAPACITY_HINT: usize = 1024;
 const FSCK_SEEN_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -116,11 +117,35 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
             batch_size,
             progress,
             no_progress,
-        } => multi_pack_index_repack(&objects_dir, batch_size, progress, no_progress),
+        } => {
+            let config_entry = find_repo()
+                .ok()
+                .map(|repo| read_config_entry(&repo, "repack.packKeptObjects"))
+                .transpose()?
+                .flatten();
+            let pack_kept_objects = resolve_repack_pack_kept_objects(false, config_entry.as_ref())?;
+            multi_pack_index_repack(
+                &objects_dir,
+                batch_size,
+                progress,
+                no_progress,
+                pack_kept_objects,
+            )
+        }
     }
 }
 
 pub(crate) fn multi_pack_index_write(
+    objects_dir: &std::path::Path,
+    require_packs: bool,
+    options: MultiPackIndexWriteOptions,
+) -> Result<()> {
+    let pack_dir = objects_dir.join("pack");
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+    multi_pack_index_write_unlocked(objects_dir, require_packs, options)
+}
+
+fn multi_pack_index_write_unlocked(
     objects_dir: &std::path::Path,
     require_packs: bool,
     options: MultiPackIndexWriteOptions,
@@ -343,6 +368,7 @@ fn multi_pack_index_verify(
 
 fn multi_pack_index_expire(objects_dir: &std::path::Path) -> Result<()> {
     let pack_dir = objects_dir.join("pack");
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
     let packs = multi_pack_index_pack_names(&pack_dir)?;
     if packs.len() < 2 {
         return Ok(());
@@ -359,19 +385,36 @@ fn multi_pack_index_expire(objects_dir: &std::path::Path) -> Result<()> {
     }
     let removed = !redundant.is_empty();
     for pack in redundant {
-        remove_pack_family(&pack_dir.join(pack))?;
+        remove_pack_family_unlocked(&pack_dir.join(pack))?;
     }
     if removed {
-        multi_pack_index_write(objects_dir, false, MultiPackIndexWriteOptions::plain())?;
+        multi_pack_index_write_unlocked(objects_dir, false, MultiPackIndexWriteOptions::plain())?;
     }
     Ok(())
 }
 
 fn remove_pack_family(idx_path: &std::path::Path) -> Result<()> {
+    let pack_dir = idx_path.parent().ok_or_else(|| {
+        CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("pack index has no parent: {}", idx_path.display()),
+        ))
+    })?;
+    let _pack_lock = PackOperationLock::acquire(pack_dir).map_err(CliError::Io)?;
+    remove_pack_family_unlocked(idx_path)
+}
+
+fn remove_pack_family_unlocked(idx_path: &std::path::Path) -> Result<()> {
+    match fs::symlink_metadata(idx_path.with_extension("keep")) {
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(CliError::Io(error)),
+    }
     for path in [
         idx_path.to_path_buf(),
         idx_path.with_extension("pack"),
         idx_path.with_extension("rev"),
+        idx_path.with_extension("promisor"),
     ] {
         match fs::remove_file(&path) {
             Ok(()) => {}
@@ -449,10 +492,15 @@ fn multi_pack_index_repack(
     batch_size: Option<u64>,
     progress: bool,
     no_progress: bool,
+    pack_kept_objects: bool,
 ) -> Result<()> {
     let _ = (progress, no_progress);
     let pack_dir = objects_dir.join("pack");
-    let packs = multi_pack_index_pack_names(&pack_dir)?;
+    let packs = {
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+        let packs = multi_pack_index_pack_names(&pack_dir)?;
+        multi_pack_index_unkept_pack_names(&pack_dir, &packs, pack_kept_objects)?
+    };
     if packs.len() < 2 {
         return Ok(());
     }
@@ -511,6 +559,19 @@ fn multi_pack_index_repack(
             return Err(CliError::Io(error));
         }
     };
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+    let current_unkept = multi_pack_index_unkept_pack_names(
+        &pack_dir,
+        &multi_pack_index_pack_names(&pack_dir)?,
+        pack_kept_objects,
+    )?;
+    if selected_packs
+        .iter()
+        .any(|pack| !current_unkept.iter().any(|current| current == pack))
+    {
+        let _ = fs::remove_file(&temp_pack);
+        return Ok(());
+    }
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
     install_temp_pack_file(
         &pack_dir.join(format!("{pack_name}.pack")),
@@ -522,7 +583,7 @@ fn multi_pack_index_repack(
         &pack_dir.join(format!("{pack_name}.rev")),
         &indexed.reverse_index,
     )?;
-    multi_pack_index_write(objects_dir, false, MultiPackIndexWriteOptions::plain())
+    multi_pack_index_write_unlocked(objects_dir, false, MultiPackIndexWriteOptions::plain())
 }
 
 fn install_temp_pack_file(
@@ -531,6 +592,11 @@ fn install_temp_pack_file(
     indexed: &zmin_git_core::IndexedPack,
 ) -> Result<()> {
     install_temp_pack_file_with_id(path, temp_pack_path, &indexed.pack_id)
+}
+
+fn acquire_pack_family_lock(pack_path: &std::path::Path) -> Result<PackOperationLock> {
+    let directory = pack_path.parent().unwrap_or_else(|| Path::new("."));
+    PackOperationLock::acquire(directory).map_err(CliError::Io)
 }
 
 fn install_temp_pack_file_with_id(
@@ -545,7 +611,7 @@ fn install_temp_pack_file_with_id(
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             let _ = fs::remove_file(temp_pack_path);
-            if index_pack_file_index_only(GitHashAlgorithm::Sha1, path)
+            if index_pack_file_index_only(pack_id.algorithm(), path)
                 .is_ok_and(|existing| existing.pack_id == *pack_id)
             {
                 Ok(())
@@ -617,6 +683,27 @@ fn multi_pack_index_repack_packs(
         selected.push(pack.clone());
     }
     Ok(selected)
+}
+
+fn multi_pack_index_unkept_pack_names(
+    pack_dir: &std::path::Path,
+    pack_names: &[String],
+    include_kept: bool,
+) -> Result<Vec<String>> {
+    if include_kept {
+        return Ok(pack_names.to_vec());
+    }
+    let mut unkept = Vec::with_capacity(pack_names.len());
+    for pack_name in pack_names {
+        match fs::symlink_metadata(pack_dir.join(pack_name).with_extension("keep")) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                unkept.push(pack_name.clone());
+            }
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(unkept)
 }
 
 #[derive(Debug, Clone)]
@@ -4404,6 +4491,8 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
     let pack_name = pack_objects_output_path(&base_name, &indexed.pack_id, "pack");
     let index_name = pack_objects_output_path(&base_name, &indexed.pack_id, "idx");
     let reverse_index_name = pack_objects_output_path(&base_name, &indexed.pack_id, "rev");
+    let pack_dir = pack_name.parent().unwrap_or_else(|| Path::new("."));
+    let _pack_lock = PackOperationLock::acquire(pack_dir).map_err(CliError::Io)?;
     fs::rename(&temp_pack, pack_name)?;
     fs::write(index_name, &indexed.index)?;
     fs::write(reverse_index_name, &indexed.reverse_index)?;
@@ -4871,7 +4960,6 @@ fn bundle_create(
     revs: Vec<String>,
     show_progress: bool,
 ) -> Result<()> {
-    let bundle_version = parse_bundle_create_version(version.as_deref())?;
     let (max_count, since, revs) = parse_bundle_create_revs(revs)?;
     if revs.is_empty() {
         return Err(CliError::Fatal {
@@ -4880,8 +4968,10 @@ fn bundle_create(
         });
     }
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let revs = normalize_bundle_create_revs(&repo, revs)?;
+    let hash_algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let bundle_version = parse_bundle_create_version(version.as_deref(), hash_algorithm)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), hash_algorithm);
+    let revs = normalize_bundle_create_revs(&repo, &store, revs)?;
     let heads = revs
         .iter()
         .map(|rev| bundle_head_for_rev(&repo, &store, rev))
@@ -4951,7 +5041,9 @@ fn bundle_create(
             .open(&temp_file)?;
         if bundle_version == "3" {
             out.write_all(b"# v3 git bundle\n")?;
-            out.write_all(b"@object-format=sha1\n")?;
+            out.write_all(b"@object-format=")?;
+            out.write_all(bundle_hash_algorithm_name(hash_algorithm).as_bytes())?;
+            out.write_all(b"\n")?;
         } else {
             out.write_all(b"# v2 git bundle\n")?;
         }
@@ -4974,7 +5066,7 @@ fn bundle_create(
         let pack_start = out.stream_position()?;
         write_pack_from_store_with_options(
             &packed_first_store,
-            GitHashAlgorithm::Sha1,
+            hash_algorithm,
             &ids,
             pack_encode_options(None, None, None),
             &mut out,
@@ -5015,9 +5107,16 @@ fn print_bundle_create_progress(total: usize, pack_bytes: u64) {
     eprintln!("Total {total} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)");
 }
 
-fn parse_bundle_create_version(version: Option<&str>) -> Result<&'static str> {
+fn parse_bundle_create_version(
+    version: Option<&str>,
+    hash_algorithm: GitHashAlgorithm,
+) -> Result<&'static str> {
     let Some(version) = version else {
-        return Ok("2");
+        return Ok(if hash_algorithm == GitHashAlgorithm::Sha256 {
+            "3"
+        } else {
+            "2"
+        });
     };
     let parsed = parse_bundle_version_value(version).ok_or_else(|| CliError::Stderr {
         code: 129,
@@ -5029,6 +5128,10 @@ fn parse_bundle_create_version(version: Option<&str>) -> Result<&'static str> {
         },
     })?;
     match parsed {
+        -1 | 2 if hash_algorithm == GitHashAlgorithm::Sha256 => Err(CliError::Fatal {
+            code: 128,
+            message: "cannot write bundle version 2 with algorithm sha256".into(),
+        }),
         -1 | 2 => Ok("2"),
         3 => Ok("3"),
         other => Err(CliError::Fatal {
@@ -5117,7 +5220,7 @@ fn bundle_rev_list_revs(
             if object.kind != GitObjectKind::Tag {
                 return Ok(rev.clone());
             }
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            let tag = decode_tag(store.algorithm(), &object.content)?;
             Ok(tag.target.to_hex())
         })
         .collect()
@@ -5138,8 +5241,12 @@ fn append_bundle_tag_head_objects(
     Ok(())
 }
 
-fn normalize_bundle_create_revs(repo: &GitRepo, revs: Vec<String>) -> Result<Vec<String>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+fn normalize_bundle_create_revs(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: Vec<String>,
+) -> Result<Vec<String>> {
+    let refs = RefStore::new(&repo.git_dir, store.algorithm());
     revs.into_iter()
         .map(|rev| {
             if rev.contains("..") || rev.starts_with('^') || rev.starts_with('-') {
@@ -5165,7 +5272,7 @@ fn append_bundle_limited_parent_exclusions(
         if object.kind != GitObjectKind::Commit {
             continue;
         }
-        let decoded = decode_commit(GitHashAlgorithm::Sha1, &object.content)?;
+        let decoded = decode_commit(store.algorithm(), &object.content)?;
         out.extend(decoded.parents);
     }
     Ok(())
@@ -5189,7 +5296,7 @@ where
             if tree.kind != GitObjectKind::Tree {
                 continue;
             }
-            let (entries, _) = fsck_decode_tree_entries(GitHashAlgorithm::Sha1, &tree.content)?;
+            let (entries, _) = fsck_decode_tree_entries(store.algorithm(), &tree.content)?;
             for entry in entries {
                 if matches!(
                     entry.mode,
@@ -5225,7 +5332,7 @@ fn bundle_commit_subject(store: &LooseObjectStore, id: &ObjectId) -> Result<Opti
     if object.kind != GitObjectKind::Commit {
         return Ok(None);
     }
-    let commit = decode_commit(GitHashAlgorithm::Sha1, &object.content)?;
+    let commit = decode_commit(store.algorithm(), &object.content)?;
     let subject = commit
         .message
         .split(|byte| *byte == b'\n')
@@ -5249,9 +5356,21 @@ fn bundle_verify(file: PathBuf, quiet: bool) -> Result<()> {
     let bundle = parse_bundle_command_header(&file)?;
     let store = repo
         .as_ref()
-        .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1));
-    verify_bundle_prerequisites(store.as_ref(), &bundle.prerequisites)?;
-    let _ = index_bundle_pack(&file, bundle.pack_offset, store.as_ref())?;
+        .map(|repo| {
+            validate_bundle_hash_algorithm(repo, bundle.metadata.hash_algorithm)?;
+            Ok::<_, CliError>(LooseObjectStore::new(
+                repo.objects_dir.clone(),
+                bundle.metadata.hash_algorithm,
+            ))
+        })
+        .transpose()?;
+    verify_bundle_prerequisites(repo.as_ref(), store.as_ref(), &bundle.prerequisites)?;
+    let _ = index_bundle_pack(
+        &file,
+        bundle.pack_offset,
+        bundle.metadata.hash_algorithm,
+        store.as_ref(),
+    )?;
     if !quiet {
         if bundle.heads.len() == 1 {
             println!("The bundle contains this ref:");
@@ -5272,7 +5391,13 @@ fn bundle_verify(file: PathBuf, quiet: bool) -> Result<()> {
                 println!("{}", id.to_hex());
             }
         }
-        println!("The bundle uses this hash algorithm: sha1");
+        println!(
+            "The bundle uses this hash algorithm: {}",
+            bundle_hash_algorithm_name(bundle.metadata.hash_algorithm)
+        );
+        if let Some(filter) = bundle.metadata.filter_spec() {
+            println!("The bundle uses this filter: {filter}");
+        }
     }
     eprintln!("{} is okay", file.display());
     Ok(())
@@ -5280,31 +5405,35 @@ fn bundle_verify(file: PathBuf, quiet: bool) -> Result<()> {
 
 fn bundle_unbundle(file: PathBuf, patterns: Vec<String>, show_progress: bool) -> Result<()> {
     let repo = find_repo()?;
+    let hash_algorithm = repo_hash_algorithm_from_config(&repo)?;
     let bundle = parse_bundle_command_header(&file)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    verify_bundle_prerequisites(Some(&store), &bundle.prerequisites)?;
+    validate_bundle_hash_algorithm(&repo, bundle.metadata.hash_algorithm)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), hash_algorithm);
+    verify_bundle_prerequisites(Some(&repo), Some(&store), &bundle.prerequisites)?;
     let pack_dir = repo.objects_dir.join("pack");
     fs::create_dir_all(&pack_dir)?;
-    let temp_pack = copy_bundle_pack_to_temp_in_dir(&file, bundle.pack_offset, &pack_dir)?;
-    let indexed = match index_pack_file_with_store(GitHashAlgorithm::Sha1, &temp_pack, &store) {
-        Ok(indexed) => indexed,
-        Err(error) => {
-            let _ = fs::remove_file(&temp_pack);
-            return Err(CliError::Io(error));
-        }
-    };
+    let (temp_pack, indexed) = copy_and_repair_bundle_pack_to_temp(
+        &file,
+        bundle.pack_offset,
+        &pack_dir,
+        hash_algorithm,
+        &store,
+    )?;
     if show_progress {
         print_bundle_unbundle_progress(
-            decode_pack_index(GitHashAlgorithm::Sha1, indexed.index.clone())?.len(),
+            decode_pack_index(hash_algorithm, indexed.index.clone())?.len(),
         );
     }
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
-    install_temp_pack_file(
-        &pack_dir.join(format!("{pack_name}.pack")),
-        &temp_pack,
-        &indexed,
-    )?;
-    write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+    {
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+        install_temp_pack_file(
+            &pack_dir.join(format!("{pack_name}.pack")),
+            &temp_pack,
+            &indexed,
+        )?;
+        write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+    }
     for head in bundle.heads {
         if bundle_head_matches(&patterns, &head.name) {
             println!("{} {}", head.id.to_hex(), head.name);
@@ -5336,26 +5465,30 @@ pub(crate) fn fetch_bundle_refspecs(
         eprintln!("warning: option \"depth\" is ignored for {location}");
     }
     let bundle = parse_fetch_bundle_header(repo, file, location)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    verify_bundle_prerequisites(Some(&store), &bundle.prerequisites)?;
+    let hash_algorithm = repo_hash_algorithm_from_config(repo)?;
+    validate_bundle_hash_algorithm(repo, bundle.metadata.hash_algorithm)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), hash_algorithm);
+    verify_bundle_prerequisites(Some(repo), Some(&store), &bundle.prerequisites)?;
     let pack_dir = repo.objects_dir.join("pack");
     fs::create_dir_all(&pack_dir)?;
-    let temp_pack = copy_bundle_pack_to_temp_in_dir(file, bundle.pack_offset, &pack_dir)?;
-    let indexed = match index_pack_file_with_store(GitHashAlgorithm::Sha1, &temp_pack, &store) {
-        Ok(indexed) => indexed,
-        Err(error) => {
-            let _ = fs::remove_file(&temp_pack);
-            return Err(CliError::Io(error));
-        }
-    };
-    let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
-    install_temp_pack_file(
-        &pack_dir.join(format!("{pack_name}.pack")),
-        &temp_pack,
-        &indexed,
+    let (temp_pack, indexed) = copy_and_repair_bundle_pack_to_temp(
+        file,
+        bundle.pack_offset,
+        &pack_dir,
+        hash_algorithm,
+        &store,
     )?;
-    write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+    {
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+        install_temp_pack_file(
+            &pack_dir.join(format!("{pack_name}.pack")),
+            &temp_pack,
+            &indexed,
+        )?;
+        write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+    }
+    let refs = RefStore::new(&repo.git_dir, hash_algorithm);
     let mut fetch_head = String::new();
     for refspec in refspecs {
         let (source, destination) = parse_bundle_fetch_refspec(refspec)?;
@@ -5377,6 +5510,132 @@ pub(crate) fn fetch_bundle_refspecs(
         eprintln!("From {}", location);
     }
     Ok(())
+}
+
+pub(crate) struct CloneBundleInstallResult {
+    pub(crate) haves: Vec<ObjectId>,
+    pub(crate) complete: bool,
+    pub(crate) filter: Option<String>,
+    pub(crate) pack_id: ObjectId,
+}
+
+#[derive(Debug, Clone)]
+struct CloneBundleRefSnapshot {
+    name: String,
+    target: Option<RefTarget>,
+}
+
+/// Import one direct bundle during clone without changing clone configuration
+/// or FETCH_HEAD.  The returned head IDs are supplied as `have` lines to the
+/// origin fetch.  Keeping this transaction here reuses the bundle parser,
+/// hash validation, pack indexer, and pack-family lock used by `bundle`
+/// commands while allowing clone to roll back all bundle refs on failure.
+pub(crate) fn install_clone_bundle(
+    repo: &GitRepo,
+    file: &Path,
+) -> Result<CloneBundleInstallResult> {
+    let bundle = parse_bundle_header(file)?;
+    validate_bundle_hash_algorithm(repo, bundle.metadata.hash_algorithm)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), bundle.metadata.hash_algorithm);
+    verify_bundle_prerequisites(Some(repo), Some(&store), &bundle.prerequisites)?;
+    let bundle_head_ids: Vec<ObjectId> = clone_bundle_ref_heads(&bundle.heads)
+        .map(|head| head.id.clone())
+        .collect();
+    let bundle_filter = bundle.metadata.filter_spec();
+    let bundle_complete = clone_bundle_is_complete(&bundle, &bundle_head_ids);
+
+    let pack_dir = repo.objects_dir.join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let temp_pack = copy_bundle_pack_to_temp_in_dir(file, bundle.pack_offset, &pack_dir)?;
+    let repaired_pack = unique_temp_sibling(&pack_dir.join("bundle-pack-repaired.pack"));
+    let repair = match repair_thin_pack_file_to_path(
+        bundle.metadata.hash_algorithm,
+        &temp_pack,
+        &store,
+        &repaired_pack,
+        PackIndexVersion::V2,
+    ) {
+        Ok(repair) => repair,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_pack);
+            let _ = fs::remove_file(&repaired_pack);
+            return Err(CliError::Io(error));
+        }
+    };
+    let indexed = repair.indexed;
+    let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+    let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+    let index_path = pack_dir.join(format!("{pack_name}.idx"));
+    let pack_preexisted = pack_path.exists();
+    let index_preexisted = index_path.exists();
+    let refs = RefStore::new(&repo.git_dir, bundle.metadata.hash_algorithm);
+    let ref_snapshots = clone_bundle_ref_heads(&bundle.heads)
+        .map(|head| {
+            let suffix = head.name.strip_prefix("refs/").expect("refs/ head");
+            let name = format!("refs/bundles/{suffix}");
+            let target = match refs.read_ref(&name) {
+                Ok(target) => Some(target),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(CliError::Io(error)),
+            };
+            Ok(CloneBundleRefSnapshot { name, target })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut haves = Vec::new();
+    let mut refs_mutated = false;
+
+    let result = (|| {
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+        install_temp_pack_file(&pack_path, &repaired_pack, &indexed)?;
+        write_content_addressed_file(&index_path, &indexed.index)?;
+        haves = collect_clone_bundle_haves(&store, &bundle_head_ids)?;
+        refs_mutated = true;
+        for head in clone_bundle_ref_heads(&bundle.heads) {
+            let suffix = head.name.strip_prefix("refs/").expect("refs/ head");
+            let ref_name = format!("refs/bundles/{suffix}");
+            refs.write_ref(&ref_name, &head.id)?;
+        }
+        Ok::<_, CliError>(())
+    })();
+
+    if let Err(error) = result {
+        if refs_mutated {
+            restore_clone_bundle_ref_snapshots(&refs, &ref_snapshots);
+        }
+        if !pack_preexisted {
+            let _ = fs::remove_file(&pack_path);
+        }
+        if !index_preexisted {
+            let _ = fs::remove_file(&index_path);
+        }
+        let _ = fs::remove_file(&temp_pack);
+        let _ = fs::remove_file(&repaired_pack);
+        return Err(error);
+    }
+
+    let _ = fs::remove_file(&temp_pack);
+    Ok(CloneBundleInstallResult {
+        haves,
+        complete: bundle_complete,
+        filter: bundle_filter,
+        pack_id: indexed.pack_id,
+    })
+}
+
+fn restore_clone_bundle_ref_snapshots(refs: &RefStore, snapshots: &[CloneBundleRefSnapshot]) {
+    for snapshot in snapshots.iter().rev() {
+        match &snapshot.target {
+            Some(RefTarget::Direct(id)) => {
+                let _ = refs.write_ref(&snapshot.name, id);
+            }
+            Some(RefTarget::Symbolic(target)) => {
+                let _ = refs.write_symbolic_ref(&snapshot.name, target);
+            }
+            None => {
+                let _ = refs.delete_ref(&snapshot.name);
+            }
+        }
+    }
 }
 
 fn parse_bundle_fetch_refspec(refspec: &str) -> Result<(&str, Option<&str>)> {
@@ -5431,14 +5690,54 @@ fn bundle_head_matches(patterns: &[String], name: &str) -> bool {
     patterns.is_empty() || patterns.iter().any(|pattern| pattern == name)
 }
 
+fn clone_bundle_ref_heads(heads: &[BundleHead]) -> impl Iterator<Item = &BundleHead> {
+    heads.iter().filter(|head| head.name.starts_with("refs/"))
+}
+
+fn clone_bundle_is_complete(bundle: &ParsedBundleHeader, head_ids: &[ObjectId]) -> bool {
+    bundle.metadata.filter_spec().is_none()
+        && bundle.prerequisites.is_empty()
+        && !head_ids.is_empty()
+}
+
+fn collect_clone_bundle_haves(
+    store: &LooseObjectStore,
+    roots: &[ObjectId],
+) -> Result<Vec<ObjectId>> {
+    let mut pending = roots.to_vec();
+    let mut seen = HashSet::with_capacity(roots.len());
+    let mut haves = Vec::with_capacity(roots.len());
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let object = store.read_object(&id).map_err(CliError::Io)?;
+        match object.kind {
+            GitObjectKind::Commit => {
+                let links = decode_commit_links(store.algorithm(), &object.content)?;
+                haves.push(id);
+                pending.extend(links.parents);
+            }
+            GitObjectKind::Tag => {
+                pending.push(decode_tag(store.algorithm(), &object.content)?.target);
+            }
+            GitObjectKind::Tree | GitObjectKind::Blob => {}
+        }
+    }
+    haves.sort_by_key(ObjectId::to_hex);
+    haves.dedup();
+    Ok(haves)
+}
+
 fn verify_bundle_prerequisites(
+    repo: Option<&GitRepo>,
     store: Option<&LooseObjectStore>,
     prerequisites: &[ObjectId],
 ) -> Result<()> {
     if prerequisites.is_empty() {
         return Ok(());
     }
-    let Some(store) = store else {
+    let (Some(repo), Some(store)) = (repo, store) else {
         return Err(CliError::Fatal {
             code: 128,
             message: "Need a repository to verify a bundle with prerequisites".into(),
@@ -5449,6 +5748,24 @@ fn verify_bundle_prerequisites(
             code: 1,
             message: format!("Repository lacks prerequisite commit {}", id.to_hex()),
         })?;
+    }
+    let refs = RefStore::new(&repo.git_dir, prerequisites[0].algorithm());
+    let mut ref_roots = Vec::new();
+    refs.for_each_resolved_ref_streaming("refs/", |_, id| -> Result<()> {
+        ref_roots.push(id.clone());
+        Ok(())
+    })?;
+    let reachable =
+        collect_reachable_object_ids_from_roots(store, &ref_roots).map_err(CliError::Io)?;
+    if prerequisites.iter().any(|id| !reachable.contains(id)) {
+        let id = prerequisites[0].to_hex();
+        return Err(CliError::Fatal {
+            code: 1,
+            message: format!(
+                "some prerequisite commits exist in the object store, but are not connected to the repository's history: {}",
+                id
+            ),
+        });
     }
     Ok(())
 }
@@ -5461,7 +5778,7 @@ fn bundle_head_for_rev(repo: &GitRepo, store: &LooseObjectStore, rev: &str) -> R
     } else if head_rev.starts_with("refs/") {
         head_rev.to_owned()
     } else {
-        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let refs = RefStore::new(&repo.git_dir, store.algorithm());
         let branch = format!("refs/heads/{head_rev}");
         if ref_exists(&refs, &branch)? {
             branch
@@ -5481,6 +5798,7 @@ fn bundle_head_for_rev(repo: &GitRepo, store: &LooseObjectStore, rev: &str) -> R
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedBundleHeader {
+    metadata: BundleMetadata,
     heads: Vec<BundleHead>,
     prerequisites: Vec<ObjectId>,
     pack_offset: u64,
@@ -5504,12 +5822,18 @@ fn parse_bundle_header(path: &std::path::Path) -> Result<ParsedBundleHeader> {
             message: "bundle header is too large".into(),
         })?;
     let header = bundle_header_line(&line)?;
-    if !matches!(header, "# v2 git bundle" | "# v3 git bundle") {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "unsupported bundle format".into(),
-        });
-    }
+    let version = match header {
+        "# v2 git bundle" => 2,
+        "# v3 git bundle" => 3,
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "unsupported bundle format".into(),
+            });
+        }
+    };
+    let mut hash_algorithm = GitHashAlgorithm::Sha1;
+    let mut filters = Vec::new();
     let mut heads = Vec::new();
     let mut prerequisites = Vec::new();
     loop {
@@ -5530,8 +5854,15 @@ fn parse_bundle_header(path: &std::path::Path) -> Result<ParsedBundleHeader> {
         if line == b"\n" {
             break;
         }
-        let line = bundle_header_line(&line)?;
+        let line = bundle_header_line(&line)?.trim_end_matches(char::is_whitespace);
         if line.starts_with('@') {
+            if version != 3 {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "bundle ref line is malformed".into(),
+                });
+            }
+            parse_bundle_capability(&line[1..], &mut hash_algorithm, &mut filters)?;
             continue;
         }
         if let Some(prerequisite) = line.strip_prefix('-') {
@@ -5542,19 +5873,36 @@ fn parse_bundle_header(path: &std::path::Path) -> Result<ParsedBundleHeader> {
                     code: 128,
                     message: "bundle prerequisite line is malformed".into(),
                 })?;
-            prerequisites.push(ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?);
+            prerequisites.push(ObjectId::from_hex(hash_algorithm, id)?);
             continue;
         }
-        let (id, name) = line.split_once(' ').ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: "bundle ref line is malformed".into(),
-        })?;
+        let oid_len = hash_algorithm.digest_len() * 2;
+        if line.len() <= oid_len
+            || !line.is_char_boundary(oid_len)
+            || !line[oid_len..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "bundle ref line is malformed".into(),
+            });
+        }
+        let (id, remainder) = line.split_at(oid_len);
+        let separator_len = remainder.chars().next().unwrap().len_utf8();
+        let name = &remainder[separator_len..];
         heads.push(BundleHead {
-            id: ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?,
+            id: ObjectId::from_hex(hash_algorithm, id)?,
             name: name.to_owned(),
         });
     }
     Ok(ParsedBundleHeader {
+        metadata: BundleMetadata {
+            version,
+            hash_algorithm,
+            filters,
+        },
         heads,
         prerequisites,
         pack_offset,
@@ -5608,21 +5956,185 @@ fn bundle_header_line(line: &[u8]) -> Result<&str> {
     })
 }
 
+fn parse_bundle_capability(
+    capability: &str,
+    hash_algorithm: &mut GitHashAlgorithm,
+    filters: &mut Vec<String>,
+) -> Result<()> {
+    let Some((key, value)) = capability.split_once('=') else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unknown capability '{capability}'"),
+        });
+    };
+    match key {
+        "object-format" => {
+            *hash_algorithm = match value {
+                "sha1" => GitHashAlgorithm::Sha1,
+                "sha256" => GitHashAlgorithm::Sha256,
+                _ => {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!("unrecognized bundle hash algorithm: {value}"),
+                    });
+                }
+            };
+            Ok(())
+        }
+        "filter" => {
+            validate_bundle_filter_spec(value)?;
+            filters.push(value.to_owned());
+            Ok(())
+        }
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unknown capability '{capability}'"),
+        }),
+    }
+}
+
+fn validate_bundle_filter_spec(raw: &str) -> Result<()> {
+    if raw == "blob:none" {
+        return Ok(());
+    }
+    if let Some(limit) = raw.strip_prefix("blob:limit=") {
+        parse_git_unsigned(limit)
+            .map(|_| ())
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid filter-spec '{raw}'"),
+            })?;
+        return Ok(());
+    }
+    if let Some(depth) = raw.strip_prefix("tree:") {
+        parse_git_unsigned(depth)
+            .map(|_| ())
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "expected 'tree:<depth>'".into(),
+            })?;
+        return Ok(());
+    }
+    if let Some(kind) = raw.strip_prefix("object:type=") {
+        if matches!(kind, "blob" | "tree" | "commit" | "tag") {
+            return Ok(());
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("'{kind}' for 'object:type=<type>' is not a valid object type"),
+        });
+    }
+    if let Some(blobish) = raw.strip_prefix("sparse:oid=") {
+        let _ = blobish;
+        return Ok(());
+    }
+    if let Some(filters) = raw.strip_prefix("combine:") {
+        if filters.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "expected something after combine:".into(),
+            });
+        }
+        for filter in filters.split('+') {
+            validate_bundle_filter_spec(&percent_decode_bundle_filter(filter)?)?;
+        }
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("invalid filter-spec '{raw}'"),
+    })
+}
+
+fn percent_decode_bundle_filter(value: &str) -> Result<String> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let Some(high) = bytes.get(index + 1).copied() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid filter-spec '{value}'"),
+                });
+            };
+            let Some(low) = bytes.get(index + 2).copied() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid filter-spec '{value}'"),
+                });
+            };
+            let Some(high) = hex_value(high) else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid filter-spec '{value}'"),
+                });
+            };
+            let Some(low) = hex_value(low) else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid filter-spec '{value}'"),
+                });
+            };
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid filter-spec '{value}'"),
+    })
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn bundle_hash_algorithm_name(algorithm: GitHashAlgorithm) -> &'static str {
+    match algorithm {
+        GitHashAlgorithm::Sha1 => "sha1",
+        GitHashAlgorithm::Sha256 => "sha256",
+    }
+}
+
+fn validate_bundle_hash_algorithm(
+    repo: &GitRepo,
+    bundle_algorithm: GitHashAlgorithm,
+) -> Result<()> {
+    let repo_algorithm = repo_hash_algorithm_from_config(repo).map_err(CliError::Io)?;
+    if repo_algorithm != bundle_algorithm {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "bundle uses hash algorithm {}, but repository uses {}",
+                bundle_hash_algorithm_name(bundle_algorithm),
+                bundle_hash_algorithm_name(repo_algorithm)
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn index_bundle_pack(
     path: &std::path::Path,
     pack_offset: u64,
+    hash_algorithm: GitHashAlgorithm,
     store: Option<&LooseObjectStore>,
 ) -> Result<zmin_git_core::IndexedPack> {
     let bytes = map_file_bytes(path)?;
     let pack = bundle_pack_slice(bytes.as_slice(), pack_offset)?;
     if let Some(store) = store {
-        Ok(index_pack_bytes_with_store(
-            GitHashAlgorithm::Sha1,
-            pack,
-            store,
-        )?)
+        Ok(index_pack_bytes_with_store(hash_algorithm, pack, store)?)
     } else {
-        Ok(index_pack_bytes(GitHashAlgorithm::Sha1, pack)?)
+        Ok(index_pack_bytes(hash_algorithm, pack)?)
     }
 }
 
@@ -5659,6 +6171,34 @@ fn copy_bundle_pack_to_temp_in_dir(
     }
     result?;
     Ok(temp_pack)
+}
+
+fn copy_and_repair_bundle_pack_to_temp(
+    path: &std::path::Path,
+    pack_offset: u64,
+    dir: &std::path::Path,
+    algorithm: GitHashAlgorithm,
+    store: &LooseObjectStore,
+) -> Result<(PathBuf, zmin_git_core::IndexedPack)> {
+    let input_pack = copy_bundle_pack_to_temp_in_dir(path, pack_offset, dir)?;
+    let repaired_pack = unique_temp_sibling(&dir.join("bundle-pack-repaired.pack"));
+    let result = repair_thin_pack_file_to_path(
+        algorithm,
+        &input_pack,
+        store,
+        &repaired_pack,
+        PackIndexVersion::V2,
+    );
+    let repair = match result {
+        Ok(repair) => repair,
+        Err(error) => {
+            let _ = fs::remove_file(&input_pack);
+            let _ = fs::remove_file(&repaired_pack);
+            return Err(CliError::Io(error));
+        }
+    };
+    let _ = fs::remove_file(&input_pack);
+    Ok((repaired_pack, repair.indexed))
 }
 
 fn index_pack_usage_error() -> CliError {
@@ -5773,6 +6313,13 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(parent) = pack_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let _pack_lock = acquire_pack_family_lock(&pack_path)?;
+        let kept = if let Some(message) = options.keep {
+            write_index_pack_keep_file(&pack_path.with_extension("keep"), &message)?;
+            true
+        } else {
+            false
+        };
         install_temp_pack_file_with_id(&pack_path, &temp_pack, &indexed.pack_id)?;
         let idx_path = options
             .output
@@ -5784,12 +6331,6 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(reverse_index) = indexed.reverse_index.as_ref() {
             write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
         }
-        let kept = if let Some(message) = options.keep {
-            fs::write(pack_path.with_extension("keep"), message)?;
-            true
-        } else {
-            false
-        };
         write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
             print_index_pack_verbose_progress(algorithm, &indexed.index)?;
@@ -5836,6 +6377,13 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(parent) = pack_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let _pack_lock = acquire_pack_family_lock(&pack_path)?;
+        let kept = if let Some(message) = options.keep {
+            write_index_pack_keep_file(&pack_path.with_extension("keep"), &message)?;
+            true
+        } else {
+            false
+        };
         install_temp_pack_file_with_id(&pack_path, &temp_pack, &indexed.pack_id)?;
         let idx_path = options
             .output
@@ -5847,12 +6395,6 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(reverse_index) = indexed.reverse_index.as_ref() {
             write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
         }
-        let kept = if let Some(message) = options.keep {
-            fs::write(pack_path.with_extension("keep"), message)?;
-            true
-        } else {
-            false
-        };
         write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
             print_index_pack_verbose_progress(algorithm, &indexed.index)?;
@@ -5905,6 +6447,13 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(parent) = pack_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let _pack_lock = acquire_pack_family_lock(&pack_path)?;
+        let kept = if let Some(message) = options.keep {
+            write_index_pack_keep_file(&pack_path.with_extension("keep"), &message)?;
+            true
+        } else {
+            false
+        };
         install_temp_pack_file(&pack_path, &repaired_pack, &repair.indexed)?;
         let idx_path = options
             .output
@@ -5919,12 +6468,6 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
                 &repair.indexed.reverse_index,
             )?;
         }
-        let kept = if let Some(message) = options.keep {
-            fs::write(pack_path.with_extension("keep"), message)?;
-            true
-        } else {
-            false
-        };
         write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
             print_index_pack_verbose_progress(algorithm, &repair.indexed.index)?;
@@ -5965,16 +6508,17 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(parent) = idx_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        write_content_addressed_file(&idx_path, &indexed.index)?;
-        if let Some(reverse_index) = indexed.reverse_index.as_ref() {
-            write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
-        }
+        let _pack_lock = acquire_pack_family_lock(&pack_path)?;
         let kept = if let Some(message) = options.keep {
-            fs::write(pack_path.with_extension("keep"), message)?;
+            write_index_pack_keep_file(&pack_path.with_extension("keep"), &message)?;
             true
         } else {
             false
         };
+        write_content_addressed_file(&idx_path, &indexed.index)?;
+        if let Some(reverse_index) = indexed.reverse_index.as_ref() {
+            write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
+        }
         if options.verbose {
             print_index_pack_verbose_progress(algorithm, &indexed.index)?;
         }
@@ -5997,16 +6541,17 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
     enforce_index_pack_max_input_size(pack_path.metadata()?.len(), max_input_size)?;
     let indexed =
         index_pack_file_for_output(algorithm, &pack_path, index_version, options.no_rev_index)?;
-    write_content_addressed_file(&idx_path, &indexed.index)?;
-    if let Some(reverse_index) = indexed.reverse_index.as_ref() {
-        write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
-    }
+    let _pack_lock = acquire_pack_family_lock(&pack_path)?;
     let kept = if let Some(message) = options.keep {
-        fs::write(pack_path.with_extension("keep"), message)?;
+        write_index_pack_keep_file(&pack_path.with_extension("keep"), &message)?;
         true
     } else {
         false
     };
+    write_content_addressed_file(&idx_path, &indexed.index)?;
+    if let Some(reverse_index) = indexed.reverse_index.as_ref() {
+        write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
+    }
     if options.verbose {
         print_index_pack_verbose_progress(algorithm, &indexed.index)?;
     }
@@ -6039,6 +6584,15 @@ fn print_index_pack_installed_output(pack_id: &ObjectId, kept: bool) {
     } else {
         println!("pack\t{}", pack_id.to_hex());
     }
+}
+
+fn write_index_pack_keep_file(path: &Path, message: &str) -> io::Result<()> {
+    if message.is_empty() {
+        return fs::write(path, []);
+    }
+    let mut content = message.as_bytes().to_vec();
+    content.push(b'\n');
+    fs::write(path, content)
 }
 
 fn copy_index_pack_stdin_to_temp_pack(path: &Path, max_input_size: Option<usize>) -> Result<()> {
@@ -7447,6 +8001,270 @@ fn write_verify_signature_input(signature: &[u8]) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_bundle_header_fixture(path: &std::path::Path, header: &str) {
+        fs::write(path, format!("{header}PACK")).expect("write bundle header fixture");
+    }
+
+    #[test]
+    fn bundle_header_tracks_sha1_and_sha256_metadata_and_order() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let sha1 = "11".repeat(20);
+        let sha256 = "22".repeat(32);
+        let sha1_path = temp.path().join("sha1.bundle");
+        write_bundle_header_fixture(
+            &sha1_path,
+            &format!("# v2 git bundle\n-{sha1} base subject\n{sha1} refs/heads/main\n\n"),
+        );
+        let parsed_sha1 = parse_bundle_header(&sha1_path).expect("parse SHA-1 bundle");
+        assert_eq!(parsed_sha1.metadata.version, 2);
+        assert_eq!(parsed_sha1.metadata.hash_algorithm, GitHashAlgorithm::Sha1);
+        assert!(parsed_sha1.metadata.filters.is_empty());
+        assert_eq!(parsed_sha1.prerequisites[0].to_hex(), sha1);
+        assert_eq!(parsed_sha1.heads[0].id.to_hex(), sha1);
+        assert_eq!(parsed_sha1.heads[0].name, "refs/heads/main");
+
+        let sha256_path = temp.path().join("sha256.bundle");
+        write_bundle_header_fixture(
+            &sha256_path,
+            &format!(
+                "# v3 git bundle\n@object-format=sha256\n@filter=blob:none\n@filter=tree:0\n-{sha256} base subject\n{sha256} refs/heads/main\n\n"
+            ),
+        );
+        let parsed_sha256 = parse_bundle_header(&sha256_path).expect("parse SHA-256 bundle");
+        assert_eq!(parsed_sha256.metadata.version, 3);
+        assert_eq!(
+            parsed_sha256.metadata.hash_algorithm,
+            GitHashAlgorithm::Sha256
+        );
+        assert_eq!(
+            parsed_sha256.metadata.filters,
+            vec!["blob:none".to_owned(), "tree:0".to_owned()]
+        );
+        assert_eq!(
+            parsed_sha256.metadata.filter_spec().as_deref(),
+            Some("combine:blob%3Anone+tree%3A0")
+        );
+        assert_eq!(parsed_sha256.prerequisites[0].to_hex(), sha256);
+        assert_eq!(parsed_sha256.heads[0].id.to_hex(), sha256);
+    }
+
+    #[test]
+    fn bundle_header_rejects_unknown_capabilities_and_wrong_oid_width() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let unknown_path = temp.path().join("unknown.bundle");
+        write_bundle_header_fixture(&unknown_path, "# v3 git bundle\n@unknown=silly\n\n");
+        let unknown = parse_bundle_header(&unknown_path).expect_err("unknown capability");
+        assert!(matches!(
+            unknown,
+            CliError::Fatal { code: 128, message } if message == "unknown capability 'unknown=silly'"
+        ));
+
+        let wrong_width_path = temp.path().join("wrong-width.bundle");
+        write_bundle_header_fixture(
+            &wrong_width_path,
+            "# v3 git bundle\n@object-format=sha256\n1111111111111111111111111111111111111111 refs/heads/main\n\n",
+        );
+        assert!(parse_bundle_header(&wrong_width_path).is_err());
+    }
+
+    #[test]
+    fn bundle_header_accepts_git_whitespace_and_empty_sparse_oid() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let oid = "11".repeat(20);
+        let path = temp.path().join("whitespace.bundle");
+        write_bundle_header_fixture(
+            &path,
+            &format!(
+                "# v3 git bundle\n@object-format=sha1\t \n@filter=sparse:oid=\n-{oid}\tbase subject   \n{oid}\trefs/heads/main   \n\n"
+            ),
+        );
+        let parsed = parse_bundle_header(&path).expect("parse Git whitespace");
+        assert_eq!(parsed.metadata.filters, vec!["sparse:oid=".to_owned()]);
+        assert_eq!(parsed.prerequisites[0].to_hex(), oid);
+        assert_eq!(parsed.heads[0].name, "refs/heads/main");
+    }
+
+    #[test]
+    fn clone_bundle_heads_ignore_non_refs_for_both_hashes() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let first = ObjectId::new(algorithm, &vec![0x11; algorithm.digest_len()]);
+            let second = ObjectId::new(algorithm, &vec![0x22; algorithm.digest_len()]);
+            let heads = vec![
+                BundleHead {
+                    id: first.clone(),
+                    name: "HEAD".to_owned(),
+                },
+                BundleHead {
+                    id: second.clone(),
+                    name: "refs/heads/main".to_owned(),
+                },
+            ];
+
+            let selected = clone_bundle_ref_heads(&heads)
+                .map(|head| (head.name.as_str(), head.id.clone()))
+                .collect::<Vec<_>>();
+            assert_eq!(selected, vec![("refs/heads/main", second)]);
+        }
+    }
+
+    #[test]
+    fn filtered_clone_bundle_is_never_complete_for_both_hashes() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let head = ObjectId::new(algorithm, &vec![0x11; algorithm.digest_len()]);
+            let bundle = ParsedBundleHeader {
+                metadata: BundleMetadata {
+                    version: 3,
+                    hash_algorithm: algorithm,
+                    filters: vec!["blob:none".to_owned()],
+                },
+                heads: vec![BundleHead {
+                    id: head.clone(),
+                    name: "refs/heads/main".to_owned(),
+                }],
+                prerequisites: Vec::new(),
+                pack_offset: 0,
+            };
+            assert!(!clone_bundle_is_complete(&bundle, &[head]));
+        }
+    }
+
+    #[test]
+    fn clone_bundle_haves_include_reachable_ancestors_for_both_hashes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let objects = temp.path().join(match algorithm {
+                GitHashAlgorithm::Sha1 => "sha1",
+                GitHashAlgorithm::Sha256 => "sha256",
+            });
+            fs::create_dir_all(&objects).expect("objects directory");
+            let store = LooseObjectStore::new(objects, algorithm);
+            let tree = ObjectId::new(algorithm, &vec![0x33; algorithm.digest_len()]);
+            let author =
+                Signature::new("A", "a@example.test", 1_700_000_000, "+0000").expect("author");
+            let committer =
+                Signature::new("C", "c@example.test", 1_700_000_000, "+0000").expect("committer");
+            let first = store
+                .write_object(
+                    GitObjectKind::Commit,
+                    &CommitBuilder::new(tree.clone(), author.clone(), committer.clone())
+                        .message("first\n")
+                        .expect("first message")
+                        .encode()
+                        .expect("first commit"),
+                )
+                .expect("first object");
+            let second = store
+                .write_object(
+                    GitObjectKind::Commit,
+                    &CommitBuilder::new(tree, author, committer)
+                        .parent(first.clone())
+                        .message("second\n")
+                        .expect("second message")
+                        .encode()
+                        .expect("second commit"),
+                )
+                .expect("second object");
+
+            let haves = collect_clone_bundle_haves(&store, &[second.clone()]).expect("haves");
+            assert_eq!(haves.len(), 2);
+            assert!(haves.contains(&first));
+            assert!(haves.contains(&second));
+        }
+    }
+
+    #[test]
+    fn clone_bundle_ref_rollback_restores_existing_and_removes_new_refs() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let git_dir = temp.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("git dir");
+        let refs = RefStore::new(&git_dir, GitHashAlgorithm::Sha1);
+        let old = ObjectId::new(GitHashAlgorithm::Sha1, &vec![0x11; 20]);
+        let incoming = ObjectId::new(GitHashAlgorithm::Sha1, &vec![0x22; 20]);
+        refs.write_ref("refs/bundles/main", &old)
+            .expect("old bundle ref");
+        let snapshots = vec![
+            CloneBundleRefSnapshot {
+                name: "refs/bundles/main".to_owned(),
+                target: Some(refs.read_ref("refs/bundles/main").expect("snapshot")),
+            },
+            CloneBundleRefSnapshot {
+                name: "refs/bundles/next".to_owned(),
+                target: None,
+            },
+        ];
+
+        refs.write_ref("refs/bundles/main", &incoming)
+            .expect("incoming old ref");
+        refs.write_ref("refs/bundles/next", &incoming)
+            .expect("incoming new ref");
+        restore_clone_bundle_ref_snapshots(&refs, &snapshots);
+
+        assert_eq!(
+            refs.resolve("refs/bundles/main").expect("restored ref"),
+            old
+        );
+        assert_eq!(
+            refs.read_ref("refs/bundles/next")
+                .expect_err("removed new ref")
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn index_pack_keep_message_matches_git_bytes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("pack.keep");
+        write_index_pack_keep_file(&path, "").expect("empty keep");
+        assert_eq!(fs::read(&path).expect("empty keep bytes"), b"");
+        write_index_pack_keep_file(&path, "custom-message").expect("message keep");
+        assert_eq!(
+            fs::read(&path).expect("message keep bytes"),
+            b"custom-message\n"
+        );
+    }
+
+    #[test]
+    fn install_temp_pack_file_with_id_checks_existing_sha1_and_sha256_packs() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let store = InMemoryObjectStore::new(algorithm);
+            let object_id = store
+                .write_object(GitObjectKind::Blob, b"existing collision pack")
+                .expect("object");
+            let mut pack = Vec::new();
+            write_pack_from_store_with_options(
+                &store,
+                algorithm,
+                &[object_id],
+                PackEncodeOptions::UNDELTIFIED,
+                &mut pack,
+            )
+            .expect("pack");
+            let indexed = index_pack_bytes(algorithm, &pack).expect("index");
+            let existing = temp.path().join("existing.pack");
+            let incoming = temp.path().join("incoming.pack");
+            fs::write(&existing, &pack).expect("existing pack");
+            fs::write(&incoming, &pack).expect("incoming pack");
+
+            install_temp_pack_file_with_id(&existing, &incoming, &indexed.pack_id)
+                .expect("same pack is idempotent");
+            assert!(!incoming.exists());
+
+            let mut wrong_bytes = indexed.pack_id.as_bytes().to_vec();
+            wrong_bytes[0] ^= 1;
+            let wrong_id = ObjectId::new(algorithm, &wrong_bytes);
+            fs::write(&incoming, &pack).expect("incoming collision pack");
+            let result = install_temp_pack_file_with_id(&existing, &incoming, &wrong_id);
+            assert!(matches!(
+                result,
+                Err(CliError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists
+            ));
+            assert!(!incoming.exists());
+        }
+    }
+
     use zmin_git_core::{GitObjectSink, InMemoryObjectStore};
 
     #[test]
@@ -7878,6 +8696,84 @@ mod tests {
             );
         }
         rows
+    }
+
+    #[test]
+    fn multi_pack_index_remove_respects_non_regular_keep_sibling() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        let idx_path = pack_dir.join("pack-keep-test.idx");
+        for suffix in ["idx", "pack", "rev", "promisor"] {
+            std::fs::write(pack_dir.join(format!("pack-keep-test.{suffix}")), suffix)
+                .expect("pack member");
+        }
+        std::fs::create_dir(pack_dir.join("pack-keep-test.keep")).expect("directory sentinel");
+        remove_pack_family(&idx_path).expect("keep protected family");
+        for suffix in ["idx", "pack", "rev", "promisor", "keep"] {
+            assert!(pack_dir.join(format!("pack-keep-test.{suffix}")).exists());
+        }
+    }
+
+    #[test]
+    fn multi_pack_index_remove_removes_promisor_without_keep_and_preserves_unrelated_sentinel() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        let idx_path = pack_dir.join("pack-remove-test.idx");
+        for suffix in ["idx", "pack", "rev", "promisor"] {
+            std::fs::write(pack_dir.join(format!("pack-remove-test.{suffix}")), suffix)
+                .expect("pack member");
+        }
+        let unrelated = pack_dir.join("pack-unrelated.promisor");
+        std::fs::write(&unrelated, b"unrelated sentinel\n").expect("unrelated sentinel");
+
+        remove_pack_family(&idx_path).expect("remove unkept family");
+
+        for suffix in ["idx", "pack", "rev", "promisor"] {
+            assert!(!pack_dir.join(format!("pack-remove-test.{suffix}")).exists());
+        }
+        assert_eq!(
+            std::fs::read(&unrelated).expect("read unrelated sentinel"),
+            b"unrelated sentinel\n"
+        );
+    }
+
+    #[test]
+    fn multi_pack_index_repack_source_selection_excludes_keep_siblings() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        std::fs::write(pack_dir.join("pack-kept.pack"), b"pack").expect("pack");
+        std::fs::write(pack_dir.join("pack-kept.keep"), b"keep").expect("keep");
+        std::fs::create_dir(pack_dir.join("pack-dir.keep")).expect("directory keep");
+        std::fs::write(pack_dir.join("pack-dir.pack"), b"pack").expect("pack");
+        std::fs::write(pack_dir.join("pack-free.pack"), b"pack").expect("pack");
+
+        let selected = multi_pack_index_unkept_pack_names(
+            &pack_dir,
+            &[
+                "pack-kept.pack".to_owned(),
+                "pack-dir.pack".to_owned(),
+                "pack-free.pack".to_owned(),
+            ],
+            false,
+        )
+        .expect("unkept packs");
+
+        assert_eq!(selected, vec!["pack-free.pack"]);
+
+        let included = multi_pack_index_unkept_pack_names(
+            &pack_dir,
+            &[
+                "pack-kept.pack".to_owned(),
+                "pack-dir.pack".to_owned(),
+                "pack-free.pack".to_owned(),
+            ],
+            true,
+        )
+        .expect("kept packs included");
+        assert_eq!(included.len(), 3);
     }
 
     fn multi_pack_index_object_ids_and_pack_ids(bytes: &[u8]) -> (Vec<Vec<u8>>, Vec<u32>) {

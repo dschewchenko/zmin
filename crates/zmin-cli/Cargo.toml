@@ -31,14 +31,27 @@ similar = { version = "2.7.0" }
 zmin-cli-schema = { path = "../zmin-cli-schema" }
 zmin-cli-runtime = { path = "../zmin-cli-runtime" }
 zmin-git-core = { path = "../zmin-git-core" }
+zmin-http-transport = { path = "../zmin-http-transport" }
 zmin-primitives = { path = "../zmin-primitives" }
+
+[target.aarch64-apple-darwin.dependencies]
+sha2 = { version = "0.10.9", features = ["asm"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.174"
 
 [target.'cfg(windows)'.dependencies]
 chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+libc = "0.2.174"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = "3.10.1"

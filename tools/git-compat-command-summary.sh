@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-baseline="${ZMIN_GIT_BASELINE:-v2.47.1}"
-cache_dir="${ZMIN_GIT_DOC_CACHE:-$repo_root/target/git-doc-cache/$baseline}"
-command_list="${ZMIN_GIT_COMMAND_LIST:-$cache_dir/command-list.txt}"
+[[ -n "${ZMIN_GIT_BASELINE:-}" ]] || { printf 'error: ZMIN_GIT_BASELINE is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_DOC_CACHE:-}" ]] || { printf 'error: ZMIN_GIT_DOC_CACHE is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_COMMAND_LIST:-}" ]] || { printf 'error: ZMIN_GIT_COMMAND_LIST is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_SOURCE_ARCHIVE_SHA256:-}" ]] || { printf 'error: ZMIN_GIT_SOURCE_ARCHIVE_SHA256 is required\n' >&2; exit 1; }
+command_list="$ZMIN_GIT_COMMAND_LIST"
 format="${1:---markdown}"
 
-if [[ ! -f "$command_list" ]]; then
-  ZMIN_GIT_BASELINE="$baseline" "$repo_root/tools/git-compat-option-inventory.sh" >/dev/null
-fi
+[[ -f "$command_list" ]] || { printf 'error: Git command list is missing: %s\n' "$command_list" >&2; exit 1; }
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -50,7 +51,7 @@ import sys
 from pathlib import Path
 
 LONG_OPTION_PATTERN = re.compile(r"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*)(?:[=\s]|$)")
-SHORT_OPTION_PATTERN = re.compile(r"(?<!\S)(-[A-Za-z])(?:[=\s]|$)")
+SHORT_OPTION_PATTERN = re.compile(r"(?<!\S)(-[A-Za-z0-9?])(?:[=\s]|$)")
 
 seed_path = Path(sys.argv[1])
 matrix_paths = [Path(path) for path in sys.argv[2:]]

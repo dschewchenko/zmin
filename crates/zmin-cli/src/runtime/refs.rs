@@ -239,13 +239,15 @@ pub(crate) fn short_ref_name_str(value: &str) -> &str {
 }
 
 pub(crate) fn abbrev_ref_name(repo: &GitRepo, rev: &str) -> Result<String> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = super::repo_hash_algorithm_from_config(repo)?;
+    let head_refs = RefStore::new(&repo.git_dir, algorithm);
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, algorithm);
     let resolved_previous = resolve_previous_checkout_expression(repo, rev)
         .ok()
         .flatten();
     let rev = resolved_previous.as_deref().unwrap_or(rev);
     if rev == "HEAD" {
-        return Ok(current_branch_ref(&refs)?
+        return Ok(current_branch_ref(&head_refs)?
             .map(|name| branch_display_name(&name))
             .unwrap_or_else(|| "HEAD".to_owned()));
     }
@@ -275,13 +277,15 @@ pub(crate) fn abbrev_ref_name(repo: &GitRepo, rev: &str) -> Result<String> {
 }
 
 pub(crate) fn symbolic_full_ref_name(repo: &GitRepo, rev: &str) -> Result<Option<String>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = super::repo_hash_algorithm_from_config(repo)?;
+    let head_refs = RefStore::new(&repo.git_dir, algorithm);
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, algorithm);
     let resolved_previous = resolve_previous_checkout_expression(repo, rev)
         .ok()
         .flatten();
     let rev = resolved_previous.as_deref().unwrap_or(rev);
     if rev == "HEAD" {
-        return Ok(match refs.read_head()? {
+        return Ok(match head_refs.read_head()? {
             RefTarget::Symbolic(target) => Some(target),
             RefTarget::Direct(_) => Some("HEAD".to_owned()),
         });
@@ -754,5 +758,57 @@ mod tests {
         let ids = branch_head_ids(&refs).expect("branch ids");
 
         assert_eq!(ids, vec![live_id]);
+    }
+
+    #[test]
+    fn named_refs_use_common_packed_refs_in_linked_worktrees_for_both_algorithms() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let suffix = match algorithm {
+                GitHashAlgorithm::Sha1 => "sha1",
+                GitHashAlgorithm::Sha256 => "sha256",
+            };
+            let common_dir = dir.path().join(format!("common-{suffix}"));
+            let worktree_git_dir = common_dir.join("worktrees/wt");
+            fs::create_dir_all(&worktree_git_dir).expect("create linked worktree git dir");
+            fs::create_dir_all(common_dir.join("objects")).expect("create common objects dir");
+            fs::write(worktree_git_dir.join("commondir"), "../..\n").expect("write commondir");
+            fs::write(
+                common_dir.join("config"),
+                format!("[extensions]\n\tobjectFormat = {suffix}\n"),
+            )
+            .expect("write common config");
+            fs::write(worktree_git_dir.join("HEAD"), "ref: refs/heads/main\n")
+                .expect("write linked HEAD");
+            let id = ObjectId::new(algorithm, &[7; 32][..algorithm.digest_len()]);
+            fs::write(
+                common_dir.join("packed-refs"),
+                format!("{} refs/heads/main\n", id.to_hex()),
+            )
+            .expect("write common packed refs");
+            let repo = GitRepo {
+                root: dir.path().to_path_buf(),
+                git_dir: worktree_git_dir,
+                objects_dir: common_dir.join("objects"),
+                index_path: dir.path().join(format!("index-{suffix}")),
+            };
+
+            assert_eq!(
+                abbrev_ref_name(&repo, "main").expect("abbreviate main"),
+                "main"
+            );
+            assert_eq!(
+                abbrev_ref_name(&repo, "HEAD").expect("abbreviate HEAD"),
+                "main"
+            );
+            assert_eq!(
+                symbolic_full_ref_name(&repo, "main").expect("symbolic main"),
+                Some("refs/heads/main".to_owned())
+            );
+            assert_eq!(
+                symbolic_full_ref_name(&repo, "HEAD").expect("symbolic HEAD"),
+                Some("refs/heads/main".to_owned())
+            );
+        }
     }
 }

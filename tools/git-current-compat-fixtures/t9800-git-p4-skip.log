@@ -1,0 +1,2 @@
+ok 1 - p4 prerequisite was not available # SKIP proprietary p4 client is not bundled
+1..0 # SKIP p4 prerequisite unavailable

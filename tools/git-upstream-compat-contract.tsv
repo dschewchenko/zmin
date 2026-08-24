@@ -1,0 +1,26 @@
+key	value
+contract_id	git-current-nondeprecated-v2.55.0
+upstream_git_tag	v2.55.0
+upstream_git_repo	https://github.com/git/git.git
+upstream_git_commit	e9019fcafe0040228b8631c30f97ae1adb61bcdc
+source_identity_policy	archive_sha256_exact; tag_commit_declared; source_manifest_exact; no_checkout_fallback
+upstream_archive_url	https://github.com/git/git/archive/refs/tags/v2.55.0.tar.gz
+upstream_archive_sha256	72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49
+authoritative_manifest	all-nondeprecated
+deprecated_removed_groups	t5323-pack-redundant|t5323|1
+external_current_groups	git-svn|t91|69;git-cvsserver|t94|3;gitweb|t95|3;cvsimport|t96|5;git-p4|t98[0-3]|37
+upstream_top_level_shell_tests	1046
+excluded_deprecated_removed_shell_tests	1
+authoritative_upstream_test_denominator	1045
+core_only_manifest	full-core
+core_only_shell_tests	928
+external_current_shell_tests	117
+required_evidence	upstream shell suite; stock Git differential; macOS; Linux; Windows
+current_git_non_extension_count	7
+current_git_non_extension_backfill	backfill|Documentation/git-backfill.adoc|t/t5620-backfill.sh|current-git-v2.55.0
+current_git_non_extension_diff_pairs	diff-pairs|Documentation/git-diff-pairs.adoc|t/t4070-diff-pairs.sh|current-git-v2.55.0
+current_git_non_extension_format_rev	format-rev|Documentation/git-format-rev.adoc|t/t6120-describe.sh|current-git-v2.55.0
+current_git_non_extension_history	history|Documentation/git-history.adoc|t/t3450-history.sh,t/t3451-history-reword.sh,t/t3452-history-split.sh,t/t3453-history-fixup.sh|current-git-v2.55.0
+current_git_non_extension_last_modified	last-modified|Documentation/git-last-modified.adoc|t/t8020-last-modified.sh|current-git-v2.55.0
+current_git_non_extension_repo	repo|Documentation/git-repo.adoc|t/t1900-repo-info.sh,t/t1901-repo-structure.sh|current-git-v2.55.0
+current_git_non_extension_url_parse	url-parse|Documentation/git-url-parse.adoc|t/t9904-url-parse.sh|current-git-v2.55.0

@@ -5,6 +5,9 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+
 fn zmin_bin() -> &'static str {
     option_env!("CARGO_BIN_EXE_zmin").unwrap_or(env!("CARGO_BIN_EXE_zmin"))
 }
@@ -2362,6 +2365,205 @@ fn clone_documented_local_tail_matches_stock_git() {
         "also-filter-missing-filter",
         ["--recurse-submodules", "--also-filter-submodules"].as_slice(),
     );
+}
+
+#[test]
+fn clone_local_filter_is_ignored_for_all_specs_and_modes() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = create_clone_source(dir.path(), "source");
+    fs::write(source.join("filter-only.txt"), b"filter-only\n").expect("write filter-only file");
+    git(&source, ["add", "filter-only.txt"]);
+    git_with_env(&source, ["commit", "-m", "filter-only"]);
+    let filter_blob = git(&source, ["rev-parse", "HEAD:filter-only.txt"]);
+    let source_display = source.to_str().expect("source path utf8").to_owned();
+    let git_root = dir.path().join("git-root");
+    let zmin_root = dir.path().join("zmin-root");
+    let hermetic_home = dir.path().join("hermetic-home");
+    fs::create_dir_all(&git_root).expect("create git root");
+    fs::create_dir_all(&zmin_root).expect("create zmin root");
+    fs::create_dir_all(&hermetic_home).expect("create hermetic home");
+    let hermetic_home = hermetic_home.to_str().expect("hermetic home path");
+    let hermetic_env = [
+        ("HOME", hermetic_home),
+        ("GIT_TEMPLATE_DIR", hermetic_home),
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_CONFIG_GLOBAL", "/dev/null"),
+        ("GIT_CONFIG_SYSTEM", "/dev/null"),
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+    ];
+
+    let run_pair = |name: &str, filter: &str, extra: &[&str]| {
+        let filter_arg = format!("--filter={filter}");
+        let mut args = vec!["clone".to_owned(), filter_arg];
+        args.extend(extra.iter().map(|value| (*value).to_owned()));
+        args.push(source_display.clone());
+        args.push(name.to_owned());
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let git_output = command_output_with_env(
+            "git",
+            &git_root,
+            &args,
+            &hermetic_env,
+            "git local ignored filter clone",
+        );
+        let zmin_output = command_output_with_env(
+            zmin_bin(),
+            &zmin_root,
+            &args,
+            &hermetic_env,
+            "zmin local ignored filter clone",
+        );
+        assert_eq!(
+            zmin_output, git_output,
+            "local filter output mismatch for {filter}"
+        );
+        assert_eq!(
+            git_output
+                .2
+                .matches("warning: --filter is ignored in local clones; use file:// instead.")
+                .count(),
+            1,
+            "local filter warning count for {filter}"
+        );
+        (
+            git_root.join(name),
+            zmin_root.join(name),
+            extra.contains(&"--bare"),
+        )
+    };
+
+    for (name, filter) in [
+        ("blob-none", "blob:none"),
+        ("blob-limit", "blob:limit=1"),
+        ("tree", "tree:1"),
+        ("object-type", "object:type=blob"),
+        ("combine", "combine:blob:none+tree:1"),
+    ] {
+        let (git_clone, zmin_clone, bare) = run_pair(name, filter, &[]);
+        assert_local_filter_clone_state(&source, &git_clone, &zmin_clone, bare, &filter_blob);
+    }
+
+    let (git_no_checkout, zmin_no_checkout, bare) =
+        run_pair("no-checkout", "blob:none", &["--no-checkout"]);
+    assert!(!bare);
+    assert_local_filter_clone_state(
+        &source,
+        &git_no_checkout,
+        &zmin_no_checkout,
+        false,
+        &filter_blob,
+    );
+    assert!(visible_worktree_files(&git_no_checkout).is_empty());
+    assert!(visible_worktree_files(&zmin_no_checkout).is_empty());
+
+    let (git_bare, zmin_bare, bare) = run_pair("bare", "tree:1", &["--bare"]);
+    assert!(bare);
+    assert_local_filter_clone_state(&source, &git_bare, &zmin_bare, true, &filter_blob);
+
+    let (git_no_hardlinks, zmin_no_hardlinks, bare) =
+        run_pair("no-hardlinks", "blob:none", &["--no-hardlinks"]);
+    assert!(!bare);
+    assert_local_filter_clone_state(
+        &source,
+        &git_no_hardlinks,
+        &zmin_no_hardlinks,
+        false,
+        &filter_blob,
+    );
+
+    #[cfg(unix)]
+    {
+        let source_object = first_loose_object(&source.join(".git/objects"));
+        let zmin_object = first_loose_object(&zmin_root.join("blob-none/.git/objects"));
+        let zmin_no_hardlinks_object = first_loose_object(&zmin_no_hardlinks.join(".git/objects"));
+        assert_eq!(
+            fs::metadata(&source_object)
+                .expect("source object metadata")
+                .ino(),
+            fs::metadata(&zmin_object)
+                .expect("local clone object metadata")
+                .ino(),
+            "ordinary local filter clone should retain hardlinks"
+        );
+        assert_ne!(
+            fs::metadata(&source_object)
+                .expect("source object metadata for copied clone")
+                .ino(),
+            fs::metadata(&zmin_no_hardlinks_object)
+                .expect("no-hardlinks clone object metadata")
+                .ino(),
+            "--no-hardlinks must retain copy semantics"
+        );
+    }
+}
+
+fn assert_local_filter_clone_state(
+    source: &std::path::Path,
+    git_clone: &std::path::Path,
+    zmin_clone: &std::path::Path,
+    bare: bool,
+    filter_blob: &str,
+) {
+    let git_dir = if bare {
+        git_clone.to_path_buf()
+    } else {
+        git_clone.join(".git")
+    };
+    let zmin_git_dir = if bare {
+        zmin_clone.to_path_buf()
+    } else {
+        zmin_clone.join(".git")
+    };
+    let zmin_config = fs::read_to_string(zmin_git_dir.join("config")).expect("read zmin config");
+    assert_eq!(
+        run_zmin(zmin_clone, ["config", "--get", "remote.origin.promisor"]),
+        git(git_clone, ["config", "--get", "remote.origin.promisor"]),
+        "plain local filter clone promisor config"
+    );
+    assert_eq!(
+        run_zmin(
+            zmin_clone,
+            ["config", "--get", "remote.origin.partialclonefilter"]
+        ),
+        git(
+            git_clone,
+            ["config", "--get", "remote.origin.partialclonefilter"]
+        ),
+        "plain local filter clone filter config"
+    );
+    assert!(!zmin_config.contains("extensions.partialclone"));
+    assert!(!contains_promisor_marker(&zmin_git_dir.join("objects")));
+    assert!(!contains_promisor_marker(&git_dir.join("objects")));
+    git(git_clone, ["cat-file", "-e", filter_blob]);
+    run_zmin(zmin_clone, ["cat-file", "-e", filter_blob]);
+    assert_eq!(
+        git(git_clone, ["rev-parse", "HEAD"]),
+        git(source, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        run_zmin(zmin_clone, ["rev-parse", "HEAD"]),
+        git(source, ["rev-parse", "HEAD"])
+    );
+}
+
+fn contains_promisor_marker(path: &std::path::Path) -> bool {
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            contains_promisor_marker(&path)
+        } else {
+            path.extension()
+                .is_some_and(|extension| extension == "promisor")
+        }
+    })
 }
 
 fn canonical_alternates(path: &std::path::Path) -> Vec<std::path::PathBuf> {

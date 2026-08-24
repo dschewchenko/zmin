@@ -1,13 +1,273 @@
 mod common;
 
+use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
-use common::{
-    command_any_output, command_any_output_with_stdin, command_stdout_bytes, configure_identity,
-    git, git_init, run_zmin, stock_git_bin, zmin_bin,
-};
+use common::{configure_identity, git, git_init, run_zmin, stock_git_bin, zmin_bin};
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
+
+struct PinnedGitLfs {
+    path_env: OsString,
+    _alias_dir: tempfile::TempDir,
+}
+
+static PINNED_GIT_LFS: OnceLock<PinnedGitLfs> = OnceLock::new();
+
+fn pinned_stock_git_lfs() -> &'static PinnedGitLfs {
+    PINNED_GIT_LFS.get_or_init(|| {
+        let (path, expected_version, expected_sha256) = if let Ok(manifest_path) =
+            std::env::var("ZMIN_STOCK_GIT_LFS_MANIFEST")
+        {
+            let manifest_path = PathBuf::from(manifest_path);
+            assert!(
+                manifest_path.is_absolute(),
+                "stock Git LFS manifest must be absolute"
+            );
+            let mut manifest_bytes = Vec::new();
+            fs::File::open(&manifest_path)
+                .expect("open stock Git LFS manifest")
+                .take(64 * 1024 + 1)
+                .read_to_end(&mut manifest_bytes)
+                .expect("read stock Git LFS manifest");
+            assert!(
+                manifest_bytes.len() <= 64 * 1024,
+                "stock Git LFS manifest is too large"
+            );
+            let manifest = String::from_utf8(manifest_bytes).expect("stock Git LFS manifest UTF-8");
+            let mut values = std::collections::HashMap::new();
+            for line in manifest.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    values.insert(key, value);
+                }
+            }
+            let artifact = values.get("artifact").expect("manifest artifact");
+            let path = std::env::var_os("ZMIN_STOCK_GIT_LFS")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    manifest_path
+                        .parent()
+                        .expect("manifest parent")
+                        .join(artifact)
+                });
+            (
+                path,
+                std::env::var("ZMIN_STOCK_GIT_LFS_VERSION").unwrap_or_else(|_| {
+                    values
+                        .get("release_version")
+                        .expect("manifest version")
+                        .to_string()
+                }),
+                std::env::var("ZMIN_STOCK_GIT_LFS_SHA256").unwrap_or_else(|_| {
+                    values
+                        .get("binary_sha256")
+                        .expect("manifest checksum")
+                        .to_string()
+                }),
+            )
+        } else {
+            (
+                PathBuf::from(
+                    std::env::var("ZMIN_STOCK_GIT_LFS")
+                        .expect("ZMIN_STOCK_GIT_LFS or ZMIN_STOCK_GIT_LFS_MANIFEST is required"),
+                ),
+                std::env::var("ZMIN_STOCK_GIT_LFS_VERSION")
+                    .expect("ZMIN_STOCK_GIT_LFS_VERSION is required"),
+                std::env::var("ZMIN_STOCK_GIT_LFS_SHA256")
+                    .expect("ZMIN_STOCK_GIT_LFS_SHA256 is required"),
+            )
+        };
+        assert!(
+            path.is_absolute(),
+            "stock Git LFS path must be absolute: {path:?}"
+        );
+        let metadata = fs::symlink_metadata(&path).expect("stat stock Git LFS");
+        assert!(
+            metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+            "stock Git LFS must be a regular non-symlink file: {path:?}"
+        );
+        let canonical = fs::canonicalize(&path).expect("canonicalize stock Git LFS");
+        let mut file = fs::File::open(&canonical).expect("open stock Git LFS");
+        let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha256);
+        let mut buffer = [0_u8; 128 * 1024];
+        loop {
+            let read = file.read(&mut buffer).expect("read stock Git LFS");
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        assert_eq!(hasher.finalize().to_hex(), expected_sha256);
+        let version = Command::new(&canonical)
+            .arg("--version")
+            .output()
+            .expect("run stock Git LFS version");
+        assert!(version.status.success());
+        let version = String::from_utf8(version.stdout).expect("stock Git LFS version UTF-8");
+        assert!(
+            version
+                .trim_start()
+                .starts_with(&format!("git-lfs/{expected_version}")),
+            "unexpected stock Git LFS version: {version:?}"
+        );
+        let alias_dir = tempfile::Builder::new()
+            .prefix("zmin-pinned-git-lfs-")
+            .tempdir()
+            .expect("create pinned Git LFS alias directory");
+        let alias_name = if cfg!(windows) {
+            "git-lfs.exe"
+        } else {
+            "git-lfs"
+        };
+        let alias = alias_dir.path().join(alias_name);
+        if fs::hard_link(&canonical, &alias).is_err() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&canonical, &alias)
+                .expect("alias pinned Git LFS executable");
+            #[cfg(windows)]
+            fs::copy(&canonical, &alias).expect("copy pinned Git LFS executable");
+        }
+        let parent = canonical.parent().expect("stock Git LFS parent");
+        let mut paths = vec![alias_dir.path().to_path_buf(), parent.to_path_buf()];
+        for directory in std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        {
+            if directory == parent {
+                continue;
+            }
+            let lfs_name = if cfg!(windows) {
+                "git-lfs.exe"
+            } else {
+                "git-lfs"
+            };
+            if directory.join(lfs_name).is_file() {
+                continue;
+            }
+            paths.push(directory);
+        }
+        let path_env = std::env::join_paths(paths).expect("construct hermetic Git LFS PATH");
+        PinnedGitLfs {
+            path_env,
+            _alias_dir: alias_dir,
+        }
+    })
+}
+
+fn test_command(command: &str, cwd: &Path, args: &[&str]) -> Command {
+    let is_stock = command == "git"
+        || Path::new(command).canonicalize().ok().as_deref() == Some(stock_git_bin());
+    let program = if is_stock {
+        stock_git_bin().as_os_str().to_owned()
+    } else {
+        OsString::from(command)
+    };
+    let mut process = Command::new(&program);
+    process.args(args).current_dir(cwd);
+    if is_stock {
+        process.env("PATH", &pinned_stock_git_lfs().path_env);
+    }
+    process
+}
+
+fn command_any_output(
+    command: &str,
+    cwd: &Path,
+    args: &[&str],
+    label: &str,
+) -> (i32, String, String) {
+    let output = test_command(command, cwd, args)
+        .output()
+        .unwrap_or_else(|error| panic!("run {label}: {error}"));
+    (
+        output.status.code().expect("process exit code"),
+        String::from_utf8(output.stdout)
+            .expect("stdout UTF-8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("stderr UTF-8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
+fn command_any_output_with_stdin(
+    command: &str,
+    cwd: &Path,
+    args: &[&str],
+    stdin: &str,
+    label: &str,
+) -> (i32, String, String) {
+    let mut process = test_command(command, cwd, args);
+    let mut child = process
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("spawn {label}: {error}"));
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(stdin.as_bytes())
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("wait for command");
+    (
+        output.status.code().expect("process exit code"),
+        String::from_utf8(output.stdout)
+            .expect("stdout UTF-8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("stderr UTF-8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
+fn command_stdout_bytes(command: &str, cwd: &Path, args: &[&str]) -> Vec<u8> {
+    let output = test_command(command, cwd, args)
+        .output()
+        .expect("run command");
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+fn command_stdout_bytes_with_stdin(
+    command: &str,
+    cwd: &Path,
+    args: &[&str],
+    stdin: &[u8],
+) -> Vec<u8> {
+    let mut process = test_command(command, cwd, args);
+    let mut child = process
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn command");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(stdin)
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("wait command");
+    assert!(
+        output.status.success(),
+        "command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
 
 #[test]
 fn lfs_track_and_untrack_match_stock_git_for_basic_patterns() {
@@ -56,6 +316,95 @@ fn lfs_track_and_untrack_match_stock_git_for_basic_patterns() {
 }
 
 #[test]
+fn lfs_track_rejects_control_injection_and_oversized_attributes() {
+    let repo = git_init();
+    let injected = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "track", "bad\nfilter=exec"],
+        "control pattern",
+    );
+    assert_ne!(injected.0, 0);
+    assert!(!repo.path().join(".gitattributes").exists());
+
+    fs::write(
+        repo.path().join(".gitattributes"),
+        vec![b'a'; 1024 * 1024 + 1],
+    )
+    .expect("write oversized attributes");
+    let oversized = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "track", "*.bin"],
+        "oversized attributes",
+    );
+    assert_ne!(oversized.0, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn lfs_track_rejects_symlinked_attributes_without_touching_target() {
+    use std::os::unix::fs::symlink;
+
+    let repo = git_init();
+    let outside = tempfile::TempDir::new().expect("outside temp");
+    let outside_attributes = outside.path().join("attributes");
+    fs::write(&outside_attributes, b"outside\n").expect("write outside attributes");
+    symlink(&outside_attributes, repo.path().join(".gitattributes"))
+        .expect("create attributes symlink");
+
+    let output = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "track", "*.bin"],
+        "track symlinked attributes",
+    );
+    assert_ne!(output.0, 0);
+    assert_eq!(
+        fs::read(&outside_attributes).expect("read outside attributes"),
+        b"outside\n"
+    );
+}
+
+#[test]
+fn lfs_install_does_not_clobber_custom_hook_without_force() {
+    let repo = git_init();
+    let hook = repo.path().join(".git/hooks/pre-push");
+    let custom = b"#!/bin/sh\necho custom-hook\n";
+    fs::write(&hook, custom).expect("write custom hook");
+
+    let output = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "install", "--local"],
+        "install over custom hook",
+    );
+    assert_ne!(output.0, 0);
+    assert_eq!(fs::read(&hook).expect("read custom hook"), custom);
+}
+
+#[test]
+fn lfs_checkout_rejects_nonportable_and_escaping_paths() {
+    let repo = git_init();
+    for path in [
+        "../outside",
+        "a//b",
+        "a/./b",
+        "a/../b",
+        "a\\b",
+        "C:asset.bin",
+    ] {
+        let output = command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &["lfs", "checkout", path],
+            "checkout invalid path",
+        );
+        assert_ne!(output.0, 0, "path should be rejected: {path}");
+    }
+}
+
+#[test]
 fn lfs_install_local_skip_repo_matches_stock_git_filter_config() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -65,20 +414,79 @@ fn lfs_install_local_skip_repo_matches_stock_git_filter_config() {
         command_any_output("git", git_repo.path(), &args, "git lfs install"),
         command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin lfs install")
     );
-    for key in [
-        "lfs.repositoryformatversion",
-        "filter.lfs.required",
-        "filter.lfs.clean",
-        "filter.lfs.smudge",
-        "filter.lfs.process",
-    ] {
-        assert_eq!(
-            git(git_repo.path(), ["config", "--local", "--get", key]),
-            run_zmin(zmin_repo.path(), ["config", "--local", "--get", key]),
-            "{key}"
-        );
-    }
+    assert_zmin_filter_config(&zmin_repo.path(), false);
     assert!(!zmin_repo.path().join(".git/hooks/pre-push").exists());
+}
+
+#[test]
+fn lfs_install_default_writes_global_scope_and_update_leaves_filters_untouched() {
+    let repo = git_init();
+    let root = tempfile::TempDir::new().expect("temp global config");
+    let global = root.path().join("gitconfig");
+    let global_value = global.to_str().expect("global config path");
+    let output = zmin_lfs_any_output_with_env(
+        repo.path(),
+        &["lfs", "install", "--skip-repo"],
+        &[
+            ("GIT_CONFIG_GLOBAL", global_value),
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+        ],
+    );
+    assert_eq!(output.0, 0, "{output:?}");
+    let contents = fs::read_to_string(&global).expect("read global config");
+    assert!(contents.contains("[filter \"lfs\"]"));
+    assert!(
+        !repo
+            .path()
+            .join(".git/config")
+            .to_string_lossy()
+            .contains("filter.lfs")
+    );
+
+    run_zmin(
+        repo.path(),
+        ["config", "--local", "filter.lfs.clean", "custom-clean %f"],
+    );
+    let before = run_zmin(
+        repo.path(),
+        ["config", "--local", "--get", "filter.lfs.clean"],
+    );
+    let update = command_any_output(zmin_bin(), repo.path(), &["lfs", "update"], "zmin update");
+    assert_eq!(update.0, 0, "{update:?}");
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["config", "--local", "--get", "filter.lfs.clean"]
+        ),
+        before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn lfs_install_force_replaces_hook_symlink_without_following_target() {
+    use std::os::unix::fs::symlink;
+
+    let repo = git_init();
+    let outside = tempfile::TempDir::new().expect("outside temp");
+    let outside_hook = outside.path().join("outside-hook");
+    fs::write(&outside_hook, b"outside\n").expect("write outside hook");
+    let hook = repo.path().join(".git/hooks/pre-push");
+    symlink(&outside_hook, &hook).expect("create hook symlink");
+    let output = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "install", "--local", "--force"],
+        "zmin install force symlink",
+    );
+    assert_eq!(output.0, 0, "{output:?}");
+    assert!(
+        !fs::symlink_metadata(&hook)
+            .expect("hook metadata")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&outside_hook).expect("outside hook"), b"outside\n");
 }
 
 #[test]
@@ -96,19 +504,7 @@ fn lfs_install_local_skip_smudge_matches_stock_git_hook_side_effects() {
             "zmin lfs install skip-smudge"
         )
     );
-    for key in [
-        "lfs.repositoryformatversion",
-        "filter.lfs.required",
-        "filter.lfs.clean",
-        "filter.lfs.smudge",
-        "filter.lfs.process",
-    ] {
-        assert_eq!(
-            git(git_repo.path(), ["config", "--local", "--get", key]),
-            run_zmin(zmin_repo.path(), ["config", "--local", "--get", key]),
-            "{key}"
-        );
-    }
+    assert_zmin_filter_config(&zmin_repo.path(), true);
     let hook = fs::read_to_string(zmin_repo.path().join(".git/hooks/pre-push"))
         .expect("read zmin pre-push hook");
     assert!(hook.contains("# zmin-lfs-pre-push"));
@@ -137,19 +533,7 @@ fn lfs_install_worktree_matches_stock_git_current_side_effects() {
             "zmin lfs install worktree"
         )
     );
-    for key in [
-        "lfs.repositoryformatversion",
-        "filter.lfs.required",
-        "filter.lfs.clean",
-        "filter.lfs.smudge",
-        "filter.lfs.process",
-    ] {
-        assert_eq!(
-            git(git_repo.path(), ["config", "--local", "--get", key]),
-            run_zmin(zmin_repo.path(), ["config", "--local", "--get", key]),
-            "{key}"
-        );
-    }
+    assert_zmin_filter_config(&zmin_repo.path(), false);
     assert_eq!(
         git_repo.path().join(".git/config.worktree").exists(),
         zmin_repo.path().join(".git/config.worktree").exists()
@@ -187,19 +571,7 @@ fn lfs_install_worktree_skip_smudge_matches_stock_git_current_side_effects() {
             "zmin lfs install worktree skip-smudge"
         )
     );
-    for key in [
-        "lfs.repositoryformatversion",
-        "filter.lfs.required",
-        "filter.lfs.clean",
-        "filter.lfs.smudge",
-        "filter.lfs.process",
-    ] {
-        assert_eq!(
-            git(git_repo.path(), ["config", "--local", "--get", key]),
-            run_zmin(zmin_repo.path(), ["config", "--local", "--get", key]),
-            "{key}"
-        );
-    }
+    assert_zmin_filter_config(&zmin_repo.path(), true);
     let hook = fs::read_to_string(zmin_repo.path().join(".git/hooks/pre-push"))
         .expect("read zmin pre-push hook");
     assert!(hook.contains("# zmin-lfs-pre-push"));
@@ -251,7 +623,6 @@ fn lfs_install_respects_relative_core_hookspath_like_stock_git() {
 
 #[test]
 fn lfs_install_manual_modes_match_stock_git() {
-    let git_repo = git_init();
     let zmin_repo = git_init();
 
     for args in [
@@ -259,41 +630,34 @@ fn lfs_install_manual_modes_match_stock_git() {
         ["lfs", "install", "--manual", "--skip-smudge"].as_slice(),
         ["lfs", "install", "--manual", "--local"].as_slice(),
     ] {
-        assert_eq!(
-            command_any_output("git", git_repo.path(), args, "git lfs install manual"),
-            command_any_output(
-                zmin_bin(),
-                zmin_repo.path(),
-                args,
-                "zmin lfs install manual"
-            ),
-            "{args:?}"
+        let output = command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            args,
+            "zmin lfs install manual",
         );
+        assert_eq!(output.0, 0, "{args:?}: {output:?}");
+        assert!(output.1.contains(zmin_bin()));
+        assert!(!output.1.contains("git-lfs"));
     }
 }
 
 #[test]
 fn lfs_install_manual_respects_relative_core_hookspath_like_stock_git() {
-    let git_repo = git_init();
     let zmin_repo = git_init();
-    git(git_repo.path(), ["config", "core.hooksPath", ".githooks"]);
     run_zmin(zmin_repo.path(), ["config", "core.hooksPath", ".githooks"]);
 
     let args = ["lfs", "install", "--manual"];
-    assert_eq!(
-        command_any_output(
-            "git",
-            git_repo.path(),
-            &args,
-            "git lfs install manual hookspath"
-        ),
-        command_any_output(
-            zmin_bin(),
-            zmin_repo.path(),
-            &args,
-            "zmin lfs install manual hookspath"
-        )
+    let output = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &args,
+        "zmin lfs install manual hookspath",
     );
+    assert_eq!(output.0, 0);
+    assert!(output.1.contains(".githooks/pre-push"));
+    assert!(output.1.contains(zmin_bin()));
+    assert!(!output.1.contains("git-lfs"));
 }
 
 #[test]
@@ -301,15 +665,15 @@ fn lfs_install_invalid_flag_matches_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
     let args = ["lfs", "install", "--bogus"];
-    assert_eq!(
-        command_any_output("git", git_repo.path(), &args, "git lfs install invalid"),
-        command_any_output(
-            zmin_bin(),
-            zmin_repo.path(),
-            &args,
-            "zmin lfs install invalid"
-        )
+    let stock = command_any_output("git", git_repo.path(), &args, "git lfs install invalid");
+    let zmin = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &args,
+        "zmin lfs install invalid",
     );
+    assert_eq!((stock.0, stock.2), (zmin.0, zmin.2));
+    assert!(zmin.1.contains("--global:"));
 }
 
 #[test]
@@ -344,14 +708,15 @@ fn lfs_install_manual_modes_do_not_depend_on_stock_git_runtime() {
             .1
             .contains("Add the following to '.git/hooks/pre-push':")
     );
-    assert!(manual.1.contains("git lfs pre-push \"$@\""));
+    assert!(manual.1.contains(zmin_bin()));
+    assert!(manual.1.contains("lfs pre-push \"$@\""));
+    assert!(!manual.1.contains("git-lfs"));
     assert!(manual.1.ends_with("Git LFS initialized."));
     assert_eq!(manual.2, "");
 }
 
 #[test]
 fn lfs_update_and_manual_modes_match_stock_git() {
-    let git_repo = git_init();
     let zmin_repo = git_init();
 
     for args in [
@@ -361,35 +726,36 @@ fn lfs_update_and_manual_modes_match_stock_git() {
         ["lfs", "update", "-m"].as_slice(),
         ["lfs", "update", "-f"].as_slice(),
     ] {
-        assert_eq!(
-            command_any_output("git", git_repo.path(), args, "git lfs update"),
-            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin lfs update"),
-            "{args:?}"
-        );
+        let output = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin lfs update");
+        assert_eq!(output.0, 0, "{args:?}: {output:?}");
+        if args.contains(&"--manual") || args.contains(&"-m") {
+            assert!(output.1.contains(zmin_bin()));
+            assert!(!output.1.contains("git-lfs"));
+        }
     }
 }
 
 #[test]
 fn lfs_update_respects_relative_core_hookspath_and_matches_stock_git() {
-    let git_repo = git_init();
     let zmin_repo = git_init();
-    git(git_repo.path(), ["config", "core.hooksPath", ".githooks"]);
     run_zmin(zmin_repo.path(), ["config", "core.hooksPath", ".githooks"]);
 
     for args in [
         ["lfs", "update"].as_slice(),
         ["lfs", "update", "--manual"].as_slice(),
     ] {
-        assert_eq!(
-            command_any_output("git", git_repo.path(), args, "git lfs update hookspath"),
-            command_any_output(
-                zmin_bin(),
-                zmin_repo.path(),
-                args,
-                "zmin lfs update hookspath"
-            ),
-            "{args:?}"
+        let output = command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            args,
+            "zmin lfs update hookspath",
         );
+        assert_eq!(output.0, 0, "{args:?}: {output:?}");
+        if args.contains(&"--manual") {
+            assert!(output.1.contains(".githooks/pre-push"));
+            assert!(output.1.contains(zmin_bin()));
+            assert!(!output.1.contains("git-lfs"));
+        }
     }
 }
 
@@ -614,20 +980,22 @@ fn lfs_ls_files_invalid_flag_and_history_conflicts_match_stock_git() {
         ["lfs", "ls-files", "--all", "HEAD"].as_slice(),
         ["lfs", "ls-files", "--deleted", "HEAD~1", "HEAD"].as_slice(),
     ] {
+        let stock = command_any_output(
+            "git",
+            git_repo.path(),
+            args,
+            "git lfs ls-files invalid/history",
+        );
+        let zmin = command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            args,
+            "zmin lfs ls-files invalid/history",
+        );
         assert_eq!(
-            command_any_output(
-                "git",
-                git_repo.path(),
-                args,
-                "git lfs ls-files invalid/history"
-            ),
-            command_any_output(
-                zmin_bin(),
-                zmin_repo.path(),
-                args,
-                "zmin lfs ls-files invalid/history"
-            ),
-            "{args:?}"
+            (stock.0, &stock.2),
+            (zmin.0, &zmin.2),
+            "{args:?}: stock={stock:?} zmin={zmin:?}"
         );
     }
 }
@@ -675,36 +1043,43 @@ fn lfs_version_and_env_report_builtin_local_foundation_state() {
         "LocalMediaDir={}",
         repo_path.join(".git/lfs/objects").display()
     )));
+    assert!(env.contains("ConcurrentTransfers=8"));
     assert!(env.contains("git config lfs.repositoryformatversion = 0"));
-    assert!(env.contains("git config filter.lfs.process = git-lfs filter-process --skip"));
-    assert!(env.contains("git config filter.lfs.smudge = git-lfs smudge --skip -- %f"));
-    assert!(env.contains("git config filter.lfs.clean = git-lfs clean -- %f"));
+    assert!(env.contains("git config filter.lfs.process = "));
+    assert!(env.contains(zmin_bin()));
+    assert!(env.contains(" lfs filter-process --skip"));
+    assert!(env.contains(" lfs smudge --skip -- %f"));
+    assert!(env.contains(" lfs clean -- %f"));
     assert!(env.contains("git config filter.lfs.required = true"));
+
+    run_zmin(repo.path(), ["config", "lfs.concurrentTransfers", "02"]);
+    let env = run_zmin(repo.path(), ["lfs", "env"]);
+    assert!(env.contains("ConcurrentTransfers=2"));
 }
 
 #[test]
 fn lfs_pre_push_validates_update_stream_shape() {
     let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
     git(repo.path(), ["remote", "add", "origin", "."]);
 
-    let valid = "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n";
-    let (code, stdout, stderr) = command_any_output_with_stdin(
-        zmin_bin(),
+    let head = String::from_utf8(command_stdout_bytes(
+        "git",
         repo.path(),
-        &["lfs", "pre-push", "origin", "."],
-        valid,
-        "zmin lfs pre-push valid",
+        &["rev-parse", "HEAD"],
+    ))
+    .expect("HEAD UTF-8");
+    let valid = format!(
+        "refs/heads/main {} refs/heads/main 0000000000000000000000000000000000000000\n",
+        head.trim()
     );
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "");
-    assert_eq!(stderr, "");
-
     let (code, stdout, stderr) = command_any_output_with_stdin(
         zmin_bin(),
         repo.path(),
         &["lfs", "pre-push", "origin", "."],
-        "oops\n",
-        "zmin lfs pre-push invalid line",
+        &valid,
+        "zmin lfs pre-push valid",
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "");
@@ -723,6 +1098,92 @@ fn lfs_pre_push_validates_update_stream_shape() {
         "This should be run through Git's pre-push hook.  Run `git lfs update` to install it."
     );
     assert_eq!(stderr, "");
+}
+
+#[test]
+fn lfs_pre_push_rejects_nonexistent_and_malformed_updates() {
+    let repo = git_init();
+    git(repo.path(), ["remote", "add", "origin", "."]);
+
+    let nonexistent = "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n";
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pre-push", "origin", "."],
+        nonexistent,
+        "zmin lfs pre-push nonexistent object",
+    );
+    assert_eq!(code, 2);
+    assert_eq!(stdout, "");
+    assert!(stderr.starts_with("error:"));
+    assert!(!stderr.contains("1111111111111111111111111111111111111111"));
+
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pre-push", "origin", "."],
+        "oops\n",
+        "zmin lfs pre-push invalid line",
+    );
+    assert_eq!(code, 2);
+    assert_eq!(stdout, "");
+    assert!(stderr.starts_with("error:"));
+    assert!(!stderr.contains("oops"));
+}
+
+#[test]
+fn lfs_pre_push_uses_the_repository_sha256_object_format() {
+    let repo = tempfile::TempDir::new().expect("SHA-256 repo");
+    git(repo.path(), ["init", "--object-format=sha256"]);
+    configure_identity(repo.path());
+    git(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
+    git(repo.path(), ["remote", "add", "origin", "."]);
+    let head = String::from_utf8(command_stdout_bytes(
+        "git",
+        repo.path(),
+        &["rev-parse", "HEAD"],
+    ))
+    .expect("HEAD UTF-8");
+    assert_eq!(head.trim().len(), 64);
+    let update = format!(
+        "refs/heads/main {} refs/heads/main {}\n",
+        head.trim(),
+        "0".repeat(64)
+    );
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pre-push", "origin", "."],
+        &update,
+        "zmin lfs pre-push SHA-256",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "");
+    assert_eq!(stderr, "");
+}
+
+#[test]
+fn lfs_skip_push_only_short_circuits_pre_push_hook() {
+    let repo = git_init();
+    let env = &[("GIT_LFS_SKIP_PUSH", "true")];
+    git(repo.path(), ["remote", "add", "origin", "."]);
+    let push = zmin_lfs_any_output_with_env(repo.path(), &["lfs", "push", "origin", "HEAD"], env);
+    assert_eq!(push.0, 2);
+    assert!(push.1.is_empty());
+    assert!(!push.2.is_empty());
+    assert!(!push.2.contains("usage: git lfs push"));
+    let pre_push = zmin_lfs_any_output_with_env_and_stdin(
+        repo.path(),
+        &[
+            "lfs",
+            "pre-push",
+            "origin",
+            "https://example.invalid/repo.git",
+        ],
+        env,
+        "not parsed when pushing is disabled\n",
+    );
+    assert_eq!(pre_push, (0, String::new(), String::new()));
 }
 
 #[test]
@@ -810,7 +1271,7 @@ fn lfs_checkout_without_args_materializes_local_objects_like_stock_git() {
     configure_identity(git_repo.path());
     configure_identity(zmin_repo.path());
 
-    let oid = "1111111111111111111111111111111111111111111111111111111111111111";
+    let oid = "2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009";
     for repo in [git_repo.path(), zmin_repo.path()] {
         fs::write(
             repo.join(".gitattributes"),
@@ -862,7 +1323,7 @@ fn lfs_checkout_path_argument_materializes_only_requested_file_like_stock_git() 
     configure_identity(git_repo.path());
     configure_identity(zmin_repo.path());
 
-    let oid = "1111111111111111111111111111111111111111111111111111111111111111";
+    let oid = "2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009";
     for repo in [git_repo.path(), zmin_repo.path()] {
         fs::write(
             repo.join(".gitattributes"),
@@ -945,6 +1406,33 @@ fn lfs_checkout_missing_local_object_matches_stock_git_shape() {
             "zmin lfs checkout missing local"
         )
     );
+}
+
+#[test]
+fn lfs_checkout_rejects_corrupt_object_without_replacing_pointer() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    let oid = "2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009";
+    let pointer = format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize 9\n");
+    fs::write(repo.path().join("a.bin"), &pointer).expect("write pointer");
+    git(repo.path(), ["add", "a.bin"]);
+    git(repo.path(), ["commit", "-m", "pointer"]);
+    let media = repo.path().join(format!(".git/lfs/objects/23/20/{oid}"));
+    fs::create_dir_all(media.parent().expect("media parent")).expect("create media dir");
+    fs::write(media, b"corrupt").expect("write corrupt object");
+
+    let output = command_any_output(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "checkout"],
+        "corrupt checkout",
+    );
+    assert_ne!(output.0, 0);
+    assert_eq!(
+        fs::read(repo.path().join("a.bin")).expect("read pointer"),
+        pointer.as_bytes()
+    );
+    assert!(!repo.path().join("a.bin.zmin-lfs-tmp").exists());
 }
 
 #[test]
@@ -1125,6 +1613,35 @@ fn zmin_lfs_any_output_with_env_and_stdin(
     )
 }
 
+fn assert_zmin_filter_config(repo: &std::path::Path, skip_smudge: bool) {
+    assert_eq!(
+        run_zmin(
+            repo,
+            ["config", "--local", "--get", "lfs.repositoryformatversion"]
+        ),
+        "0"
+    );
+    assert_eq!(
+        run_zmin(repo, ["config", "--local", "--get", "filter.lfs.required"]),
+        "true"
+    );
+    let clean = run_zmin(repo, ["config", "--local", "--get", "filter.lfs.clean"]);
+    assert!(clean.contains(zmin_bin()));
+    assert!(clean.ends_with(" lfs clean -- %f"));
+    let smudge = run_zmin(repo, ["config", "--local", "--get", "filter.lfs.smudge"]);
+    assert!(smudge.contains(zmin_bin()));
+    assert_eq!(smudge.ends_with(" lfs smudge --skip -- %f"), skip_smudge);
+    if !skip_smudge {
+        assert!(smudge.ends_with(" lfs smudge -- %f"));
+    }
+    let process = run_zmin(repo, ["config", "--local", "--get", "filter.lfs.process"]);
+    assert!(process.contains(zmin_bin()));
+    assert_eq!(process.ends_with(" lfs filter-process --skip"), skip_smudge);
+    if !skip_smudge {
+        assert!(process.ends_with(" lfs filter-process"));
+    }
+}
+
 #[test]
 fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
     let repo = git_init();
@@ -1141,7 +1658,7 @@ fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
     .expect("write attributes");
     fs::write(
         repo.path().join("a.bin"),
-        b"version https://git-lfs.github.com/spec/v1\noid sha256:1111111111111111111111111111111111111111111111111111111111111111\nsize 3\n",
+        b"version https://git-lfs.github.com/spec/v1\noid sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nsize 3\n",
     )
     .expect("write pointer");
     git(repo.path(), ["add", ".gitattributes", "a.bin"]);
@@ -1177,10 +1694,10 @@ fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
     assert_eq!(ls_files.1, "a.bin");
     assert_eq!(ls_files.2, "");
 
-    fs::create_dir_all(repo.path().join(".git/lfs/objects/11/11")).expect("create lfs object dir");
+    fs::create_dir_all(repo.path().join(".git/lfs/objects/ba/78")).expect("create lfs object dir");
     fs::write(
         repo.path()
-            .join(".git/lfs/objects/11/11/1111111111111111111111111111111111111111111111111111111111111111"),
+            .join(".git/lfs/objects/ba/78/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
         b"abc",
     )
     .expect("write local lfs media");
@@ -1196,14 +1713,16 @@ fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
     write_lfs_pointer(
         &repo.path().join("a.bin"),
         "2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009",
-        3,
+        9,
     );
+    git(repo.path(), ["add", "a.bin"]);
+    git(repo.path(), ["commit", "-m", "second pointer"]);
     fs::create_dir_all(repo.path().join(".git/lfs/objects/23/20"))
         .expect("create second lfs object dir");
     fs::write(
         repo.path()
             .join(".git/lfs/objects/23/20/2320bb89b3d79a57fe63ff8d2072dcc184c6d8df1869b975279b759e5845e009"),
-        b"abc",
+        b"REALDATA\n",
     )
     .expect("write second local lfs media");
     let pull = zmin_lfs_any_output_with_env(repo.path(), &["lfs", "pull"], poisoned_envs);
@@ -1212,7 +1731,7 @@ fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
     assert_eq!(pull.2, "");
     assert_eq!(
         fs::read(repo.path().join("a.bin")).expect("read pulled file"),
-        b"abc"
+        b"REALDATA\n"
     );
 
     for args in [
@@ -1232,11 +1751,21 @@ fn lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime() {
         assert_eq!(output.2, "", "{args:?}");
     }
 
+    let head = String::from_utf8(command_stdout_bytes(
+        "git",
+        repo.path(),
+        &["rev-parse", "HEAD"],
+    ))
+    .expect("HEAD UTF-8");
+    let update = format!(
+        "refs/heads/main {} refs/heads/main 0000000000000000000000000000000000000000\n",
+        head.trim()
+    );
     let pre_push = zmin_lfs_any_output_with_env_and_stdin(
         repo.path(),
         &["lfs", "pre-push", "origin", "."],
         poisoned_envs,
-        "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n",
+        &update,
     );
     assert_eq!(pre_push.0, 0);
     assert_eq!(pre_push.1, "");
@@ -1348,6 +1877,119 @@ fn lfs_update_modes_do_not_depend_on_stock_git_runtime() {
             .1
             .contains("Add the following to '.git/hooks/pre-push':")
     );
-    assert!(manual.1.contains("git lfs pre-push \"$@\""));
+    assert!(manual.1.contains(zmin_bin()));
+    assert!(manual.1.contains("lfs pre-push \"$@\""));
+    assert!(!manual.1.contains("git-lfs"));
     assert_eq!(manual.2, "");
+}
+
+#[test]
+fn lfs_local_clean_smudge_and_pointer_check_are_streaming_commands() {
+    let repo = git_init();
+    let clean = command_stdout_bytes_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "clean", "--", "asset.bin"],
+        b"abc",
+    );
+    let pointer = b"version https://git-lfs.github.com/spec/v1\n\
+oid sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n\
+size 3\n";
+    assert_eq!(clean, pointer);
+    assert_eq!(
+        fs::read(
+            repo.path()
+                .join(".git/lfs/objects/ba/78/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        )
+        .expect("read clean object"),
+        b"abc"
+    );
+
+    let smudged = command_stdout_bytes_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "smudge", "--", "asset.bin"],
+        pointer,
+    );
+    assert_eq!(smudged, b"abc");
+
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pointer", "--check", "--stdin"],
+        std::str::from_utf8(pointer).expect("pointer utf8"),
+        "pointer check",
+    );
+    assert_eq!((code, stdout, stderr), (0, String::new(), String::new()));
+    let noncanonical = std::str::from_utf8(pointer)
+        .expect("pointer utf8")
+        .trim_end_matches('\n');
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pointer", "--check", "--strict", "--stdin"],
+        noncanonical,
+        "strict pointer check",
+    );
+    assert_eq!(code, 1);
+    assert_eq!(stdout, "");
+    assert_eq!(stderr, "");
+
+    let oversized = "x".repeat(1025);
+    let (code, stdout, stderr) = command_any_output_with_stdin(
+        zmin_bin(),
+        repo.path(),
+        &["lfs", "pointer", "--check", "--stdin"],
+        &oversized,
+        "oversized pointer check",
+    );
+    assert_eq!((code, stdout, stderr), (1, String::new(), String::new()));
+
+    let pointer_path = repo.path().join("asset.pointer");
+    fs::write(&pointer_path, pointer).expect("write pointer fixture");
+    let output = Command::new(zmin_bin())
+        .args(["lfs", "pointer", "--check", "--strict", "--file"])
+        .arg(&pointer_path)
+        .current_dir(repo.path())
+        .output()
+        .expect("run file pointer check");
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn stock_git_uses_absolute_zmin_filter_process_for_binary_add_and_checkout() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(
+        repo.path().join(".gitattributes"),
+        b"*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    )
+    .expect("write attributes");
+    run_zmin(repo.path(), ["lfs", "install", "--local"]);
+    let clean = run_zmin(
+        repo.path(),
+        ["config", "--local", "--get", "filter.lfs.clean"],
+    );
+    assert!(clean.contains(zmin_bin()));
+    assert!(!clean.contains("git-lfs"));
+
+    let content = b"\0binary\npayload\0";
+    fs::write(repo.path().join("asset.bin"), content).expect("write asset");
+    git(repo.path(), ["add", ".gitattributes", "asset.bin"]);
+    let stored_pointer = git(repo.path(), ["cat-file", "-p", ":asset.bin"]);
+    assert_eq!(
+        stored_pointer,
+        "version https://git-lfs.github.com/spec/v1\n\
+oid sha256:e35c2abde08f488dae76e13889d839c210f65bf61ce35d5be3b1e762cf3504d5\n\
+size 16"
+    );
+    git(repo.path(), ["commit", "-m", "lfs binary"]);
+    fs::remove_file(repo.path().join("asset.bin")).expect("remove worktree asset");
+    git(repo.path(), ["checkout", "--", "asset.bin"]);
+    assert_eq!(
+        fs::read(repo.path().join("asset.bin")).expect("read checked out binary"),
+        content
+    );
 }

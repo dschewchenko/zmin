@@ -1,0 +1,20 @@
+{
+  "contract_version": 1,
+  "upstream": {
+    "tag": "v2.55.0",
+    "archive_url": "https://github.com/git/git/archive/refs/tags/v2.55.0.tar.gz",
+    "archive_sha256": "72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49",
+    "tag_object": "5ce91c059e41090e7d2cffad39c04af8acf98dc1",
+    "commit": "e9019fcafe0040228b8631c30f97ae1adb61bcdc"
+  },
+  "manifest": {
+    "mode": "all-nondeprecated",
+    "top_level_count": 1046,
+    "selected_count": 1045,
+    "sole_exclusion": "t5323-pack-redundant.sh",
+    "top_level_names_sha256": "fcaaaf275db6a4e0b86ac623549371b2cd7438eef92ba677791f55d37c9f7c90",
+    "selected_names_sha256": "b49ad3a4b94a93d77109da4060671ee5ba0fa92fd1b45885023bd5b358ed34a6",
+    "generated_tsv_sha256": "ba7f8c03b683eb984970c103f791e65a77c5664101ba8ca61d3c5d80ab4bafcb",
+    "names_encoding": "LC_ALL=C sorted basenames, one LF-terminated name per line"
+  }
+}

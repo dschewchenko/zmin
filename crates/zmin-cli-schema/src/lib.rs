@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
@@ -31,6 +32,44 @@ pub enum CompatFormat {
     Text,
     #[value(name = "json")]
     Json,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DiskUsageValue {
+    Human,
+    Invalid(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecurseSubmodulesValue {
+    Disabled,
+    Enabled,
+    Invalid(String),
+}
+
+fn parse_recurse_submodules_value(value: &str) -> Result<RecurseSubmodulesValue, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Ok(RecurseSubmodulesValue::Enabled),
+        "false" | "no" | "off" | "0" => Ok(RecurseSubmodulesValue::Disabled),
+        _ if value.is_empty() => Ok(RecurseSubmodulesValue::Disabled),
+        _ => match value.parse::<i64>() {
+            Ok(number) if number != 0 => Ok(RecurseSubmodulesValue::Enabled),
+            Ok(_) => Ok(RecurseSubmodulesValue::Disabled),
+            Err(_) => Ok(RecurseSubmodulesValue::Invalid(value.to_owned())),
+        },
+    }
+}
+
+impl std::str::FromStr for DiskUsageValue {
+    type Err = Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(if value == "human" {
+            Self::Human
+        } else {
+            Self::Invalid(value.to_owned())
+        })
+    }
 }
 
 #[derive(CliSchema, Debug)]
@@ -114,13 +153,14 @@ pub struct ShowRefArgs {
     #[arg(short = 'd', long = "dereference", action = ArgAction::SetTrue)]
     pub dereference: bool,
     #[arg(
-        short = 's',
         long = "hash",
         num_args = 0..=1,
         require_equals = true,
-        default_missing_value = "40"
+        default_missing_value = "0"
     )]
     pub hash: Option<usize>,
+    #[arg(short = 's', num_args = 0..=1, default_missing_value = "0")]
+    pub short_hash: Option<usize>,
     #[arg(
         long = "abbrev",
         num_args = 0..=1,
@@ -128,6 +168,8 @@ pub struct ShowRefArgs {
         default_missing_value = "7"
     )]
     pub abbrev: Option<usize>,
+    #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+    pub no_abbrev: bool,
     #[arg(long = "verify", action = ArgAction::SetTrue)]
     pub verify: bool,
     #[arg(long = "exists", action = ArgAction::SetTrue)]
@@ -513,7 +555,8 @@ pub struct ShowCommandArgs {
     pub format: Option<String>,
     #[arg(long = "max-count", short = 'n')]
     pub max_count: Option<String>,
-    #[arg(long = "pretty")]
+    // Bare --pretty is medium; require_equals keeps the following revision separate.
+    #[arg(long = "pretty", num_args = 0..=1, require_equals = true, default_missing_value = "medium")]
     pub pretty: Option<String>,
     #[arg(long = "stdin", action = ArgAction::SetTrue)]
     pub stdin: bool,
@@ -587,13 +630,31 @@ pub struct LsTreeCommandArgs {
         long = "abbrev",
         num_args = 0..=1,
         require_equals = true,
-        default_missing_value = "7"
+        default_missing_value = "__zmin_bare_abbrev__",
+        value_parser = parse_ls_tree_abbrev_argument,
+        overrides_with = "no_abbrev"
     )]
-    pub abbrev: Option<usize>,
+    pub abbrev: Option<LsTreeAbbrevArgument>,
+    #[arg(long = "no-abbrev", action = ArgAction::SetTrue, overrides_with = "abbrev")]
+    pub no_abbrev: bool,
     #[arg(long = "format")]
     pub format: Option<String>,
     pub treeish: String,
     pub paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LsTreeAbbrevArgument {
+    Bare,
+    Value(String),
+}
+
+pub fn parse_ls_tree_abbrev_argument(value: &str) -> Result<LsTreeAbbrevArgument, Infallible> {
+    Ok(if value == "__zmin_bare_abbrev__" {
+        LsTreeAbbrevArgument::Bare
+    } else {
+        LsTreeAbbrevArgument::Value(value.to_owned())
+    })
 }
 
 #[derive(Parser, Debug)]
@@ -636,7 +697,7 @@ pub struct RevParseCommandArgs {
     pub glob: Vec<String>,
     #[arg(long = "exclude")]
     pub exclude: Vec<String>,
-    #[arg(long = "exclude-hidden")]
+    #[arg(long = "exclude-hidden", overrides_with = "exclude_hidden")]
     pub exclude_hidden: Option<String>,
     #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
     pub local_env_vars: bool,
@@ -998,7 +1059,7 @@ pub struct LogCommandArgs {
     pub exclude: Vec<String>,
     #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
     pub exclude_first_parent_only: bool,
-    #[arg(long = "exclude-hidden")]
+    #[arg(long = "exclude-hidden", overrides_with = "exclude_hidden")]
     pub exclude_hidden: Option<String>,
     #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
     pub exclude_promisor_objects: bool,
@@ -1026,7 +1087,7 @@ pub struct LogCommandArgs {
     #[arg(long = "count", action = ArgAction::SetTrue)]
     pub count: bool,
     #[arg(long = "glob")]
-    pub glob: Option<String>,
+    pub glob: Vec<String>,
     #[arg(long = "skip")]
     pub skip: Option<usize>,
     #[arg(long = "max-parents")]
@@ -1105,6 +1166,8 @@ pub struct LogCommandArgs {
     pub root: bool,
     #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
     pub patch: bool,
+    #[arg(short = 's', long = "no-patch", action = ArgAction::SetTrue)]
+    pub no_patch: bool,
     #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
     pub patch_with_stat: bool,
     #[arg(short = 'c', action = ArgAction::SetTrue)]
@@ -1275,7 +1338,8 @@ pub struct LogCommandArgs {
     pub date: Option<String>,
     #[arg(long = "relative-date", action = ArgAction::SetTrue)]
     pub relative_date: bool,
-    #[arg(long = "pretty")]
+    // Bare --pretty is medium; an explicit --pretty= remains empty.
+    #[arg(long = "pretty", num_args = 0..=1, require_equals = true, default_missing_value = "medium")]
     pub pretty: Option<String>,
     #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
     pub single_worktree: bool,
@@ -1311,6 +1375,78 @@ pub struct LogOnlyArgs {
     #[command(flatten)]
     pub options: LogCommandArgs,
 }
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct DaemonCommandArgs {
+    #[arg(long = "verbose", action = ArgAction::SetTrue)]
+    pub verbose: bool,
+    #[arg(long = "syslog", action = ArgAction::SetTrue)]
+    pub syslog: bool,
+    #[arg(long = "export-all", action = ArgAction::SetTrue)]
+    pub export_all: bool,
+    #[arg(long = "timeout")]
+    pub timeout: Option<String>,
+    #[arg(long = "init-timeout")]
+    pub init_timeout: Option<String>,
+    #[arg(long = "max-connections")]
+    pub max_connections: Option<String>,
+    #[arg(long = "strict-paths", action = ArgAction::SetTrue)]
+    pub strict_paths: bool,
+    #[arg(long = "base-path", value_hint = ValueHint::DirPath)]
+    pub base_path: Option<PathBuf>,
+    #[arg(long = "base-path-relaxed", action = ArgAction::SetTrue)]
+    pub base_path_relaxed: bool,
+    #[arg(long = "reuseaddr", action = ArgAction::SetTrue)]
+    pub reuseaddr: bool,
+    #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
+    pub pid_file: Option<PathBuf>,
+    #[arg(long = "access-hook", value_hint = ValueHint::FilePath)]
+    pub access_hook: Option<PathBuf>,
+    #[arg(long = "detach", action = ArgAction::SetTrue)]
+    pub detach: bool,
+    #[arg(long = "group")]
+    pub group: Option<String>,
+    #[arg(long = "enable")]
+    pub enable: Vec<String>,
+    #[arg(long = "disable")]
+    pub disable: Vec<String>,
+    #[arg(long = "allow-override")]
+    pub allow_override: Vec<String>,
+    #[arg(long = "forbid-override")]
+    pub forbid_override: Vec<String>,
+    #[arg(long = "informative-errors", action = ArgAction::SetTrue)]
+    pub informative_errors: bool,
+    #[arg(long = "no-informative-errors", action = ArgAction::SetTrue)]
+    pub no_informative_errors: bool,
+    #[arg(long = "log-destination")]
+    pub log_destination: Option<String>,
+    #[arg(long = "interpolated-path")]
+    pub interpolated_path: Option<String>,
+    #[arg(long = "inetd", action = ArgAction::SetTrue)]
+    pub inetd: bool,
+    #[arg(long = "listen")]
+    pub listen: Vec<String>,
+    #[arg(long = "port")]
+    pub port: Option<u16>,
+    #[arg(long = "user")]
+    pub user: Option<String>,
+    #[arg(long = "user-path", action = ArgAction::SetTrue)]
+    pub user_path: bool,
+    #[arg(value_hint = ValueHint::DirPath)]
+    pub directories: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "zmin daemon",
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
+pub struct DaemonOnlyArgs {
+    #[command(flatten)]
+    pub options: DaemonCommandArgs,
+}
+
 #[derive(CliSchema, Debug)]
 pub enum Command {
     #[command(name = "compatibility", aliases = ["compat"])]
@@ -1466,8 +1602,10 @@ pub enum Command {
         server_option: Vec<String>,
         #[arg(short = 'u', long = "upload-pack")]
         upload_pack: Option<String>,
-        #[arg(long = "filter")]
-        filter: Option<String>,
+        #[arg(long = "filter", action = ArgAction::Append)]
+        filter: Vec<String>,
+        #[arg(long = "no-filter", action = ArgAction::Count)]
+        no_filter: u8,
         #[arg(long = "also-filter-submodules", action = ArgAction::SetTrue)]
         also_filter_submodules: bool,
         #[arg(long = "bundle-uri")]
@@ -1948,7 +2086,7 @@ pub enum Command {
         exclude: Vec<String>,
         #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
         exclude_first_parent_only: bool,
-        #[arg(long = "exclude-hidden")]
+        #[arg(long = "exclude-hidden", overrides_with = "exclude_hidden")]
         exclude_hidden: Option<String>,
         #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
         exclude_promisor_objects: bool,
@@ -2019,7 +2157,7 @@ pub enum Command {
         #[arg(long = "full-history", action = ArgAction::SetTrue)]
         full_history: bool,
         #[arg(long = "glob")]
-        glob: Option<String>,
+        glob: Vec<String>,
         #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
         in_commit_order: bool,
         #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
@@ -2106,7 +2244,12 @@ pub enum Command {
         relative_date: bool,
         #[arg(long = "group")]
         group: Vec<String>,
-        #[arg(short = 'w', num_args = 0..=1, default_missing_value = "")]
+        #[arg(
+            short = 'w',
+            num_args = 0..=1,
+            default_missing_value = "",
+            require_equals = true
+        )]
         wrap: Vec<String>,
         #[arg(long = "stdin", hide = true, action = ArgAction::SetTrue)]
         stdin: bool,
@@ -2874,7 +3017,8 @@ pub enum Command {
             overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
         )]
         perl_regexp: bool,
-        #[arg(long = "pretty")]
+        // Bare --pretty is medium; require_equals keeps the following revision separate.
+        #[arg(long = "pretty", num_args = 0..=1, require_equals = true, default_missing_value = "medium")]
         pretty: Option<String>,
         #[arg(long = "oneline", action = ArgAction::SetTrue)]
         oneline: bool,
@@ -2944,7 +3088,7 @@ pub enum Command {
         exclude_first_parent_only: bool,
         #[arg(long = "merges", action = ArgAction::SetTrue)]
         merges: bool,
-        #[arg(long = "exclude-hidden")]
+        #[arg(long = "exclude-hidden", overrides_with = "exclude_hidden")]
         exclude_hidden: Option<String>,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
         contained: bool,
@@ -3227,8 +3371,10 @@ pub enum Command {
         no_show_forced_updates: bool,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
-        #[arg(long = "filter")]
-        filter: Option<String>,
+        #[arg(long = "filter", action = ArgAction::Append)]
+        filter: Vec<String>,
+        #[arg(long = "no-filter", action = ArgAction::Count)]
+        no_filter: u8,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         #[arg(long = "porcelain", action = ArgAction::SetTrue)]
@@ -3782,6 +3928,8 @@ pub enum Command {
         batch: u8,
         #[arg(long = "no-batch", overrides_with = "batch", action = ArgAction::Count)]
         no_batch: u8,
+        #[arg(trailing_var_arg = true, hide = true)]
+        trailing_args: Vec<String>,
     },
     Mktag {
         #[arg(long = "strict", action = ArgAction::SetTrue)]
@@ -3953,10 +4101,22 @@ pub enum Command {
         exclude_per_directory: Option<String>,
         #[arg(long = "super-prefix")]
         super_prefix: Option<String>,
-        #[arg(long = "recurse-submodules", action = ArgAction::Count)]
-        recurse_submodules: u8,
-        #[arg(long = "no-recurse-submodules", action = ArgAction::Count)]
-        no_recurse_submodules: u8,
+        #[arg(
+            long = "recurse-submodules",
+            action = ArgAction::Set,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            overrides_with_all = ["recurse_submodules", "no_recurse_submodules"],
+            value_parser = parse_recurse_submodules_value
+        )]
+        recurse_submodules: Option<RecurseSubmodulesValue>,
+        #[arg(
+            long = "no-recurse-submodules",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["no_recurse_submodules", "recurse_submodules"]
+        )]
+        no_recurse_submodules: bool,
         #[arg(long = "no-sparse-checkout", action = ArgAction::Count)]
         no_sparse_checkout: u8,
         treeish: Vec<String>,
@@ -4237,9 +4397,9 @@ pub enum Command {
         color_words: Option<String>,
         #[arg(long = "word-diff-regex")]
         word_diff_regex: Option<String>,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "", overrides_with = "no_abbrev")]
         abbrev: Option<String>,
-        #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+        #[arg(long = "no-abbrev", action = ArgAction::SetTrue, overrides_with = "abbrev")]
         no_abbrev: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
@@ -4493,9 +4653,9 @@ pub enum Command {
         color_words: Option<String>,
         #[arg(long = "word-diff-regex")]
         word_diff_regex: Option<String>,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
-        abbrev: Option<String>,
-        #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "", action = ArgAction::Append, overrides_with = "no_abbrev")]
+        abbrev: Vec<String>,
+        #[arg(long = "no-abbrev", action = ArgAction::SetTrue, overrides_with = "abbrev")]
         no_abbrev: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
@@ -4713,9 +4873,9 @@ pub enum Command {
         color_words: Option<String>,
         #[arg(long = "word-diff-regex")]
         word_diff_regex: Option<String>,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
-        abbrev: Option<String>,
-        #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "", action = ArgAction::Append, overrides_with = "no_abbrev")]
+        abbrev: Vec<String>,
+        #[arg(long = "no-abbrev", action = ArgAction::SetTrue, overrides_with = "abbrev")]
         no_abbrev: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
@@ -4936,9 +5096,9 @@ pub enum Command {
         color_words: Option<String>,
         #[arg(long = "word-diff-regex")]
         word_diff_regex: Option<String>,
-        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
-        abbrev: Option<String>,
-        #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
+        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "", action = ArgAction::Append, overrides_with = "no_abbrev")]
+        abbrev: Vec<String>,
+        #[arg(long = "no-abbrev", action = ArgAction::SetTrue, overrides_with = "abbrev")]
         no_abbrev: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
@@ -5060,7 +5220,13 @@ pub enum Command {
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
         exit_code: bool,
-        #[arg(long = "pretty", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        // Bare --pretty selects medium without consuming the following revision.
+        #[arg(
+            long = "pretty",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "medium"
+        )]
         pretty: Option<String>,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
@@ -6073,62 +6239,8 @@ pub enum Command {
         command: MultiPackIndexCommand,
     },
     Daemon {
-        #[arg(long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
-        #[arg(long = "syslog", action = ArgAction::SetTrue)]
-        syslog: bool,
-        #[arg(long = "export-all", action = ArgAction::SetTrue)]
-        export_all: bool,
-        #[arg(long = "timeout")]
-        timeout: Option<u64>,
-        #[arg(long = "init-timeout")]
-        init_timeout: Option<u64>,
-        #[arg(long = "max-connections")]
-        max_connections: Option<usize>,
-        #[arg(long = "strict-paths", action = ArgAction::SetTrue)]
-        strict_paths: bool,
-        #[arg(long = "base-path", value_hint = ValueHint::DirPath)]
-        base_path: Option<PathBuf>,
-        #[arg(long = "base-path-relaxed", action = ArgAction::SetTrue)]
-        base_path_relaxed: bool,
-        #[arg(long = "reuseaddr", action = ArgAction::SetTrue)]
-        reuseaddr: bool,
-        #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
-        pid_file: Option<PathBuf>,
-        #[arg(long = "access-hook", value_hint = ValueHint::FilePath)]
-        access_hook: Option<PathBuf>,
-        #[arg(long = "detach", action = ArgAction::SetTrue)]
-        detach: bool,
-        #[arg(long = "group")]
-        group: Option<String>,
-        #[arg(long = "enable")]
-        enable: Vec<String>,
-        #[arg(long = "disable")]
-        disable: Vec<String>,
-        #[arg(long = "allow-override")]
-        allow_override: Vec<String>,
-        #[arg(long = "forbid-override")]
-        forbid_override: Vec<String>,
-        #[arg(long = "informative-errors", action = ArgAction::SetTrue)]
-        informative_errors: bool,
-        #[arg(long = "no-informative-errors", action = ArgAction::SetTrue)]
-        no_informative_errors: bool,
-        #[arg(long = "log-destination")]
-        log_destination: Option<String>,
-        #[arg(long = "interpolated-path")]
-        interpolated_path: Option<String>,
-        #[arg(long = "inetd", action = ArgAction::SetTrue)]
-        inetd: bool,
-        #[arg(long = "listen")]
-        listen: Vec<String>,
-        #[arg(long = "port")]
-        port: Option<u16>,
-        #[arg(long = "user")]
-        user: Option<String>,
-        #[arg(long = "user-path", action = ArgAction::SetTrue)]
-        user_path: bool,
-        #[arg(value_hint = ValueHint::DirPath)]
-        directories: Vec<PathBuf>,
+        #[command(flatten)]
+        options: DaemonCommandArgs,
     },
     UploadPack {
         #[arg(long = "strict", action = ArgAction::SetTrue)]
@@ -6452,13 +6564,15 @@ pub enum Command {
         header: bool,
         #[arg(long = "graph", action = ArgAction::SetTrue)]
         graph: bool,
-        #[arg(long = "all", action = ArgAction::SetTrue)]
+        #[arg(long = "all", action = ArgAction::SetTrue, overrides_with = "all")]
         all: bool,
+        #[arg(long = "not", action = ArgAction::Count)]
+        not: u8,
         #[arg(long = "exclude")]
         exclude: Vec<String>,
         #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
         exclude_first_parent_only: bool,
-        #[arg(long = "exclude-hidden")]
+        #[arg(long = "exclude-hidden", overrides_with = "exclude_hidden")]
         exclude_hidden: Option<String>,
         #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
         exclude_promisor_objects: bool,
@@ -6536,7 +6650,7 @@ pub enum Command {
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
         #[arg(long = "glob")]
-        glob: Option<String>,
+        glob: Vec<String>,
         #[arg(long = "skip")]
         skip: Option<usize>,
         #[arg(
@@ -6659,7 +6773,7 @@ pub enum Command {
         #[arg(long = "boundary", action = ArgAction::SetTrue)]
         boundary: bool,
         #[arg(long = "max-count", short = 'n')]
-        max_count: Option<usize>,
+        max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
         #[arg(long = "since-as-filter")]
@@ -6680,8 +6794,12 @@ pub enum Command {
         commit_header: bool,
         #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
         no_commit_header: bool,
-        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
-        disk_usage: bool,
+        #[arg(
+            long = "disk-usage",
+            num_args = 0..=1,
+            require_equals = true
+        )]
+        disk_usage: Option<Option<DiskUsageValue>>,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(long = "no-filter", action = ArgAction::SetTrue)]
@@ -6699,7 +6817,8 @@ pub enum Command {
         quiet: bool,
         #[arg(long = "format")]
         format: Option<String>,
-        #[arg(long = "pretty")]
+        // Bare --pretty is medium; require_equals keeps the following revision separate.
+        #[arg(long = "pretty", num_args = 0..=1, require_equals = true, default_missing_value = "medium")]
         pretty: Option<String>,
         revs: Vec<String>,
     },
@@ -7417,9 +7536,12 @@ pub enum RemoteCommand {
     },
     #[command(name = "set-head")]
     SetHead {
+        #[arg(short = 'a', long = "auto", action = ArgAction::SetTrue)]
+        auto: bool,
+        #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
+        delete: bool,
         name: String,
-        #[arg(allow_hyphen_values = true)]
-        args: Vec<String>,
+        branch: Option<String>,
     },
     Show {
         #[arg(short = 'n', action = ArgAction::SetTrue)]

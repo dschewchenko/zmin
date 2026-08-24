@@ -8,9 +8,11 @@ api_base="${ZMIN_GITHUB_API_URL:-https://api.github.com}"
 metadata_json="$(mktemp)"
 downloads_tsv="$(mktemp)"
 api_error_file="$(mktemp)"
+asset_dir="$(mktemp -d)"
 
 cleanup() {
   rm -f "$metadata_json" "$downloads_tsv" "$api_error_file"
+  rm -rf "$asset_dir"
 }
 trap cleanup EXIT
 
@@ -87,7 +89,7 @@ missing=0
 printf 'Release assets for %s/%s\n' "$repo" "$tag"
 printf '%-45s %s\n' "asset" "downloads"
 for asset in "${expected_assets[@]}"; do
-  if curl -fsIL "$release_base/$tag/$asset" >/dev/null; then
+  if curl -fsSL "$release_base/$tag/$asset" -o "$asset_dir/$asset"; then
     printf '%-45s %s\n' "$asset" "$(download_count "$asset")"
   else
     printf '%-45s missing\n' "$asset"
@@ -98,3 +100,31 @@ done
 if [[ "$missing" -ne 0 ]]; then
   exit 1
 fi
+
+python3 - "$asset_dir" "${expected_assets[@]}" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+asset_dir = Path(sys.argv[1])
+expected_assets = sys.argv[2:]
+archive_assets = [name for name in expected_assets if name != "SHA256SUMS"]
+rows = {}
+for line in (asset_dir / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+    fields = line.split()
+    if len(fields) != 2 or fields[1] in rows:
+        raise SystemExit("SHA256SUMS has malformed or duplicate rows")
+    rows[fields[1]] = fields[0]
+if set(rows) != set(archive_assets):
+    raise SystemExit("SHA256SUMS asset list drifted")
+for asset in archive_assets:
+    actual = hashlib.sha256((asset_dir / asset).read_bytes()).hexdigest()
+    if rows[asset] != actual:
+        raise SystemExit(f"SHA256SUMS mismatch: {asset}")
+PY
+
+for asset in "${expected_assets[@]}"; do
+  if [[ "$asset" != "SHA256SUMS" ]]; then
+    python3 tools/release-package.py check --artifact "$asset_dir/$asset"
+  fi
+done

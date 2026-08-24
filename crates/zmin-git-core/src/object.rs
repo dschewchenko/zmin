@@ -191,25 +191,24 @@ pub(crate) fn object_hex_common_prefix_len_bytes(left: &[u8], right: &[u8]) -> u
     len
 }
 
-pub(crate) fn update_unique_abbrev_len_for_candidate(
+pub(crate) fn update_unique_abbrev_lens_for_candidate(
     sorted_targets: &[ObjectId],
+    required: &mut [usize],
     candidate: &[u8],
-    required: &mut usize,
 ) {
     let insertion = match sorted_targets.binary_search_by(|id| id.as_bytes().cmp(candidate)) {
         Ok(_) => return,
         Err(insertion) => insertion,
     };
-    if let Some(target) = insertion
-        .checked_sub(1)
-        .and_then(|index| sorted_targets.get(index))
+    if let Some(index) = insertion.checked_sub(1)
+        && let Some(target) = sorted_targets.get(index)
     {
-        *required =
-            (*required).max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
+        required[index] = required[index]
+            .max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
     }
     if let Some(target) = sorted_targets.get(insertion) {
-        *required =
-            (*required).max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
+        required[insertion] = required[insertion]
+            .max(object_hex_common_prefix_len_bytes(target.as_bytes(), candidate) + 1);
     }
 }
 

@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -65,15 +65,22 @@ pub(crate) fn exact_repo_at(path: &std::path::Path) -> Option<GitRepo> {
 }
 
 pub(crate) fn find_repo_at(path: &std::path::Path) -> Result<GitRepo> {
-    let previous = std::env::current_dir()?;
-    std::env::set_current_dir(path)?;
-    let result = find_repo();
-    std::env::set_current_dir(previous)?;
-    result
+    let cwd = std::env::current_dir()?;
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    find_repo_from_base(&path)
 }
 
 pub(crate) fn repo_is_bare(repo: &GitRepo) -> bool {
-    repo.root == repo.git_dir && is_bare_git_dir(&repo.git_dir)
+    repo.root == repo.git_dir
+        && std::env::var_os("GIT_WORK_TREE").is_none()
+        && GLOBAL_REPO_OPTIONS
+            .get()
+            .is_none_or(|options| options.work_tree.is_none())
+        && git_dir_worktree(&repo.git_dir).ok().flatten().is_none()
 }
 
 pub(crate) fn repo_relative_path(
@@ -372,28 +379,35 @@ fn git_path_output_string(value: String) -> String {
 }
 
 pub(crate) fn find_repo() -> Result<GitRepo> {
+    find_repo_from_base(&std::env::current_dir()?)
+}
+
+fn find_repo_from_base(base: &std::path::Path) -> Result<GitRepo> {
     prepare_trace2_perf_target()?;
-    if let Some(repo) = repo_from_global_options()? {
+    if let Some(repo) = repo_from_global_options(base)? {
         return Ok(repo);
     }
-    if let Some(repo) = repo_from_env_options()? {
+    if let Some(repo) = repo_from_env_options(base)? {
         return Ok(repo);
     }
-    let ceiling_dirs = repo_search_ceiling_dirs()?;
-    let mut dir = std::env::current_dir()?;
+    find_discovered_repo(base, false)
+}
+
+fn find_discovered_repo(base: &std::path::Path, enforce_bare_safety: bool) -> Result<GitRepo> {
+    let ceiling_dirs = repo_search_ceiling_dirs_at(base)?;
+    let mut dir = base.to_path_buf();
     loop {
+        if is_git_dir_or_linked_worktree_git_dir(&dir) {
+            let repo = repo_from_git_dir(&dir, &dir, base, None, false)?;
+            if enforce_bare_safety {
+                enforce_safe_bare_repository_access(&repo, base)?;
+            }
+            return Ok(repo);
+        }
         let git_dir = dir.join(".git");
         match inspect_dot_git_entry(&git_dir)? {
             DotGitEntry::ValidDir => {
-                let repo = GitRepo {
-                    root: dir,
-                    index_path: git_dir.join("index"),
-                    objects_dir: git_dir.join("objects"),
-                    git_dir,
-                };
-                trace_implicit_git_directory_access(&repo, &std::env::current_dir()?)?;
-                enforce_safe_directory_access(&repo, &std::env::current_dir()?)?;
-                return repo_with_env_index_path(repo);
+                return repo_from_git_dir(&git_dir, &dir, base, None, false);
             }
             DotGitEntry::GitFile => {
                 let actual_git_dir = read_gitdir_file(&git_dir)?;
@@ -406,16 +420,7 @@ pub(crate) fn find_repo() -> Result<GitRepo> {
                         ),
                     });
                 }
-                let common_dir = read_common_git_dir(&actual_git_dir)?;
-                let repo = GitRepo {
-                    root: dir,
-                    index_path: actual_git_dir.join("index"),
-                    objects_dir: common_dir.join("objects"),
-                    git_dir: actual_git_dir,
-                };
-                trace_implicit_git_directory_access(&repo, &std::env::current_dir()?)?;
-                enforce_safe_directory_access(&repo, &std::env::current_dir()?)?;
-                return repo_with_env_index_path(repo);
+                return repo_from_git_dir(&actual_git_dir, &dir, base, None, false);
             }
             DotGitEntry::InvalidSpecialFile => {
                 return Err(CliError::Fatal {
@@ -443,6 +448,314 @@ pub(crate) fn find_repo() -> Result<GitRepo> {
     }
 }
 
+fn repo_from_git_dir(
+    git_dir: &std::path::Path,
+    discovered_root: &std::path::Path,
+    base: &std::path::Path,
+    explicit_work_tree: Option<&std::path::Path>,
+    explicit_bare: bool,
+) -> Result<GitRepo> {
+    if !is_git_dir_or_linked_worktree_git_dir(git_dir) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("not a git repository: '{}'", git_path_output(git_dir)),
+        });
+    }
+    let common_dir = read_common_git_dir_at(git_dir, base)?;
+    let root = effective_work_tree(
+        git_dir,
+        discovered_root,
+        base,
+        explicit_work_tree,
+        explicit_bare,
+    )?;
+    let repo = GitRepo {
+        root,
+        index_path: git_dir.join("index"),
+        objects_dir: common_dir.join("objects"),
+        git_dir: git_dir.to_path_buf(),
+    };
+    write_trace_setup(&repo, base)?;
+    trace_implicit_git_directory_access(&repo, base)?;
+    enforce_safe_directory_access(&repo, base)?;
+    repo_with_env_index_path_at(repo, base)
+}
+
+fn write_trace_setup(repo: &GitRepo, base: &std::path::Path) -> Result<()> {
+    let Some(target) = std::env::var_os("GIT_TRACE_SETUP") else {
+        return Ok(());
+    };
+    if target.is_empty() || target == "0" || target.eq_ignore_ascii_case("false") {
+        return Ok(());
+    }
+    let Ok(payload) = trace_setup_payload(repo, base) else {
+        return Ok(());
+    };
+    if target == "1" || target == "2" || target.eq_ignore_ascii_case("true") {
+        let _ = io::stderr().write_all(&payload);
+        return Ok(());
+    }
+    let target_path = PathBuf::from(target);
+    if !target_path.is_absolute() {
+        warn_trace_setup_value(&target_path);
+        return Ok(());
+    }
+    let mut file = match fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target_path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            warn_trace_setup_open(&target_path, &error);
+            return Ok(());
+        }
+    };
+    if let Err(error) = file.write_all(&payload) {
+        warn_trace_setup_write(&error);
+    }
+    Ok(())
+}
+
+fn trace_setup_payload(repo: &GitRepo, base: &std::path::Path) -> Result<Vec<u8>> {
+    let git_dir = trace_git_dir_display(repo, base)?;
+    let common_dir = read_common_git_dir_at(&repo.git_dir, base)?;
+    let common_dir = if canonical_or_absolute(common_dir.clone())
+        == canonical_or_absolute(repo.git_dir.clone())
+    {
+        git_dir.clone()
+    } else {
+        trace_path_bytes(&canonical_or_absolute(common_dir))?
+    };
+    let worktree = if repo_is_bare(repo) {
+        b"(null)".to_vec()
+    } else {
+        trace_path_bytes(&canonical_or_absolute(repo.root.clone()))?
+    };
+    let cwd = trace_path_bytes(&trace_cwd(repo, base))?;
+    let prefix = trace_prefix(repo, base)?;
+    let mut payload = Vec::new();
+    append_trace_setup_line(&mut payload, b"setup: git_dir: ", &git_dir);
+    append_trace_setup_line(&mut payload, b"setup: git_common_dir: ", &common_dir);
+    append_trace_setup_line(&mut payload, b"setup: worktree: ", &worktree);
+    append_trace_setup_line(&mut payload, b"setup: cwd: ", &cwd);
+    append_trace_setup_line(&mut payload, b"setup: prefix: ", &prefix);
+    Ok(payload)
+}
+
+fn append_trace_setup_line(payload: &mut Vec<u8>, label: &[u8], value: &[u8]) {
+    payload.extend_from_slice(label);
+    payload.extend_from_slice(value);
+    payload.push(b'\n');
+}
+
+fn warn_trace_setup_value(target: &std::path::Path) {
+    let mut message = b"warning: unknown trace value for 'GIT_TRACE_SETUP': ".to_vec();
+    message.extend(trace_path_bytes(target).unwrap_or_else(|_| b"<invalid path>".to_vec()));
+    message.extend_from_slice(b"\n");
+    let _ = io::stderr().write_all(&message);
+}
+
+fn warn_trace_setup_open(target: &std::path::Path, error: &io::Error) {
+    let mut message = b"warning: could not open '".to_vec();
+    message.extend(trace_path_bytes(target).unwrap_or_else(|_| b"<invalid path>".to_vec()));
+    message.extend_from_slice(b"' for tracing: ");
+    let error_text = error.to_string();
+    let error_text = error_text
+        .split_once(" (os error ")
+        .map_or(error_text.as_str(), |(message, _)| message);
+    message.extend_from_slice(error_text.as_bytes());
+    message.push(b'\n');
+    let _ = io::stderr().write_all(&message);
+}
+
+fn warn_trace_setup_write(error: &io::Error) {
+    let mut message = b"warning: unable to write trace for GIT_TRACE_SETUP: ".to_vec();
+    let error_text = error.to_string();
+    let error_text = error_text
+        .split_once(" (os error ")
+        .map_or(error_text.as_str(), |(message, _)| message);
+    message.extend_from_slice(error_text.as_bytes());
+    message.push(b'\n');
+    let _ = io::stderr().write_all(&message);
+}
+
+fn trace_git_dir_display(repo: &GitRepo, base: &std::path::Path) -> Result<Vec<u8>> {
+    if let Some(raw) = std::env::var_os("GIT_DIR") {
+        let raw_path = normalize_windows_input_path(PathBuf::from(raw));
+        let absolute = absolute_path_from_base(base, &raw_path)?;
+        if absolute.is_file() || raw_path.is_absolute() {
+            return trace_path_bytes(&canonical_or_absolute(repo.git_dir.clone()));
+        }
+        let inside_worktree = trace_path_is_inside(repo, base);
+        let base_is_below_worktree =
+            canonical_or_absolute(base.to_path_buf()) != canonical_or_absolute(repo.root.clone());
+        let git_dir_parent = repo
+            .git_dir
+            .parent()
+            .map(|parent| canonical_or_absolute(parent.to_path_buf()));
+        let worktree_differs_from_git_dir_parent = git_dir_parent
+            .as_ref()
+            .is_some_and(|parent| canonical_or_absolute(repo.root.clone()) != *parent);
+        let has_configured_worktree = git_dir_worktree(&repo.git_dir)?.is_some();
+        if !repo_is_bare(repo)
+            && inside_worktree
+            && ((worktree_differs_from_git_dir_parent
+                && (raw_path == PathBuf::from(".") || raw_path == PathBuf::from(".git")))
+                || (std::env::var_os("GIT_WORK_TREE").is_some() && base_is_below_worktree))
+        {
+            return trace_path_bytes(&canonical_or_absolute(repo.git_dir.clone()));
+        }
+        if std::env::var_os("GIT_WORK_TREE").is_none()
+            && inside_worktree
+            && has_configured_worktree
+            && raw_path
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+        {
+            return trace_path_bytes(&canonical_or_absolute(repo.git_dir.clone()));
+        }
+        return trace_path_bytes(&raw_path);
+    }
+    let git_dir = canonical_or_absolute(repo.git_dir.clone());
+    let base = canonical_or_absolute(base.to_path_buf());
+    let inside_worktree = trace_path_is_inside(repo, &base);
+    let git_dir_parent = repo
+        .git_dir
+        .parent()
+        .map(|parent| canonical_or_absolute(parent.to_path_buf()));
+    let worktree_differs_from_git_dir_parent = git_dir_parent
+        .as_ref()
+        .is_some_and(|parent| canonical_or_absolute(repo.root.clone()) != *parent);
+    if repo_is_bare(repo) {
+        if base == git_dir {
+            return Ok(b".".to_vec());
+        }
+        if canonical_or_absolute(base.join(".git")) == git_dir {
+            return Ok(b".git".to_vec());
+        }
+    } else if inside_worktree
+        && (worktree_differs_from_git_dir_parent
+            || (std::env::var_os("GIT_WORK_TREE").is_some()
+                && canonical_or_absolute(base.to_path_buf())
+                    != canonical_or_absolute(repo.root.clone())))
+    {
+        return trace_path_bytes(&git_dir);
+    } else if base.starts_with(&git_dir) {
+        return trace_path_bytes(&git_dir);
+    } else {
+        if repo.git_dir.file_name().is_some_and(|name| name == ".git") && repo.git_dir.is_dir() {
+            return Ok(b".git".to_vec());
+        }
+    }
+    trace_path_bytes(&git_dir)
+}
+
+fn trace_path_is_inside(repo: &GitRepo, base: &std::path::Path) -> bool {
+    canonical_or_absolute(base.to_path_buf()).starts_with(&canonical_or_absolute(repo.root.clone()))
+}
+
+fn trace_prefix(repo: &GitRepo, base: &std::path::Path) -> Result<Vec<u8>> {
+    if repo_is_bare(repo) {
+        return Ok(b"(null)".to_vec());
+    }
+    let root = canonical_or_absolute(repo.root.clone());
+    let cwd = canonical_or_absolute(base.to_path_buf());
+    let Ok(relative) = cwd.strip_prefix(&root) else {
+        return Ok(b"(null)".to_vec());
+    };
+    if relative.as_os_str().is_empty() {
+        return Ok(b"(null)".to_vec());
+    }
+    let mut prefix = Vec::new();
+    for component in relative.components() {
+        if !prefix.is_empty() {
+            prefix.push(b'/');
+        }
+        let component_path = PathBuf::from(component.as_os_str());
+        prefix.extend_from_slice(&trace_path_bytes(&component_path)?);
+    }
+    prefix.push(b'/');
+    Ok(prefix)
+}
+
+fn trace_path_bytes(path: &Path) -> Result<Vec<u8>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        return Ok(quote_trace_bytes(path.as_os_str().as_bytes()));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
+        let value = String::from_utf16(&wide).map_err(|_| {
+            CliError::Message("path cannot be represented as valid Windows UTF-8".to_owned())
+        })?;
+        return Ok(quote_trace_bytes(value.replace('\\', "/").as_bytes()));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let value = path
+            .to_str()
+            .ok_or_else(|| CliError::Message("path cannot be represented as UTF-8".to_owned()))?;
+        Ok(quote_trace_bytes(value.as_bytes()))
+    }
+}
+
+fn quote_trace_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut quoted = Vec::with_capacity(bytes.len());
+    for &byte in bytes {
+        match byte {
+            b'\\' => quoted.extend_from_slice(b"\\\\"),
+            b'\n' => quoted.extend_from_slice(b"\\n"),
+            b'\r' => quoted.extend_from_slice(b"\\r"),
+            _ => quoted.push(byte),
+        }
+    }
+    quoted
+}
+
+fn trace_cwd(repo: &GitRepo, base: &std::path::Path) -> PathBuf {
+    if repo_is_bare(repo) {
+        return canonical_or_absolute(base.to_path_buf());
+    }
+    let root = canonical_or_absolute(repo.root.clone());
+    let cwd = canonical_or_absolute(base.to_path_buf());
+    if cwd == root || cwd.starts_with(&root) {
+        root
+    } else {
+        cwd
+    }
+}
+
+fn effective_work_tree(
+    git_dir: &std::path::Path,
+    discovered_root: &std::path::Path,
+    base: &std::path::Path,
+    explicit_work_tree: Option<&std::path::Path>,
+    explicit_bare: bool,
+) -> Result<PathBuf> {
+    if let Some(work_tree) = explicit_work_tree {
+        return Ok(work_tree.to_path_buf());
+    }
+    if let Some(work_tree_raw) = std::env::var_os("GIT_WORK_TREE") {
+        return absolute_path_from_base(
+            base,
+            &normalize_windows_input_path(PathBuf::from(work_tree_raw)),
+        );
+    }
+    if let Some(work_tree) = git_dir_worktree(git_dir)? {
+        return Ok(canonical_or_absolute(work_tree));
+    }
+    if explicit_bare || is_bare_git_dir(git_dir) || discovered_root == git_dir {
+        return Ok(git_dir.to_path_buf());
+    }
+    Ok(discovered_root.to_path_buf())
+}
+
 pub(crate) fn find_repo_with_parent_dir_error() -> Result<GitRepo> {
     parent_dir_not_repo_error(find_repo())
 }
@@ -466,12 +779,7 @@ fn parent_dir_not_repo_error(result: Result<GitRepo>) -> Result<GitRepo> {
 pub(crate) fn repo_from_worktree_root(root: PathBuf) -> Result<GitRepo> {
     let git_dir_path = root.join(".git");
     if git_dir_path.is_dir() {
-        return Ok(GitRepo {
-            root,
-            index_path: git_dir_path.join("index"),
-            objects_dir: git_dir_path.join("objects"),
-            git_dir: git_dir_path,
-        });
+        return repo_from_git_dir(&git_dir_path, &root, &root, Some(&root), false);
     }
     if git_dir_path.is_file() {
         let actual_git_dir = read_gitdir_file(&git_dir_path)?;
@@ -481,13 +789,7 @@ pub(crate) fn repo_from_worktree_root(root: PathBuf) -> Result<GitRepo> {
                 message: format!("not a git repository: {}", git_path_output(&actual_git_dir)),
             });
         }
-        let common_dir = read_common_git_dir(&actual_git_dir)?;
-        return Ok(GitRepo {
-            root,
-            index_path: actual_git_dir.join("index"),
-            objects_dir: common_dir.join("objects"),
-            git_dir: actual_git_dir,
-        });
+        return repo_from_git_dir(&actual_git_dir, &root, &root, Some(&root), false);
     }
     Err(CliError::Fatal {
         code: 128,
@@ -495,108 +797,67 @@ pub(crate) fn repo_from_worktree_root(root: PathBuf) -> Result<GitRepo> {
     })
 }
 
-pub(crate) fn repo_with_env_index_path(mut repo: GitRepo) -> Result<GitRepo> {
+pub(crate) fn repo_with_env_index_path(repo: GitRepo) -> Result<GitRepo> {
+    repo_with_env_index_path_at(repo, &std::env::current_dir()?)
+}
+
+fn repo_with_env_index_path_at(mut repo: GitRepo, base: &std::path::Path) -> Result<GitRepo> {
     let Some(index_raw) = std::env::var_os("GIT_INDEX_FILE") else {
         return Ok(repo);
     };
-    let cwd = std::env::current_dir()?;
     let path = normalize_windows_input_path(PathBuf::from(index_raw));
     repo.index_path = if path.is_absolute() {
         path
     } else {
-        cwd.join(path)
+        base.join(path)
     };
     Ok(repo)
 }
 
-fn repo_from_global_options() -> Result<Option<GitRepo>> {
+fn repo_from_global_options(base: &std::path::Path) -> Result<Option<GitRepo>> {
     let Some(options) = GLOBAL_REPO_OPTIONS.get() else {
         return Ok(None);
     };
     let git_dir = if let Some(git_dir) = options.git_dir.as_ref() {
-        git_dir.clone()
-    } else if let Some(work_tree) = options.work_tree.as_ref() {
-        let cwd = std::env::current_dir()?;
-        if !work_tree.as_os_str().is_empty() && is_git_dir_or_linked_worktree_git_dir(&cwd) {
-            cwd
-        } else {
-            return Ok(None);
+        resolve_git_dir_path(git_dir)?
+    } else if options.work_tree.is_some() {
+        match find_discovered_repo(base, false) {
+            Ok(repo) => repo.git_dir,
+            Err(CliError::Fatal { code: 128, .. }) => return Ok(None),
+            Err(error) => return Err(error),
         }
     } else {
         return Ok(None);
     };
-    if !is_git_dir_or_linked_worktree_git_dir(&git_dir) {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!("not a git repository: '{}'", git_path_output(&git_dir)),
-        });
-    }
-    let common_dir = read_common_git_dir(&git_dir)?;
-    let root = match (options.work_tree.as_ref(), options.bare) {
-        (Some(path), _) => path.clone(),
-        (None, true) => git_dir.clone(),
-        (None, false) => std::env::current_dir()?,
-    };
-    let repo = GitRepo {
-        root,
-        index_path: git_dir.join("index"),
-        objects_dir: common_dir.join("objects"),
-        git_dir,
-    };
-    enforce_safe_directory_access(&repo, &std::env::current_dir()?)?;
-    Ok(Some(repo_with_env_index_path(repo)?))
+    let explicit_work_tree = options.work_tree.as_deref();
+    let repo = repo_from_git_dir(&git_dir, base, base, explicit_work_tree, options.bare)?;
+    Ok(Some(repo))
 }
 
-fn repo_from_env_options() -> Result<Option<GitRepo>> {
+fn repo_from_env_options(base: &std::path::Path) -> Result<Option<GitRepo>> {
     let Some(git_dir_raw) = std::env::var_os("GIT_DIR") else {
         return Ok(None);
     };
-    let cwd = std::env::current_dir()?;
-    let git_dir = {
-        let path = normalize_windows_input_path(PathBuf::from(git_dir_raw));
-        if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        }
-    };
-    if !is_git_dir(&git_dir) {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!("not a git repository: '{}'", git_path_output(&git_dir)),
-        });
-    }
-    let common_dir = read_common_git_dir(&git_dir)?;
-    let root = if let Some(work_tree_raw) = std::env::var_os("GIT_WORK_TREE") {
-        let path = normalize_windows_input_path(PathBuf::from(work_tree_raw));
-        if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        }
-    } else if is_bare_git_dir(&git_dir) {
-        git_dir.clone()
+    let git_dir_input = normalize_windows_input_path(PathBuf::from(git_dir_raw));
+    let work_tree_raw = std::env::var_os("GIT_WORK_TREE");
+    let git_dir_path = absolute_path_from_base(base, &git_dir_input)?;
+    let git_dir_path = if work_tree_raw.is_some()
+        && !git_dir_input.is_absolute()
+        && git_dir_input
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        canonical_or_absolute(git_dir_path)
     } else {
-        cwd.clone()
+        git_dir_path
     };
-    let index_path = if let Some(index_raw) = std::env::var_os("GIT_INDEX_FILE") {
-        let path = normalize_windows_input_path(PathBuf::from(index_raw));
-        if path.is_absolute() {
-            path
-        } else {
-            cwd.join(path)
-        }
-    } else {
-        git_dir.join("index")
-    };
-    let repo = GitRepo {
-        root,
-        index_path,
-        objects_dir: common_dir.join("objects"),
-        git_dir,
-    };
-    enforce_safe_directory_access(&repo, &std::env::current_dir()?)?;
-    Ok(Some(repo_with_env_index_path(repo)?))
+    let git_dir = resolve_git_dir_path(&git_dir_path)?;
+    let explicit_work_tree = work_tree_raw.map(|raw| {
+        absolute_path_from_base(base, &normalize_windows_input_path(PathBuf::from(raw)))
+    });
+    let explicit_work_tree = explicit_work_tree.transpose()?.map(canonical_or_absolute);
+    let repo = repo_from_git_dir(&git_dir, base, base, explicit_work_tree.as_deref(), false)?;
+    Ok(Some(repo))
 }
 
 pub(crate) fn is_git_dir(path: &std::path::Path) -> bool {
@@ -642,6 +903,14 @@ pub(crate) fn read_gitdir_file(path: &std::path::Path) -> Result<PathBuf> {
             .join(git_dir)
     };
     Ok(fs::canonicalize(&git_dir).unwrap_or(git_dir))
+}
+
+fn resolve_git_dir_path(path: &std::path::Path) -> Result<PathBuf> {
+    if path.is_file() {
+        read_gitdir_file(path)
+    } else {
+        Ok(path.to_path_buf())
+    }
 }
 
 enum DotGitEntry {
@@ -697,9 +966,12 @@ fn inspect_dot_git_entry(path: &std::path::Path) -> Result<DotGitEntry> {
 }
 
 pub(crate) fn read_common_git_dir(git_dir: &std::path::Path) -> Result<PathBuf> {
+    read_common_git_dir_at(git_dir, &std::env::current_dir()?)
+}
+
+fn read_common_git_dir_at(git_dir: &std::path::Path, base: &std::path::Path) -> Result<PathBuf> {
     if let Some(common_dir_raw) = std::env::var_os("GIT_COMMON_DIR") {
-        let cwd = std::env::current_dir()?;
-        return absolute_path_from_base(&cwd, std::path::Path::new(&common_dir_raw));
+        return absolute_path_from_base(base, std::path::Path::new(&common_dir_raw));
     }
     match fs::read_to_string(git_dir.join("commondir")) {
         Ok(raw) => {
@@ -716,29 +988,17 @@ pub(crate) fn read_common_git_dir(git_dir: &std::path::Path) -> Result<PathBuf> 
 }
 
 pub(crate) fn find_repo_or_bare() -> Result<GitRepo> {
-    prepare_trace2_perf_target()?;
-    if let Some(repo) = repo_from_global_options()? {
-        return repo_with_env_index_path(repo);
-    }
-    if let Some(repo) = repo_from_env_options()? {
-        return repo_with_env_index_path(repo);
-    }
     let cwd = std::env::current_dir()?;
-    if is_git_dir(&cwd) {
-        let common_dir = read_common_git_dir(&cwd)?;
-        let root = git_dir_worktree(&cwd)?.unwrap_or_else(|| cwd.clone());
-        let repo = GitRepo {
-            root,
-            index_path: cwd.join("index"),
-            objects_dir: common_dir.join("objects"),
-            git_dir: cwd,
-        };
-        trace_implicit_git_directory_access(&repo, &std::env::current_dir()?)?;
-        enforce_safe_bare_repository_access(&repo, &std::env::current_dir()?)?;
-        enforce_safe_directory_access(&repo, &std::env::current_dir()?)?;
-        return repo_with_env_index_path(repo);
+    prepare_trace2_perf_target()?;
+    if let Some(repo) = repo_from_global_options(&cwd)? {
+        enforce_safe_bare_repository_access(&repo, &cwd)?;
+        return Ok(repo);
     }
-    repo_with_env_index_path(find_repo()?)
+    if let Some(repo) = repo_from_env_options(&cwd)? {
+        enforce_safe_bare_repository_access(&repo, &cwd)?;
+        return Ok(repo);
+    }
+    find_discovered_repo(&cwd, true)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -934,11 +1194,10 @@ fn repository_requires_safe_directory(repo: &GitRepo) -> Result<bool> {
     }
 }
 
-fn repo_search_ceiling_dirs() -> Result<Vec<PathBuf>> {
+fn repo_search_ceiling_dirs_at(base: &std::path::Path) -> Result<Vec<PathBuf>> {
     let Some(raw) = std::env::var_os("GIT_CEILING_DIRECTORIES") else {
         return Ok(Vec::new());
     };
-    let cwd = std::env::current_dir()?;
     let mut preserve_symlinks = false;
     let mut ceilings = Vec::new();
     for path in std::env::split_paths(&raw) {
@@ -950,7 +1209,7 @@ fn repo_search_ceiling_dirs() -> Result<Vec<PathBuf>> {
         let absolute = if path.is_absolute() {
             path
         } else {
-            cwd.join(path)
+            base.join(path)
         };
         ceilings.push(if preserve_symlinks {
             absolute
@@ -994,8 +1253,24 @@ fn git_dir_worktree(git_dir: &std::path::Path) -> Result<Option<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_url_to_path, normalize_repo_relative_path, repo_search_stops_before_parent};
-    use std::path::Path;
+    use super::{
+        file_url_to_path, normalize_repo_relative_path, repo_search_stops_before_parent,
+        trace_path_bytes,
+    };
+    use std::path::{Path, PathBuf};
+
+    #[cfg(unix)]
+    #[test]
+    fn trace_path_bytes_preserves_raw_unix_pathnames() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = PathBuf::from(OsStr::from_bytes(b"/tmp/raw-\x80\\name\n"));
+        assert_eq!(
+            trace_path_bytes(&path).expect("trace path bytes"),
+            b"/tmp/raw-\x80\\\\name\\n"
+        );
+    }
 
     #[cfg(windows)]
     #[test]

@@ -1,8 +1,10 @@
 # Zmin Staged Hook Runner
 
-This document defines the Zmin-only staged hook runner. It is outside the Git
-`2.47.1` compatibility denominator because stock Git has no `git hooks run`
-command and no lint-staged equivalent.
+This document defines the Zmin-only staged hook runner. It is outside the
+current Git v2.55.0 compatibility denominator because it is the plural Zmin
+`zmin hooks` product surface. Stock Git's singular `git hook run` command is a
+different current-Git surface and remains in the upstream contract; there is no
+stock `git hooks run` command or lint-staged equivalent.
 
 The goal is to replace Husky plus lint-staged style workflows with one
 index-backed command that works from normal Git hooks, has predictable file

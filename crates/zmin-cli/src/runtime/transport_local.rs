@@ -502,6 +502,127 @@ pub(crate) fn cleanup_failed_clone_config(
     }
 }
 
+struct SeparateGitDirCleanup {
+    path: PathBuf,
+    existed: bool,
+}
+
+pub(crate) struct CloneCleanupGuard {
+    destination: PathBuf,
+    git_dir: PathBuf,
+    destination_existed: bool,
+    bare: bool,
+    initialized: bool,
+    separate_git_dir: Option<SeparateGitDirCleanup>,
+    armed: bool,
+}
+
+impl CloneCleanupGuard {
+    pub(crate) fn new(
+        destination: &std::path::Path,
+        destination_existed: bool,
+        bare: bool,
+    ) -> Self {
+        let git_dir = if bare {
+            destination.to_path_buf()
+        } else {
+            destination.join(".git")
+        };
+        Self {
+            destination: destination.to_path_buf(),
+            git_dir,
+            destination_existed,
+            bare,
+            initialized: false,
+            separate_git_dir: None,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn mark_initialized(&mut self) {
+        self.initialized = true;
+    }
+
+    pub(crate) fn update_git_dir(&mut self, git_dir: &std::path::Path) {
+        self.git_dir = git_dir.to_path_buf();
+    }
+
+    pub(crate) fn track_separate_git_dir(
+        &mut self,
+        requested_git_dir: &std::path::Path,
+    ) -> Result<()> {
+        let path = absolute_path_from_arg(requested_git_dir)?;
+        self.separate_git_dir = Some(SeparateGitDirCleanup {
+            existed: path.exists(),
+            path,
+        });
+        Ok(())
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CloneCleanupGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if !self.initialized {
+            if !self.destination_existed {
+                let _ = fs::remove_dir_all(&self.destination);
+            }
+            return;
+        }
+        if let Some(separate_git_dir) = &self.separate_git_dir {
+            if !separate_git_dir.existed {
+                let _ = fs::remove_dir_all(&separate_git_dir.path);
+            }
+            if self.destination_existed {
+                remove_clone_path(&self.destination.join(".git"));
+            } else {
+                let _ = fs::remove_dir_all(&self.destination);
+            }
+            return;
+        }
+        if self.destination_existed {
+            if self.bare {
+                remove_directory_contents(&self.destination);
+            } else {
+                let _ = fs::remove_dir_all(&self.git_dir);
+            }
+        } else {
+            let _ = fs::remove_dir_all(&self.destination);
+        }
+    }
+}
+
+fn remove_directory_contents(directory: &std::path::Path) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+fn remove_clone_path(path: &std::path::Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.is_dir() {
+        let _ = fs::remove_dir_all(path);
+    } else {
+        let _ = fs::remove_file(path);
+    }
+}
+
 pub(crate) fn is_shallow_git_dir(git_dir: &std::path::Path) -> bool {
     let file = match fs::File::open(git_dir.join("shallow")) {
         Ok(file) => file,
@@ -1417,6 +1538,110 @@ mod tests {
         assert_eq!(
             fs::read_to_string(objects_dir.join("info/alternates")).expect("alternates file"),
             "/repo/a/objects\n/repo/b/objects\n"
+        );
+    }
+
+    #[test]
+    fn clone_cleanup_guard_preserves_preexisting_bare_destination_before_init() {
+        let root = tempfile::TempDir::new().expect("root");
+        let destination = root.path().join("destination");
+        fs::create_dir(&destination).expect("destination");
+        fs::write(destination.join("user.txt"), b"keep\n").expect("user file");
+
+        {
+            let _guard = CloneCleanupGuard::new(&destination, true, true);
+        }
+
+        assert_eq!(
+            fs::read(destination.join("user.txt")).expect("read user file"),
+            b"keep\n"
+        );
+    }
+
+    #[test]
+    fn clone_cleanup_guard_removes_new_separate_git_dir_and_destination() {
+        let root = tempfile::TempDir::new().expect("root");
+        let destination = root.path().join("destination");
+        let separate_git_dir = root.path().join("separate.git");
+        fs::create_dir(&destination).expect("destination");
+
+        {
+            let mut guard = CloneCleanupGuard::new(&destination, false, false);
+            guard.mark_initialized();
+            guard
+                .track_separate_git_dir(&separate_git_dir)
+                .expect("track separate git dir");
+            fs::create_dir(&separate_git_dir).expect("separate git dir");
+            fs::write(destination.join(".git"), b"gitdir: separate.git\n").expect("gitdir pointer");
+        }
+
+        assert!(!destination.exists());
+        assert!(!separate_git_dir.exists());
+    }
+
+    #[test]
+    fn clone_cleanup_guard_removes_created_git_dir_and_preserves_existing_separate_dir() {
+        let root = tempfile::TempDir::new().expect("root");
+        let destination = root.path().join("destination");
+        let separate_git_dir = root.path().join("separate.git");
+        fs::create_dir(&destination).expect("destination");
+        fs::create_dir(&separate_git_dir).expect("separate git dir");
+
+        {
+            let mut guard = CloneCleanupGuard::new(&destination, true, false);
+            guard.mark_initialized();
+            guard
+                .track_separate_git_dir(&separate_git_dir)
+                .expect("track separate git dir");
+            fs::create_dir(destination.join(".git")).expect("created git dir");
+        }
+
+        assert!(destination.is_dir());
+        assert!(!destination.join(".git").exists());
+        assert!(separate_git_dir.is_dir());
+    }
+
+    #[test]
+    fn clone_cleanup_guard_removes_created_git_pointer_and_preserves_existing_separate_dir() {
+        let root = tempfile::TempDir::new().expect("root");
+        let destination = root.path().join("destination");
+        let separate_git_dir = root.path().join("separate.git");
+        fs::create_dir(&destination).expect("destination");
+        fs::create_dir(&separate_git_dir).expect("separate git dir");
+
+        {
+            let mut guard = CloneCleanupGuard::new(&destination, true, false);
+            guard.mark_initialized();
+            guard
+                .track_separate_git_dir(&separate_git_dir)
+                .expect("track separate git dir");
+            fs::write(destination.join(".git"), b"gitdir: separate.git\n")
+                .expect("created git pointer");
+        }
+
+        assert!(destination.is_dir());
+        assert!(!destination.join(".git").exists());
+        assert!(separate_git_dir.is_dir());
+    }
+
+    #[test]
+    fn clone_cleanup_guard_removes_initialized_bare_contents_only() {
+        let root = tempfile::TempDir::new().expect("root");
+        let destination = root.path().join("destination");
+        fs::create_dir(&destination).expect("destination");
+
+        {
+            let mut guard = CloneCleanupGuard::new(&destination, true, true);
+            guard.mark_initialized();
+            fs::write(destination.join("HEAD"), b"ref: refs/heads/main\n").expect("head");
+        }
+
+        assert!(destination.is_dir());
+        assert!(
+            fs::read_dir(&destination)
+                .expect("destination entries")
+                .next()
+                .is_none()
         );
     }
 

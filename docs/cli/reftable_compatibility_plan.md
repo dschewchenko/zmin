@@ -1,8 +1,10 @@
 # Reftable Compatibility Plan
 
-This file scopes the remaining `clone --ref-format=reftable` Git `2.47.1`
-compatibility row. The row must stay open until Zmin writes and reads real
-reftable ref storage. A config-only implementation is not compatible.
+This file scopes the remaining `clone --ref-format=reftable` compatibility row
+in the current Git contract. Zmin now has partial reader, writer, and
+multi-table stack paths, but the row must stay open until those paths are
+validated end-to-end against current Git. A config-only implementation is not
+compatible.
 
 ## Current Evidence
 
@@ -13,7 +15,9 @@ reftable ref storage. A config-only implementation is not compatible.
 - stock Git writes `.git/reftable/tables.list` and at least one binary
   `.git/reftable/*.ref` table
 - stock Git does not write `.git/refs/heads/main`
-- Zmin exits `128` before creating the destination
+- Zmin's reader, writer, and stack implementation is partial; the clone,
+  normal ref-resolution, fsck, and platform acceptance rows remain unverified
+  by this probe
 
 ## Compatibility Contract
 

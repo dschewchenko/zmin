@@ -8,9 +8,107 @@ use super::*;
 
 include!(concat!(env!("OUT_DIR"), "/known_commands.rs"));
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LogPatchMode {
+    Default,
+    Patch,
+    NoPatch,
+}
+
+impl LogPatchMode {
+    pub(crate) fn from_flags(patch: bool, no_patch: bool) -> Self {
+        match (patch, no_patch) {
+            (true, false) => Self::Patch,
+            (false, true) => Self::NoPatch,
+            _ => Self::Default,
+        }
+    }
+
+    pub(crate) fn from_raw_args(raw_args: &[String], patch: bool, no_patch: bool) -> Self {
+        let mut mode = Self::from_flags(patch, no_patch);
+        for argument in raw_args {
+            if argument == "--" {
+                break;
+            }
+            if argument == "--patch" {
+                mode = Self::Patch;
+            } else if argument == "--no-patch" {
+                mode = Self::NoPatch;
+            } else {
+                mode.apply_short_patch_cluster(argument);
+            }
+        }
+        mode
+    }
+
+    fn apply_short_patch_cluster(&mut self, argument: &str) -> bool {
+        let bytes = argument.as_bytes();
+        if bytes.len() < 2 || bytes[0] != b'-' || bytes[1] == b'-' {
+            return false;
+        }
+        let mut candidate = *self;
+        for &option in &bytes[1..] {
+            match option {
+                b'p' => candidate = Self::Patch,
+                b's' => candidate = Self::NoPatch,
+                _ => return false,
+            }
+        }
+        *self = candidate;
+        true
+    }
+}
+
 pub(crate) const GIT_COMPAT_VERSION: &str = "2.47.1.zmin";
 const ROOT_HELP_TEXT: &str = include_str!("../cli/help_fixtures/root_help.txt");
 const BUILTINS_TEXT: &str = include_str!("../cli/help_fixtures/builtins.txt");
+const EMPTY_FOR_EACH_REF_FORMAT: &str =
+    "%(if:equals=__ZMIN_EMPTY_FOR_EACH_REF_FORMAT__)%(then)%(else)%(end)";
+const ROOT_USAGE_TEXT: &str = concat!(
+    "usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]\n",
+    "           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]\n",
+    "           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\n",
+    "           [--no-optional-locks] [--no-advice] [--bare] [--git-dir=<path>]\n",
+    "           [--work-tree=<path>] [--namespace=<name>] [--config-env=<name>=<envvar>]\n",
+    "           <command> [<args>]\n",
+);
+const REFS_LIST_USAGE: &str = concat!(
+    "usage: git refs list [--count=<count>] [--shell|--perl|--python|--tcl]\n",
+    "                                [(--sort=<key>)...] [--format=<format>]\n",
+    "                                [--include-root-refs] [--points-at=<object>]\n",
+    "                                [--merged[=<object>]] [--no-merged[=<object>]]\n",
+    "                                [--contains[=<object>]] [--no-contains[=<object>]]\n",
+    "                                [(--exclude=<pattern>)...] [--start-after=<marker>]\n",
+    "                                [ --stdin | (<pattern>...)]\n",
+    "\n",
+    "    -s, --[no-]shell      quote placeholders suitably for shells\n",
+    "    -p, --[no-]perl       quote placeholders suitably for perl\n",
+    "    --[no-]python         quote placeholders suitably for python\n",
+    "    --[no-]tcl            quote placeholders suitably for Tcl\n",
+    "    --[no-]omit-empty     do not output a newline after empty formatted refs\n",
+    "\n",
+    "    --[no-]count <n>      show only <n> matched refs\n",
+    "    --[no-]format <format>\n",
+    "                          format to use for the output\n",
+    "    --[no-]start-after <marker>\n",
+    "                          start iteration after the provided marker\n",
+    "    --[no-]color[=<when>] respect format colors\n",
+    "    --[no-]exclude <pattern>\n",
+    "                          exclude refs which match pattern\n",
+    "    --[no-]sort <key>     field name to sort on\n",
+    "    --[no-]points-at <object>\n",
+    "                          print only refs which points at the given object\n",
+    "    --merged <commit>     print only refs that are merged\n",
+    "    --no-merged <commit>  print only refs that are not merged\n",
+    "    --contains <commit>   print only refs which contain the commit\n",
+    "    --no-contains <commit>\n",
+    "                          print only refs which don't contain the commit\n",
+    "    --[no-]ignore-case    sorting and filtering are case insensitive\n",
+    "    --[no-]stdin          read reference patterns from stdin\n",
+    "    --[no-]include-root-refs\n",
+    "                          also include HEAD ref and pseudorefs\n",
+    "\n",
+);
 const PENDING_FORMAT_PATCH_RELATIVE_ENV: &str = "ZMIN_PENDING_FORMAT_PATCH_RELATIVE";
 const PENDING_FORMAT_PATCH_ATTACH_ENV: &str = "ZMIN_PENDING_FORMAT_PATCH_ATTACH";
 const PENDING_FORMAT_PATCH_INLINE_ENV: &str = "ZMIN_PENDING_FORMAT_PATCH_INLINE";
@@ -35,12 +133,349 @@ pub(crate) fn command_definition() -> clap::Command {
     top_level_command_definition()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HistoryArgValueArity {
+    None,
+    Required,
+    Optional,
+}
+
+#[derive(Clone, Debug)]
+struct HistoryArgSpec {
+    long_names: Vec<String>,
+    short_names: Vec<char>,
+    value_arity: HistoryArgValueArity,
+    require_equals: bool,
+}
+
+impl HistoryArgSpec {
+    fn matches_long(&self, name: &str) -> bool {
+        self.long_names.iter().any(|candidate| candidate == name)
+    }
+
+    fn matches_short(&self, name: char) -> bool {
+        self.short_names.contains(&name)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HistoryOptionName<'a> {
+    Long(&'a str),
+    Short(char),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HistoryArgToken<'a> {
+    Option {
+        name: HistoryOptionName<'a>,
+        value: Option<&'a str>,
+        position: usize,
+    },
+    Revision {
+        value: &'a str,
+        position: usize,
+    },
+    EndOfOptions {
+        position: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HistoryShortCluster {
+    argument_index: usize,
+    byte_offset: usize,
+}
+
+pub(crate) struct HistoryArgCursor<'a> {
+    args: &'a [String],
+    index: usize,
+    specs: Vec<HistoryArgSpec>,
+    short_cluster: Option<HistoryShortCluster>,
+    after_end_of_options: bool,
+}
+
+impl<'a> HistoryArgCursor<'a> {
+    pub(crate) fn new(args: &'a [String]) -> Self {
+        let specs = {
+            let definition = command_definition();
+            args.first()
+                .and_then(|command| definition.find_subcommand(command))
+                .map(|command| {
+                    command
+                        .get_arguments()
+                        .filter(|argument| !argument.is_positional())
+                        .map(|argument| {
+                            let mut long_names = argument
+                                .get_long()
+                                .into_iter()
+                                .map(str::to_owned)
+                                .collect::<Vec<_>>();
+                            long_names.extend(
+                                argument
+                                    .get_all_aliases()
+                                    .into_iter()
+                                    .flatten()
+                                    .map(str::to_owned),
+                            );
+                            let mut short_names =
+                                argument.get_short_and_visible_aliases().unwrap_or_default();
+                            short_names
+                                .extend(argument.get_all_short_aliases().unwrap_or_default());
+                            short_names.sort_unstable();
+                            short_names.dedup();
+                            let value_arity = match argument.get_action() {
+                                clap::ArgAction::Set | clap::ArgAction::Append => {
+                                    let values = argument.get_num_args();
+                                    if values.is_some_and(|range| range.min_values() == 0) {
+                                        HistoryArgValueArity::Optional
+                                    } else {
+                                        HistoryArgValueArity::Required
+                                    }
+                                }
+                                _ => HistoryArgValueArity::None,
+                            };
+                            HistoryArgSpec {
+                                long_names,
+                                short_names,
+                                value_arity,
+                                require_equals: argument.is_require_equals_set(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Self {
+            args,
+            index: 1,
+            specs,
+            short_cluster: None,
+            after_end_of_options: false,
+        }
+    }
+
+    fn long_spec(&self, name: &str) -> Option<&HistoryArgSpec> {
+        self.specs.iter().find(|spec| spec.matches_long(name))
+    }
+
+    fn short_spec(&self, name: char) -> Option<&HistoryArgSpec> {
+        self.specs.iter().find(|spec| spec.matches_short(name))
+    }
+
+    fn option_with_value(&self, name: HistoryOptionName<'_>, value: &str) -> String {
+        match name {
+            HistoryOptionName::Long(name) => format!("--{name}={value}"),
+            HistoryOptionName::Short(name) => self
+                .short_spec(name)
+                .and_then(|spec| spec.long_names.first())
+                .map(|long_name| format!("--{long_name}={value}"))
+                .unwrap_or_else(|| format!("-{name}{value}")),
+        }
+    }
+
+    fn next_short_token(&mut self) -> Option<HistoryArgToken<'a>> {
+        let cluster = self.short_cluster?;
+        let argument = self.args.get(cluster.argument_index)?;
+        let (relative_offset, short) = argument[cluster.byte_offset..].char_indices().next()?;
+        let short_end = cluster.byte_offset + relative_offset + short.len_utf8();
+        let spec = self.short_spec(short).cloned();
+        let position = cluster.argument_index;
+        let inline_value = spec
+            .as_ref()
+            .filter(|spec| spec.value_arity != HistoryArgValueArity::None)
+            .and_then(|_| (short_end < argument.len()).then_some(short_end));
+        if let Some(value_start) = inline_value {
+            self.short_cluster = None;
+            self.index = position + 1;
+            return Some(HistoryArgToken::Option {
+                name: HistoryOptionName::Short(short),
+                value: Some(&argument[value_start..]),
+                position,
+            });
+        }
+
+        let Some(spec) = spec else {
+            self.short_cluster = (short_end < argument.len()).then_some(HistoryShortCluster {
+                argument_index: position,
+                byte_offset: short_end,
+            });
+            if self.short_cluster.is_none() {
+                self.index = position + 1;
+            }
+            return Some(HistoryArgToken::Option {
+                name: HistoryOptionName::Short(short),
+                value: None,
+                position,
+            });
+        };
+        if spec.value_arity == HistoryArgValueArity::Required {
+            let value_index = position + 1;
+            let value = self.args.get(value_index).map(String::as_str);
+            self.short_cluster = None;
+            self.index = (value.is_some())
+                .then_some(value_index + 1)
+                .unwrap_or(value_index);
+            return Some(HistoryArgToken::Option {
+                name: HistoryOptionName::Short(short),
+                value,
+                position,
+            });
+        }
+        if spec.value_arity == HistoryArgValueArity::Optional {
+            let value_index = position + 1;
+            let value = self
+                .args
+                .get(value_index)
+                .filter(|value| !spec.require_equals && !value.starts_with('-'))
+                .map(String::as_str);
+            self.short_cluster = None;
+            self.index = (value.is_some())
+                .then_some(value_index + 1)
+                .unwrap_or(value_index);
+            return Some(HistoryArgToken::Option {
+                name: HistoryOptionName::Short(short),
+                value,
+                position,
+            });
+        }
+        self.short_cluster = (short_end < argument.len()).then_some(HistoryShortCluster {
+            argument_index: position,
+            byte_offset: short_end,
+        });
+        if self.short_cluster.is_none() {
+            self.index = position + 1;
+        }
+        Some(HistoryArgToken::Option {
+            name: HistoryOptionName::Short(short),
+            value: None,
+            position,
+        })
+    }
+
+    pub(crate) fn next(&mut self) -> Option<HistoryArgToken<'a>> {
+        if self.short_cluster.is_some() {
+            return self.next_short_token();
+        }
+        let position = self.index;
+        let argument = self.args.get(position)?;
+        self.index += 1;
+        if self.after_end_of_options {
+            return Some(HistoryArgToken::Revision {
+                value: argument,
+                position,
+            });
+        }
+        if argument == "--" {
+            self.after_end_of_options = true;
+            return Some(HistoryArgToken::EndOfOptions { position });
+        }
+        if argument == "-" || !argument.starts_with('-') {
+            return Some(HistoryArgToken::Revision {
+                value: argument,
+                position,
+            });
+        }
+        if let Some(long_argument) = argument.strip_prefix("--") {
+            let (name, inline_value) = long_argument
+                .split_once('=')
+                .map(|(name, value)| (name, Some(value)))
+                .unwrap_or((long_argument, None));
+            let Some(spec) = self.long_spec(name).cloned() else {
+                return Some(HistoryArgToken::Option {
+                    name: HistoryOptionName::Long(name),
+                    value: inline_value,
+                    position,
+                });
+            };
+            if inline_value.is_some() || spec.value_arity == HistoryArgValueArity::None {
+                return Some(HistoryArgToken::Option {
+                    name: HistoryOptionName::Long(name),
+                    value: inline_value,
+                    position,
+                });
+            }
+            if spec.require_equals && spec.value_arity == HistoryArgValueArity::Optional {
+                return Some(HistoryArgToken::Option {
+                    name: HistoryOptionName::Long(name),
+                    value: None,
+                    position,
+                });
+            }
+            let value = self
+                .args
+                .get(self.index)
+                .filter(|value| {
+                    spec.value_arity == HistoryArgValueArity::Required || !value.starts_with('-')
+                })
+                .map(String::as_str);
+            if value.is_some() {
+                self.index += 1;
+            }
+            return Some(HistoryArgToken::Option {
+                name: HistoryOptionName::Long(name),
+                value,
+                position,
+            });
+        }
+        if argument.len() > 1 {
+            self.short_cluster = Some(HistoryShortCluster {
+                argument_index: position,
+                byte_offset: 1,
+            });
+            return self.next_short_token();
+        }
+        Some(HistoryArgToken::Option {
+            name: HistoryOptionName::Short('-'),
+            value: None,
+            position,
+        })
+    }
+}
+
 pub(crate) fn git_compatible_version_line() -> String {
     format!(
         "git version {} (zmin {})",
         GIT_COMPAT_VERSION,
         env!("CARGO_PKG_VERSION")
     )
+}
+
+fn normalize_history_required_option_values(mut command_args: Vec<String>) -> Vec<String> {
+    let mut cursor = HistoryArgCursor::new(&command_args);
+    let mut replacements = Vec::new();
+    let mut removed_positions = BTreeSet::new();
+    while let Some(token) = cursor.next() {
+        let HistoryArgToken::Option {
+            name,
+            value: Some(value),
+            position,
+        } = token
+        else {
+            continue;
+        };
+        let Some(next) = command_args.get(position + 1) else {
+            continue;
+        };
+        if next != value || !value.starts_with('-') || command_args[position].contains('=') {
+            continue;
+        }
+        replacements.push((position, cursor.option_with_value(name, value)));
+        removed_positions.insert(position + 1);
+    }
+    if replacements.is_empty() {
+        return command_args;
+    }
+    drop(cursor);
+    for (position, replacement) in replacements {
+        command_args[position] = replacement;
+    }
+    command_args
+        .into_iter()
+        .enumerate()
+        .filter_map(|(position, argument)| {
+            (!removed_positions.contains(&position)).then_some(argument)
+        })
+        .collect()
 }
 
 pub(crate) fn write_git_compatible_version(
@@ -252,6 +687,70 @@ fn normalize_update_index_ordered_force_remove_paths(args: Vec<String>) -> Vec<S
     args
 }
 
+pub(crate) fn refs_list_help_error(raw_args: &[String]) -> Option<CliError> {
+    if raw_args.first().map(String::as_str) != Some("refs")
+        || raw_args.get(1).map(String::as_str) != Some("list")
+    {
+        return None;
+    }
+    if let Err(error) = validate_refs_list_invocation_before_clap(raw_args) {
+        return Some(error);
+    }
+    if !refs_list_help_requested(raw_args) {
+        return None;
+    }
+    use std::io::Write;
+
+    let mut stdout = io::stdout().lock();
+    if let Err(error) = stdout.write_all(REFS_LIST_USAGE.as_bytes()) {
+        return Some(CliError::Io(error));
+    }
+    Some(CliError::Exit(129))
+}
+
+fn refs_list_help_requested(raw_args: &[String]) -> bool {
+    refs_list_help_requested_from(raw_args, 2)
+}
+
+fn refs_list_help_requested_from(raw_args: &[String], start_index: usize) -> bool {
+    let mut index = start_index;
+    while index < raw_args.len() {
+        let argument = &raw_args[index];
+        if argument == "--" {
+            return false;
+        }
+        if matches!(argument.as_str(), "-h" | "--help") {
+            return true;
+        }
+        if refs_list_option_requires_value(argument) {
+            index = index.saturating_add(2);
+        } else {
+            index = index.saturating_add(1);
+        }
+    }
+    false
+}
+
+fn refs_list_option_requires_value(argument: &str) -> bool {
+    matches!(
+        argument,
+        "--count" | "--format" | "--sort" | "--exclude" | "--points-at" | "--start-after"
+    )
+}
+
+fn refs_list_unsupported_config_error(raw_args: &[String]) -> Option<CliError> {
+    let refs_list_index = raw_args
+        .windows(2)
+        .position(|pair| pair[0] == "refs" && pair[1] == "list")?;
+    let option = raw_args[..refs_list_index].iter().find_map(|argument| {
+        (argument == "--config" || argument.starts_with("--config=")).then_some(argument.as_str())
+    })?;
+    Some(CliError::Stderr {
+        code: 129,
+        text: format!("unknown option: {option}\n{ROOT_USAGE_TEXT}"),
+    })
+}
+
 pub(crate) fn parse_cli_invocation(
     program: String,
     raw_args: &[String],
@@ -267,6 +766,9 @@ pub(crate) fn parse_cli_invocation(
         let _ = program;
         write_root_help(io::stdout().lock()).map_err(CliError::Io)?;
         return Err(CliError::Exit(0));
+    }
+    if let Some(error) = refs_list_unsupported_config_error(raw_args) {
+        return Err(error);
     }
     if try_handle_root_list_cmds_invocation(raw_args)? {
         return Err(CliError::Exit(0));
@@ -289,6 +791,18 @@ pub(crate) fn parse_cli_invocation(
     }
     let command_args = apply_command_alias(command_args)?;
     let command_args = apply_alias_leading_config_options(command_args)?;
+    if let Some(error) = refs_list_help_error(&command_args) {
+        return Err(error);
+    }
+    let original_command_args = command_args.clone();
+    let refs_list_invocation = is_refs_list_invocation(&command_args);
+    validate_refs_list_invocation_before_clap(&command_args)?;
+    let command_args = normalize_refs_list_invocation(command_args);
+    let command_args = if refs_list_invocation {
+        normalize_for_each_ref_sort_options(command_args)
+    } else {
+        command_args
+    };
     propagate_reftable_lock_timeout_override();
     propagate_reftable_write_options_overrides();
     if let Some(code) = maybe_exec_diff_output_redirection(raw_args, &command_args)? {
@@ -299,12 +813,18 @@ pub(crate) fn parse_cli_invocation(
         return Err(CliError::Exit(0));
     }
     if let Some(args) = parse_common_command_without_clap(&command_args) {
-        return Ok((args, command_args));
+        let dispatch_args = if refs_list_invocation {
+            original_command_args
+        } else {
+            command_args
+        };
+        return Ok((args, dispatch_args));
     }
     let command_args = normalize_empty_init_template(command_args);
     let command_args = normalize_empty_clone_template(command_args);
     let command_args = normalize_history_count_shorthand(command_args);
     let command_args = normalize_history_no_walk_value(command_args);
+    let command_args = normalize_history_required_option_values(command_args);
     let command_args = normalize_show_interspersed_options(command_args);
     let command_args = normalize_log_date_hyphen_value(command_args);
     let command_args = normalize_diff_dirstat_short_value(command_args);
@@ -363,17 +883,26 @@ pub(crate) fn parse_cli_invocation(
     validate_refs_invocation_before_clap(&command_args)?;
     validate_unknown_command_invocation_before_clap(&command_args)?;
     if let Some(args) = parse_rev_list_object_walk(&command_args) {
-        return Ok((args, command_args));
+        let dispatch_args = if refs_list_invocation {
+            original_command_args
+        } else {
+            command_args
+        };
+        return Ok((args, dispatch_args));
     }
     let clap_command_args = normalize_rev_parse_end_of_options_for_clap(&command_args);
     let args = parse_validated_command(program, clap_command_args.as_ref());
-    Ok((args, command_args))
+    let dispatch_args = if refs_list_invocation {
+        original_command_args
+    } else {
+        command_args
+    };
+    Ok((args, dispatch_args))
 }
 
 fn parse_common_command_without_clap(command_args: &[String]) -> Option<Args> {
     match command_args.first().map(String::as_str) {
         Some("status") => parse_common_status_without_clap(command_args),
-        Some("log") => parse_common_log_without_clap(command_args),
         Some("show") => parse_common_show_without_clap(command_args),
         Some("ls-files") => parse_common_ls_files_without_clap(command_args),
         Some("config") => parse_common_config_without_clap(command_args),
@@ -383,6 +912,78 @@ fn parse_common_command_without_clap(command_args: &[String]) -> Option<Args> {
         Some("rev-parse") => parse_common_rev_parse_without_clap(command_args),
         _ => None,
     }
+}
+
+fn normalize_refs_list_invocation(mut command_args: Vec<String>) -> Vec<String> {
+    if !is_refs_list_invocation(&command_args) {
+        return command_args;
+    }
+
+    command_args.drain(..2);
+    let mut normalized = Vec::with_capacity(command_args.len() + 1);
+    normalized.push("for-each-ref".to_owned());
+    normalized.extend(command_args);
+    normalized
+}
+
+fn is_refs_list_invocation(command_args: &[String]) -> bool {
+    command_args.first().map(String::as_str) == Some("refs")
+        && command_args.get(1).map(String::as_str) == Some("list")
+}
+
+fn normalize_for_each_ref_sort_options(command_args: Vec<String>) -> Vec<String> {
+    if command_args.first().map(String::as_str) != Some("for-each-ref") {
+        return command_args;
+    }
+
+    let mut normalized = Vec::with_capacity(command_args.len());
+    let mut index = 0;
+    while index < command_args.len() {
+        let argument = &command_args[index];
+        if argument == "--" {
+            normalized.extend(command_args[index..].iter().cloned());
+            break;
+        }
+        if argument == "--sort" {
+            if let Some(value) = command_args.get(index + 1) {
+                if matches!(value.as_str(), "--no-sort" | "-h" | "--help") {
+                    normalized.push(format!("--sort={value}"));
+                } else {
+                    normalized.push(argument.clone());
+                    normalized.push(value.clone());
+                }
+                index = index.saturating_add(2);
+            } else {
+                normalized.push(argument.clone());
+                index = index.saturating_add(1);
+            }
+            continue;
+        }
+        if argument == "--no-sort" {
+            clear_for_each_ref_sort_options(&mut normalized);
+            index = index.saturating_add(1);
+            continue;
+        }
+        normalized.push(argument.clone());
+        index = index.saturating_add(1);
+    }
+    normalized
+}
+
+fn clear_for_each_ref_sort_options(command_args: &mut Vec<String>) {
+    let mut without_sorts = Vec::with_capacity(command_args.len());
+    let mut index = 0;
+    while index < command_args.len() {
+        if command_args[index] == "--sort" {
+            index = index.saturating_add(2).min(command_args.len());
+        } else if command_args[index].starts_with("--sort=") {
+            index = index.saturating_add(1);
+        } else {
+            without_sorts.push(command_args[index].clone());
+            index = index.saturating_add(1);
+        }
+    }
+    *command_args = without_sorts;
 }
 
 fn parse_common_config_without_clap(command_args: &[String]) -> Option<Args> {
@@ -426,6 +1027,8 @@ fn parse_common_for_each_ref_without_clap(command_args: &[String]) -> Option<Arg
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--format" => options.format = Some(arguments.next()?.clone()),
+            "--format=" => options.format = Some(EMPTY_FOR_EACH_REF_FORMAT.to_owned()),
+            "--omit-empty" => options.omit_empty = true,
             "--" => {
                 options.patterns.extend(arguments.cloned());
                 break;
@@ -456,6 +1059,7 @@ fn parse_common_ls_tree_without_clap(command_args: &[String]) -> Option<Args> {
             "--name-status" => options.name_status = true,
             "--object-only" => options.object_only = true,
             "--full-tree" => options.full_tree = true,
+            "--no-abbrev" => options.no_abbrev = true,
             "--" => {
                 options.paths.extend(arguments.cloned());
                 break;
@@ -534,11 +1138,12 @@ fn parse_common_ls_files_without_clap(command_args: &[String]) -> Option<Args> {
 
 fn parse_common_show_without_clap(command_args: &[String]) -> Option<Args> {
     let mut options = ShowCommandArgs::default();
+    let mut patch_mode = LogPatchMode::Default;
     let mut arguments = command_args.iter().skip(1).peekable();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
-            "-s" | "--no-patch" => options.no_patch = true,
-            "-p" | "--patch" => options.patch = true,
+            "--no-patch" => patch_mode = LogPatchMode::NoPatch,
+            "--patch" => patch_mode = LogPatchMode::Patch,
             "--oneline" => options.oneline = true,
             "-z" => options.zero = true,
             "--stat" => options.stat = true,
@@ -562,10 +1167,7 @@ fn parse_common_show_without_clap(command_args: &[String]) -> Option<Args> {
                 options.format = Some(arguments.next()?.clone());
             }
             "--pretty" => {
-                if arguments.peek()?.starts_with('-') {
-                    return None;
-                }
-                options.pretty = Some(arguments.next()?.clone());
+                options.pretty = Some("medium".to_owned());
             }
             "--encoding" => {
                 if arguments.peek()?.starts_with('-') {
@@ -579,6 +1181,7 @@ fn parse_common_show_without_clap(command_args: &[String]) -> Option<Args> {
                 }
                 options.max_count = Some(arguments.next()?.clone());
             }
+            value if patch_mode.apply_short_patch_cluster(value) => {}
             "--" => {
                 options.args.push("--".to_owned());
                 options.args.extend(arguments.cloned());
@@ -605,6 +1208,8 @@ fn parse_common_show_without_clap(command_args: &[String]) -> Option<Args> {
             _ => return None,
         }
     }
+    options.patch = matches!(patch_mode, LogPatchMode::Patch);
+    options.no_patch = matches!(patch_mode, LogPatchMode::NoPatch);
     Some(Args {
         command: Command::Show(options),
     })
@@ -704,59 +1309,6 @@ fn parse_common_status_without_clap(command_args: &[String]) -> Option<Args> {
     })
 }
 
-fn parse_common_log_without_clap(command_args: &[String]) -> Option<Args> {
-    let mut options = LogCommandArgs::default();
-    let mut arguments = command_args.iter().skip(1);
-    while let Some(argument) = arguments.next() {
-        match argument.as_str() {
-            "--oneline" => options.oneline = true,
-            "--all" => options.all = true,
-            "--reverse" => options.reverse = true,
-            "--first-parent" => options.first_parent = true,
-            "--parents" => options.parents = true,
-            "--no-merges" => options.no_merges = true,
-            "--merges" => options.merges = true,
-            "--abbrev-commit" => options.abbrev_commit = true,
-            "--no-abbrev-commit" => options.no_abbrev_commit = true,
-            "--decorate" => options.decorate = Some("short".to_owned()),
-            "--no-decorate" => {
-                options.decorate = None;
-                options.no_decorate = true;
-            }
-            "-n" | "--max-count" => options.max_count = Some(arguments.next()?.clone()),
-            "--" => {
-                options.revs.push("--".to_owned());
-                options.revs.extend(arguments.cloned());
-                break;
-            }
-            value if value.starts_with("--max-count=") => {
-                options.max_count = Some(value["--max-count=".len()..].to_owned());
-            }
-            value if value.starts_with("--format=") => {
-                options.format = Some(value["--format=".len()..].to_owned());
-            }
-            value if value.starts_with("--pretty=") => {
-                options.pretty = Some(value["--pretty=".len()..].to_owned());
-            }
-            value if value.starts_with("--date=") => {
-                options.date = Some(value["--date=".len()..].to_owned());
-            }
-            value if value.starts_with("--decorate=") => {
-                options.decorate = Some(value["--decorate=".len()..].to_owned());
-                options.no_decorate = false;
-            }
-            value if value.starts_with("-n") && value.len() > 2 => {
-                options.max_count = Some(value[2..].to_owned());
-            }
-            value if !value.starts_with('-') => options.revs.push(value.to_owned()),
-            _ => return None,
-        }
-    }
-    Some(Args {
-        command: Command::Log { options },
-    })
-}
-
 fn normalize_status_untracked_short_value(args: Vec<String>) -> Vec<String> {
     if args.first().map(String::as_str) != Some("status") {
         return args;
@@ -851,6 +1403,7 @@ fn parse_rev_list_object_walk(command_args: &[String]) -> Option<Args> {
             header: false,
             graph: false,
             all,
+            not: 0,
             exclude: Vec::new(),
             exclude_first_parent_only: false,
             exclude_hidden: None,
@@ -882,7 +1435,7 @@ fn parse_rev_list_object_walk(command_args: &[String]) -> Option<Args> {
             bisect_vars: false,
             cherry: false,
             count: false,
-            glob: None,
+            glob: Vec::new(),
             skip: None,
             branches: Vec::new(),
             tags: Vec::new(),
@@ -947,7 +1500,7 @@ fn parse_rev_list_object_walk(command_args: &[String]) -> Option<Args> {
             single_worktree: false,
             commit_header: false,
             no_commit_header: false,
-            disk_usage: false,
+            disk_usage: None,
             progress: false,
             no_filter: false,
             missing: None,
@@ -1086,6 +1639,18 @@ fn parse_validated_command(program: String, command_args: &[String]) -> Args {
                 },
             };
         }
+        Some("daemon") => {
+            let daemon = DaemonOnlyArgs::try_parse_from(
+                std::iter::once(format!("{program} daemon"))
+                    .chain(command_args.iter().skip(1).cloned()),
+            )
+            .unwrap_or_else(|error| error.exit());
+            return Args {
+                command: Command::Daemon {
+                    options: daemon.options,
+                },
+            };
+        }
         _ => {
             if let Some(args) = parse_top_level_command_only(program.clone(), command_args) {
                 return args;
@@ -1153,7 +1718,7 @@ fn normalize_diff_dirstat_short_value(command_args: Vec<String>) -> Vec<String> 
 fn preserve_consumed_pathspec_separator(mut command_args: Vec<String>) -> Vec<String> {
     if !matches!(
         command_args.first().map(String::as_str),
-        Some("diff" | "log")
+        Some("diff" | "log" | "rev-list")
     ) {
         return command_args;
     }
@@ -1686,6 +2251,7 @@ fn validate_for_each_ref_invocation_before_clap(command_args: &[String]) -> Resu
             "--count=",
             "--format",
             "--format=",
+            "--color",
             "--color=",
             "--exclude",
             "--exclude=",
@@ -1708,6 +2274,149 @@ fn validate_for_each_ref_invocation_before_clap(command_args: &[String]) -> Resu
 }
 
 const BRANCH_USAGE: &str = "usage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n   or: git branch [<options>] [-f] [--recurse-submodules] <branch-name> [<start-point>]\n   or: git branch [<options>] [-l] [<pattern>...]\n   or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n   or: git branch [<options>] (-m | -M) [<old-branch>] <new-branch>\n   or: git branch [<options>] (-c | -C) [<old-branch>] <new-branch>\n   or: git branch [<options>] [-r | -a] [--points-at]\n   or: git branch [<options>] [-r | -a] [--format]\n\nGeneric options\n    -v, --[no-]verbose    show hash and subject, give twice for upstream branch\n    -q, --[no-]quiet      suppress informational messages\n    -t, --[no-]track[=(direct|inherit)]\n                          set branch tracking configuration\n    -u, --[no-]set-upstream-to <upstream>\n                          change the upstream info\n    --[no-]unset-upstream unset the upstream info\n    --[no-]color[=<when>] use colored output\n    -r, --remotes         act on remote-tracking branches\n    --contains <commit>   print only branches that contain the commit\n    --no-contains <commit>\n                          print only branches that don't contain the commit\n    --[no-]abbrev[=<n>]   use <n> digits to display object names\n\nSpecific git-branch actions:\n    -a, --all             list both remote-tracking and local branches\n    -d, --[no-]delete     delete fully merged branch\n    -D                    delete branch (even if not merged)\n    -m, --[no-]move       move/rename a branch and its reflog\n    -M                    move/rename a branch, even if target exists\n    --[no-]omit-empty     do not output a newline after empty formatted refs\n    -c, --[no-]copy       copy a branch and its reflog\n    -C                    copy a branch, even if target exists\n    -l, --[no-]list       list branch names\n    --[no-]show-current   show current branch name\n    --[no-]create-reflog  create the branch's reflog\n    --[no-]edit-description\n                          edit the description for the branch\n    -f, --[no-]force      force creation, move/rename, deletion\n    --merged <commit>     print only branches that are merged\n    --no-merged <commit>  print only branches that are not merged\n    --[no-]column[=<style>]\n                          list branches in columns\n    --[no-]sort <key>     field name to sort on\n    --[no-]points-at <object>\n                          print only branches of the object\n    -i, --[no-]ignore-case\n                          sorting and filtering are case insensitive\n    --[no-]recurse-submodules\n                          recurse through submodules\n    --[no-]format <format>\n                          format to use for the output\n\n";
+
+fn validate_refs_list_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if !is_refs_list_invocation(command_args) {
+        return Ok(());
+    }
+    let validation_args = std::iter::once("refs list".to_owned())
+        .chain(command_args.iter().skip(2).cloned())
+        .collect::<Vec<_>>();
+    validate_known_long_options_before_clap(
+        &validation_args,
+        "refs list",
+        REFS_LIST_USAGE,
+        &[
+            "--help",
+            "--shell",
+            "--perl",
+            "--python",
+            "--tcl",
+            "--no-color",
+            "--omit-empty",
+            "--ignore-case",
+            "--stdin",
+            "--include-root-refs",
+            "--no-sort",
+        ],
+        &[
+            "--count",
+            "--count=",
+            "--format",
+            "--format=",
+            "--color",
+            "--color=",
+            "--exclude",
+            "--exclude=",
+            "--sort",
+            "--sort=",
+            "--points-at",
+            "--points-at=",
+            "--merged",
+            "--merged=",
+            "--no-merged",
+            "--no-merged=",
+            "--contains",
+            "--contains=",
+            "--no-contains",
+            "--no-contains=",
+            "--start-after",
+            "--start-after=",
+        ],
+    )?;
+    validate_for_each_ref_option_values(&validation_args)
+}
+
+fn validate_for_each_ref_option_values(command_args: &[String]) -> Result<()> {
+    let mut index = 1;
+    while index < command_args.len() {
+        let argument = &command_args[index];
+        if argument == "--" {
+            break;
+        }
+        if argument == "--sort" {
+            let Some(_value) = command_args.get(index + 1) else {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: "error: option `sort' requires a value\n".to_owned(),
+                });
+            };
+            index = index.saturating_add(2);
+            continue;
+        }
+        if argument == "--count" {
+            if let Some(value) = command_args.get(index + 1) {
+                validate_refs_count_value(value)?;
+                index = index.saturating_add(2);
+                continue;
+            }
+        }
+        if let Some(value) = argument.strip_prefix("--color=")
+            && !matches!(value, "always" | "auto" | "never")
+        {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `color' expects \"always\", \"auto\", or \"never\"\n"
+                    .to_owned(),
+            });
+        }
+        if let Some(value) = argument.strip_prefix("--count=") {
+            validate_refs_count_value(value)?;
+        }
+        index = index.saturating_add(1);
+    }
+    Ok(())
+}
+
+fn validate_refs_count_value(value: &str) -> Result<()> {
+    if let Some(parsed) = parse_signed_refs_count(value) {
+        if !(-2_147_483_648..=2_147_483_647).contains(&parsed) {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: value {value} for option `count' not in range [-2147483648,2147483647]\n"
+                ),
+            });
+        }
+        if parsed >= 0 {
+            return Ok(());
+        }
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!("error: invalid --count argument: `{parsed}'\n{REFS_LIST_USAGE}"),
+        });
+    }
+    Err(CliError::Stderr {
+        code: 129,
+        text: "error: option `count' expects an integer value with an optional k/m/g suffix\n"
+            .to_owned(),
+    })
+}
+
+fn parse_signed_refs_count(value: &str) -> Option<i128> {
+    let (negative, unsigned) = match value.as_bytes().first().copied() {
+        Some(b'-') => (true, &value[1..]),
+        Some(b'+') => (false, &value[1..]),
+        _ => (false, value),
+    };
+    let (digits, multiplier) = match unsigned.as_bytes().last().copied() {
+        Some(b'k') => (&unsigned[..unsigned.len().saturating_sub(1)], 1024_i128),
+        Some(b'm') => (
+            &unsigned[..unsigned.len().saturating_sub(1)],
+            1024_i128.pow(2),
+        ),
+        Some(b'g') => (
+            &unsigned[..unsigned.len().saturating_sub(1)],
+            1024_i128.pow(3),
+        ),
+        _ => (unsigned, 1_i128),
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let magnitude = digits.parse::<i128>().ok()?.checked_mul(multiplier)?;
+    Some(if negative { -magnitude } else { magnitude })
+}
 
 fn normalize_empty_init_template(args: Vec<String>) -> Vec<String> {
     if args.first().map(String::as_str) != Some("init") {
@@ -2213,11 +2922,21 @@ fn try_emit_builtin_help_before_clap(command_args: &[String]) -> Result<Option<i
     let Some(command) = command_args.first().map(String::as_str) else {
         return Ok(None);
     };
+    if matches!(command_args, [command, help] if command == "ls-tree" && is_help_flag(help)) {
+        crate::cli::commands::reference_commands::validate_ls_tree_config_before_help()?;
+    }
     if let Some((usage, code)) = specialized_builtin_help_surface(command_args) {
-        io::stdout()
-            .lock()
-            .write_all(usage.as_bytes())
-            .map_err(CliError::Io)?;
+        if command == "diff" {
+            io::stderr()
+                .lock()
+                .write_all(usage.as_bytes())
+                .map_err(CliError::Io)?;
+        } else {
+            io::stdout()
+                .lock()
+                .write_all(usage.as_bytes())
+                .map_err(CliError::Io)?;
+        }
         return Ok(Some(code));
     }
     if !command_args
@@ -2599,7 +3318,7 @@ fn is_help_flag(arg: &str) -> bool {
     arg == "-h" || arg == "--help"
 }
 
-const SPARSE_CHECKOUT_USAGE: &str = "usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules) [<options>]\n";
+const SPARSE_CHECKOUT_USAGE: &str = "usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules | clean) [<options>]\n";
 
 const STRIPSPACE_USAGE: &str = "usage: git stripspace [-s | --strip-comments]\n   or: git stripspace [-c | --comment-lines]\n\n    -s, --strip-comments  skip and remove all lines starting with comment character\n    -c, --comment-lines   prepend comment character and space to each line\n\n";
 
@@ -2611,7 +3330,7 @@ const SYMBOLIC_REF_USAGE: &str = "usage: git symbolic-ref [-m <reason>] <name> <
 
 const SHOW_BRANCH_USAGE: &str = "usage: git show-branch [-a | --all] [-r | --remotes] [--topo-order | --date-order]\n                       [--current] [--color[=<when>] | --no-color] [--sparse]\n                       [--more=<n> | --list | --independent | --merge-base]\n                       [--no-name | --sha1-name] [--topics]\n                       [(<rev> | <glob>)...]\n   or: git show-branch (-g | --reflog)[=<n>[,<base>]] [--list] [<ref>]\n\n    -a, --[no-]all        show remote-tracking and local branches\n    -r, --[no-]remotes    show remote-tracking branches\n    --[no-]color[=<when>] color '*!+-' corresponding to the branch\n    --[no-]more[=<n>]     show <n> more commits after the common ancestor\n    --[no-]list           synonym to more=-1\n    --no-name             suppress naming strings\n    --name                opposite of --no-name\n    --[no-]current        include the current branch\n    --[no-]sha1-name      name commits with their object names\n    --[no-]merge-base     show possible merge bases\n    --[no-]independent    show refs unreachable from any other ref\n    --topo-order          show commits in topological order\n    --[no-]topics         show only commits not on the first branch\n    --[no-]sparse         show merges reachable from only one tip\n    --date-order          topologically sort, maintaining date order where possible\n    -g, --reflog[=<n>[,<base>]]\n                          show <n> most recent ref-log entries starting at base\n\n";
 
-const SHOW_INDEX_USAGE: &str = "usage: git show-index [--object-format=<hash-algorithm>]\n\n    --[no-]object-format <hash-algorithm>\n                          specify the hash algorithm to use\n\n";
+const SHOW_INDEX_USAGE: &str = "usage: git show-index [--object-format=<hash-algorithm>] < <pack-idx-file>\n\n    --[no-]object-format <hash-algorithm>\n                          specify the hash algorithm to use\n\n";
 
 const SHOW_REF_USAGE: &str = "usage: git show-ref [--head] [-d | --dereference]\n                    [-s | --hash[=<n>]] [--abbrev[=<n>]] [--branches] [--tags]\n                    [--] [<pattern>...]\n   or: git show-ref --verify [-q | --quiet] [-d | --dereference]\n                    [-s | --hash[=<n>]] [--abbrev[=<n>]]\n                    [--] [<ref>...]\n   or: git show-ref --exclude-existing[=<pattern>]\n   or: git show-ref --exists <ref>\n\n    --[no-]tags           only show tags (can be combined with --branches)\n    --[no-]branches       only show branches (can be combined with --tags)\n    --[no-]exists         check for reference existence without resolving\n    --[no-]verify         stricter reference checking, requires exact ref path\n    --[no-]head           show the HEAD reference, even if it would be filtered out\n    -d, --[no-]dereference\n                          dereference tags into object IDs\n    -s, --[no-]hash[=<n>] only show SHA1 hash using <n> digits\n    --[no-]abbrev[=<n>]   use <n> digits to display object names\n    -q, --[no-]quiet      do not print results to stdout (useful with --verify)\n    --exclude-existing[=<pattern>]\n                          show refs from stdin that aren't in local repository\n\n";
 
@@ -2642,7 +3361,7 @@ const REBASE_USAGE: &str = "usage: git rebase [-i] [options] [--exec <cmd>] [--o
 const RECEIVE_PACK_USAGE: &str =
     "usage: git receive-pack <git-dir>\n\n    -q, --[no-]quiet      quiet\n\n";
 
-const REFLOG_USAGE: &str = "usage: git reflog [show] [<log-options>] [<ref>]\n   or: git reflog list\n   or: git reflog expire [--expire=<time>] [--expire-unreachable=<time>]\n                         [--rewrite] [--updateref] [--stale-fix]\n                         [--dry-run | -n] [--verbose] [--all [--single-worktree] | <refs>...]\n   or: git reflog delete [--rewrite] [--updateref]\n                         [--dry-run | -n] [--verbose] <ref>@{<specifier>}...\n   or: git reflog exists <ref>\n\n";
+const REFLOG_USAGE: &str = "usage: git reflog [show] [<log-options>] [<ref>]\n   or: git reflog list\n   or: git reflog exists <ref>\n   or: git reflog write <ref> <old-oid> <new-oid> <message>\n   or: git reflog delete [--rewrite] [--updateref]\n\t[--dry-run | -n] [--verbose] <ref>@{<specifier>}...\n   or: git reflog drop [--all [--single-worktree] | <refs>...]\n   or: git reflog expire [--expire=<time>] [--expire-unreachable=<time>]\n\t[--rewrite] [--updateref] [--stale-fix]\n\t[--dry-run | -n] [--verbose] [--all [--single-worktree] | <refs>...]\n\n";
 
 const PUSH_USAGE: &str = "usage: git push [<options>] [<repository> [<refspec>...]]\n\n    -v, --[no-]verbose    be more verbose\n    -q, --[no-]quiet      be more quiet\n    --[no-]repo <repository>\n                          repository\n    --[no-]all            push all branches\n    --[no-]branches       alias of --all\n    --[no-]mirror         mirror all refs\n    -d, --[no-]delete     delete refs\n    --[no-]tags           push tags (can't be used with --all or --branches or --mirror)\n    -n, --[no-]dry-run    dry run\n    --[no-]porcelain      machine-readable output\n    -f, --[no-]force      force updates\n    --[no-]force-with-lease[=<refname>:<expect>]\n                          require old value of ref to be at this value\n    --[no-]force-if-includes\n                          require remote updates to be integrated locally\n    --[no-]recurse-submodules (check|on-demand|no)\n                          control recursive pushing of submodules\n    --[no-]thin           use thin pack\n    --[no-]receive-pack <receive-pack>\n                          receive pack program\n    --[no-]exec <receive-pack>\n                          receive pack program\n    -u, --[no-]set-upstream\n                          set upstream for git pull/status\n    --[no-]progress       force progress reporting\n    --[no-]prune          prune locally removed refs\n    --no-verify           bypass pre-push hook\n    --verify              opposite of --no-verify\n    --[no-]follow-tags    push missing but relevant tags\n    --[no-]signed[=(yes|no|if-asked)]\n                          GPG sign the push\n    --[no-]atomic         request atomic transaction on remote side\n    -o, --[no-]push-option <server-specific>\n                          option to transmit\n    -4, --ipv4            use IPv4 addresses only\n    -6, --ipv6            use IPv6 addresses only\n\n";
 
@@ -2711,7 +3430,7 @@ const BUGREPORT_SHORT_USAGE: &str = "usage: git bugreport [(-o | --output-direct
 
 const BUNDLE_USAGE: &str = "usage: git bundle create [-q | --quiet | --progress]\n                         [--version=<version>] <file> <git-rev-list-args>\n   or: git bundle verify [-q | --quiet] <file>\n   or: git bundle list-heads <file> [<refname>...]\n   or: git bundle unbundle [--progress] <file> [<refname>...]\n";
 
-const CAT_FILE_USAGE: &str = "usage: git cat-file <type> <object>\n   or: git cat-file (-e | -p) <object>\n   or: git cat-file (-t | -s) [--allow-unknown-type] <object>\n   or: git cat-file (--textconv | --filters)\n                    [<rev>:<path|tree-ish> | --path=<path|tree-ish> <rev>]\n   or: git cat-file (--batch | --batch-check | --batch-command) [--batch-all-objects]\n                    [--buffer] [--follow-symlinks] [--unordered]\n                    [--textconv | --filters] [-Z]\n\nCheck object existence or emit object contents\n    -e                    check if <object> exists\n    -p                    pretty-print <object> content\n\nEmit [broken] object attributes\n    -t                    show object type (one of 'blob', 'tree', 'commit', 'tag', ...)\n    -s                    show object size\n    --[no-]use-mailmap    use mail map file\n    --[no-]mailmap        alias of --use-mailmap\n\nBatch objects requested on stdin (or --batch-all-objects)\n    --batch[=<format>]    show full <object> or <rev> contents\n    --batch-check[=<format>]\n                          like --batch, but don't emit <contents>\n    -Z                    stdin and stdout is NUL-terminated\n    --batch-command[=<format>]\n                          read commands from stdin\n    --batch-all-objects   with --batch[-check]: ignores stdin, batches all known objects\n\nChange or optimize batch output\n    --[no-]buffer         buffer --batch output\n    --[no-]follow-symlinks\n                          follow in-tree symlinks\n    --[no-]unordered      do not order objects before emitting them\n\nEmit object (blob or tree) with conversion or filter (stand-alone, or with batch)\n    --textconv            run textconv on object's content\n    --filters             run filters on object's content\n    --[no-]path blob|tree use a <path> for (--textconv | --filters); Not with 'batch'\n    --[no-]filter <args>  object filtering\n\n";
+const CAT_FILE_USAGE: &str = "usage: git cat-file <type> <object>\n   or: git cat-file (-e | -p) <object>\n   or: git cat-file (-t | -s) [--allow-unknown-type] <object>\n   or: git cat-file (--textconv | --filters)\n                    [<rev>:<path|tree-ish> | --path=<path|tree-ish> <rev>]\n   or: git cat-file (--batch | --batch-check | --batch-command) [--batch-all-objects]\n                    [--buffer] [--follow-symlinks] [--unordered]\n                    [--textconv | --filters] [-Z]\n\nCheck object existence or emit object contents\n    -e                    check if <object> exists\n    -p                    pretty-print <object> content\n\nEmit [broken] object attributes\n    -t                    show object type (one of 'blob', 'tree', 'commit', 'tag', ...)\n    -s                    show object size\n    --[no-]use-mailmap    use mail map file\n    --[no-]mailmap        alias of --use-mailmap\n\nBatch objects requested on stdin (or --batch-all-objects)\n    --batch[=<format>]    show full <object> or <rev> contents\n    --batch-check[=<format>]\n                          like --batch, but don't emit <contents>\n    -Z                    stdin and stdout is NUL-terminated\n    --batch-command[=<format>]\n                          read commands from stdin\n    --batch-all-objects   with --batch[-check]: ignores stdin, batches all known objects\n\nChange or optimize batch output\n    --[no-]buffer         buffer --batch output\n    --[no-]follow-symlinks\n                          follow in-tree symlinks\n    --[no-]unordered      do not order objects before emitting them\n\nEmit object (blob or tree) with conversion or filter (stand-alone, or with batch)\n    --textconv            run textconv on object's content\n    --filters             run filters on object's content\n    --[no-]path blob|tree use a <path> for (--textconv | --filters); Not with 'batch'\n    --[no-]filter <args>  object filtering\n\nZmin extensions\n    --type                alias of -t\n    --size                alias of -s\n    --exists              alias of -e\n    --pretty              alias of -p\n\n";
 
 const CHECK_ATTR_USAGE: &str = "usage: git check-attr [--source <tree-ish>] [-a | --all | <attr>...] [--] <pathname>...\n   or: git check-attr --stdin [-z] [--source <tree-ish>] [-a | --all | <attr>...]\n\n    -a, --[no-]all        report all attributes set on file\n    --[no-]cached         use .gitattributes only from the index\n    --[no-]stdin          read file names from stdin\n    -z                    terminate input and output records by a NUL character\n    --[no-]source <tree-ish>\n                          which tree-ish to check attributes at\n\n";
 
@@ -2735,13 +3454,13 @@ const CLONE_USAGE: &str = "usage: git clone [<options>] [--] <repo> [<dir>]\n\n 
 
 const COLUMN_USAGE: &str = "usage: git column [<options>]\n\n    --[no-]command <name> lookup config vars\n    --[no-]mode[=<style>] layout to use\n    --raw-mode <n>        layout to use\n    --[no-]width <n>      maximum width\n    --[no-]indent <string>\n                          padding space on left border\n    --[no-]nl <string>    padding space on right border\n    --[no-]padding <n>    padding space between columns\n\n";
 
-const COMMIT_USAGE: &str = "usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u<mode>] [--amend]\n                  [--dry-run] [(-c | -C | --squash) <commit> | --fixup [(amend|reword):]<commit>]\n                  [-F <file> | -m <msg>] [--reset-author] [--allow-empty]\n                  [--allow-empty-message] [--no-verify] [-e] [--author=<author>]\n                  [--date=<date>] [--cleanup=<mode>] [--[no-]status]\n                  [-i | -o] [--pathspec-from-file=<file> [--pathspec-file-nul]]\n                  [(--trailer <token>[(=|:)<value>])...] [-S[<keyid>]]\n                  [--] [<pathspec>...]\n\n    -q, --[no-]quiet      suppress summary after successful commit\n    -v, --[no-]verbose    show diff in commit message template\n\nCommit message options\n    -F, --[no-]file <file>\n                          read message from file\n    --[no-]author <author>\n                          override author for commit\n    --[no-]date <date>    override date for commit\n    -m, --[no-]message <message>\n                          commit message\n    -c, --[no-]reedit-message <commit>\n                          reuse and edit message from specified commit\n    -C, --[no-]reuse-message <commit>\n                          reuse message from specified commit\n    --[no-]fixup [(amend|reword):]commit\n                          use autosquash formatted message to fixup or amend/reword specified commit\n    --[no-]squash <commit>\n                          use autosquash formatted message to squash specified commit\n    --[no-]reset-author   the commit is authored by me now (used with -C/-c/--amend)\n    --trailer <trailer>   add custom trailer(s)\n    -s, --[no-]signoff    add a Signed-off-by trailer\n    -t, --[no-]template <file>\n                          use specified template file\n    -e, --[no-]edit       force edit of commit\n    --[no-]cleanup <mode> how to strip spaces and #comments from message\n    --[no-]status         include status in commit message template\n    -S, --[no-]gpg-sign[=<key-id>]\n                          GPG sign commit\n\nCommit contents options\n    -a, --[no-]all        commit all changed files\n    -i, --[no-]include    add specified files to index for commit\n    --[no-]interactive    interactively add files\n    -p, --[no-]patch      interactively add changes\n    -o, --[no-]only       commit only specified files\n    -n, --no-verify       bypass pre-commit and commit-msg hooks\n    --verify              opposite of --no-verify\n    --[no-]dry-run        show what would be committed\n    --[no-]short          show status concisely\n    --[no-]branch         show branch information\n    --[no-]ahead-behind   compute full ahead/behind values\n    --[no-]porcelain      machine-readable output\n    --[no-]long           show status in long format (default)\n    -z, --[no-]null       terminate entries with NUL\n    --[no-]amend          amend previous commit\n    --no-post-rewrite     bypass post-rewrite hook\n    --post-rewrite        opposite of --no-post-rewrite\n    -u, --[no-]untracked-files[=<mode>]\n                          show untracked files, optional modes: all, normal, no. (Default: all)\n    --[no-]pathspec-from-file <file>\n                          read pathspec from file\n    --[no-]pathspec-file-nul\n                          with --pathspec-from-file, pathspec elements are separated with NUL character\n\n";
+const COMMIT_USAGE: &str = "usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u[<mode>]] [--amend]\n                  [--dry-run] [(-c | -C | --squash) <commit> | --fixup [(amend|reword):]<commit>]\n                  [-F <file> | -m <msg>] [--reset-author] [--allow-empty]\n                  [--allow-empty-message] [--no-verify] [-e] [--author=<author>]\n                  [--date=<date>] [--cleanup=<mode>] [--[no-]status]\n                  [-i | -o] [--pathspec-from-file=<file> [--pathspec-file-nul]]\n                  [(--trailer <token>[(=|:)<value>])...] [-S[<keyid>]]\n                  [--] [<pathspec>...]\n\n    -q, --[no-]quiet      suppress summary after successful commit\n    -v, --[no-]verbose    show diff in commit message template\n\nCommit message options\n    -F, --[no-]file <file>\n                          read message from file\n    --[no-]author <author>\n                          override author for commit\n    --[no-]date <date>    override date for commit\n    -m, --[no-]message <message>\n                          commit message\n    -c, --[no-]reedit-message <commit>\n                          reuse and edit message from specified commit\n    -C, --[no-]reuse-message <commit>\n                          reuse message from specified commit\n    --[no-]fixup [(amend|reword):]commit\n                          use autosquash formatted message to fixup or amend/reword specified commit\n    --[no-]squash <commit>\n                          use autosquash formatted message to squash specified commit\n    --[no-]reset-author   the commit is authored by me now (used with -C/-c/--amend)\n    --trailer <trailer>   add custom trailer(s)\n    -s, --[no-]signoff    add a Signed-off-by trailer\n    -t, --[no-]template <file>\n                          use specified template file\n    -e, --[no-]edit       force edit of commit\n    --[no-]cleanup <mode> how to strip spaces and #comments from message\n    --[no-]status         include status in commit message template\n    -S, --[no-]gpg-sign[=<key-id>]\n                          GPG sign commit\n\nCommit contents options\n    -a, --[no-]all        commit all changed files\n    -i, --[no-]include    add specified files to index for commit\n    --[no-]interactive    interactively add files\n    -p, --[no-]patch      interactively add changes\n    -o, --[no-]only       commit only specified files\n    -n, --no-verify       bypass pre-commit and commit-msg hooks\n    --verify              opposite of --no-verify\n    --[no-]dry-run        show what would be committed\n    --[no-]short          show status concisely\n    --[no-]branch         show branch information\n    --[no-]ahead-behind   compute full ahead/behind values\n    --[no-]porcelain      machine-readable output\n    --[no-]long           show status in long format (default)\n    -z, --[no-]null       terminate entries with NUL\n    --[no-]amend          amend previous commit\n    --no-post-rewrite     bypass post-rewrite hook\n    --post-rewrite        opposite of --no-post-rewrite\n    -u, --[no-]untracked-files[=<mode>]\n                          show untracked files, optional modes: all, normal, no. (Default: all)\n    --[no-]pathspec-from-file <file>\n                          read pathspec from file\n    --[no-]pathspec-file-nul\n                          with --pathspec-from-file, pathspec elements are separated with NUL character\n\n";
 
 const COMMIT_GRAPH_USAGE: &str = "usage: git commit-graph verify [--object-dir <dir>] [--shallow] [--[no-]progress]\n   or: git commit-graph write [--object-dir <dir>] [--append]\n                              [--split[=<strategy>]] [--reachable | --stdin-packs | --stdin-commits]\n                              [--changed-paths] [--[no-]max-new-filters <n>] [--[no-]progress]\n                              <split-options>\n\n    --[no-]object-dir <dir>\n                          the object directory to store the graph\n\n";
 
 const COMMIT_TREE_USAGE: &str = "usage: git commit-tree <tree> [(-p <parent>)...]\n   or: git commit-tree [(-p <parent>)...] [-S[<keyid>]] [(-m <message>)...]\n                       [(-F <file>)...] <tree>\n\n    -p <parent>           id of a parent commit object\n    -m <message>          commit message\n    -F <file>             read commit log message from file\n    -S, --[no-]gpg-sign[=<key-id>]\n                          GPG sign commit\n\n";
 
-const CONFIG_USAGE: &str = "usage: git config list [<file-option>] [<display-option>] [--includes]\n   or: git config get [<file-option>] [<display-option>] [--includes] [--all] [--regexp] [--value=<value>] [--fixed-value] [--default=<default>] <name>\n   or: git config set [<file-option>] [--type=<type>] [--all] [--value=<value>] [--fixed-value] <name> <value>\n   or: git config unset [<file-option>] [--all] [--value=<value>] [--fixed-value] <name>\n   or: git config rename-section [<file-option>] <old-name> <new-name>\n   or: git config remove-section [<file-option>] <name>\n   or: git config edit [<file-option>]\n   or: git config [<file-option>] --get-colorbool <name> [<stdout-is-tty>]\n";
+const CONFIG_USAGE: &str = "usage: git config list [<file-option>] [<display-option>] [--includes]\n   or: git config get [<file-option>] [<display-option>] [--includes] [--all] [--regexp] [--value=<pattern>] [--fixed-value] [--default=<default>] [--url=<url>] <name>\n   or: git config set [<file-option>] [--type=<type>] [--all] [--value=<pattern>] [--fixed-value] <name> <value>\n   or: git config unset [<file-option>] [--all] [--value=<pattern>] [--fixed-value] <name>\n   or: git config rename-section [<file-option>] <old-name> <new-name>\n   or: git config remove-section [<file-option>] <name>\n   or: git config edit [<file-option>]\n   or: git config [<file-option>] --get-colorbool <name> [<stdout-is-tty>]\n";
 
 const COUNT_OBJECTS_USAGE: &str = "usage: git count-objects [-v] [-H | --human-readable]\n\n    -v, --[no-]verbose    be verbose\n    -H, --[no-]human-readable\n                          print sizes in human readable format\n\n";
 
@@ -2757,7 +3476,7 @@ const DESCRIBE_USAGE: &str = "usage: git describe [--all] [--tags] [--contains] 
 
 const DIAGNOSE_USAGE: &str = "usage: git diagnose [(-o | --output-directory) <path>] [(-s | --suffix) <format>]\n                    [--mode=<mode>]\n\n    -o, --[no-]output-directory <path>\n                          specify a destination for the diagnostics archive\n    -s, --[no-]suffix <format>\n                          specify a strftime format suffix for the filename\n    --mode (stats|all)    specify the content of the diagnostic archive\n\n";
 
-const DIFF_USAGE: &str = "usage: git diff [<options>] [<commit>] [--] [<path>...]\n   or: git diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n   or: git diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]\n   or: git diff [<options>] <commit>...<commit> [--] [<path>...]\n   or: git diff [<options>] <blob> <blob>\n   or: git diff [<options>] --no-index [--] <path> <path>\n\ncommon diff options:\n  -z            output diff-raw with lines terminated with NUL.\n  -p            output patch format.\n  -u            synonym for -p.\n  --patch-with-raw\n                output both a patch and the diff-raw format.\n  --stat        show diffstat instead of patch.\n  --numstat     show numeric diffstat instead of patch.\n  --patch-with-stat\n                output a patch and prepend its diffstat.\n  --name-only   show only names of changed files.\n  --name-status show names and status of changed files.\n  --full-index  show full object name on index lines.\n  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n  -R            swap input file pairs.\n  -B            detect complete rewrites.\n  -M            detect renames.\n  -C            detect copies.\n  --find-copies-harder\n                try unchanged files as candidate for copy detection.\n  -l<n>         limit rename attempts up to <n> paths.\n  -O<file>      reorder diffs according to the <file>.\n  -S<string>    find filepair whose only one side contains the string.\n  --pickaxe-all\n                show all files diff when -S is used and hit is found.\n  -a  --text    treat all files as text.\n";
+const DIFF_USAGE: &str = "usage: git diff [<options>] [<commit>] [--] [<path>...]\n   or: git diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n   or: git diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]\n   or: git diff [<options>] <commit>...<commit> [--] [<path>...]\n   or: git diff [<options>] <blob> <blob>\n   or: git diff [<options>] --no-index [--] <path> <path> [<pathspec>...]\n\ncommon diff options:\n  -z            output diff-raw with lines terminated with NUL.\n  -p            output patch format.\n  -u            synonym for -p.\n  --patch-with-raw\n                output both a patch and the diff-raw format.\n  --stat        show diffstat instead of patch.\n  --numstat     show numeric diffstat instead of patch.\n  --patch-with-stat\n                output a patch and prepend its diffstat.\n  --name-only   show only names of changed files.\n  --name-status show names and status of changed files.\n  --full-index  show full object name on index lines.\n  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n  -R            swap input file pairs.\n  -B            detect complete rewrites.\n  -M            detect renames.\n  -C            detect copies.\n  --find-copies-harder\n                try unchanged files as candidate for copy detection.\n  -l<n>         limit rename attempts up to <n> paths.\n  -O<file>      reorder diffs according to the <file>.\n  -S<string>    find filepair whose only one side contains the string.\n  --pickaxe-all\n                show all files diff when -S is used and hit is found.\n  -a  --text    treat all files as text.\n";
 
 const DIFF_FILES_USAGE: &str = "usage: git diff-files [-q] [-0 | -1 | -2 | -3 | -c | --cc] [<common-diff-options>] [<path>...]\n\ncommon diff options:\n  -z            output diff-raw with lines terminated with NUL.\n  -p            output patch format.\n  -u            synonym for -p.\n  --patch-with-raw\n                output both a patch and the diff-raw format.\n  --stat        show diffstat instead of patch.\n  --numstat     show numeric diffstat instead of patch.\n  --patch-with-stat\n                output a patch and prepend its diffstat.\n  --name-only   show only names of changed files.\n  --name-status show names and status of changed files.\n  --full-index  show full object name on index lines.\n  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n  -R            swap input file pairs.\n  -B            detect complete rewrites.\n  -M            detect renames.\n  -C            detect copies.\n  --find-copies-harder\n                try unchanged files as candidate for copy detection.\n  -l<n>         limit rename attempts up to <n> paths.\n  -O<file>      reorder diffs according to the <file>.\n  -S<string>    find filepair whose only one side contains the string.\n  --pickaxe-all\n                show all files diff when -S is used and hit is found.\n  -a  --text    treat all files as text.\n\n";
 
@@ -2773,7 +3492,7 @@ const FAST_IMPORT_USAGE: &str = "usage: git fast-import [--date-format=<f>] [--m
 
 const FAST_EXPORT_USAGE: &str = "usage: git fast-export [<rev-list-opts>]\n\n    --[no-]progress <n>   show progress after <n> objects\n    --[no-]signed-tags <mode>\n                          select handling of signed tags\n    --[no-]signed-commits <mode>\n                          select handling of signed commits\n    --[no-]tag-of-filtered-object <mode>\n                          select handling of tags that tag filtered objects\n    --[no-]reencode <mode>\n                          select handling of commit messages in an alternate encoding\n    --[no-]export-marks <file>\n                          dump marks to this file\n    --[no-]import-marks <file>\n                          import marks from this file\n    --[no-]import-marks-if-exists <file>\n                          import marks from this file if it exists\n    --[no-]fake-missing-tagger\n                          fake a tagger when tags lack one\n    --[no-]full-tree      output full tree for each commit\n    --[no-]use-done-feature\n                          use the done feature to terminate the stream\n    --no-data             skip output of blob data\n    --data                opposite of --no-data\n    --[no-]refspec <refspec>\n                          apply refspec to exported refs\n    --[no-]anonymize      anonymize output\n    --anonymize-map <from:to>\n                          convert <from> to <to> in anonymized output\n    --[no-]reference-excluded-parents\n                          reference parents which are not in fast-export stream by object id\n    --[no-]show-original-ids\n                          show original object ids of blobs/commits\n    --[no-]mark-tags      label tags with mark ids\n\n";
 
-const FETCH_USAGE: &str = "usage: git fetch [<options>] [<repository> [<refspec>...]]\n   or: git fetch [<options>] <group>\n   or: git fetch --multiple [<options>] [(<repository> | <group>)...]\n   or: git fetch --all [<options>]\n\n    -v, --[no-]verbose    be more verbose\n    -q, --[no-]quiet      be more quiet\n    --[no-]all            fetch from all remotes\n    --[no-]set-upstream   set upstream for git pull/fetch\n    -a, --[no-]append     append to .git/FETCH_HEAD instead of overwriting\n    --[no-]atomic         use atomic transaction to update references\n    --[no-]upload-pack <path>\n                          path to upload pack on remote end\n    -f, --[no-]force      force overwrite of local reference\n    -m, --[no-]multiple   fetch from multiple remotes\n    -t, --[no-]tags       fetch all tags and associated objects\n    -n                    do not fetch all tags (--no-tags)\n    -j, --[no-]jobs <n>   number of submodules fetched in parallel\n    --[no-]prefetch       modify the refspec to place all refs within refs/prefetch/\n    -p, --[no-]prune      prune remote-tracking branches no longer on remote\n    -P, --[no-]prune-tags prune local tags no longer on remote and clobber changed tags\n    --[no-]recurse-submodules[=<on-demand>]\n                          control recursive fetching of submodules\n    --[no-]dry-run        dry run\n    --[no-]porcelain      machine-readable output\n    --[no-]write-fetch-head\n                          write fetched references to the FETCH_HEAD file\n    -k, --[no-]keep       keep downloaded pack\n    -u, --[no-]update-head-ok\n                          allow updating of HEAD ref\n    --[no-]progress       force progress reporting\n    --[no-]depth <depth>  deepen history of shallow clone\n    --[no-]shallow-since <time>\n                          deepen history of shallow repository based on time\n    --[no-]shallow-exclude <ref>\n                          deepen history of shallow clone, excluding ref\n    --[no-]deepen <n>     deepen history of shallow clone\n    --unshallow           convert to a complete repository\n    --refetch             re-fetch without negotiating common commits\n    --[no-]update-shallow accept refs that update .git/shallow\n    --refmap <refmap>     specify fetch refmap\n    -o, --[no-]server-option <server-specific>\n                          option to transmit\n    -4, --ipv4            use IPv4 addresses only\n    -6, --ipv6            use IPv6 addresses only\n    --[no-]negotiation-tip <revision>\n                          report that we have only objects reachable from this object\n    --[no-]negotiate-only do not fetch a packfile; instead, print ancestors of negotiation tips\n    --[no-]filter <args>  object filtering\n    --[no-]auto-maintenance\n                          run 'maintenance --auto' after fetching\n    --[no-]auto-gc        run 'maintenance --auto' after fetching\n    --[no-]show-forced-updates\n                          check for forced-updates on all updated branches\n    --[no-]write-commit-graph\n                          write the commit-graph after fetching\n    --[no-]stdin          accept refspecs from stdin\n\n";
+const FETCH_USAGE: &str = "usage: git fetch [<options>] [<repository> [<refspec>...]]\n   or: git fetch [<options>] <group>\n   or: git fetch --multiple [<options>] [(<repository>|<group>)...]\n   or: git fetch --all [<options>]\n\n    -v, --[no-]verbose    be more verbose\n    -q, --[no-]quiet      be more quiet\n    --[no-]all            fetch from all remotes\n    --[no-]set-upstream   set upstream for git pull/fetch\n    -a, --[no-]append     append to .git/FETCH_HEAD instead of overwriting\n    --[no-]atomic         use atomic transaction to update references\n    --[no-]upload-pack <path>\n                          path to upload pack on remote end\n    -f, --[no-]force      force overwrite of local reference\n    -m, --[no-]multiple   fetch from multiple remotes\n    -t, --[no-]tags       fetch all tags and associated objects\n    -n                    do not fetch all tags (--no-tags)\n    -j, --[no-]jobs <n>   number of submodules fetched in parallel\n    --[no-]prefetch       modify the refspec to place all refs within refs/prefetch/\n    -p, --[no-]prune      prune remote-tracking branches no longer on remote\n    -P, --[no-]prune-tags prune local tags no longer on remote and clobber changed tags\n    --[no-]recurse-submodules[=<on-demand>]\n                          control recursive fetching of submodules\n    --[no-]dry-run        dry run\n    --[no-]porcelain      machine-readable output\n    --[no-]write-fetch-head\n                          write fetched references to the FETCH_HEAD file\n    -k, --[no-]keep       keep downloaded pack\n    -u, --[no-]update-head-ok\n                          allow updating of HEAD ref\n    --[no-]progress       force progress reporting\n    --[no-]depth <depth>  deepen history of shallow clone\n    --[no-]shallow-since <time>\n                          deepen history of shallow repository based on time\n    --[no-]shallow-exclude <ref>\n                          deepen history of shallow clone, excluding ref\n    --[no-]deepen <n>     deepen history of shallow clone\n    --unshallow           convert to a complete repository\n    --refetch             re-fetch without negotiating common commits\n    --[no-]update-shallow accept refs that update .git/shallow\n    --refmap <refmap>     specify fetch refmap\n    -o, --[no-]server-option <server-specific>\n                          option to transmit\n    -4, --ipv4            use IPv4 addresses only\n    -6, --ipv6            use IPv6 addresses only\n    --[no-]negotiation-tip <revision>\n                          report that we have only objects reachable from this object\n    --[no-]negotiate-only do not fetch a packfile; instead, print ancestors of negotiation tips\n    --[no-]filter <args>  object filtering\n    --[no-]auto-maintenance\n                          run 'maintenance --auto' after fetching\n    --[no-]auto-gc        run 'maintenance --auto' after fetching\n    --[no-]show-forced-updates\n                          check for forced-updates on all updated branches\n    --[no-]write-commit-graph\n                          write the commit-graph after fetching\n    --[no-]stdin          accept refspecs from stdin\n\n";
 
 const FETCH_PACK_USAGE: &str = "usage: git fetch-pack [--all] [--stdin] [--quiet | -q] [--keep | -k] [--thin] [--include-tag] [--upload-pack=<git-upload-pack>] [--depth=<n>] [--no-progress] [--diag-url] [-v] [<host>:]<directory> [<refs>...]\n";
 
@@ -2783,11 +3502,11 @@ const FORMAT_PATCH_USAGE: &str = "usage: git format-patch [<options>] [<since> |
 
 const FMT_MERGE_MSG_USAGE: &str = "usage: git fmt-merge-msg [-m <message>] [--log[=<n>] | --no-log] [--file <file>]\n\n    --[no-]log[=<n>]      populate log with at most <n> entries from shortlog\n    -m, --[no-]message <text>\n                          use <text> as start of message\n    --[no-]into-name <name>\n                          use <name> instead of the real target branch\n    -F, --[no-]file <file>\n                          file to read from\n\n";
 
-const FOR_EACH_REF_USAGE: &str = "usage: git for-each-ref [<options>] [<pattern>]\n   or: git for-each-ref [--points-at <object>]\n   or: git for-each-ref [--merged [<commit>]] [--no-merged [<commit>]]\n   or: git for-each-ref [--contains [<commit>]] [--no-contains [<commit>]]\n\n    -s, --[no-]shell      quote placeholders suitably for shells\n    -p, --[no-]perl       quote placeholders suitably for perl\n    --[no-]python         quote placeholders suitably for python\n    --[no-]tcl            quote placeholders suitably for Tcl\n    --[no-]omit-empty     do not output a newline after empty formatted refs\n\n    --[no-]count <n>      show only <n> matched refs\n    --[no-]format <format>\n                          format to use for the output\n    --[no-]color[=<when>] respect format colors\n    --[no-]exclude <pattern>\n                          exclude refs which match pattern\n    --[no-]sort <key>     field name to sort on\n    --[no-]points-at <object>\n                          print only refs which points at the given object\n    --merged <commit>     print only refs that are merged\n    --no-merged <commit>  print only refs that are not merged\n    --contains <commit>   print only refs which contain the commit\n    --no-contains <commit>\n                          print only refs which don't contain the commit\n    --[no-]ignore-case    sorting and filtering are case insensitive\n    --[no-]stdin          read reference patterns from stdin\n    --[no-]include-root-refs\n                          also include HEAD ref and pseudorefs\n\n";
+const FOR_EACH_REF_USAGE: &str = "usage: git for-each-ref [--count=<count>] [--shell|--perl|--python|--tcl]\n\t[(--sort=<key>)...] [--format=<format>]\n\t[--include-root-refs] [--points-at=<object>]\n\t[--merged[=<object>]] [--no-merged[=<object>]]\n\t[--contains[=<object>]] [--no-contains[=<object>]]\n\t[(--exclude=<pattern>)...] [--start-after=<marker>]\n\t[ --stdin | (<pattern>...)]\n\n    -s, --[no-]shell      quote placeholders suitably for shells\n    -p, --[no-]perl       quote placeholders suitably for perl\n    --[no-]python         quote placeholders suitably for python\n    --[no-]tcl            quote placeholders suitably for Tcl\n    --[no-]omit-empty     do not output a newline after empty formatted refs\n\n    --[no-]count <n>      show only <n> matched refs\n    --[no-]format <format>\n                          format to use for the output\n    --[no-]color[=<when>] respect format colors\n    --[no-]exclude <pattern>\n                          exclude refs which match pattern\n    --[no-]sort <key>     field name to sort on\n    --[no-]points-at <object>\n                          print only refs which points at the given object\n    --merged <commit>     print only refs that are merged\n    --no-merged <commit>  print only refs that are not merged\n    --contains <commit>   print only refs which contain the commit\n    --no-contains <commit>\n                          print only refs which don't contain the commit\n    --[no-]ignore-case    sorting and filtering are case insensitive\n    --[no-]stdin          read reference patterns from stdin\n    --[no-]include-root-refs\n                          also include HEAD ref and pseudorefs\n\n";
 
 const FOR_EACH_REPO_USAGE: &str = "usage: git for-each-repo --config=<config> [--] <arguments>\n\n    --[no-]config <config>\n                          config key storing a list of repository paths\n    --[no-]keep-going     keep going even if command fails in a repository\n\n";
 
-const FSCK_USAGE: &str = "usage: git fsck [--tags] [--root] [--unreachable] [--cache] [--no-reflogs]\n                [--[no-]full] [--strict] [--verbose] [--lost-found]\n                [--[no-]dangling] [--[no-]progress] [--connectivity-only]\n                [--[no-]name-objects] [<object>...]\n\n    -v, --[no-]verbose    be verbose\n    --[no-]unreachable    show unreachable objects\n    --[no-]dangling       show dangling objects\n    --[no-]tags           report tags\n    --[no-]root           report root nodes\n    --[no-]cache          make index objects head nodes\n    --[no-]reflogs        make reflogs head nodes (default)\n    --[no-]full           also consider packs and alternate objects\n    --[no-]connectivity-only\n                          check only connectivity\n    --[no-]strict         enable more strict checking\n    --[no-]lost-found     write dangling objects in .git/lost-found\n    --[no-]progress       show progress\n    --[no-]name-objects   show verbose names for reachable objects\n    --[no-]references     check reference database consistency\n\n";
+const FSCK_USAGE: &str = "usage: git fsck [--tags] [--root] [--unreachable] [--cache] [--no-reflogs]\n                [--[no-]full] [--strict] [--verbose] [--lost-found]\n                [--[no-]dangling] [--[no-]progress] [--connectivity-only]\n                [--[no-]name-objects] [--[no-]references] [<object>...]\n\n    -v, --[no-]verbose    be verbose\n    --[no-]unreachable    show unreachable objects\n    --[no-]dangling       show dangling objects\n    --[no-]tags           report tags\n    --[no-]root           report root nodes\n    --[no-]cache          make index objects head nodes\n    --[no-]reflogs        make reflogs head nodes (default)\n    --[no-]full           also consider packs and alternate objects\n    --[no-]connectivity-only\n                          check only connectivity\n    --[no-]strict         enable more strict checking\n    --[no-]lost-found     write dangling objects in .git/lost-found\n    --[no-]progress       show progress\n    --[no-]name-objects   show verbose names for reachable objects\n    --[no-]references     check reference database consistency\n\n";
 
 const GC_USAGE: &str = "usage: git gc [<options>]\n\n    -q, --[no-]quiet      suppress progress reporting\n    --[no-]prune[=<date>] prune unreferenced objects\n    --[no-]cruft          pack unreferenced objects separately\n    --max-cruft-size <n>  with --cruft, limit the size of new cruft packs\n    --[no-]aggressive     be more thorough (increased runtime)\n    --[no-]auto           enable auto-gc mode\n    --[no-]detach         perform garbage collection in the background\n    --[no-]force          force running gc even if there may be another gc running\n    --[no-]keep-largest-pack\n                          repack all other packs except the largest pack\n    --[no-]expire-to <dir>\n                          pack prefix to store a pack containing pruned objects\n\n";
 
@@ -2802,7 +3521,7 @@ const MKTAG_USAGE: &str =
 
 const MKTREE_USAGE: &str = "usage: git mktree [-z] [--missing] [--batch]\n\n    -z                    input is NUL terminated\n    --[no-]missing        allow missing objects\n    --[no-]batch          allow creation of more than one tree\n\n";
 
-const MV_USAGE: &str = "usage: git mv [<options>] <source>... <destination>\n\n    -v, --[no-]verbose    be verbose\n    -n, --[no-]dry-run    dry run\n    -f, --[no-]force      force move/rename even if target exists\n    -k                    skip move/rename errors\n    --[no-]sparse         allow updating entries outside of the sparse-checkout cone\n\n";
+const MV_USAGE: &str = "usage: git mv [-v] [-f] [-n] [-k] <source> <destination>\n   or: git mv [-v] [-f] [-n] [-k] <source>... <destination-directory>\n\n    -v, --[no-]verbose    be verbose\n    -n, --[no-]dry-run    dry run\n    -f, --[no-]force      force move/rename even if target exists\n    -k                    skip move/rename errors\n    --[no-]sparse         allow updating entries outside of the sparse-checkout cone\n\n";
 
 const NAME_REV_USAGE: &str = "usage: git name-rev [<options>] <commit>...\n   or: git name-rev [<options>] --all\n   or: git name-rev [<options>] --annotate-stdin\n\n    --[no-]name-only      print only ref-based names (no object names)\n    --[no-]tags           only use tags to name the commits\n    --[no-]refs <pattern> only use refs matching <pattern>\n    --[no-]exclude <pattern>\n                          ignore refs matching <pattern>\n\n    --[no-]all            list all commits reachable from all refs\n    --[no-]annotate-stdin annotate text from stdin\n    --[no-]undefined      allow to print `undefined` names (default)\n    --[no-]always         show abbreviated commit object as fallback\n\n";
 
@@ -2816,7 +3535,7 @@ const NOTES_USAGE: &str = "usage: git notes [--ref <notes-ref>] [list [<object>]
 
 const PACK_REFS_USAGE: &str = "usage: git pack-refs [--all] [--no-prune] [--auto] [--include <pattern>] [--exclude <pattern>]\n\n    --[no-]all            pack everything\n    --[no-]prune          prune loose refs (default)\n    --[no-]auto           auto-pack refs as needed\n    --[no-]include <pattern>\n                          references to include\n    --[no-]exclude <pattern>\n                          references to exclude\n\n";
 
-const PACK_OBJECTS_USAGE: &str = "usage: git pack-objects --stdout [<options>] [< <ref-list> | < <object-list>]\n   or: git pack-objects [<options>] <base-name> [< <ref-list> | < <object-list>]\n\n    -q, --[no-]quiet      do not show progress meter\n    --[no-]progress       show progress meter\n    --[no-]all-progress   show progress meter during object writing phase\n    --[no-]all-progress-implied\n                          similar to --all-progress when progress meter is shown\n    --index-version <version>[,<offset>]\n                          write the pack index file in the specified idx format version\n    --max-pack-size <n>   maximum size of each output pack file\n    --[no-]local          ignore borrowed objects from alternate object store\n    --[no-]incremental    ignore packed objects\n    --[no-]window <n>     limit pack window by objects\n    --window-memory <n>   limit pack window by memory in addition to object limit\n    --[no-]depth <n>      maximum length of delta chain allowed in the resulting pack\n    --[no-]reuse-delta    reuse existing deltas\n    --[no-]reuse-object   reuse existing objects\n    --[no-]delta-base-offset\n                          use OFS_DELTA objects\n    --[no-]threads <n>    use threads when searching for best delta matches\n    --[no-]non-empty      do not create an empty pack output\n    --[no-]revs           read revision arguments from standard input\n    --unpacked            limit the objects to those that are not yet packed\n    --all                 include objects reachable from any reference\n    --reflog              include objects referred by reflog entries\n    --indexed-objects     include objects referred to by the index\n    --[no-]stdin-packs    read packs from stdin\n    --[no-]stdout         output pack to stdout\n    --[no-]include-tag    include tag objects that refer to objects to be packed\n    --[no-]keep-unreachable\n                          keep unreachable objects\n    --[no-]pack-loose-unreachable\n                          pack loose unreachable objects\n    --[no-]unpack-unreachable[=<time>]\n                          unpack unreachable objects newer than <time>\n    --[no-]cruft          create a cruft pack\n    --[no-]cruft-expiration[=<time>]\n                          expire cruft objects older than <time>\n    --[no-]sparse         use the sparse reachability algorithm\n    --[no-]thin           create thin packs\n    --[no-]shallow        create packs suitable for shallow fetches\n    --[no-]honor-pack-keep\n                          ignore packs that have companion .keep file\n    --[no-]keep-pack <name>\n                          ignore this pack\n    --[no-]compression <n>\n                          pack compression level\n    --[no-]keep-true-parents\n                          do not hide commits by grafts\n    --[no-]use-bitmap-index\n                          use a bitmap index if available to speed up counting objects\n    --[no-]write-bitmap-index\n                          write a bitmap index together with the pack index\n    --[no-]filter <args>  object filtering\n    --missing <action>    handling for missing objects\n    --[no-]exclude-promisor-objects\n                          do not pack objects in promisor packfiles\n    --[no-]exclude-promisor-objects-best-effort\n                          implies --missing=allow-any\n    --[no-]delta-islands  respect islands during delta compression\n    --[no-]uri-protocol <protocol>\n                          exclude any configured uploadpack.blobpackfileuri with this protocol\n    --[no-]name-hash-version <n>\n                          use the specified name-hash function to group similar objects\n\n";
+const PACK_OBJECTS_USAGE: &str = "usage: git pack-objects [-q | --progress | --all-progress] [--all-progress-implied]\n\t   [--no-reuse-delta] [--delta-base-offset] [--non-empty]\n\t   [--local] [--incremental] [--window=<n>] [--depth=<n>]\n\t   [--revs [--unpacked | --all]] [--keep-pack=<pack-name>]\n\t   [--cruft] [--cruft-expiration=<time>]\n\t   [--stdout [--filter=<filter-spec>] | <base-name>]\n\t   [--shallow] [--keep-true-parents] [--[no-]sparse]\n\t   [--name-hash-version=<n>] [--path-walk] < <object-list>\n\n    -q, --[no-]quiet      do not show progress meter\n    --[no-]progress       show progress meter\n    --[no-]all-progress   show progress meter during object writing phase\n    --[no-]all-progress-implied\n                          similar to --all-progress when progress meter is shown\n    --index-version <version>[,<offset>]\n                          write the pack index file in the specified idx format version\n    --max-pack-size <n>   maximum size of each output pack file\n    --[no-]local          ignore borrowed objects from alternate object store\n    --[no-]incremental    ignore packed objects\n    --[no-]window <n>     limit pack window by objects\n    --window-memory <n>   limit pack window by memory in addition to object limit\n    --[no-]depth <n>      maximum length of delta chain allowed in the resulting pack\n    --[no-]reuse-delta    reuse existing deltas\n    --[no-]reuse-object   reuse existing objects\n    --[no-]delta-base-offset\n                          use OFS_DELTA objects\n    --[no-]threads <n>    use threads when searching for best delta matches\n    --[no-]non-empty      do not create an empty pack output\n    --[no-]revs           read revision arguments from standard input\n    --unpacked            limit the objects to those that are not yet packed\n    --all                 include objects reachable from any reference\n    --reflog              include objects referred by reflog entries\n    --indexed-objects     include objects referred to by the index\n    --[no-]stdin-packs    read packs from stdin\n    --[no-]stdout         output pack to stdout\n    --[no-]include-tag    include tag objects that refer to objects to be packed\n    --[no-]keep-unreachable\n                          keep unreachable objects\n    --[no-]pack-loose-unreachable\n                          pack loose unreachable objects\n    --[no-]unpack-unreachable[=<time>]\n                          unpack unreachable objects newer than <time>\n    --[no-]cruft          create a cruft pack\n    --[no-]cruft-expiration[=<time>]\n                          expire cruft objects older than <time>\n    --[no-]sparse         use the sparse reachability algorithm\n    --[no-]thin           create thin packs\n    --[no-]shallow        create packs suitable for shallow fetches\n    --[no-]honor-pack-keep\n                          ignore packs that have companion .keep file\n    --[no-]keep-pack <name>\n                          ignore this pack\n    --[no-]compression <n>\n                          pack compression level\n    --[no-]keep-true-parents\n                          do not hide commits by grafts\n    --[no-]use-bitmap-index\n                          use a bitmap index if available to speed up counting objects\n    --[no-]write-bitmap-index\n                          write a bitmap index together with the pack index\n    --[no-]filter <args>  object filtering\n    --missing <action>    handling for missing objects\n    --[no-]exclude-promisor-objects\n                          do not pack objects in promisor packfiles\n    --[no-]exclude-promisor-objects-best-effort\n                          implies --missing=allow-any\n    --[no-]delta-islands  respect islands during delta compression\n    --[no-]uri-protocol <protocol>\n                          exclude any configured uploadpack.blobpackfileuri with this protocol\n    --[no-]name-hash-version <n>\n                          use the specified name-hash function to group similar objects\n\n";
 
 const PACK_REDUNDANT_USAGE: &str =
     "usage: git pack-redundant [--verbose] [--alt-odb] (--all | <pack-filename>...)\n";
@@ -4314,6 +5033,19 @@ fn validate_mktree_invocation_before_clap(command_args: &[String]) -> Result<()>
             return Err(CliError::Stderr {
                 code: 129,
                 text: format!("error: unknown option `no-z'\n{USAGE}"),
+            });
+        }
+        if arg == "--batch-command"
+            || arg == "--no-batch-command"
+            || arg.starts_with("--batch-command=")
+            || arg.starts_with("--no-batch-command=")
+        {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: unknown option `{}'\n{USAGE}",
+                    arg.trim_start_matches('-')
+                ),
             });
         }
         if arg.starts_with("-z=") {

@@ -363,21 +363,55 @@ fn bad_compression_config_value(entry: &ConfigEntry) -> CliError {
     }
 }
 
-pub(crate) fn parse_git_unsigned_size(raw: &str) -> Option<u64> {
-    let raw = raw.trim();
-    let digits_len = raw.bytes().take_while(u8::is_ascii_digit).count();
-    if digits_len == 0 {
-        return None;
+pub(crate) fn parse_git_unsigned(raw: &str) -> std::result::Result<u64, &'static str> {
+    let raw = raw.trim_start_matches(|character: char| character.is_ascii_whitespace());
+    if raw.is_empty() || raw.bytes().any(|byte| byte == b'-') {
+        return Err("invalid unit");
     }
-    let base = raw[..digits_len].parse::<u64>().ok()?;
-    let multiplier = match &raw[digits_len..] {
-        "" => 1,
-        "k" | "K" => 1024,
-        "m" | "M" => 1024 * 1024,
-        "g" | "G" => 1024 * 1024 * 1024,
-        _ => return None,
+    let (number, multiplier) = match raw.as_bytes().last().copied() {
+        Some(b'k' | b'K') => (&raw[..raw.len() - 1], 1024_u128),
+        Some(b'm' | b'M') => (&raw[..raw.len() - 1], 1024_u128 * 1024),
+        Some(b'g' | b'G') => (&raw[..raw.len() - 1], 1024_u128 * 1024 * 1024),
+        _ => (raw, 1),
     };
-    base.checked_mul(multiplier)
+    if number.is_empty() {
+        return Err("invalid unit");
+    }
+    let number = number.strip_prefix('+').unwrap_or(number);
+    let (radix, digits) = if let Some(rest) = number
+        .strip_prefix("0x")
+        .or_else(|| number.strip_prefix("0X"))
+    {
+        (16, rest)
+    } else if number.len() > 1 && number.starts_with('0') {
+        (8, &number[1..])
+    } else {
+        (10, number)
+    };
+    let value = if digits.is_empty() {
+        if radix == 8 && number == "0" {
+            0
+        } else {
+            return Err("invalid unit");
+        }
+    } else {
+        let valid_digit = |byte: u8| match radix {
+            8 => (b'0'..=b'7').contains(&byte),
+            10 => byte.is_ascii_digit(),
+            16 => byte.is_ascii_hexdigit(),
+            _ => false,
+        };
+        if !digits.bytes().all(valid_digit) {
+            return Err("invalid unit");
+        }
+        u128::from_str_radix(digits, radix).map_err(|_| "out of range")?
+    };
+    let value = value.checked_mul(multiplier).ok_or("out of range")?;
+    u64::try_from(value).map_err(|_| "out of range")
+}
+
+pub(crate) fn parse_git_unsigned_size(raw: &str) -> Option<u64> {
+    parse_git_unsigned(raw).ok()
 }
 
 pub(crate) fn parse_global_config_env_entry(raw: &str) -> Result<ConfigEntry> {
@@ -625,7 +659,10 @@ fn validate_repository_format_entries(entries: &[ConfigEntry]) -> Result<()> {
                 | "partialclone"
                 | "compatobjectformat"
         );
-        let requires_v1 = entry.key != "noop";
+        // Git accepts the partial-clone extension in a format-v0 repository
+        // as a documented exception.  Keep the general v1-only validation
+        // intact for every other extension.
+        let requires_v1 = !matches!(entry.key.as_str(), "noop" | "partialclone");
         if version == 0 && known && requires_v1 {
             return Err(CliError::Fatal {
                 code: 128,
@@ -756,6 +793,27 @@ pub(crate) fn read_config_entries_without_repo(no_includes: bool) -> io::Result<
         }
     }
     entries.extend(global_config_entries());
+    Ok(entries)
+}
+
+pub(crate) fn read_early_global_config_entries() -> io::Result<Vec<ConfigEntry>> {
+    let mut entries = Vec::new();
+    for (scope, paths) in [
+        (ConfigScope::System, system_config_paths()),
+        (ConfigScope::Global, global_config_paths()),
+    ] {
+        for path in paths {
+            entries.extend(read_config_file_with_source(
+                &path,
+                scope,
+                format!("file:{}", path.display()),
+                None,
+                0,
+                false,
+                None,
+            )?);
+        }
+    }
     Ok(entries)
 }
 
@@ -1172,6 +1230,15 @@ impl ConfigIncludeContext {
                 target.strip_prefix("refs/heads/").map(str::to_owned)
             }
             Ok(RefTarget::Direct(_)) => None,
+            Err(error)
+                if config_reftable_stack_is_active(&refs)
+                    && matches!(
+                        error.kind(),
+                        io::ErrorKind::InvalidData | io::ErrorKind::NotFound
+                    ) =>
+            {
+                None
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
@@ -1182,6 +1249,18 @@ impl ConfigIncludeContext {
             remote_urls: collect_config_remote_urls(repo)?,
         })
     }
+}
+
+fn config_reftable_stack_is_active(refs: &RefStore) -> bool {
+    if refs.storage_kind().ok() != Some(zmin_git_core::refs::RefStorageKind::Reftable) {
+        return false;
+    }
+    let Ok(storage_root) = refs.storage_root_path() else {
+        return false;
+    };
+    fs::read_to_string(storage_root.join("reftable/tables.list"))
+        .map(|content| content.lines().any(|line| !line.trim().is_empty()))
+        .unwrap_or(false)
 }
 
 pub(crate) fn repo_hash_algorithm_from_config(repo: &GitRepo) -> io::Result<GitHashAlgorithm> {
@@ -1674,7 +1753,7 @@ pub(crate) fn parse_config_blob_entries(
     includes: bool,
 ) -> Result<Vec<ConfigEntry>> {
     let object_id = resolve_objectish(repo, objectish)?;
-    let store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(&repo.objects_dir, repo_hash_algorithm_from_config(repo)?);
     let object = store.read_object(&object_id)?;
     if object.kind != GitObjectKind::Blob {
         return Err(CliError::Fatal {
@@ -2216,7 +2295,7 @@ pub(crate) fn parse_git_bool(value: &str) -> Option<bool> {
     match value.to_ascii_lowercase().as_str() {
         "true" | "yes" | "on" | "1" => Some(true),
         "false" | "no" | "off" | "0" | "" => Some(false),
-        _ => None,
+        _ => value.parse::<i64>().ok().map(|number| number != 0),
     }
 }
 
@@ -2688,9 +2767,56 @@ pub(crate) fn parse_config_section(raw: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigScope, parse_config_name, read_config_file_raw};
+    use super::{
+        ConfigEntry, ConfigScope, parse_config_name, read_config_file_raw,
+        validate_repository_format_entries,
+    };
     use std::fs;
     use tempfile::TempDir;
+
+    fn repository_entry(section: &str, key: &str, value: &str) -> ConfigEntry {
+        ConfigEntry {
+            section: section.to_owned(),
+            raw_section: section.to_owned(),
+            subsection: String::new(),
+            key: key.to_owned(),
+            raw_key: key.to_owned(),
+            value: value.to_owned(),
+            comment: None,
+            implicit_bool: false,
+            scope: ConfigScope::Local,
+            origin: "test".to_owned(),
+            line: None,
+        }
+    }
+
+    #[test]
+    fn partial_clone_extension_is_valid_in_format_v0_for_sha1() {
+        let entries = vec![
+            repository_entry("core", "repositoryformatversion", "0"),
+            repository_entry("extensions", "partialclone", "origin"),
+        ];
+        validate_repository_format_entries(&entries).expect("Git's format-v0 exception");
+    }
+
+    #[test]
+    fn partial_clone_extension_is_valid_in_format_v1_for_sha256() {
+        let entries = vec![
+            repository_entry("core", "repositoryformatversion", "1"),
+            repository_entry("extensions", "objectformat", "sha256"),
+            repository_entry("extensions", "partialclone", "origin"),
+        ];
+        validate_repository_format_entries(&entries).expect("format-v1 SHA-256 repository");
+    }
+
+    #[test]
+    fn format_v0_still_rejects_other_v1_only_extensions() {
+        let entries = vec![
+            repository_entry("core", "repositoryformatversion", "0"),
+            repository_entry("extensions", "objectformat", "sha256"),
+        ];
+        assert!(validate_repository_format_entries(&entries).is_err());
+    }
 
     #[test]
     fn read_config_file_raw_refreshes_when_file_changes() {

@@ -7,7 +7,8 @@ use std::process::Command;
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin,
     command_failure_output_with_env, command_output_with_env, configure_identity, git, git_init,
-    git_with_env, run_zmin, run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
+    git_with_env, pinned_git_with_env, run_zmin, run_zmin_args,
+    run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
 };
 
 #[test]
@@ -50,6 +51,28 @@ const COMMIT_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_EMAIL", "bench@example.test"),
     ("GIT_COMMITTER_DATE", "1700000000 +0000"),
 ];
+
+const PINNED_COMMIT_SUMMARY_GLOBAL_CONFIG: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+const PINNED_COMMIT_SUMMARY_CONFIG_ENV: [(&str, &str); 2] = [
+    ("GIT_CONFIG_GLOBAL", PINNED_COMMIT_SUMMARY_GLOBAL_CONFIG),
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+];
+
+const PINNED_COMMIT_SUMMARY_COMMIT_ENV: [(&str, &str); 8] = [
+    ("GIT_CONFIG_GLOBAL", PINNED_COMMIT_SUMMARY_GLOBAL_CONFIG),
+    ("GIT_CONFIG_NOSYSTEM", "1"),
+    ("GIT_AUTHOR_NAME", "Bench"),
+    ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+    ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+    ("GIT_COMMITTER_NAME", "Bench"),
+    ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+    ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+];
+
+fn pinned_commit_summary_git_args(cwd: &Path, args: &[&str]) -> String {
+    pinned_git_with_env(cwd, args, &PINNED_COMMIT_SUMMARY_CONFIG_ENV)
+}
 
 #[test]
 fn commit_gpg_sign_family_matches_stock_git_with_fixture_key() {
@@ -993,6 +1016,60 @@ fn commit_summary_and_quiet_output_match_stock_git() {
             "git"
         )
     );
+}
+
+#[test]
+fn pinned_commit_summary_supports_sha1_sha256_files_and_reftable() {
+    for sha256 in [false, true] {
+        for reftable in [false, true] {
+            let root = tempfile::Builder::new()
+                .prefix("zmin-commit-summary-")
+                .tempdir_in("/private/tmp")
+                .expect("create commit summary fixture root");
+            let stock = root.path().join("stock");
+            let zmin = root.path().join("zmin");
+            fs::create_dir_all(&stock).expect("create stock fixture");
+            fs::create_dir_all(&zmin).expect("create zmin fixture");
+            let mut init = vec!["init", "--quiet"];
+            if sha256 {
+                init.push("--object-format=sha256");
+            }
+            if reftable {
+                init.push("--ref-format=reftable");
+            }
+            pinned_commit_summary_git_args(&stock, &init);
+            pinned_commit_summary_git_args(&zmin, &init);
+            for repo in [&stock, &zmin] {
+                if repo == &stock {
+                    pinned_commit_summary_git_args(repo, &["config", "user.name", "Bench"]);
+                    pinned_commit_summary_git_args(
+                        repo,
+                        &["config", "user.email", "bench@example.test"],
+                    );
+                } else {
+                    run_zmin_args(repo, &["config", "user.name", "Bench"]);
+                    run_zmin_args(repo, &["config", "user.email", "bench@example.test"]);
+                }
+                write_file(repo, "tracked.txt", "base\n");
+            }
+            pinned_commit_summary_git_args(&stock, &["add", "tracked.txt"]);
+            run_zmin_args(&zmin, &["add", "tracked.txt"]);
+            let stock_commit = pinned_git_with_env(
+                &stock,
+                &["commit", "-m", "base"],
+                &PINNED_COMMIT_SUMMARY_COMMIT_ENV,
+            );
+            let zmin_commit = command_output_with_env(
+                zmin_bin(),
+                &zmin,
+                &["commit", "-m", "base"],
+                &COMMIT_ENV,
+                "zmin pinned commit summary",
+            )
+            .1;
+            assert_eq!(zmin_commit, stock_commit, "sha256={sha256}, reftable={reftable}");
+        }
+    }
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -20,6 +21,192 @@ pub(crate) struct PathspecRule<'a> {
     pub(crate) pattern: &'a [u8],
     pub(crate) exclude: bool,
     pub(crate) options: PathspecOptions,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HistoryPathQuery {
+    rules: Vec<HistoryPathRule>,
+    literal_rule_buckets: Vec<Vec<usize>>,
+    fallback_rule_indices: Vec<usize>,
+    has_positive_rule: bool,
+    fingerprint: u64,
+}
+
+#[derive(Debug, Clone)]
+struct HistoryPathRule {
+    pattern: Vec<u8>,
+    exclude: bool,
+    options: PathspecOptions,
+}
+
+impl HistoryPathQuery {
+    pub(crate) fn compile(pathspecs: &[Vec<u8>]) -> Self {
+        let rules = pathspecs
+            .iter()
+            .map(|raw| {
+                let parsed = parse_pathspec_rule(raw);
+                HistoryPathRule {
+                    pattern: parsed.pattern.to_vec(),
+                    exclude: parsed.exclude,
+                    options: parsed.options,
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut literal_rule_buckets = (0..=u8::MAX).map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut fallback_rule_indices = Vec::new();
+        let mut has_positive_rule = false;
+        for (index, rule) in rules.iter().enumerate() {
+            has_positive_rule |= !rule.exclude;
+            let is_literal = !rule.options.glob
+                && !rule.options.glob_explicit
+                && !rule.options.icase
+                && !rule.pattern.is_empty()
+                && !rule
+                    .pattern
+                    .iter()
+                    .any(|byte| matches!(*byte, b'*' | b'?' | b'['));
+            if let Some(&first) = rule.pattern.first().filter(|_| is_literal) {
+                literal_rule_buckets[usize::from(first)].push(index);
+            } else {
+                fallback_rule_indices.push(index);
+            }
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for rule in &rules {
+            rule.pattern.hash(&mut hasher);
+            rule.exclude.hash(&mut hasher);
+            rule.options.glob.hash(&mut hasher);
+            rule.options.glob_explicit.hash(&mut hasher);
+            rule.options.literal.hash(&mut hasher);
+            rule.options.icase.hash(&mut hasher);
+        }
+        Self {
+            rules,
+            literal_rule_buckets,
+            fallback_rule_indices,
+            has_positive_rule,
+            fingerprint: hasher.finish(),
+        }
+    }
+
+    pub(crate) fn fingerprint(&self) -> u64 {
+        self.fingerprint
+    }
+
+    pub(crate) fn matches_path(&self, path: &[u8]) -> bool {
+        if self.rules.is_empty() {
+            return true;
+        }
+        let mut matched_positive = false;
+        let mut excluded = false;
+        let fallback = self.fallback_rule_indices.iter().copied();
+        let bucket = path
+            .first()
+            .map(|first| {
+                self.literal_rule_buckets[usize::from(*first)]
+                    .iter()
+                    .copied()
+            })
+            .into_iter()
+            .flatten();
+        for rule_index in fallback.chain(bucket) {
+            let rule = &self.rules[rule_index];
+            if rule.pattern.is_empty() {
+                if rule.exclude {
+                    excluded = true;
+                } else {
+                    matched_positive = true;
+                }
+                continue;
+            }
+            let matches = history_path_rule_matches(path, rule);
+            if rule.exclude {
+                excluded |= matches;
+            } else {
+                matched_positive |= matches;
+            }
+        }
+        (matched_positive || !self.has_positive_rule) && !excluded
+    }
+
+    pub(crate) fn may_match_prefix(&self, prefix: &[u8]) -> bool {
+        if prefix.is_empty() || self.rules.is_empty() {
+            return true;
+        }
+        if !self.has_positive_rule {
+            return true;
+        }
+        let prefix = prefix.strip_suffix(b"/").unwrap_or(prefix);
+        let fallback = self.fallback_rule_indices.iter().copied();
+        let bucket = prefix
+            .first()
+            .map(|first| {
+                self.literal_rule_buckets[usize::from(*first)]
+                    .iter()
+                    .copied()
+            })
+            .into_iter()
+            .flatten();
+        fallback.chain(bucket).any(|rule_index| {
+            let rule = &self.rules[rule_index];
+            if rule.exclude || rule.pattern.is_empty() {
+                return false;
+            }
+            if rule
+                .pattern
+                .iter()
+                .any(|byte| matches!(*byte, b'*' | b'?' | b'['))
+            {
+                return true;
+            }
+            bytes_eq(&rule.pattern, prefix, rule.options.icase)
+                || bytes_starts_with_path_separator(&rule.pattern, prefix, rule.options.icase)
+                || bytes_starts_with_path_separator(prefix, &rule.pattern, rule.options.icase)
+        })
+    }
+}
+
+fn bytes_starts_with_path_separator(value: &[u8], prefix: &[u8], icase: bool) -> bool {
+    value
+        .get(..prefix.len().saturating_add(1))
+        .is_some_and(|start| {
+            start.last() == Some(&b'/') && bytes_eq(&start[..prefix.len()], prefix, icase)
+        })
+}
+
+fn history_path_rule_matches(path: &[u8], rule: &HistoryPathRule) -> bool {
+    if history_path_exact_or_prefix_matches(path, &rule.pattern, rule.options.icase) {
+        return true;
+    }
+    if !rule.options.glob
+        || !rule
+            .pattern
+            .iter()
+            .any(|byte| matches!(*byte, b'*' | b'?' | b'['))
+    {
+        return false;
+    }
+    let wildcard_matches_slash = if !rule.options.glob_explicit {
+        true
+    } else if rule.pattern.contains(&b'/') {
+        false
+    } else {
+        !path.contains(&b'/')
+    };
+    wildcard_match_bytes_without_allocation(
+        &rule.pattern,
+        path,
+        rule.options.icase,
+        wildcard_matches_slash,
+    )
+}
+
+fn history_path_exact_or_prefix_matches(path: &[u8], pattern: &[u8], icase: bool) -> bool {
+    bytes_eq(path, pattern, icase)
+        || path
+            .get(..pattern.len())
+            .is_some_and(|prefix| bytes_eq(prefix, pattern, icase))
+            && path.get(pattern.len()) == Some(&b'/')
 }
 
 impl Default for PathspecOptions {
@@ -186,6 +373,86 @@ pub(crate) fn wildcard_match(pattern: &str, value: &str) -> bool {
 
 fn wildcard_match_bytes(pattern: &[u8], value: &[u8]) -> bool {
     wildcard_match_bytes_with_slash(pattern, value, true)
+}
+
+fn wildcard_match_bytes_without_allocation(
+    pattern: &[u8],
+    value: &[u8],
+    icase: bool,
+    wildcard_matches_slash: bool,
+) -> bool {
+    let mut pattern_index = 0;
+    let mut value_index = 0;
+    let mut star_index = None;
+    let mut star_value_index = 0;
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && pattern_byte_matches(
+                pattern,
+                value,
+                pattern_index,
+                value_index,
+                icase,
+                wildcard_matches_slash,
+            )
+        {
+            let consumed = if pattern[pattern_index] == b'[' {
+                wildcard_class_end(&pattern[pattern_index + 1..]).unwrap_or(0) + 2
+            } else {
+                1
+            };
+            pattern_index += consumed;
+            value_index += 1;
+            continue;
+        }
+        if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            star_value_index = value_index;
+            pattern_index += 1;
+            continue;
+        }
+        if let Some(star_index) = star_index {
+            if star_value_index < value.len()
+                && (wildcard_matches_slash || value[star_value_index] != b'/')
+            {
+                star_value_index += 1;
+                value_index = star_value_index;
+                pattern_index = star_index + 1;
+                continue;
+            }
+        }
+        return false;
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
+}
+
+fn pattern_byte_matches(
+    pattern: &[u8],
+    value: &[u8],
+    pattern_index: usize,
+    value_index: usize,
+    icase: bool,
+    wildcard_matches_slash: bool,
+) -> bool {
+    let pattern_byte = pattern[pattern_index];
+    let value_byte = value[value_index];
+    match pattern_byte {
+        b'?' => wildcard_matches_slash || value_byte != b'/',
+        b'[' => {
+            wildcard_class_matches(&pattern[pattern_index + 1..], Some(&value_byte))
+                .is_some_and(|(_, matched)| matched)
+                && (wildcard_matches_slash || value_byte != b'/')
+        }
+        b'*' => false,
+        literal => bytes_eq(&[literal], &[value_byte], icase),
+    }
+}
+
+fn wildcard_class_end(class: &[u8]) -> Option<usize> {
+    class.iter().position(|byte| *byte == b']')
 }
 
 fn wildcard_match_bytes_with_slash(
@@ -392,5 +659,27 @@ mod tests {
 
         assert!(pathspec_rule_matches(b"untracked_dir", rule));
         assert!(pathspec_rule_matches(b"untracked_dir/file", rule));
+    }
+
+    #[test]
+    fn history_query_matches_raw_bytes_and_nested_prefixes() {
+        let query = HistoryPathQuery::compile(&[b"dir/\x80name".to_vec()]);
+
+        assert!(query.matches_path(b"dir/\x80name"));
+        assert!(query.matches_path(b"dir/\x80name/child"));
+        assert!(!query.matches_path("dir/�name".as_bytes()));
+        assert!(query.may_match_prefix(b"dir/"));
+
+        let glob = HistoryPathQuery::compile(&[b"dir/*\x80*".to_vec()]);
+        assert!(glob.matches_path(b"dir/a\x80b"));
+        assert!(!glob.matches_path(b"dir/ab"));
+    }
+
+    #[test]
+    fn history_query_literal_bucket_keeps_global_positive_rule_state() {
+        let query = HistoryPathQuery::compile(&[b":(literal)path.txt".to_vec()]);
+
+        assert!(query.matches_path(b"path.txt"));
+        assert!(!query.matches_path(b"noise.txt"));
     }
 }

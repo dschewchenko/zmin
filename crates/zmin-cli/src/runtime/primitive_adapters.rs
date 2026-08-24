@@ -18,10 +18,10 @@ use zmin_primitives::{Error as PrimitiveError, Result as PrimitiveResult};
 
 use super::{
     CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry, FormatPatchPreludeMode,
-    GitRepo, SubmoduleDiffFormat, WordDiffMode, default_abbrev_len, is_per_worktree_ref,
+    GitRepo, SubmoduleDiffFormat, WordDiffMode, configured_core_abbrev_state, is_per_worktree_ref,
     local_clone_source, local_repository_path_from_location, normalize_git_path,
-    read_common_git_dir, read_config_file, run_receive_pack_request_service,
-    run_upload_pack_request_service, signature_from_commit_bytes,
+    read_common_git_dir, read_config_file, rendered_abbrev_len_for_ids,
+    run_receive_pack_request_service, run_upload_pack_request_service, signature_from_commit_bytes,
     write_format_patch_with_tree_diff_cached,
 };
 
@@ -287,12 +287,26 @@ impl GitPatchRenderer for CliPatchRenderer {
             })?;
         let store = self.store.as_object_store();
         let tree_cache = TreeObjectCache::new(store);
+        let diff_entries = zmin_git_core::diff_trees(&tree_cache, old_tree.as_ref(), &new_tree)
+            .map_err(|error| PrimitiveError::Storage {
+                details: format!("failed to collect diff entries: {error}"),
+            })?;
+        let diff_ids = diff_entries
+            .iter()
+            .flat_map(|entry| entry.old_entry.iter().chain(entry.new_entry.iter()))
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let abbrev_policy =
+            configured_core_abbrev_state(&self.repo).map_err(map_cli_result_error)?;
+        let abbrev_lengths = rendered_abbrev_len_for_ids(store, abbrev_policy, &diff_ids)
+            .map_err(map_cli_result_error)?;
         let empty_notes = HashMap::new();
         let commit = FormatPatchContext {
             repo: &self.repo,
             store,
-            abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
-            patch_abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
+            abbrev_policy,
+            patch_abbrev_policy: abbrev_policy,
+            abbrev_lengths: Some(abbrev_lengths),
             total: 1,
             nul_terminated: false,
             no_prefix: false,
@@ -386,12 +400,15 @@ impl GitPatchRenderer for CliPatchRenderer {
 
         let store = self.store.as_object_store();
         let tree_cache = TreeObjectCache::new(store);
+        let abbrev_policy =
+            configured_core_abbrev_state(&self.repo).map_err(map_cli_result_error)?;
         let empty_notes = HashMap::new();
         let context = FormatPatchContext {
             repo: &self.repo,
             store,
-            abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
-            patch_abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
+            abbrev_policy,
+            patch_abbrev_policy: abbrev_policy,
+            abbrev_lengths: None,
             total: commits.len(),
             nul_terminated: false,
             no_prefix: false,
@@ -872,11 +889,12 @@ fn peel_local_tag(store: &LooseObjectStore, id: &ObjectId) -> PrimitiveResult<Op
     }
 
     for _ in 0..8 {
-        let tag = crate::runtime::decode_tag(GitHashAlgorithm::Sha1, &object.content).map_err(
-            |error| PrimitiveError::Validation {
-                details: format!("decode local tag object {}: {error}", current.to_hex()),
-            },
-        )?;
+        let tag =
+            crate::runtime::decode_tag(store.algorithm(), &object.content).map_err(|error| {
+                PrimitiveError::Validation {
+                    details: format!("decode local tag object {}: {error}", current.to_hex()),
+                }
+            })?;
         current = tag.target;
         object = store
             .read_object(&current)

@@ -57,12 +57,6 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         .filter(|value| !value.is_empty())
         .or(options.word_diff_regex.as_deref());
     let ignore_submodules = parse_ignore_submodules_mode(options.ignore_submodules.as_deref())?;
-    let abbrev_len = parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev)?;
-    let patch_abbrev_len = if options.full_index && !options.no_full_index {
-        Some(GitHashAlgorithm::Sha1.digest_len() * 2)
-    } else {
-        abbrev_len
-    };
     let unified_context = options
         .unified
         .as_deref()
@@ -143,6 +137,18 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
             Err(error) => return Err(error),
         }
     };
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let configured_abbrev = configured_core_abbrev_state(&repo)?;
+    let raw_abbrev_policy = policy_for_abbrev_action(
+        configured_abbrev,
+        resolve_abbrev_action(options.abbrev.as_deref(), options.no_abbrev),
+        algorithm,
+    );
+    let patch_abbrev_len = if options.full_index && !options.no_full_index {
+        Some(algorithm.digest_len() * 2)
+    } else {
+        parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev, algorithm)?
+    };
     let relative_prefix = {
         let _trace = phase_trace("diff.relative_prefix");
         diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?
@@ -174,7 +180,8 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         binary: options.binary,
         quiet: options.quiet,
         exit_code: options.exit_code,
-        raw_abbrev_len: abbrev_len,
+        raw_abbrev_len: None,
+        raw_abbrev_policy: Some(raw_abbrev_policy),
         word_diff,
         word_diff_regex: word_diff_regex.map(str::to_owned),
         patch_abbrev_len,
@@ -201,7 +208,7 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         let _trace = phase_trace("diff.validate_format");
         render_options.validate_format(false)?;
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let unmerged_selection = selected_unmerged_stage(options.base, options.ours, options.theirs);
     if let Some(stage) = unmerged_selection {
         if options.cached {
@@ -633,6 +640,7 @@ fn render_porcelain_combined_diff(
         .iter()
         .map(|path| path_arg_to_repo_relative(repo, path))
         .collect::<Result<Vec<_>>>()?;
+    let abbrev_policy = configured_core_abbrev_state(repo)?;
     if render_options.patch_with_stat {
         print_combined_diff_tree_stat(
             repo,
@@ -659,6 +667,7 @@ fn render_porcelain_combined_diff(
         println!();
         return print_combined_diff_tree_patches(
             store,
+            abbrev_policy,
             &parent_indexes,
             &result_index,
             &pathspecs,
@@ -691,6 +700,7 @@ fn render_porcelain_combined_diff(
     if render_options.raw {
         return print_combined_diff_tree_raw_entries(
             store,
+            abbrev_policy,
             &parent_indexes,
             &result_index,
             &pathspecs,
@@ -709,6 +719,7 @@ fn render_porcelain_combined_diff(
     }
     print_combined_diff_tree_patches(
         store,
+        abbrev_policy,
         &parent_indexes,
         &result_index,
         &pathspecs,
@@ -795,20 +806,20 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
             .map(|_| "color")
             .or(options.word_diff.as_deref()),
     )?;
-    let render_options = plumbing_render_options(&options)?;
-    let render_options = DiffRenderOptions {
-        word_diff,
-        ..render_options
-    };
-    render_options.validate_format(true)?;
     let repo = find_repo()?;
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let raw_abbrev_policy = plumbing_raw_abbrev_policy(&repo, &options, algorithm)?;
     let relative_prefix =
         diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?;
     let render_options = DiffRenderOptions {
         relative_prefix: relative_prefix.clone(),
-        ..render_options
+        word_diff,
+        raw_abbrev_len: None,
+        raw_abbrev_policy: Some(raw_abbrev_policy),
+        ..plumbing_render_options(&options, algorithm)?
     };
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    render_options.validate_format(true)?;
     let full_index = read_repo_index(&repo)?;
     let unmerged_selection = selected_unmerged_stage(options.base, options.ours, options.theirs);
     if has_unmerged_entries(&full_index) {
@@ -1066,6 +1077,7 @@ fn render_diff_files_unmerged_stage(
                 index,
                 &unmerged,
                 render_options.raw_abbrev_len,
+                store.algorithm(),
                 options.nul_terminated,
             )?;
             return Ok(());
@@ -1075,6 +1087,7 @@ fn render_diff_files_unmerged_stage(
             index,
             &unmerged,
             render_options.raw_abbrev_len,
+            store.algorithm(),
             options.nul_terminated,
         )?;
     }
@@ -1130,9 +1143,11 @@ fn render_diff_files_unmerged_combined(
         .iter()
         .map(|path| path_arg_to_repo_relative(repo, path))
         .collect::<Result<Vec<_>>>()?;
+    let abbrev_policy = configured_core_abbrev_state(repo)?;
     print_combined_worktree_patches_with_zero_result(
         repo,
         store,
+        abbrev_policy,
         &[ours_index, theirs_index],
         &result_index,
         DiffSideSource::WorktreeOrIndex,
@@ -1169,9 +1184,11 @@ fn render_diff_index_unmerged_combined(
         .iter()
         .map(|path| path_arg_to_repo_relative(repo, path))
         .collect::<Result<Vec<_>>>()?;
+    let abbrev_policy = configured_core_abbrev_state(repo)?;
     print_combined_worktree_patches_with_zero_result(
         repo,
         store,
+        abbrev_policy,
         &[base_index, old_index.clone()],
         &result_index,
         DiffSideSource::WorktreeOrIndex,
@@ -1208,15 +1225,20 @@ fn unmerged_diff_entries(indexes: [&GitIndex; 2]) -> Vec<zmin_git_core::IndexDif
 fn print_combined_worktree_patches_with_zero_result(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     parent_indexes: &[GitIndex],
     result_index: &GitIndex,
     result_source: DiffSideSource,
     pathspecs: &[Vec<u8>],
     options: CombinedPatchRenderOptions<'_>,
 ) -> Result<()> {
-    let abbrev_len = options.abbrev_len.unwrap_or(default_abbrev_len(store)?);
-    let zero_result_id = short_zero_object_id_len(abbrev_len);
-    for path in combined_diff_tree_paths(parent_indexes, result_index, pathspecs) {
+    let paths = combined_diff_tree_paths(parent_indexes, result_index, pathspecs);
+    let ids = combined_diff_tree_object_ids(parent_indexes, result_index, &paths);
+    let abbrev_lengths = match options.abbrev_len {
+        Some(width) => RenderedAbbrevLengths::from_store_minimum(store, &ids, width)?,
+        None => rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?,
+    };
+    for path in paths {
         let Some(result_entry) = find_index_entry(result_index, &path) else {
             continue;
         };
@@ -1237,6 +1259,7 @@ fn print_combined_worktree_patches_with_zero_result(
             .into_iter()
             .map(|entry| entry.expect("gitlink/missing parent entries skipped"))
             .collect::<Vec<_>>();
+        let zero_result_id = short_zero_object_id_len(abbrev_lengths.width_for(&result_entry.id));
         let result_content = read_diff_side_content(repo, store, result_entry, result_source)?;
         let parent_contents = parent_entries
             .iter()
@@ -1258,7 +1281,7 @@ fn print_combined_worktree_patches_with_zero_result(
         }
         let parent_ids = parent_entries
             .iter()
-            .map(|entry| short_object_id_len(&entry.id, abbrev_len))
+            .map(|entry| short_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id)))
             .collect::<Vec<_>>()
             .join(",");
         println!("{line_prefix}index {parent_ids}..{zero_result_id}");
@@ -1322,9 +1345,10 @@ fn print_diff_files_unmerged_raw(
     index: &GitIndex,
     paths: &[Vec<u8>],
     raw_abbrev_len: Option<usize>,
+    algorithm: GitHashAlgorithm,
     nul_terminated: bool,
 ) -> Result<()> {
-    let abbrev_len = raw_abbrev_len.unwrap_or(GitHashAlgorithm::Sha1.digest_len() * 2);
+    let abbrev_len = raw_abbrev_len.unwrap_or(algorithm.digest_len() * 2);
     for path in paths {
         let mode = index
             .entry(path, 1)
@@ -1332,7 +1356,7 @@ fn print_diff_files_unmerged_raw(
             .or_else(|| index.entry(path, 3))
             .map(|entry| index_mode_octal(entry.mode))
             .unwrap_or("000000");
-        let zero = diff_raw_zero_object_id_len(abbrev_len);
+        let zero = diff_raw_zero_object_id_len_for_algorithm(abbrev_len, algorithm);
         let display = diff_display_path(path, None);
         if nul_terminated {
             print!(":000000 {mode} {zero} {zero} U\0{display}\0");
@@ -1433,20 +1457,20 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
             .map(|_| "color")
             .or(options.word_diff.as_deref()),
     )?;
-    let render_options = plumbing_render_options(&options)?;
-    let render_options = DiffRenderOptions {
-        word_diff,
-        ..render_options
-    };
-    render_options.validate_format(true)?;
     let repo = find_repo()?;
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let raw_abbrev_policy = plumbing_raw_abbrev_policy(&repo, &options, algorithm)?;
     let relative_prefix =
         diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?;
     let render_options = DiffRenderOptions {
         relative_prefix: relative_prefix.clone(),
-        ..render_options
+        word_diff,
+        raw_abbrev_len: None,
+        raw_abbrev_policy: Some(raw_abbrev_policy),
+        ..plumbing_render_options(&options, algorithm)?
     };
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    render_options.validate_format(true)?;
     let full_index = read_repo_index(&repo)?;
     let treeish = options.treeish.as_deref().ok_or_else(|| CliError::Fatal {
         code: 129,
@@ -1814,18 +1838,17 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
             .map(|_| "color")
             .or(options.word_diff.as_deref()),
     )?;
-    let render_options = plumbing_render_options(&options)?;
-    let render_options = DiffRenderOptions {
-        word_diff,
-        ..render_options
-    };
-    render_options.validate_format(true)?;
     let repo = find_repo()?;
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let raw_abbrev_policy = plumbing_raw_abbrev_policy(&repo, &options, algorithm)?;
     let relative_prefix =
         diff_relative_prefix(&repo, options.relative.as_deref(), options.no_relative)?;
     let render_options = DiffRenderOptions {
         relative_prefix: relative_prefix.clone(),
-        ..render_options
+        word_diff,
+        raw_abbrev_len: None,
+        raw_abbrev_policy: Some(raw_abbrev_policy),
+        ..plumbing_render_options(&options, algorithm)?
     };
     let parsed_pretty = if options.oneline && options.pretty.is_none() && options.format.is_none() {
         Some("oneline")
@@ -1854,13 +1877,18 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         options.show_signature,
         options.no_standard_notes,
     );
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    render_options.validate_format(true)?;
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
+    let configured_abbrev_policy = configured_core_abbrev_state(&repo)?;
+    let format_abbrev_policy =
+        diff_tree_format_abbrev_policy(&configured_abbrev_policy, &options, algorithm)?;
     if options.stdin {
         return diff_tree_stdin(
             &repo,
             &store,
+            format_abbrev_policy,
             &commit_cache,
             &tree_cache,
             &options,
@@ -1931,6 +1959,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
             println!();
             return print_combined_diff_tree_patches(
                 &store,
+                raw_abbrev_policy,
                 &parent_indexes,
                 &result_index,
                 &pathspecs,
@@ -2034,6 +2063,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                 .collect::<Result<Vec<_>>>()?;
             return print_combined_diff_tree_patches(
                 &store,
+                raw_abbrev_policy,
                 &parent_indexes,
                 &result_index,
                 &pathspecs,
@@ -2069,12 +2099,21 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                 .iter()
                 .map(|path| path_arg_to_repo_relative(&repo, path))
                 .collect::<Result<Vec<_>>>()?;
+            let combined_raw_abbrev_len = if options.abbrev.is_none()
+                && !options.no_abbrev
+                && matches!(&raw_abbrev_policy, CoreAbbrevConfigState::Auto)
+            {
+                Some(algorithm.digest_len() * 2)
+            } else {
+                render_options.raw_abbrev_len
+            };
             return print_combined_diff_tree_raw_entries(
                 &store,
+                raw_abbrev_policy,
                 &parent_indexes,
                 &result_index,
                 &pathspecs,
-                render_options.raw_abbrev_len,
+                combined_raw_abbrev_len,
                 relative_prefix.as_deref(),
                 options.nul_terminated,
             );
@@ -2146,9 +2185,15 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                 return Ok(());
             }
             if let Some(format) = log_format.as_ref() {
+                let abbrev_ids = std::iter::once(&id)
+                    .chain(commit.parents.iter())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let abbrev_lengths =
+                    rendered_abbrev_len_for_ids(&store, format_abbrev_policy, &abbrev_ids)?;
                 print_diff_tree_log_format(
                     format,
-                    &store,
+                    &abbrev_lengths,
                     &id,
                     &commit,
                     &log_notes,
@@ -2174,6 +2219,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                 skip_to: options.skip_to.as_deref(),
                 rotate_to: options.rotate_to.as_deref(),
                 relative_prefix: relative_prefix.as_deref(),
+                abbrev_policy: raw_abbrev_policy,
                 options: &render_options,
             },
         );
@@ -2190,9 +2236,15 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
             return Ok(());
         }
         if let Some(format) = log_format.as_ref() {
+            let abbrev_ids = std::iter::once(&id)
+                .chain(commit.parents.iter())
+                .cloned()
+                .collect::<Vec<_>>();
+            let abbrev_lengths =
+                rendered_abbrev_len_for_ids(&store, format_abbrev_policy, &abbrev_ids)?;
             print_diff_tree_log_format(
                 format,
-                &store,
+                &abbrev_lengths,
                 &id,
                 &commit,
                 &log_notes,
@@ -2336,6 +2388,11 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
 }
 
 pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let word_diff = parse_word_diff_option(options.word_diff.as_deref())?;
     let patch = !options.no_patch
         && (options.patch
@@ -2367,7 +2424,8 @@ pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
         binary: false,
         quiet: options.quiet,
         exit_code: false,
-        raw_abbrev_len: Some(GitHashAlgorithm::Sha1.digest_len() * 2),
+        raw_abbrev_len: Some(store.algorithm().digest_len() * 2),
+        raw_abbrev_policy: None,
         word_diff,
         word_diff_regex: None,
         patch_abbrev_len: None,
@@ -2392,8 +2450,6 @@ pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
     };
     render_options.validate_format(true)?;
 
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
     for (batch_index, batch) in parse_diff_pairs_batches(&input, options.nul_terminated)?
@@ -2431,6 +2487,7 @@ pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
                 quiet: render_options.quiet,
                 exit_code: render_options.exit_code,
                 raw_abbrev_len: render_options.raw_abbrev_len,
+                raw_abbrev_policy: render_options.raw_abbrev_policy,
                 word_diff: render_options.word_diff,
                 word_diff_regex: render_options.word_diff_regex.clone(),
                 patch_abbrev_len: render_options.patch_abbrev_len,
@@ -2550,6 +2607,7 @@ pub(crate) fn combined_diff_tree_parent_indexes(
 
 pub(crate) fn print_combined_diff_tree_raw_entries(
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     parent_indexes: &[GitIndex],
     result_index: &GitIndex,
     pathspecs: &[Vec<u8>],
@@ -2557,8 +2615,13 @@ pub(crate) fn print_combined_diff_tree_raw_entries(
     relative_prefix: Option<&[u8]>,
     nul_terminated: bool,
 ) -> Result<()> {
-    let abbrev_len = abbrev_len.unwrap_or(default_abbrev_len(store)?);
-    for path in combined_diff_tree_paths(parent_indexes, result_index, pathspecs) {
+    let paths = combined_diff_tree_paths(parent_indexes, result_index, pathspecs);
+    let ids = combined_diff_tree_object_ids(parent_indexes, result_index, &paths);
+    let abbrev_lengths = match abbrev_len {
+        Some(width) => RenderedAbbrevLengths::from_store_minimum(store, &ids, width)?,
+        None => rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?,
+    };
+    for path in paths {
         let result_entry = find_index_entry(result_index, &path);
         let parent_entries = parent_indexes
             .iter()
@@ -2580,18 +2643,33 @@ pub(crate) fn print_combined_diff_tree_raw_entries(
         let result_mode = result_entry
             .map(|entry| index_mode_octal(entry.mode))
             .unwrap_or("000000");
+        let result_width = result_entry
+            .map(|entry| abbrev_lengths.width_for(&entry.id))
+            .or_else(|| {
+                parent_entries
+                    .iter()
+                    .filter_map(|entry| entry.map(|entry| abbrev_lengths.width_for(&entry.id)))
+                    .max()
+            })
+            .unwrap_or_else(|| abbrev_lengths.empty_width());
         let parent_ids = parent_entries
             .iter()
             .map(|entry| {
                 entry
-                    .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-                    .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len))
+                    .map(|entry| {
+                        diff_raw_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id))
+                    })
+                    .unwrap_or_else(|| {
+                        diff_raw_zero_object_id_len_for_algorithm(result_width, store.algorithm())
+                    })
             })
             .collect::<Vec<_>>()
             .join(" ");
         let result_id = result_entry
-            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-            .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
+            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id)))
+            .unwrap_or_else(|| {
+                diff_raw_zero_object_id_len_for_algorithm(result_width, store.algorithm())
+            });
         let path = diff_display_path(&path, relative_prefix);
         if nul_terminated {
             print!(
@@ -2686,13 +2764,19 @@ pub(crate) struct CombinedPatchRenderOptions<'a> {
 
 pub(crate) fn print_combined_diff_tree_patches(
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     parent_indexes: &[GitIndex],
     result_index: &GitIndex,
     pathspecs: &[Vec<u8>],
     options: CombinedPatchRenderOptions<'_>,
 ) -> Result<()> {
-    let abbrev_len = options.abbrev_len.unwrap_or(default_abbrev_len(store)?);
-    for path in combined_diff_tree_paths(parent_indexes, result_index, pathspecs) {
+    let paths = combined_diff_tree_paths(parent_indexes, result_index, pathspecs);
+    let ids = combined_diff_tree_object_ids(parent_indexes, result_index, &paths);
+    let abbrev_lengths = match options.abbrev_len {
+        Some(width) => RenderedAbbrevLengths::from_store_minimum(store, &ids, width)?,
+        None => rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?,
+    };
+    for path in paths {
         let Some(result_entry) = find_index_entry(result_index, &path) else {
             continue;
         };
@@ -2713,6 +2797,7 @@ pub(crate) fn print_combined_diff_tree_patches(
             .into_iter()
             .map(|entry| entry.expect("gitlink/missing parent entries skipped"))
             .collect::<Vec<_>>();
+        let result_id_width = abbrev_lengths.width_for(&result_entry.id);
         let result_content = read_index_entry_content(store, result_entry)?;
         let parent_contents = parent_entries
             .iter()
@@ -2734,10 +2819,10 @@ pub(crate) fn print_combined_diff_tree_patches(
         }
         let parent_ids = parent_entries
             .iter()
-            .map(|entry| short_object_id_len(&entry.id, abbrev_len))
+            .map(|entry| short_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id)))
             .collect::<Vec<_>>()
             .join(",");
-        let result_id = short_object_id_len(&result_entry.id, abbrev_len);
+        let result_id = short_object_id_len(&result_entry.id, result_id_width);
         println!("{line_prefix}index {parent_ids}..{result_id}");
         println!("{line_prefix}--- {old_path}");
         println!("{line_prefix}+++ {new_path}");
@@ -2864,6 +2949,25 @@ fn combined_diff_tree_paths(
         .collect()
 }
 
+fn combined_diff_tree_object_ids(
+    parent_indexes: &[GitIndex],
+    result_index: &GitIndex,
+    paths: &[Vec<u8>],
+) -> Vec<ObjectId> {
+    let mut ids = Vec::with_capacity(paths.len().saturating_mul(parent_indexes.len() + 1));
+    for path in paths {
+        if let Some(entry) = find_index_entry(result_index, path) {
+            ids.push(entry.id.clone());
+        }
+        for index in parent_indexes {
+            if let Some(entry) = find_index_entry(index, path) {
+                ids.push(entry.id.clone());
+            }
+        }
+    }
+    ids
+}
+
 fn combined_diff_tree_entries_equal(
     parent_entry: Option<&IndexEntry>,
     result_entry: Option<&IndexEntry>,
@@ -2884,9 +2988,43 @@ struct DiffTreeStdinOptions<'a> {
     relative_prefix: Option<&'a [u8]>,
 }
 
+const DIFF_TREE_STDIN_RECORD_LIMIT: usize = 1024 * 1024;
+
+fn read_bounded_diff_tree_record<R: BufRead>(
+    reader: &mut R,
+    record: &mut Vec<u8>,
+) -> io::Result<Option<()>> {
+    record.clear();
+    loop {
+        let (consumed, line_end) = {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok((!record.is_empty()).then_some(()));
+            }
+            let consumed = available
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(available.len(), |index| index + 1);
+            if record.len().saturating_add(consumed) > DIFF_TREE_STDIN_RECORD_LIMIT {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "diff-tree stdin record exceeds 1 MiB",
+                ));
+            }
+            record.extend_from_slice(&available[..consumed]);
+            (consumed, available[consumed - 1] == b'\n')
+        };
+        reader.consume(consumed);
+        if line_end {
+            return Ok(Some(()));
+        }
+    }
+}
+
 fn diff_tree_stdin(
     repo: &GitRepo,
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     options: &PlumbingDiffOptions,
@@ -2911,134 +3049,181 @@ fn diff_tree_stdin(
                 .as_deref()
                 .is_some_and(|format| format.contains("%N")),
     )?;
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
-    for token in input.split_whitespace() {
-        let id = resolve_objectish(repo, token).map_err(|_| ambiguous_revision_error(token))?;
-        let commit = commit_cache.read_commit(&id)?;
-        if !options.root && commit.parents.is_empty() {
-            continue;
+    let stdin = io::stdin();
+    let mut reader = io::BufReader::new(stdin.lock());
+    let mut record = Vec::new();
+    while read_bounded_diff_tree_record(&mut reader, &mut record)?.is_some() {
+        let input = String::from_utf8(record.clone())
+            .map_err(|error| CliError::Io(io::Error::new(io::ErrorKind::InvalidData, error)))?;
+        let input_ids = input
+            .split_whitespace()
+            .map(|token| {
+                resolve_objectish(repo, token).map_err(|_| ambiguous_revision_error(token))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut abbrev_ids = Vec::with_capacity(input_ids.len());
+        for id in &input_ids {
+            let commit = commit_cache.read_commit(id)?;
+            abbrev_ids.push(id.clone());
+            abbrev_ids.extend(commit.parents.iter().cloned());
         }
-        if commit.parents.len() > 1
-            && !(options.merge || options.combined || options.dense_combined)
-        {
-            continue;
-        }
-        if let Some(format) = log_format.as_ref() {
-            print_diff_tree_log_format(
-                format,
-                store,
-                &id,
-                &commit,
-                &log_notes,
-                !options.no_patch,
-                false,
+        let abbrev_lengths = rendered_abbrev_len_for_ids(store, abbrev_policy, &abbrev_ids)?;
+        for id in input_ids {
+            let commit = commit_cache.read_commit(&id)?;
+            if !options.root && commit.parents.is_empty() {
+                continue;
+            }
+            if commit.parents.len() > 1
+                && !(options.merge || options.combined || options.dense_combined)
+            {
+                continue;
+            }
+            if let Some(format) = log_format.as_ref() {
+                print_diff_tree_log_format(
+                    format,
+                    &abbrev_lengths,
+                    &id,
+                    &commit,
+                    &log_notes,
+                    !options.no_patch,
+                    false,
+                )?;
+            } else {
+                print_diff_tree_commit_id(&id, options.nul_terminated);
+            }
+            if options.no_patch {
+                continue;
+            }
+            let Some(parent) = commit.parents.first() else {
+                continue;
+            };
+            let parent_commit = commit_cache.read_commit(parent)?;
+            let old_index = tree_cache.read_tree_to_index(&parent_commit.tree)?;
+            let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+            let entries = filtered_diff_entries(
+                repo,
+                if options.reverse {
+                    &new_index
+                } else {
+                    &old_index
+                },
+                if options.reverse {
+                    &old_index
+                } else {
+                    &new_index
+                },
+                &options.paths,
+                stdin_options.detect_renames,
+                stdin_options.detect_copies,
+                options.find_copies_harder,
             )?;
-        } else {
-            print_diff_tree_commit_id(&id, options.nul_terminated);
-        }
-        if options.no_patch {
-            continue;
-        }
-        let Some(parent) = commit.parents.first() else {
-            continue;
-        };
-        let parent_commit = commit_cache.read_commit(parent)?;
-        let old_index = tree_cache.read_tree_to_index(&parent_commit.tree)?;
-        let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
-        let entries = filtered_diff_entries(
-            repo,
-            if options.reverse {
+            let compare_old_index = if options.reverse {
                 &new_index
             } else {
                 &old_index
-            },
-            if options.reverse {
+            };
+            let compare_new_index = if options.reverse {
                 &old_index
             } else {
                 &new_index
-            },
-            &options.paths,
-            stdin_options.detect_renames,
-            stdin_options.detect_copies,
-            options.find_copies_harder,
-        )?;
-        let compare_old_index = if options.reverse {
-            &new_index
-        } else {
-            &old_index
-        };
-        let compare_new_index = if options.reverse {
-            &old_index
-        } else {
-            &new_index
-        };
-        let diff_context = DiffIndexContext {
-            repo,
-            store,
-            old_index: compare_old_index,
-            new_index: compare_new_index,
-            old_source: DiffSideSource::Index,
-            new_source: DiffSideSource::Index,
-        };
-        let entries = apply_similarity_detection(
-            &diff_context,
-            entries,
-            SimilarityDetectionOptions {
-                rename_threshold: stdin_options.detect_renames,
-                copy_threshold: stdin_options.detect_copies,
-                find_copies_harder: options.find_copies_harder,
-            },
-        )?;
-        let entries = filter_ignored_submodule_entries(
-            entries,
-            compare_old_index,
-            compare_new_index,
-            stdin_options.ignore_submodules,
-        );
-        let entries = apply_break_rewrites(&diff_context, entries, stdin_options.break_rewrites)?;
-        let entries = apply_pickaxe_filter(
-            &diff_context,
-            entries,
-            PickaxeOptions {
-                string: options.pickaxe_string.as_deref(),
-                regex: options.pickaxe_regex.as_deref(),
-                regex_mode: options.pickaxe_regex_mode,
-                all: options.pickaxe_all,
-            },
-        )?;
-        let entries = apply_diff_filter(entries, stdin_options.diff_filter);
-        let entries = apply_diff_order_file(entries, options.order_file.as_deref())?;
-        let entries = apply_diff_skip_rotate(
-            entries,
-            options.skip_to.as_deref(),
-            options.rotate_to.as_deref(),
-        );
-        let entries = filter_diff_relative(entries, stdin_options.relative_prefix);
-        let (old_index, new_index, mut render_options) = if options.reverse {
-            let mut render_options = render_options.clone();
-            render_options.old_source = DiffSideSource::Index;
-            render_options.new_source = DiffSideSource::Index;
-            render_options.reverse_direction();
-            (new_index, old_index, render_options)
-        } else {
-            let mut render_options = render_options.clone();
-            render_options.old_source = DiffSideSource::Index;
-            render_options.new_source = DiffSideSource::Index;
-            (old_index, new_index, render_options)
-        };
-        render_options.relative_prefix =
-            stdin_options.relative_prefix.map(|prefix| prefix.to_vec());
-        render_diff(
-            repo,
-            store,
-            &old_index,
-            &new_index,
-            &entries,
-            render_options,
-        )?;
+            };
+            let diff_context = DiffIndexContext {
+                repo,
+                store,
+                old_index: compare_old_index,
+                new_index: compare_new_index,
+                old_source: DiffSideSource::Index,
+                new_source: DiffSideSource::Index,
+            };
+            let entries = apply_similarity_detection(
+                &diff_context,
+                entries,
+                SimilarityDetectionOptions {
+                    rename_threshold: stdin_options.detect_renames,
+                    copy_threshold: stdin_options.detect_copies,
+                    find_copies_harder: options.find_copies_harder,
+                },
+            )?;
+            let entries = filter_ignored_submodule_entries(
+                entries,
+                compare_old_index,
+                compare_new_index,
+                stdin_options.ignore_submodules,
+            );
+            let entries =
+                apply_break_rewrites(&diff_context, entries, stdin_options.break_rewrites)?;
+            let entries = apply_pickaxe_filter(
+                &diff_context,
+                entries,
+                PickaxeOptions {
+                    string: options.pickaxe_string.as_deref(),
+                    regex: options.pickaxe_regex.as_deref(),
+                    regex_mode: options.pickaxe_regex_mode,
+                    all: options.pickaxe_all,
+                },
+            )?;
+            let entries = apply_diff_filter(entries, stdin_options.diff_filter);
+            let entries = apply_diff_order_file(entries, options.order_file.as_deref())?;
+            let entries = apply_diff_skip_rotate(
+                entries,
+                options.skip_to.as_deref(),
+                options.rotate_to.as_deref(),
+            );
+            let entries = filter_diff_relative(entries, stdin_options.relative_prefix);
+            let (old_index, new_index, mut render_options) = if options.reverse {
+                let mut render_options = render_options.clone();
+                render_options.old_source = DiffSideSource::Index;
+                render_options.new_source = DiffSideSource::Index;
+                render_options.reverse_direction();
+                (new_index, old_index, render_options)
+            } else {
+                let mut render_options = render_options.clone();
+                render_options.old_source = DiffSideSource::Index;
+                render_options.new_source = DiffSideSource::Index;
+                (old_index, new_index, render_options)
+            };
+            render_options.relative_prefix =
+                stdin_options.relative_prefix.map(|prefix| prefix.to_vec());
+            render_diff(
+                repo,
+                store,
+                &old_index,
+                &new_index,
+                &entries,
+                render_options,
+            )?;
+        }
     }
     Ok(())
+}
+
+fn plumbing_raw_abbrev_policy(
+    repo: &GitRepo,
+    options: &PlumbingDiffOptions,
+    algorithm: GitHashAlgorithm,
+) -> Result<CoreAbbrevConfigState> {
+    let configured = configured_core_abbrev_state(repo)?;
+    Ok(policy_for_abbrev_action(
+        configured,
+        resolve_abbrev_action(options.abbrev.as_deref(), options.no_abbrev),
+        algorithm,
+    ))
+}
+
+fn diff_tree_format_abbrev_policy(
+    configured: &CoreAbbrevConfigState,
+    options: &PlumbingDiffOptions,
+    algorithm: GitHashAlgorithm,
+) -> Result<CoreAbbrevConfigState> {
+    Ok(
+        match resolve_abbrev_action(options.abbrev.as_deref(), options.no_abbrev) {
+            AbbrevAction::Default | AbbrevAction::NoAbbrev => CoreAbbrevConfigState::Full,
+            AbbrevAction::Bare => *configured,
+            AbbrevAction::Explicit(value) => {
+                CoreAbbrevConfigState::Minimum(parse_revision_abbrev(value, algorithm))
+            }
+        },
+    )
 }
 
 fn combined_diff_tree_status(
@@ -3056,18 +3241,18 @@ fn combined_diff_tree_status(
 
 fn print_diff_tree_log_format(
     format: &history_commands::LogFormat<'_>,
-    store: &LooseObjectStore,
+    abbrev_lengths: &RenderedAbbrevLengths,
     id: &ObjectId,
     commit: &zmin_git_core::CommitObject,
     notes: &history_commands::LogNotes,
     emit_patch_separator: bool,
     stat_patch_separator: bool,
 ) -> Result<()> {
-    let rendered = format.render_with_context_default_date(
+    let rendered = format.render_with_context_default_date_lengths(
         id,
         commit,
         false,
-        default_abbrev_len(store)?,
+        abbrev_lengths,
         None,
         false,
         true,
@@ -3701,4 +3886,44 @@ pub(crate) fn null_device_path() -> PathBuf {
 #[cfg(windows)]
 pub(crate) fn null_device_path() -> PathBuf {
     PathBuf::from("NUL")
+}
+
+#[cfg(test)]
+mod diff_tree_stdin_tests {
+    use super::{DIFF_TREE_STDIN_RECORD_LIMIT, read_bounded_diff_tree_record};
+    use std::io::{BufReader, Cursor};
+
+    #[test]
+    fn bounded_reader_returns_one_record_at_a_time() {
+        let mut reader = BufReader::new(Cursor::new(b"first\nsecond\n"));
+        let mut record = Vec::new();
+        assert!(
+            read_bounded_diff_tree_record(&mut reader, &mut record)
+                .expect("first record")
+                .is_some()
+        );
+        assert_eq!(record, b"first\n");
+        assert!(
+            read_bounded_diff_tree_record(&mut reader, &mut record)
+                .expect("second record")
+                .is_some()
+        );
+        assert_eq!(record, b"second\n");
+        assert!(
+            read_bounded_diff_tree_record(&mut reader, &mut record)
+                .expect("end of records")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bounded_reader_rejects_an_oversized_record_before_growth() {
+        let input = vec![b'x'; DIFF_TREE_STDIN_RECORD_LIMIT + 1];
+        let mut reader = BufReader::new(Cursor::new(input));
+        let mut record = Vec::new();
+        let error = read_bounded_diff_tree_record(&mut reader, &mut record)
+            .expect_err("oversized record must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(record.len() <= DIFF_TREE_STDIN_RECORD_LIMIT);
+    }
 }

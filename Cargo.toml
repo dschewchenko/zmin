@@ -7,6 +7,7 @@ members = [
     "crates/zmin-primitives",
     "crates/zmin-git-core",
     "crates/zmin-git-remote-http",
+    "crates/zmin-http-transport",
     "crates/zmin-cli",
 ]
 resolver = "2"

@@ -3,12 +3,16 @@ use super::patch_commands::{
 };
 use super::sequencer_commands::apply_tree_delta;
 use super::*;
-use crate::runtime::{DiffColorMode, parse_diff_color_option};
+use crate::runtime::FollowDirection;
+use crate::runtime::{
+    DiffColorMode, HistoryArgCursor, HistoryArgToken, HistoryOptionName, LogPatchMode,
+    parse_diff_color_option,
+};
 use chrono::Datelike;
 use similar::{Algorithm, DiffTag, capture_diff_slices};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 
 const REFLOG_REVERSE_READ_CHUNK_SIZE: usize = 16 * 1024;
@@ -24,6 +28,177 @@ const REV_LIST_OUTPUT_BUFFER_BYTES: usize = 64 * 1024;
 const REV_LIST_PACK_OBJECT_CACHE_BYTES: usize = 128 * 1024;
 const LOG_PACK_OBJECT_CACHE_BYTES: usize = 4 * 1024;
 const LOG_PACK_FILE_READER_BUFFER_BYTES: usize = 512;
+const SHOW_TREE_INDEX_CACHE_ENTRY_LIMIT: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HistorySelectionOccurrence {
+    LeftOnly,
+    RightOnly,
+    Cherry,
+    CherryPick,
+    CherryMark,
+}
+
+#[derive(Default)]
+struct HistorySelectionConflictState {
+    left_only: bool,
+    right_only: bool,
+    cherry: bool,
+    explicit_cherry_mark: bool,
+    cherry_pick: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HistorySelectionPolicy {
+    right_only: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    max_parents: Option<usize>,
+}
+
+fn resolve_history_selection_policy(
+    right_only: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    max_parents: Option<usize>,
+) -> HistorySelectionPolicy {
+    if cherry {
+        HistorySelectionPolicy {
+            right_only: true,
+            cherry: true,
+            cherry_pick,
+            cherry_mark: true,
+            max_parents: Some(1),
+        }
+    } else {
+        HistorySelectionPolicy {
+            right_only,
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            max_parents,
+        }
+    }
+}
+
+fn validate_history_selection_options(raw_args: &[String]) -> Result<()> {
+    let mut cursor = HistoryArgCursor::new(raw_args);
+    let mut occurrences = Vec::new();
+    while let Some(token) = cursor.next() {
+        let HistoryArgToken::Option { name, .. } = token else {
+            if matches!(token, HistoryArgToken::EndOfOptions { .. }) {
+                break;
+            }
+            continue;
+        };
+        let HistoryOptionName::Long(name) = name else {
+            continue;
+        };
+        let occurrence = match name {
+            "left-only" => Some(HistorySelectionOccurrence::LeftOnly),
+            "right-only" => Some(HistorySelectionOccurrence::RightOnly),
+            "cherry" => Some(HistorySelectionOccurrence::Cherry),
+            "cherry-pick" => Some(HistorySelectionOccurrence::CherryPick),
+            "cherry-mark" => Some(HistorySelectionOccurrence::CherryMark),
+            _ => None,
+        };
+        if let Some(occurrence) = occurrence {
+            occurrences.push(occurrence);
+        }
+    }
+    let mut state = HistorySelectionConflictState::default();
+    for occurrence in occurrences {
+        match occurrence {
+            HistorySelectionOccurrence::LeftOnly => {
+                if state.right_only {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message:
+                            "options '--left-only' and '--right-only/--cherry' cannot be used together"
+                                .into(),
+                    });
+                }
+                if state.cherry {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "options '--left-only' and '--right-only/--cherry' cannot be used together".into(),
+                    });
+                }
+                state.left_only = true;
+            }
+            HistorySelectionOccurrence::RightOnly => {
+                if state.left_only {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "options '--right-only' and '--left-only' cannot be used together"
+                            .into(),
+                    });
+                }
+                state.right_only = true;
+            }
+            HistorySelectionOccurrence::Cherry => {
+                if state.left_only {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "options '--cherry' and '--left-only' cannot be used together"
+                            .into(),
+                    });
+                }
+                state.cherry = true;
+            }
+            HistorySelectionOccurrence::CherryPick => {
+                if state.explicit_cherry_mark || state.cherry {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message:
+                            "options '--cherry-pick' and '--cherry-mark' cannot be used together"
+                                .into(),
+                    });
+                }
+                state.cherry_pick = true;
+            }
+            HistorySelectionOccurrence::CherryMark => {
+                if state.cherry_pick {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message:
+                            "options '--cherry-mark' and '--cherry-pick' cannot be used together"
+                                .into(),
+                    });
+                }
+                state.explicit_cherry_mark = true;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_rev_list_output_options(
+    parents: bool,
+    children: bool,
+    simplify_merges: bool,
+    simplify_by_decoration: bool,
+) -> Result<()> {
+    if children && (parents || simplify_merges || simplify_by_decoration) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--parents' and '--children' cannot be used together".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_rev_list_filter_options(filter: Option<&str>, objects: bool) -> Result<()> {
+    if filter.is_some() && !objects {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "object filtering requires --objects".into(),
+        });
+    }
+    Ok(())
+}
 
 const BLAME_USAGE: &str = r#"usage: git blame [<options>] [<rev-opts>] [<rev>] [--] <file>
 
@@ -1250,7 +1425,8 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                 pathspecs: &pathspecs,
             };
             if all {
-                for name in reflog_names(&repo)? {
+                let algorithm = repo_hash_algorithm_from_config(&repo)?;
+                for name in reflog_names(&repo, algorithm)? {
                     reflog_show(
                         &repo,
                         ReflogShowOptions {
@@ -1324,11 +1500,12 @@ fn reflog_write(repo: &GitRepo, args: Vec<String>) -> Result<()> {
             message: format!("invalid reference name: {ref_name}"),
         });
     }
-    let old_id = reflog_write_object_id(&args[1], "old")?;
-    let new_id = reflog_write_object_id(&args[2], "new")?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let old_id = reflog_write_object_id(&args[1], "old", algorithm)?;
+    let new_id = reflog_write_object_id(&args[2], "new", algorithm)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     for (label, id) in [("old", &old_id), ("new", &new_id)] {
-        if *id != zero_object_id() && !store.contains_object(id)? {
+        if *id != reflog_zero_object_id(algorithm) && !store.contains_object(id)? {
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!("{label} object {} does not exist", id.to_hex()),
@@ -1339,14 +1516,18 @@ fn reflog_write(repo: &GitRepo, args: Vec<String>) -> Result<()> {
     append_reflog(repo, ref_name, &old_id, &new_id, &message)
 }
 
-fn reflog_write_object_id(value: &str, label: &str) -> Result<ObjectId> {
-    if value.len() != GitHashAlgorithm::Sha1.digest_len() * 2 {
+fn reflog_write_object_id(
+    value: &str,
+    label: &str,
+    algorithm: GitHashAlgorithm,
+) -> Result<ObjectId> {
+    if value.len() != algorithm.digest_len() * 2 {
         return Err(CliError::Fatal {
             code: 128,
             message: format!("invalid {label} object ID: {value}"),
         });
     }
-    ObjectId::from_hex(GitHashAlgorithm::Sha1, value).map_err(|_| CliError::Fatal {
+    ObjectId::from_hex(algorithm, value).map_err(|_| CliError::Fatal {
         code: 128,
         message: format!("invalid {label} object ID: {value}"),
     })
@@ -1411,6 +1592,7 @@ enum ReflogDeleteSelector {
 }
 
 fn reflog_delete(repo: &GitRepo, args: Vec<String>) -> Result<()> {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
     let update_ref = args.iter().any(|arg| arg == "--updateref");
     let selectors = args
         .into_iter()
@@ -1424,7 +1606,7 @@ fn reflog_delete(repo: &GitRepo, args: Vec<String>) -> Result<()> {
     }
     for selector in selectors {
         let (ref_name, selector) = parse_reflog_delete_selector(&selector)?;
-        reflog_delete_one(repo, &ref_name, selector)?;
+        reflog_delete_one(repo, algorithm, &ref_name, selector)?;
         if update_ref && ref_name != "HEAD" {
             reflog_update_ref_to_log_tip(repo, &ref_name)?;
         }
@@ -1450,12 +1632,17 @@ fn reflog_update_ref_to_log_tip(repo: &GitRepo, ref_name: &str) -> Result<()> {
     }
     let path = reflog_path(repo, ref_name)?;
     let content = fs::read_to_string(path)?;
-    let Some(entry) = content.lines().next_back().and_then(parse_reflog_entry) else {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let Some(entry) = content
+        .lines()
+        .next_back()
+        .and_then(|line| parse_reflog_line(line, algorithm))
+    else {
         return Ok(());
     };
     let canonical = reflog_expire_canonical_ref_name(repo, ref_name)?;
     let common_dir = read_common_git_dir(&repo.git_dir)?;
-    RefStore::new(common_dir, GitHashAlgorithm::Sha1)
+    RefStore::new(common_dir, algorithm)
         .write_ref(&canonical, &entry.new_id)
         .map_err(CliError::Io)
 }
@@ -1490,7 +1677,12 @@ fn parse_reflog_delete_date(value: &str) -> Option<i64> {
         .map(|datetime| datetime.timestamp())
 }
 
-fn reflog_delete_one(repo: &GitRepo, ref_name: &str, selector: ReflogDeleteSelector) -> Result<()> {
+fn reflog_delete_one(
+    repo: &GitRepo,
+    algorithm: GitHashAlgorithm,
+    ref_name: &str,
+    selector: ReflogDeleteSelector,
+) -> Result<()> {
     if let Some(reftable) = reftable_reflog(repo, ref_name)? {
         let mut records = reftable
             .store
@@ -1520,7 +1712,7 @@ fn reflog_delete_one(repo: &GitRepo, ref_name: &str, selector: ReflogDeleteSelec
     let path = reflog_path(repo, ref_name)?;
     let content = fs::read_to_string(&path)?;
     let mut lines = content.lines().map(str::to_owned).collect::<Vec<_>>();
-    let Some(remove_index) = reflog_delete_line_index(&lines, selector) else {
+    let Some(remove_index) = reflog_delete_line_index(&lines, selector, algorithm) else {
         return Ok(());
     };
     lines.remove(remove_index);
@@ -1532,11 +1724,15 @@ fn reflog_delete_one(repo: &GitRepo, ref_name: &str, selector: ReflogDeleteSelec
     fs::write(path, output).map_err(CliError::Io)
 }
 
-fn reflog_delete_line_index(lines: &[String], selector: ReflogDeleteSelector) -> Option<usize> {
+fn reflog_delete_line_index(
+    lines: &[String],
+    selector: ReflogDeleteSelector,
+    algorithm: GitHashAlgorithm,
+) -> Option<usize> {
     match selector {
         ReflogDeleteSelector::Index(index) => lines.len().checked_sub(index + 1),
         ReflogDeleteSelector::Date(timestamp) => lines.iter().rposition(|line| {
-            parse_reflog_entry(line)
+            parse_reflog_line(line, algorithm)
                 .map(|entry| entry.timestamp <= timestamp)
                 .unwrap_or(false)
         }),
@@ -1561,7 +1757,10 @@ fn reflog_expire(args: Vec<String>) -> Result<()> {
     let stale_fix = args.iter().any(|arg| arg == "--stale-fix");
     if stale_fix {
         let refs = reflog_expire_refs(&repo, &args)?;
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let store = LooseObjectStore::new(
+            repo.objects_dir.clone(),
+            repo_hash_algorithm_from_config(&repo)?,
+        );
         for ref_name in refs {
             reflog_expire_stale_fix_ref(&repo, &store, &ref_name)?;
         }
@@ -1689,7 +1888,7 @@ fn reflog_expire_canonical_ref_name(repo: &GitRepo, ref_name: &str) -> Result<St
     if ref_name == "stash" {
         return Ok("refs/stash".to_owned());
     }
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     if let Some(branch) = branch_checkout_ref(&refs, ref_name)? {
         return Ok(branch);
     }
@@ -1829,7 +2028,10 @@ fn reflog_expire_with_unreachable_policy(
     policy: &ReflogExpirePolicy,
 ) -> Result<()> {
     let verbose = args.iter().any(|arg| arg == "--verbose");
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
     for ref_name in reflog_expire_refs(repo, args)? {
         reflog_expire_ref_with_policy(repo, &store, &ref_name, policy, verbose)?;
     }
@@ -1946,8 +2148,9 @@ fn reflog_expire_path_by_timestamp(
         Err(error) => return Err(CliError::Io(error)),
     };
     let mut kept = String::new();
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
     for line in content.lines() {
-        let expire = parse_reflog_entry(line)
+        let expire = parse_reflog_line(line, algorithm)
             .map(|entry| entry.timestamp <= timestamp)
             .unwrap_or(false);
         if expire {
@@ -1980,7 +2183,7 @@ fn reflog_expire_ref_with_policy(
     let mut seen = HashMap::<ObjectId, bool>::new();
     let mut kept = String::new();
     for line in content.lines() {
-        let expire = parse_reflog_entry(line)
+        let expire = parse_reflog_line(line, store.algorithm())
             .map(|entry| {
                 reflog_entry_matches_expire_policy(
                     store,
@@ -2052,9 +2255,9 @@ fn reflog_entry_matches_expire_policy(
     let Some(unreachable_policy) = policy.expire_unreachable else {
         return false;
     };
-    let old_reachable = entry.old_id == zero_object_id()
+    let old_reachable = entry.old_id == reflog_zero_object_id(store.algorithm())
         || reflog_entry_is_reachable(store, reachable_tip, seen, &entry.old_id);
-    let new_reachable = entry.new_id == zero_object_id()
+    let new_reachable = entry.new_id == reflog_zero_object_id(store.algorithm())
         || reflog_entry_is_reachable(store, reachable_tip, seen, &entry.new_id);
     if old_reachable && new_reachable {
         return false;
@@ -2087,7 +2290,7 @@ fn reflog_object_reachable_from(
     if start == target {
         return true;
     }
-    if *target == zero_object_id() {
+    if *target == reflog_zero_object_id(store.algorithm()) {
         return false;
     }
     if let Some(reachable) = seen.get(target) {
@@ -2188,7 +2391,8 @@ fn reflog_not_found_error(ref_name: &str) -> CliError {
 
 fn reflog_expire_refs(repo: &GitRepo, args: &[String]) -> Result<Vec<String>> {
     if args.iter().any(|arg| arg == "--all") {
-        return Ok(reflog_names(repo)?.into_iter().collect());
+        let algorithm = repo_hash_algorithm_from_config(repo)?;
+        return Ok(reflog_names(repo, algorithm)?.into_iter().collect());
     }
     let mut refs = Vec::new();
     let mut iter = args.iter().peekable();
@@ -2250,7 +2454,7 @@ fn reflog_expire_stale_fix_ref(
     };
     let mut kept = String::new();
     for line in content.lines() {
-        let Some(entry) = parse_reflog_entry(line) else {
+        let Some(entry) = parse_reflog_line(line, store.algorithm()) else {
             kept.push_str(line);
             kept.push('\n');
             continue;
@@ -2271,7 +2475,7 @@ fn reflog_object_graph_complete(
     id: &ObjectId,
     seen: &mut HashSet<ObjectId>,
 ) -> bool {
-    if *id == zero_object_id() || !seen.insert(id.clone()) {
+    if *id == reflog_zero_object_id(store.algorithm()) || !seen.insert(id.clone()) {
         return true;
     }
     let object = match store.packed_first().read_object(id) {
@@ -2361,13 +2565,16 @@ fn reflog_show(repo: &GitRepo, options: ReflogShowOptions<'_>) -> Result<()> {
     if !reflog_show_pathspecs_match(repo, options.pathspecs)? {
         return Ok(());
     }
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
     let display = reflog_display_name(ref_name);
     let object_len = if options.no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
+        full_abbrev_len(store.algorithm())
     } else {
         7
     };
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let mut index = 0usize;
     let mut emitted = 0usize;
@@ -2453,7 +2660,7 @@ fn reflog_show(repo: &GitRepo, options: ReflogShowOptions<'_>) -> Result<()> {
             Err(error) => return Err(CliError::Io(error)),
         };
         for_each_reflog_line_rev(file, |line| {
-            if let Some(entry) = parse_reflog_entry(line) {
+            if let Some(entry) = parse_reflog_line(line, store.algorithm()) {
                 render_entry(entry)?;
             }
             Ok(())
@@ -2571,20 +2778,21 @@ fn reflog_selector(index: usize, entry: &ReflogEntry, mode: ReflogDateMode) -> R
 }
 
 fn reflog_list(repo: &GitRepo) -> Result<()> {
-    for name in reflog_names(repo)? {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    for name in reflog_names(repo, algorithm)? {
         println!("{name}");
     }
     Ok(())
 }
 
-fn reflog_names(repo: &GitRepo) -> Result<BTreeSet<String>> {
+fn reflog_names(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     let logs_dir = repo.git_dir.join("logs");
     let mut local_names = Vec::new();
     collect_reflog_names(&logs_dir, &logs_dir, &mut local_names)?;
     names.extend(local_names);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-    let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&common_git_dir, algorithm);
     if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
         names.extend(
             refs.reftable_logs()?
@@ -2605,11 +2813,11 @@ fn reflog_names(repo: &GitRepo) -> Result<BTreeSet<String>> {
     Ok(names)
 }
 
-fn log_reflog_object_ids(repo: &GitRepo) -> Result<Vec<String>> {
-    let zero = zero_object_id();
+fn log_reflog_object_ids(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<Vec<String>> {
+    let zero = reflog_zero_object_id(algorithm);
     let mut seen = HashSet::new();
     let mut ids = Vec::new();
-    for name in reflog_names(repo)? {
+    for name in reflog_names(repo, algorithm)? {
         if let Some(entries) = reftable_reflog_entries(repo, &name)? {
             for entry in entries {
                 insert_log_reflog_object_id(&entry.old_id, &zero, &mut seen, &mut ids);
@@ -2623,7 +2831,7 @@ fn log_reflog_object_ids(repo: &GitRepo) -> Result<Vec<String>> {
             Err(error) => return Err(CliError::Io(error)),
         };
         for_each_reflog_line_rev(file, |line| {
-            if let Some(entry) = parse_reflog_entry(line) {
+            if let Some(entry) = parse_reflog_line(line, algorithm) {
                 insert_log_reflog_object_id(&entry.old_id, &zero, &mut seen, &mut ids);
                 insert_log_reflog_object_id(&entry.new_id, &zero, &mut seen, &mut ids);
             }
@@ -2681,10 +2889,21 @@ pub(crate) struct ReflogEntry {
 }
 
 pub(crate) fn parse_reflog_entry(line: &str) -> Option<ReflogEntry> {
+    parse_reflog_entry_with_algorithm(line, GitHashAlgorithm::Sha1)
+}
+
+pub(crate) fn parse_reflog_entry_with_algorithm(
+    line: &str,
+    algorithm: GitHashAlgorithm,
+) -> Option<ReflogEntry> {
+    parse_reflog_line(line, algorithm)
+}
+
+fn parse_reflog_line(line: &str, algorithm: GitHashAlgorithm) -> Option<ReflogEntry> {
     let (header, message) = line.split_once('\t').unwrap_or((line, ""));
     let mut fields = header.split_whitespace();
-    let old_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
-    let new_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
+    let old_id = ObjectId::from_hex(algorithm, fields.next()?).ok()?;
+    let new_id = ObjectId::from_hex(algorithm, fields.next()?).ok()?;
     let timezone = fields.next_back()?.to_owned();
     let timestamp = fields.next_back()?.parse().ok()?;
     let identity = fields.collect::<Vec<_>>().join(" ");
@@ -2699,6 +2918,10 @@ pub(crate) fn parse_reflog_entry(line: &str) -> Option<ReflogEntry> {
         timezone,
         message: message.to_owned(),
     })
+}
+
+fn reflog_zero_object_id(algorithm: GitHashAlgorithm) -> ObjectId {
+    ObjectId::new(algorithm, &vec![0; algorithm.digest_len()])
 }
 
 fn reflog_iso_selector(timestamp: i64, timezone: &str) -> Result<String> {
@@ -2890,7 +3113,7 @@ fn split_upstream_reflog_suffix(value: &str) -> Option<&str> {
 }
 
 fn normalized_reflog_name(repo: &GitRepo, ref_name: &str) -> Result<String> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     if ref_name == "HEAD" || ref_name.starts_with("refs/") {
         Ok(ref_name.to_owned())
     } else if ref_name == "stash" {
@@ -3228,6 +3451,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         raw_args,
         revs,
     } = options;
+    validate_history_selection_options(raw_args)?;
     let _accepted_oneline = oneline;
     let _accepted_exclude = exclude;
     let _accepted_exclude_first_parent_only = exclude_first_parent_only;
@@ -3356,15 +3580,20 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
             message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
         });
     }
+    let max_count = parse_log_max_count(max_count)?;
     if walk_reflogs {
         return Ok(());
     }
-    let (wrap, revs) = normalize_shortlog_revs(wrap, revs);
-    if revs.is_empty() && !all {
+    if max_count == Some(0) {
         return Ok(());
     }
-    let max_count = parse_log_max_count(max_count)?;
-    let no_walk = resolve_history_walk_mode(raw_args, no_walk, do_walk);
+    let (wrap, _revs) = normalize_shortlog_revs(wrap, revs);
+    let selector_events = ordered_rev_list_selector_events(raw_args);
+    if !all && !rev_list_selector_events_have_positive_selection(&selector_events) {
+        return Ok(());
+    }
+    let walk_mode = resolve_history_walk_mode(raw_args, no_walk, do_walk);
+    let no_walk = walk_mode.is_no_walk();
     let effective_since = since.or(since_as_filter);
     let (since, until) =
         resolve_history_age_bounds(raw_args, effective_since, max_age, until, min_age);
@@ -3375,7 +3604,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         return Ok(());
     };
     let skip = resolve_history_skip(raw_args, skip)?;
-    let (min_parents, max_parents) = parse_log_parent_bounds(
+    let (min_parents, parsed_max_parents) = parse_log_parent_bounds(
         min_parents,
         no_min_parents,
         no_merges,
@@ -3383,20 +3612,142 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         no_max_parents,
         merges,
     )?;
+    let selection = resolve_history_selection_policy(
+        right_only,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        parsed_max_parents,
+    );
+    let right_only = selection.right_only;
+    let cherry = selection.cherry;
+    let cherry_pick = selection.cherry_pick;
+    let cherry_mark = selection.cherry_mark;
+    let max_parents = selection.max_parents;
+    let grep_mode =
+        parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let effective_revs = shortlog_effective_revs(raw_args, revs);
-    if !all && !shortlog_has_positive_revs(&effective_revs) {
-        return Ok(());
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
+    let ref_snapshot = if all
+        || selector_events
+            .iter()
+            .any(|event| matches!(event, RevListSelectorEvent::Select(_)))
+        || simplify_by_decoration
+    {
+        Some(collect_rev_list_ref_snapshot(&repo, store.algorithm())?)
+    } else {
+        None
+    };
+    let mut revs = collect_rev_list_revs_with_events(
+        &repo,
+        &store,
+        all,
+        selector_events,
+        ref_snapshot.as_ref(),
+    )?;
+    revs.exclude_first_parent_only = exclude_first_parent_only;
+    let pathspecs = history_pathspecs_after_separator(&repo, raw_args)?;
+    if !pathspecs.is_empty() {
+        let no_additional_exclusions = HashSet::new();
+        let selection = collect_history_path_selection(
+            &repo,
+            &store,
+            &revs,
+            &HistoryPathQuery::compile(&pathspecs),
+            HistoryPathSelectionPolicy {
+                full_history,
+                sparse,
+                first_parent,
+                topo_order,
+                rewrite_parents: false,
+                children: false,
+                missing_policy: RevListTreeMissingPolicy::default(),
+                additional_excluded: &no_additional_exclusions,
+                follow: None,
+            },
+        )?;
+        return render_shortlog_path_selection(ShortlogPathSelectionRequest {
+            repo: &repo,
+            store: &store,
+            selection: &selection,
+            revs: &revs,
+            raw_args,
+            format,
+            group: &group,
+            committer,
+            email,
+            summary,
+            numbered,
+            wrap,
+            date,
+            relative_date,
+            max_count,
+            skip,
+            reverse,
+            since,
+            until,
+            no_merges,
+            min_parents,
+            max_parents,
+            author,
+            grep: &grep,
+            all_match,
+            invert_grep,
+            regexp_ignore_case,
+            grep_mode,
+            history_order: if author_date_order {
+                Some(HistoryCommitOrder::AuthorDate)
+            } else if date_order {
+                Some(HistoryCommitOrder::Date)
+            } else if topo_order {
+                Some(HistoryCommitOrder::Topo)
+            } else {
+                None
+            },
+            left_right,
+            left_only,
+            right_only,
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            boundary,
+            first_parent,
+        });
     }
-    let revs = collect_rev_list_revs(&repo, &store, all, effective_revs)?;
     let commit_cache = CommitObjectCache::new(&store);
     let post_collection_filters = since.is_some()
         || until.is_some()
         || !grep.is_empty()
         || author.is_some()
         || min_parents.is_some()
-        || max_parents.is_some();
+        || max_parents.is_some()
+        || no_merges
+        || first_parent
+        || left_right
+        || left_only
+        || right_only
+        || cherry
+        || cherry_pick
+        || cherry_mark
+        || boundary
+        || reverse
+        || topo_order
+        || date_order
+        || author_date_order
+        || ancestry_path
+        || simplify_by_decoration;
+    let history_order = if author_date_order {
+        Some(HistoryCommitOrder::AuthorDate)
+    } else if date_order {
+        Some(HistoryCommitOrder::Date)
+    } else if topo_order {
+        Some(HistoryCommitOrder::Topo)
+    } else {
+        None
+    };
     let collect_max_count = if post_collection_filters {
         None
     } else {
@@ -3410,13 +3761,14 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
             &revs.include,
             collect_max_count,
         )?
-    } else if first_parent && !all {
-        collect_first_parent_commit_objects_with_exclusions(
+    } else if first_parent {
+        collect_commit_objects_with_exclusions_cached_with_parent_policy(
             &repo,
             &store,
             &commit_cache,
             &revs,
             collect_max_count,
+            true,
         )?
     } else {
         collect_commit_objects_with_exclusions_cached(
@@ -3427,39 +3779,43 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
             collect_max_count,
         )?
     };
-    if let Some(since) = since {
-        commits.retain(|entry| {
-            signature_timestamp_timezone(&entry.commit.committer)
-                .map(|(timestamp, _)| timestamp)
-                .is_some_and(|timestamp| timestamp > since)
-        });
+    let mut commits_ordered_before_filters = false;
+    if let Some(order) = history_order {
+        commits = reorder_collected_commits(commits, order)?;
+        commits_ordered_before_filters = true;
     }
-    if let Some(until) = until {
-        commits.retain(|entry| {
-            signature_timestamp_timezone(&entry.commit.committer)
-                .map(|(timestamp, _)| timestamp)
-                .is_some_and(|timestamp| timestamp < until)
-        });
+    let mut filtered_commits = Vec::with_capacity(commits.len());
+    for entry in commits {
+        if shortlog_commit_matches_filters(
+            &entry,
+            since,
+            until,
+            no_merges,
+            min_parents,
+            max_parents,
+            author,
+            &grep,
+            all_match,
+            invert_grep,
+            regexp_ignore_case,
+            grep_mode,
+        )? {
+            filtered_commits.push(entry);
+        }
     }
-    if min_parents.is_some() || max_parents.is_some() {
-        commits.retain(|entry| {
-            log_parent_count_matches_bounds(entry.commit.parents.len(), min_parents, max_parents)
-        });
-    }
-    if let Some(skip) = skip {
-        commits = commits.into_iter().skip(skip).collect();
-    }
-    if post_collection_filters && let Some(max_count) = max_count {
-        commits.truncate(max_count);
-    }
+    let mut commits = filtered_commits;
     if ancestry_path {
         commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
     if simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo, None)?;
+        let decorated = collect_default_log_decoration_ids(&repo, &store, ref_snapshot.as_ref())?;
         commits.retain(|entry| decorated.contains(&entry.id));
     }
-    if left_only {
+    let mut boundary_shown_ids = commits
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<HashSet<_>>();
+    if left_right || left_only || right_only || cherry || cherry_pick || cherry_mark {
         let commit_ids = commits
             .iter()
             .map(|entry| entry.id.clone())
@@ -3467,68 +3823,85 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         let traversal = collect_history_traversal_decoration(
             &repo,
             &store,
-            &commit_cache,
             &revs,
             &commit_ids,
-            true,
-            false,
-            false,
-            false,
-            false,
+            left_right || left_only || (right_only && !cherry),
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            first_parent,
         )?;
-        commits.retain(|entry| {
-            traversal.markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
-        });
+        boundary_shown_ids.extend(traversal.markers.keys().cloned());
+        boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
+        if left_only {
+            commits.retain(|entry| {
+                traversal.markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
+            });
+        }
+        if right_only && !cherry {
+            commits.retain(|entry| {
+                traversal.markers.get(&entry.id) == Some(&HistoryTraversalMarker::Right)
+            });
+        }
+        if cherry {
+            commits.retain(|entry| traversal.right_ids.contains(&entry.id));
+        }
+        if cherry_pick && !cherry {
+            commits.retain(|entry| !traversal.equivalent_ids.contains(&entry.id));
+        }
+    }
+    if !commits_ordered_before_filters && let Some(order) = history_order {
+        commits = reorder_collected_commits(commits, order)?;
+    }
+    if let Some(skip) = skip {
+        commits = commits.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = max_count {
+        commits.truncate(max_count);
+    }
+    let emit_boundary = boundary;
+    let mut boundary_commits = if emit_boundary {
+        let selected_ids = commits
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        collect_history_boundary_ids(&store, &selected_ids, &boundary_shown_ids)?
+            .into_iter()
+            .map(|id| {
+                Ok(CollectedCommit {
+                    id: id.clone(),
+                    commit: commit_cache.read_commit(&id)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+    if let Some(order) = history_order {
+        boundary_commits = reorder_collected_commits(boundary_commits, order)?;
+    }
+    if reverse {
+        commits.reverse();
+    }
+    if emit_boundary {
+        if reverse {
+            boundary_commits.reverse();
+            boundary_commits.extend(commits);
+            commits = boundary_commits;
+        } else {
+            commits.extend(boundary_commits);
+        }
     }
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_arg = history_raw_date_arg(raw_args, date, relative_date);
     let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
-    let grep_mode =
-        parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
     let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();
     for entry in commits.iter().rev() {
         let commit = entry.commit.as_ref();
-        if no_merges && commit.parents.len() > 1 {
-            continue;
-        }
-        if let Some(since) = since
-            && signature_timestamp_timezone(&commit.committer)
-                .map(|(timestamp, _)| timestamp)
-                .is_none_or(|timestamp| timestamp <= since)
-        {
-            continue;
-        }
-        if let Some(until) = until
-            && signature_timestamp_timezone(&commit.committer)
-                .map(|(timestamp, _)| timestamp)
-                .is_none_or(|timestamp| timestamp >= until)
-        {
-            continue;
-        }
-        if let Some(pattern) = author
-            && !log_signature_matches_pattern(
-                &commit.author,
-                pattern,
-                regexp_ignore_case,
-                grep_mode,
-            )
-        {
-            continue;
-        }
-        if !shortlog_commit_matches_grep(
-            &commit.message,
-            &grep,
-            all_match,
-            invert_grep,
-            regexp_ignore_case,
-            grep_mode,
-        )? {
-            continue;
-        }
         let subject =
             render_shortlog_subject(&entry.id, commit, format, &decorations, &notes, date_mode)?;
         let mut keys = HashSet::new();
@@ -3559,7 +3932,334 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         }
         println!("{} ({}):", name, subjects.len());
         for subject in subjects {
-            for line in wrap_shortlog_subject(subject, wrap) {
+            for line in wrap_shortlog_subject(&subject, wrap) {
+                println!("{line}");
+            }
+        }
+        println!();
+    }
+    Ok(())
+}
+
+struct ShortlogPathSelectionRequest<'a> {
+    repo: &'a GitRepo,
+    store: &'a LooseObjectStore,
+    selection: &'a HistoryPathSelection,
+    revs: &'a RevListRevs,
+    raw_args: &'a [String],
+    format: Option<&'a str>,
+    group: &'a [String],
+    committer: bool,
+    email: bool,
+    summary: bool,
+    numbered: bool,
+    wrap: Option<String>,
+    date: Option<&'a str>,
+    relative_date: bool,
+    max_count: Option<usize>,
+    skip: Option<usize>,
+    reverse: bool,
+    since: Option<i64>,
+    until: Option<i64>,
+    no_merges: bool,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+    author: Option<&'a str>,
+    grep: &'a [String],
+    all_match: bool,
+    invert_grep: bool,
+    regexp_ignore_case: bool,
+    grep_mode: ShortlogPatternMode,
+    history_order: Option<HistoryCommitOrder>,
+    left_right: bool,
+    left_only: bool,
+    right_only: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    boundary: bool,
+    first_parent: bool,
+}
+
+fn render_shortlog_path_selection(request: ShortlogPathSelectionRequest<'_>) -> Result<()> {
+    let ShortlogPathSelectionRequest {
+        repo,
+        store,
+        selection,
+        revs,
+        raw_args,
+        format,
+        group,
+        committer,
+        email,
+        summary,
+        numbered,
+        wrap,
+        date,
+        relative_date,
+        max_count,
+        skip,
+        reverse,
+        since,
+        until,
+        no_merges,
+        min_parents,
+        max_parents,
+        author,
+        grep,
+        all_match,
+        invert_grep,
+        regexp_ignore_case,
+        grep_mode,
+        history_order,
+        left_right,
+        left_only,
+        right_only,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        boundary,
+        first_parent,
+    } = request;
+    let groups_spec = parse_shortlog_groups(group, committer)?;
+    let date_arg = history_raw_date_arg(raw_args, date, relative_date);
+    let date_mode = parse_log_date_mode(date_arg.as_deref())?;
+    let wrap = parse_shortlog_wrap(wrap.as_deref())?;
+    let mut entries = Vec::with_capacity(selection.commits.len());
+    for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+        let id = &selection.ids[candidate.id_index];
+        let metadata = read_commit_metadata(store, id)?;
+        let author_timestamp = signature_timestamp(&metadata.author);
+        let committer_timestamp =
+            signature_timestamp(&metadata.committer).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("commit {} has invalid committer timestamp", id.to_hex()),
+            })?;
+        let parent_count = selection
+            .parent_indices
+            .get(candidate_index)
+            .map_or(0, Vec::len);
+        if no_merges && parent_count > 1
+            || since.is_some_and(|value| committer_timestamp <= value)
+            || until.is_some_and(|value| committer_timestamp >= value)
+            || !log_parent_count_matches_bounds(parent_count, min_parents, max_parents)
+            || author.is_some_and(|pattern| {
+                !log_signature_matches_pattern(
+                    &metadata.author,
+                    pattern,
+                    regexp_ignore_case,
+                    grep_mode,
+                )
+            })
+        {
+            continue;
+        }
+        if !grep.is_empty() {
+            let object = store.read_object(id)?;
+            let commit = decode_commit(id.algorithm(), &object.content).map_err(CliError::Io)?;
+            if !shortlog_commit_matches_grep(
+                &commit.message,
+                grep,
+                all_match,
+                invert_grep,
+                regexp_ignore_case,
+                grep_mode,
+            )? {
+                continue;
+            }
+        }
+        entries.push(HistoryPathLogEntry {
+            candidate_index,
+            author_timestamp,
+            committer_timestamp,
+        });
+    }
+    let mut traversal_markers = HashMap::new();
+    let mut boundary_shown_ids = entries
+        .iter()
+        .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+        .collect::<HashSet<_>>();
+    if left_right || left_only || right_only || cherry || cherry_pick || cherry_mark {
+        let commit_ids = entries
+            .iter()
+            .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+            .collect::<Vec<_>>();
+        let traversal = collect_history_traversal_decoration(
+            repo,
+            store,
+            revs,
+            &commit_ids,
+            left_right || left_only || (right_only && !cherry),
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            first_parent,
+        )?;
+        boundary_shown_ids.extend(traversal.markers.keys().cloned());
+        boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
+        if cherry {
+            entries.retain(|entry| {
+                traversal
+                    .right_ids
+                    .contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+            });
+        }
+        if cherry_pick && !cherry && !traversal.equivalent_ids.is_empty() {
+            entries.retain(|entry| {
+                !traversal
+                    .equivalent_ids
+                    .contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+            });
+        }
+        if left_only {
+            entries.retain(|entry| {
+                traversal
+                    .markers
+                    .get(&selection.ids[selection.commits[entry.candidate_index].id_index])
+                    == Some(&HistoryTraversalMarker::Left)
+            });
+        }
+        if right_only && !cherry {
+            entries.retain(|entry| {
+                traversal
+                    .markers
+                    .get(&selection.ids[selection.commits[entry.candidate_index].id_index])
+                    == Some(&HistoryTraversalMarker::Right)
+            });
+        }
+        traversal_markers = traversal.markers;
+    }
+    if let Some(order) = history_order {
+        entries = reorder_history_path_log_entries(entries, selection, order)?;
+    }
+    if let Some(skip) = skip {
+        entries = entries.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = max_count {
+        entries.truncate(max_count);
+    }
+    let boundary_ids = if boundary {
+        let selected_ids = entries
+            .iter()
+            .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+            .collect::<Vec<_>>();
+        let boundary_ids = collect_history_boundary_ids(store, &selected_ids, &boundary_shown_ids)?;
+        reorder_history_path_boundary_ids(store, boundary_ids, history_order)?
+    } else {
+        Vec::new()
+    };
+    if summary {
+        let mut group_counts: HashMap<String, usize> = HashMap::new();
+        for entry in entries.iter().rev() {
+            let id = &selection.ids[selection.commits[entry.candidate_index].id_index];
+            let commit = decode_history_path_render_commit(store, id, None, &selection.ids)?;
+            let mut keys = HashSet::new();
+            for group in &groups_spec {
+                for key in shortlog_group_keys(group, id, &commit, email, date_mode)? {
+                    if keys.insert(key.clone()) {
+                        *group_counts.entry(key).or_default() += 1;
+                    }
+                }
+            }
+        }
+        for id in &boundary_ids {
+            let commit = decode_history_path_render_commit(store, id, None, &selection.ids)?;
+            let mut keys = HashSet::new();
+            for group in &groups_spec {
+                for key in shortlog_group_keys(group, id, &commit, email, date_mode)? {
+                    if keys.insert(key.clone()) {
+                        *group_counts.entry(key).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let mut groups = group_counts.into_iter().collect::<Vec<_>>();
+        if numbered {
+            groups.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        } else {
+            groups.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+        for (name, count) in groups {
+            println!("{:6}\t{}", count, name);
+        }
+        return Ok(());
+    }
+
+    let mut outputs = entries
+        .into_iter()
+        .map(|entry| {
+            let id = selection.ids[selection.commits[entry.candidate_index].id_index].clone();
+            HistoryPathLogOutputEntry {
+                marker: traversal_markers.get(&id).copied(),
+                id,
+                candidate_index: Some(entry.candidate_index),
+            }
+        })
+        .collect::<Vec<_>>();
+    if boundary {
+        let mut boundaries = boundary_ids
+            .iter()
+            .cloned()
+            .into_iter()
+            .map(|id| HistoryPathLogOutputEntry {
+                id,
+                candidate_index: None,
+                marker: Some(HistoryTraversalMarker::Boundary),
+            })
+            .collect::<Vec<_>>();
+        if reverse {
+            outputs.reverse();
+            boundaries.reverse();
+            boundaries.extend(outputs);
+            outputs = boundaries;
+        } else {
+            outputs.extend(boundaries);
+        }
+    } else if reverse {
+        outputs.reverse();
+    }
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
+    let render_outputs = outputs.iter().rev().collect::<Vec<_>>();
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (output_index, output) in render_outputs.iter().enumerate() {
+        let commit = decode_history_path_render_commit(store, &output.id, None, &selection.ids)?;
+        let mut keys = HashSet::new();
+        for group in &groups_spec {
+            for key in shortlog_group_keys(group, &output.id, &commit, email, date_mode)? {
+                if keys.insert(key.clone()) {
+                    groups.entry(key).or_default().push(output_index);
+                }
+            }
+        }
+    }
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    if numbered {
+        groups.sort_by(|left, right| {
+            right
+                .1
+                .len()
+                .cmp(&left.1.len())
+                .then_with(|| left.0.cmp(&right.0))
+        });
+    } else {
+        groups.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    for (name, subjects) in &groups {
+        println!("{} ({}):", name, subjects.len());
+        for output_index in subjects {
+            let output = render_outputs[*output_index];
+            let commit =
+                decode_history_path_render_commit(store, &output.id, None, &selection.ids)?;
+            let subject = render_shortlog_subject(
+                &output.id,
+                &commit,
+                format,
+                &decorations,
+                &notes,
+                date_mode,
+            )?;
+            for line in wrap_shortlog_subject(&subject, wrap) {
                 println!("{line}");
             }
         }
@@ -3596,49 +4296,13 @@ fn rev_list_usage_error() -> CliError {
     }
 }
 
-fn shortlog_effective_revs(raw_args: &[String], mut revs: Vec<String>) -> Vec<String> {
-    if raw_arg_present_before_dashdash(raw_args, "--not") && !revs.iter().any(|rev| rev == "--not")
-    {
-        revs.insert(0, "--not".to_owned());
+pub(crate) fn rev_list_selector_conflict_error(selector_name: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: options '--exclude-hidden' and '{selector_name}' cannot be used together\n{REV_LIST_USAGE}"
+        ),
     }
-    revs
-}
-
-fn shortlog_has_positive_revs(revs: &[String]) -> bool {
-    let mut not_mode = false;
-    for rev in revs {
-        if rev == "--not" {
-            not_mode = !not_mode;
-            continue;
-        }
-        if rev == "--branches"
-            || rev == "--heads"
-            || rev == "--remotes"
-            || rev == "--tags"
-            || rev.starts_with("--branches=")
-            || rev.starts_with("--heads=")
-            || rev.starts_with("--remotes=")
-            || rev.starts_with("--tags=")
-        {
-            if !not_mode {
-                return true;
-            }
-            continue;
-        }
-        if rev.starts_with('^') {
-            if not_mode {
-                return true;
-            }
-            continue;
-        }
-        if rev.contains("..") {
-            return true;
-        }
-        if !not_mode {
-            return true;
-        }
-    }
-    false
 }
 
 fn parse_shortlog_groups(values: &[String], committer: bool) -> Result<Vec<ShortlogGroup>> {
@@ -3751,7 +4415,9 @@ fn render_shortlog_subject(
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     match format {
-        Some(pattern) => render_log_format(pattern, id, commit, 7, decorations, notes, date_mode),
+        Some(pattern) => {
+            render_log_format(pattern, id, commit, 7, decorations, notes, date_mode, None)
+        }
         None => Ok(commit_subject(&commit.message)),
     }
 }
@@ -3775,6 +4441,7 @@ fn shortlog_group_keys(
             &LogDecorations::empty(),
             &LogNotes::empty(),
             date_mode,
+            None,
         )?]),
     }
 }
@@ -3873,6 +4540,58 @@ fn parse_shortlog_pattern_mode(
     } else {
         ShortlogPatternMode::Basic
     }
+}
+
+fn shortlog_commit_matches_filters(
+    entry: &CollectedCommit,
+    since: Option<i64>,
+    until: Option<i64>,
+    no_merges: bool,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+    author: Option<&str>,
+    grep: &[String],
+    all_match: bool,
+    invert_grep: bool,
+    regexp_ignore_case: bool,
+    grep_mode: ShortlogPatternMode,
+) -> Result<bool> {
+    let commit = entry.commit.as_ref();
+    if no_merges && commit.parents.len() > 1 {
+        return Ok(false);
+    }
+    if let Some(since) = since
+        && !signature_timestamp_timezone(&commit.committer)
+            .map(|(timestamp, _)| timestamp)
+            .is_some_and(|timestamp| timestamp > since)
+    {
+        return Ok(false);
+    }
+    if let Some(until) = until
+        && !signature_timestamp_timezone(&commit.committer)
+            .map(|(timestamp, _)| timestamp)
+            .is_some_and(|timestamp| timestamp < until)
+    {
+        return Ok(false);
+    }
+    if (min_parents.is_some() || max_parents.is_some())
+        && !log_parent_count_matches_bounds(commit.parents.len(), min_parents, max_parents)
+    {
+        return Ok(false);
+    }
+    if let Some(pattern) = author
+        && !log_signature_matches_pattern(&commit.author, pattern, regexp_ignore_case, grep_mode)
+    {
+        return Ok(false);
+    }
+    shortlog_commit_matches_grep(
+        &commit.message,
+        grep,
+        all_match,
+        invert_grep,
+        regexp_ignore_case,
+        grep_mode,
+    )
 }
 
 fn shortlog_commit_matches_grep(
@@ -6394,9 +7113,10 @@ pub(crate) struct ShowBranchOptions {
 
 pub(crate) fn show_branch(options: ShowBranchOptions) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     let _accepted_sparse = options.sparse;
     let color_mode = parse_diff_color_option(options.color.as_deref(), options.no_color)?;
     if options.independent {
@@ -6407,7 +7127,13 @@ pub(crate) fn show_branch(options: ShowBranchOptions) -> Result<()> {
     }
     let reflog_mode = options.reflog.is_some();
     let heads = if reflog_mode {
-        show_branch_reflog_heads(&repo, &refs, options.reflog.as_deref(), &options.revs)?
+        show_branch_reflog_heads(
+            &repo,
+            &refs,
+            store.algorithm(),
+            options.reflog.as_deref(),
+            &options.revs,
+        )?
     } else {
         show_branch_heads(
             &repo,
@@ -6621,7 +7347,7 @@ fn show_branch_commits(
         let commit = commit_cache.read_commit(&id)?;
         for parent in &commit.parents {
             if !seen.contains(&parent.to_hex())
-                && !pending.iter().any(|pending_id| pending_id == parent)
+                && !pending.iter().any(|pending_id| *pending_id == *parent)
             {
                 pending.push(parent.clone());
             }
@@ -6689,7 +7415,7 @@ fn show_branch_independent(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     revs: Vec<String>,
 ) -> Result<()> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, store.algorithm());
     let heads = show_branch_heads(repo, store, &refs, false, false, false, revs)?;
     for (idx, head) in heads.iter().enumerate() {
         let mut reachable = false;
@@ -6725,7 +7451,7 @@ fn show_branch_merge_base(
         .iter()
         .map(|rev| resolve_commitish(repo, store, rev))
         .collect::<Result<Vec<_>>>()?;
-    for base in merge_bases_all_cached(commit_cache, &resolved[0], &resolved[1])? {
+    for base in merge_bases_all_cached(store, commit_cache, &resolved[0], &resolved[1])? {
         println!("{}", base.to_hex());
     }
     Ok(())
@@ -6734,6 +7460,7 @@ fn show_branch_merge_base(
 fn show_branch_reflog_heads(
     repo: &GitRepo,
     refs: &RefStore,
+    algorithm: GitHashAlgorithm,
     raw: Option<&str>,
     revs: &[String],
 ) -> Result<Vec<ShowBranchHead>> {
@@ -6760,7 +7487,7 @@ fn show_branch_reflog_heads(
             .unwrap_or(0)
     });
     for_each_reflog_line_rev(file, |line| {
-        let Some(entry) = parse_reflog_entry(line) else {
+        let Some(entry) = parse_reflog_line(line, algorithm) else {
             return Ok(());
         };
         if index >= selector.base && entries.len() < selector.limit {
@@ -6928,6 +7655,7 @@ pub(crate) fn cherry(
         exclude,
         extra_objects: Vec::new(),
         symmetric_diff: None,
+        exclude_first_parent_only: false,
     };
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
@@ -7019,24 +7747,35 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
         });
     }
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
-        .with_stable_pack_snapshot()
-        .with_packed_objects_first();
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    )
+    .with_stable_pack_snapshot()
+    .with_packed_objects_first();
     let commits = if options.commits.is_empty() {
         vec!["HEAD".to_owned()]
     } else {
         options.commits.clone()
     };
-    let abbrev_len = options.abbrev.unwrap_or(default_abbrev_len(&store)?);
     let candidates = describe_candidates(&repo, &store, &options)?;
     let commit_cache = CommitObjectCache::new(&store);
     let dirty_suffix = describe_dirty_suffix(&repo, &store, &options)?;
+    let resolved_commits = commits
+        .iter()
+        .map(|commitish| resolve_describe_commitish(&repo, &store, commitish))
+        .collect::<Result<Vec<_>>>()?;
+    let abbrev_policy = options
+        .abbrev
+        .map(CoreAbbrevConfigState::Minimum)
+        .unwrap_or(configured_core_abbrev_state(&repo)?);
+    let abbrev_lengths = rendered_abbrev_len_for_ids(&store, abbrev_policy, &resolved_commits)?;
 
-    for commitish in commits {
-        let id = resolve_describe_commitish(&repo, &store, &commitish)?;
+    for (commitish, id) in commits.into_iter().zip(resolved_commits) {
         if options.debug {
             eprintln!("describe {commitish}");
         }
+        let abbrev_len = abbrev_lengths.width_for(&id);
         match describe_commit(&commit_cache, &id, &candidates, &options, abbrev_len)? {
             Some(mut description) => {
                 description.push_str(dirty_suffix);
@@ -7076,7 +7815,7 @@ fn describe_candidates(
     store: &LooseObjectStore,
     options: &DescribeOptions,
 ) -> Result<Vec<DescribeCandidate>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, store.algorithm());
     let prefix = if options.all { "refs/" } else { "refs/tags/" };
     let mut candidates = Vec::new();
     refs.for_each_resolved_ref(prefix, |ref_name, id| {
@@ -7147,7 +7886,7 @@ fn describe_candidate_target(
     let object = store.read_object(id)?;
     match object.kind {
         GitObjectKind::Tag => {
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            let tag = decode_tag(store.algorithm(), &object.content)?;
             let Some(target) = peel_to_commit(store, tag.target)? else {
                 return Ok(None);
             };
@@ -7159,24 +7898,10 @@ fn describe_candidate_target(
     }
 }
 
-pub(crate) fn peel_to_commit(
-    store: &LooseObjectStore,
-    mut id: ObjectId,
-) -> Result<Option<ObjectId>> {
-    for _ in 0..8 {
-        let object = store.read_object(&id)?;
-        match object.kind {
-            GitObjectKind::Commit => return Ok(Some(id)),
-            GitObjectKind::Tag => {
-                id = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
-            }
-            _ => return Ok(None),
-        }
-    }
-    Err(CliError::Fatal {
-        code: 128,
-        message: "tag nesting is too deep".into(),
-    })
+pub(crate) fn peel_to_commit(store: &LooseObjectStore, id: ObjectId) -> Result<Option<ObjectId>> {
+    Ok(peel_tag_chain_to_commit(store, &id)
+        .map_err(CliError::Io)?
+        .commit)
 }
 
 fn resolve_describe_commitish(
@@ -7396,18 +8121,63 @@ pub(crate) fn describe_for_each_ref(
     object_id: &ObjectId,
     atom: &str,
 ) -> Result<String> {
+    let batch = describe_for_each_ref_batch(repo, std::slice::from_ref(object_id), atom)?;
+    Ok(batch.value_for(object_id).unwrap_or_default().to_owned())
+}
+
+pub(crate) struct DescribeForEachRefBatch {
+    values: HashMap<String, String>,
+}
+
+impl DescribeForEachRefBatch {
+    pub(crate) fn value_for(&self, object_id: &ObjectId) -> Option<&str> {
+        self.values.get(&object_id.to_hex()).map(String::as_str)
+    }
+}
+
+pub(crate) fn describe_for_each_ref_batch(
+    repo: &GitRepo,
+    object_ids: &[ObjectId],
+    atom: &str,
+) -> Result<DescribeForEachRefBatch> {
     let options = parse_for_each_ref_describe_options(atom)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let Some(commit_id) = peel_to_commit(&store, object_id.clone())? else {
-        return Ok(String::new());
-    };
-    let abbrev_len = options.abbrev.unwrap_or(default_abbrev_len(&store)?);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
+    let mut commit_ids = Vec::with_capacity(object_ids.len());
+    let mut resolved = Vec::with_capacity(object_ids.len());
+    for object_id in object_ids {
+        let commit_id = peel_to_commit(&store, object_id.clone())?;
+        if let Some(commit_id) = &commit_id {
+            commit_ids.push(commit_id.clone());
+        }
+        resolved.push(commit_id);
+    }
+    let policy = options
+        .abbrev
+        .map(CoreAbbrevConfigState::Minimum)
+        .map_or_else(|| configured_core_abbrev_state(repo), Ok)?;
+    let abbrev_lengths = rendered_abbrev_len_for_ids(&store, policy, &commit_ids)?;
     let candidates = describe_candidates(repo, &store, &options)?;
     let commit_cache = CommitObjectCache::new(&store);
-    Ok(
-        describe_commit(&commit_cache, &commit_id, &candidates, &options, abbrev_len)?
-            .unwrap_or_default(),
-    )
+    let mut values = HashMap::with_capacity(object_ids.len());
+    for (object_id, commit_id) in object_ids.iter().zip(resolved) {
+        let Some(commit_id) = commit_id else {
+            values.insert(object_id.to_hex(), String::new());
+            continue;
+        };
+        let value = describe_commit(
+            &commit_cache,
+            &commit_id,
+            &candidates,
+            &options,
+            abbrev_lengths.width_for(&commit_id),
+        )?
+        .unwrap_or_default();
+        values.insert(object_id.to_hex(), value);
+    }
+    Ok(DescribeForEachRefBatch { values })
 }
 
 fn parse_for_each_ref_describe_options(atom: &str) -> Result<DescribeOptions> {
@@ -7497,7 +8267,10 @@ pub(crate) fn name_rev(options: NameRevOptions) -> Result<()> {
         });
     }
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let commit_cache = CommitObjectCache::new(&store);
     let candidates = name_rev_candidates(&repo, &store, &commit_cache, &options)?;
     if options.all {
@@ -7699,10 +8472,19 @@ pub(crate) fn render_range_diff_output(
     options: &RangeDiffOptions,
 ) -> Result<String> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let old = range_diff_commits(&repo, &store, &ranges[0])?;
     let new = range_diff_commits(&repo, &store, &ranges[1])?;
-    let abbrev_len = default_abbrev_len(&store)?;
+    let range_ids = old
+        .iter()
+        .chain(new.iter())
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let abbrev_policy = configured_core_abbrev_state(&repo)?;
+    let abbrev_lengths = rendered_abbrev_len_for_ids(&store, abbrev_policy, &range_ids)?;
     let color = options.color;
     let _accepted_creation_factor = options.creation_factor.as_deref();
     let _accepted_notes = options.notes;
@@ -7733,9 +8515,12 @@ pub(crate) fn render_range_diff_output(
                 &format!(
                     "{}:  {} = {}:  {} {}",
                     old_idx + 1,
-                    short_object_id_len(&old_entry.id, abbrev_len),
+                    short_object_id_len(&old_entry.id, abbrev_lengths.width_for(&old_entry.id),),
                     new_idx + 1,
-                    short_object_id_len(&new[new_idx].id, abbrev_len),
+                    short_object_id_len(
+                        &new[new_idx].id,
+                        abbrev_lengths.width_for(&new[new_idx].id),
+                    ),
                     old_entry.subject
                 ),
             )?;
@@ -7750,7 +8535,7 @@ pub(crate) fn render_range_diff_output(
                 &format!(
                     "{}:  {} < -:  ------- {}",
                     old_idx + 1,
-                    short_object_id_len(&old_entry.id, abbrev_len),
+                    short_object_id_len(&old_entry.id, abbrev_lengths.width_for(&old_entry.id),),
                     old_entry.subject
                 ),
             )?;
@@ -7770,7 +8555,7 @@ pub(crate) fn render_range_diff_output(
             &format!(
                 "-:  ------- > {}:  {} {}",
                 new_idx + 1,
-                short_object_id_len(&new_entry.id, abbrev_len),
+                short_object_id_len(&new_entry.id, abbrev_lengths.width_for(&new_entry.id),),
                 new_entry.subject
             ),
         )?;
@@ -7890,6 +8675,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) children: bool,
     pub(crate) root: bool,
     pub(crate) patch: bool,
+    pub(crate) no_patch: bool,
     pub(crate) patch_with_stat: bool,
     pub(crate) combined: bool,
     pub(crate) dense_combined: bool,
@@ -7999,14 +8785,14 @@ impl LogOptions<'_> {
         }
     }
 
-    fn diff_format(&self, patch: bool) -> Option<ShowDiffFormat> {
+    fn diff_format(&self, patch: bool, patch_suppressed: bool) -> Option<ShowDiffFormat> {
         if self.patch_with_stat {
             if self.summary {
                 Some(ShowDiffFormat::PatchWithStatSummary)
             } else {
                 Some(ShowDiffFormat::PatchWithStat)
             }
-        } else if patch || self.dd {
+        } else if patch || (self.dd && !patch_suppressed) {
             Some(ShowDiffFormat::Patch)
         } else if self.stat {
             Some(ShowDiffFormat::Stat)
@@ -8053,7 +8839,9 @@ impl LogOptions<'_> {
         if self.no_diff_merges {
             mode = LogMergeDiffMode::Off;
         }
-        if let Some(value) = self.diff_merges {
+        let explicit_diff_merges =
+            raw_arg_last_value(self.raw_args, &["--diff-merges"]).or(self.diff_merges);
+        if let Some(value) = explicit_diff_merges {
             mode = parse_log_diff_merges_arg(value, config_mode)?;
         }
         Ok(mode)
@@ -8067,6 +8855,18 @@ enum HistoryCommitOrder {
     AuthorDate,
 }
 
+struct RevListChildrenMetadataFilter<'a> {
+    since: Option<i64>,
+    until: Option<i64>,
+    author: Option<&'a str>,
+    committer: Option<&'a str>,
+    grep: &'a [String],
+    regexp_ignore_case: bool,
+    grep_mode: ShortlogPatternMode,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 struct HistoryOrderMetadata {
     id: ObjectId,
@@ -8075,14 +8875,36 @@ struct HistoryOrderMetadata {
     original_index: usize,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct HistoryOrderReady {
+#[derive(Clone, Copy)]
+struct HistoryOrderMetadataRef<'a> {
+    id: &'a ObjectId,
+    parents: &'a [ObjectId],
     timestamp: i64,
     original_index: usize,
-    id: ObjectId,
+    output_index: usize,
 }
 
-impl Ord for HistoryOrderReady {
+impl HistoryOrderMetadata {
+    fn as_ref(&self, output_index: usize) -> HistoryOrderMetadataRef<'_> {
+        HistoryOrderMetadataRef {
+            id: &self.id,
+            parents: &self.parents,
+            timestamp: self.timestamp,
+            original_index: self.original_index,
+            output_index,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct HistoryOrderReadyRef<'a> {
+    timestamp: i64,
+    original_index: usize,
+    output_index: usize,
+    id: &'a ObjectId,
+}
+
+impl Ord for HistoryOrderReadyRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.timestamp
             .cmp(&other.timestamp)
@@ -8091,7 +8913,7 @@ impl Ord for HistoryOrderReady {
     }
 }
 
-impl PartialOrd for HistoryOrderReady {
+impl PartialOrd for HistoryOrderReadyRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -8112,51 +8934,78 @@ fn reorder_history_from_metadata(
     commits: Vec<HistoryOrderMetadata>,
     order: HistoryCommitOrder,
 ) -> Result<Vec<ObjectId>> {
+    let metadata = commits
+        .iter()
+        .enumerate()
+        .map(|(output_index, commit)| commit.as_ref(output_index))
+        .collect::<Vec<_>>();
+    let ordered = reorder_history_positions(&metadata, order)?;
+    take_owned_by_positions(
+        commits,
+        ordered,
+        "history ordering lost original commit index",
+        "history ordered commit was emitted twice",
+    )
+    .map(|commits| commits.into_iter().map(|commit| commit.id).collect())
+}
+
+fn reorder_history_positions(
+    commits: &[HistoryOrderMetadataRef<'_>],
+    order: HistoryCommitOrder,
+) -> Result<Vec<usize>> {
     let included = commits
         .iter()
-        .map(|commit| commit.id.clone())
+        .map(|commit| commit.id)
         .collect::<std::collections::HashSet<_>>();
-    let mut remaining_children = HashMap::<ObjectId, usize>::new();
-    let mut metadata_by_id = HashMap::<ObjectId, HistoryOrderMetadata>::new();
+    let mut remaining_children = HashMap::<&ObjectId, usize>::new();
+    let mut metadata_by_id = HashMap::<&ObjectId, &HistoryOrderMetadataRef<'_>>::new();
 
     for commit in commits {
-        remaining_children.entry(commit.id.clone()).or_insert(0);
-        for parent in &commit.parents {
-            if included.contains(parent) {
-                *remaining_children.entry(parent.clone()).or_insert(0) += 1;
+        remaining_children.entry(commit.id).or_insert(0);
+        for parent in commit.parents {
+            if included.contains(&parent) {
+                *remaining_children.entry(parent).or_insert(0) += 1;
             }
         }
-        metadata_by_id.insert(commit.id.clone(), commit);
+        metadata_by_id.insert(commit.id, commit);
     }
 
     let mut ordered = Vec::with_capacity(metadata_by_id.len());
     if matches!(order, HistoryCommitOrder::Topo) {
-        let mut ready = metadata_by_id
+        let mut roots = metadata_by_id
             .values()
             .filter(|commit| remaining_children.get(&commit.id).copied().unwrap_or(0) == 0)
-            .map(|commit| (commit.original_index, commit.id.clone()))
+            .map(|commit| (commit.original_index, commit.id))
             .collect::<Vec<_>>();
-        ready.sort_by_key(|(original_index, _)| *original_index);
-        while let Some((_, next_id)) = ready.pop() {
-            let Some(commit) = metadata_by_id.get(&next_id) else {
-                continue;
-            };
-            ordered.push(next_id.clone());
-            for parent in &commit.parents {
-                if !included.contains(parent) {
+        roots.sort_by_key(|(original_index, _)| *original_index);
+        let mut ordered_ids = HashSet::with_capacity(metadata_by_id.len());
+        for (_, root_id) in roots {
+            let mut ready = vec![root_id];
+            while let Some(next_id) = ready.pop() {
+                if !ordered_ids.insert(next_id) {
                     continue;
                 }
-                let Some(remaining) = remaining_children.get_mut(parent) else {
+                let Some(commit) = metadata_by_id.get(&next_id) else {
                     continue;
                 };
-                *remaining -= 1;
-                if *remaining == 0 {
-                    let parent_commit =
-                        metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
-                            code: 128,
-                            message: "history order parent metadata missing".into(),
-                        })?;
-                    ready.push((parent_commit.original_index, parent.clone()));
+                ordered.push(commit.output_index);
+                for parent in commit.parents {
+                    if !included.contains(&parent) {
+                        continue;
+                    }
+                    let Some(remaining) = remaining_children.get_mut(&parent) else {
+                        continue;
+                    };
+                    *remaining -= 1;
+                    if *remaining == 0 {
+                        if metadata_by_id.get(&parent).is_none() {
+                            return Err(CliError::Fatal {
+                                code: 128,
+                                message: "history order parent metadata missing".into(),
+                            });
+                        }
+                        ready.push(parent);
+                    }
                 }
             }
         }
@@ -8164,10 +9013,11 @@ fn reorder_history_from_metadata(
         let mut ready = std::collections::BinaryHeap::new();
         for commit in metadata_by_id.values() {
             if remaining_children.get(&commit.id).copied().unwrap_or(0) == 0 {
-                ready.push(HistoryOrderReady {
+                ready.push(HistoryOrderReadyRef {
                     timestamp: commit.timestamp,
                     original_index: commit.original_index,
-                    id: commit.id.clone(),
+                    output_index: commit.output_index,
+                    id: commit.id,
                 });
             }
         }
@@ -8175,25 +9025,26 @@ fn reorder_history_from_metadata(
             let Some(commit) = metadata_by_id.get(&next.id) else {
                 continue;
             };
-            ordered.push(next.id.clone());
-            for parent in &commit.parents {
-                if !included.contains(parent) {
+            ordered.push(commit.output_index);
+            for parent in commit.parents {
+                if !included.contains(&parent) {
                     continue;
                 }
-                let Some(remaining) = remaining_children.get_mut(parent) else {
+                let Some(remaining) = remaining_children.get_mut(&parent) else {
                     continue;
                 };
                 *remaining -= 1;
                 if *remaining == 0 {
                     let parent_commit =
-                        metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
+                        metadata_by_id.get(&parent).ok_or_else(|| CliError::Fatal {
                             code: 128,
                             message: "history order parent metadata missing".into(),
                         })?;
-                    ready.push(HistoryOrderReady {
+                    ready.push(HistoryOrderReadyRef {
                         timestamp: parent_commit.timestamp,
                         original_index: parent_commit.original_index,
-                        id: parent.clone(),
+                        output_index: parent_commit.output_index,
+                        id: parent,
                     });
                 }
             }
@@ -8207,6 +9058,28 @@ fn reorder_history_from_metadata(
         });
     }
     Ok(ordered)
+}
+
+fn take_owned_by_positions<T>(
+    items: Vec<T>,
+    positions: Vec<usize>,
+    missing_message: &str,
+    duplicate_message: &str,
+) -> Result<Vec<T>> {
+    let mut items = items.into_iter().map(Some).collect::<Vec<_>>();
+    positions
+        .into_iter()
+        .map(|position| {
+            let item = items.get_mut(position).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: missing_message.into(),
+            })?;
+            item.take().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: duplicate_message.into(),
+            })
+        })
+        .collect()
 }
 
 fn reorder_collected_commits(
@@ -8259,28 +9132,86 @@ fn reorder_collected_commit_metadata(
                 code: 128,
                 message: "history ordering encountered an invalid commit timestamp".into(),
             })?;
-            Ok(HistoryOrderMetadata {
-                id: entry.id.clone(),
-                parents: entry.parents.clone(),
+            Ok(HistoryOrderMetadataRef {
+                id: &entry.id,
+                parents: &entry.parents,
                 timestamp,
                 original_index,
+                output_index: original_index,
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let ordered_ids = reorder_history_from_metadata(metadata, order)?;
-    let mut commits_by_id = commits
-        .into_iter()
-        .map(|entry| (entry.id.clone(), entry))
-        .collect::<HashMap<_, _>>();
-    ordered_ids
-        .into_iter()
-        .map(|id| {
-            commits_by_id.remove(&id).ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "history ordered commit metadata missing from collected set".into(),
-            })
-        })
-        .collect()
+    let ordered_positions = reorder_history_positions(&metadata, order)?;
+    take_owned_by_positions(
+        commits,
+        ordered_positions,
+        "history ordering lost original commit index",
+        "history ordered commit was emitted twice",
+    )
+}
+
+fn select_rev_list_children_metadata_indices(
+    metadata: &[CollectedCommitMetadata],
+    filter: RevListChildrenMetadataFilter<'_>,
+) -> Result<Vec<usize>> {
+    let mut retained = Vec::with_capacity(metadata.len());
+    for (index, entry) in metadata.iter().enumerate() {
+        if let Some(since) = filter.since
+            && !signature_timestamp_timezone(&entry.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_some_and(|timestamp| timestamp > since)
+        {
+            continue;
+        }
+        if let Some(until) = filter.until
+            && !signature_timestamp_timezone(&entry.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_some_and(|timestamp| timestamp < until)
+        {
+            continue;
+        }
+        if let Some(pattern) = filter.author
+            && !log_signature_matches_pattern(
+                &entry.author,
+                pattern,
+                filter.regexp_ignore_case,
+                filter.grep_mode,
+            )
+        {
+            continue;
+        }
+        if let Some(pattern) = filter.committer
+            && !log_signature_matches_pattern(
+                &entry.committer,
+                pattern,
+                filter.regexp_ignore_case,
+                filter.grep_mode,
+            )
+        {
+            continue;
+        }
+        if (filter.min_parents.is_some() || filter.max_parents.is_some())
+            && !log_parent_count_matches_bounds(
+                entry.parents.len(),
+                filter.min_parents,
+                filter.max_parents,
+            )
+        {
+            continue;
+        }
+        if !filter.grep.is_empty() && !entry.grep_matches {
+            continue;
+        }
+        retained.push(index);
+    }
+    Ok(retained)
+}
+
+fn retain_rev_list_display_indices<F>(indices: &mut Vec<usize>, ids: &[ObjectId], mut keep: F)
+where
+    F: FnMut(&ObjectId) -> bool,
+{
+    indices.retain(|index| ids.get(*index).is_some_and(&mut keep));
 }
 
 fn reorder_commit_ids<S>(
@@ -8305,6 +9236,764 @@ where
         })
         .collect::<Result<Vec<_>>>()?;
     reorder_history_from_metadata(metadata, order)
+}
+
+struct RevListObjectCommitSchedule<'a> {
+    order: Option<HistoryCommitOrder>,
+    reverse: bool,
+    max_count: Option<usize>,
+    skip: Option<usize>,
+    since: Option<i64>,
+    until: Option<i64>,
+    author: Option<&'a str>,
+    committer: Option<&'a str>,
+    grep: &'a [String],
+    all_match: bool,
+    invert_grep: bool,
+    regexp_ignore_case: bool,
+    grep_mode: ShortlogPatternMode,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+    ancestry_path: bool,
+    simplify_by_decoration: bool,
+    ref_snapshot: Option<&'a RevListRefSnapshot>,
+    first_parent: bool,
+    left_right: bool,
+    left_only: bool,
+    right_only: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    boundary: bool,
+}
+
+impl RevListObjectCommitSchedule<'_> {
+    fn emits_boundary(&self) -> bool {
+        self.boundary
+    }
+
+    fn requires_full_collection(&self) -> bool {
+        self.order.is_some()
+            || self.reverse
+            || self.since.is_some()
+            || self.until.is_some()
+            || self.author.is_some()
+            || self.committer.is_some()
+            || !self.grep.is_empty()
+            || self.min_parents.is_some()
+            || self.max_parents.is_some()
+            || self.ancestry_path
+            || self.simplify_by_decoration
+            || self.first_parent
+            || self.left_right
+            || self.left_only
+            || self.right_only
+            || self.cherry
+            || self.cherry_pick
+            || self.cherry_mark
+            || self.boundary
+    }
+}
+
+impl RevListObjectCommitPredicate for RevListObjectCommitSchedule<'_> {
+    fn matches_metadata(
+        &mut self,
+        _id: &ObjectId,
+        _author_timestamp: Option<i64>,
+        committer_timestamp: i64,
+        parent_count: usize,
+    ) -> Result<bool> {
+        if let Some(since) = self.since
+            && committer_timestamp <= since
+        {
+            return Ok(false);
+        }
+        if let Some(until) = self.until
+            && committer_timestamp >= until
+        {
+            return Ok(false);
+        }
+        if (self.min_parents.is_some() || self.max_parents.is_some())
+            && !log_parent_count_matches_bounds(parent_count, self.min_parents, self.max_parents)
+        {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn needs_full_commit_object(&self) -> bool {
+        self.author.is_some() || self.committer.is_some() || !self.grep.is_empty()
+    }
+
+    fn matches(&mut self, id: &ObjectId, commit: &CommitObject) -> Result<bool> {
+        let committer_timestamp =
+            signature_timestamp(&commit.committer).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("commit {} has invalid committer timestamp", id.to_hex()),
+            })?;
+        if !self.matches_metadata(
+            id,
+            signature_timestamp(&commit.author),
+            committer_timestamp,
+            commit.parents.len(),
+        )? {
+            return Ok(false);
+        }
+        if let Some(pattern) = self.author
+            && !log_signature_matches_pattern(
+                &commit.author,
+                pattern,
+                self.regexp_ignore_case,
+                self.grep_mode,
+            )
+        {
+            return Ok(false);
+        }
+        if let Some(pattern) = self.committer
+            && !log_signature_matches_pattern(
+                &commit.committer,
+                pattern,
+                self.regexp_ignore_case,
+                self.grep_mode,
+            )
+        {
+            return Ok(false);
+        }
+        if !self.grep.is_empty()
+            && !shortlog_commit_matches_grep(
+                &commit.message,
+                self.grep,
+                self.all_match,
+                self.invert_grep,
+                self.regexp_ignore_case,
+                self.grep_mode,
+            )?
+        {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn first_parent_only(&self) -> bool {
+        self.first_parent
+    }
+}
+
+fn apply_rev_list_object_commit_schedule(
+    commit_trees: Vec<CollectedCommitTree>,
+    schedule: &RevListObjectCommitSchedule<'_>,
+) -> Result<Vec<CollectedCommitTree>> {
+    if schedule.requires_full_collection() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "full object schedule requires compact metadata collection".into(),
+        });
+    }
+    let mut commit_trees = commit_trees;
+    if let Some(skip) = schedule.skip {
+        commit_trees = commit_trees.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = schedule.max_count {
+        commit_trees.truncate(max_count);
+    }
+    if schedule.reverse {
+        commit_trees.reverse();
+    }
+    Ok(commit_trees)
+}
+
+struct RevListObjectTraversalSelection {
+    candidates: Vec<RevListObjectCommitCandidate>,
+    shown_ids: HashSet<ObjectId>,
+}
+
+fn apply_rev_list_object_commit_candidates(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    candidates: Vec<RevListObjectCommitCandidate>,
+    schedule: &RevListObjectCommitSchedule<'_>,
+) -> Result<Vec<CollectedCommitTree>> {
+    let traversal_selection =
+        apply_rev_list_object_traversal_filters(repo, store, revs, candidates, schedule)?;
+    let mut candidates = traversal_selection.candidates;
+    let mut boundary_shown_ids = traversal_selection.shown_ids;
+    if schedule.ancestry_path {
+        candidates =
+            filter_rev_list_object_metadata_by_ancestry_path(repo, store, revs, candidates)?;
+    }
+    if schedule.simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(repo, store, schedule.ref_snapshot)?;
+        candidates.retain(|entry| decorated.contains(&entry.id));
+    }
+    if let Some(order) = schedule.order {
+        candidates = reorder_rev_list_object_metadata(candidates, order)?;
+    }
+    let mut commits = candidates
+        .into_iter()
+        .filter(|entry| entry.matches)
+        .collect::<Vec<_>>();
+    if let Some(skip) = schedule.skip {
+        commits = commits.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = schedule.max_count {
+        commits.truncate(max_count);
+    }
+    boundary_shown_ids.extend(commits.iter().map(|entry| entry.id.clone()));
+    let mut boundary_commits = if schedule.emits_boundary() {
+        let selected_ids = commits
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let boundary_ids =
+            collect_rev_list_object_boundary_ids(store, &selected_ids, &boundary_shown_ids)?;
+        boundary_ids
+            .into_iter()
+            .map(|id| {
+                let mut candidate = read_unfiltered_rev_list_object_commit_candidate(store, id)?;
+                candidate.is_boundary = true;
+                Ok(candidate)
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+    if let Some(order) = schedule.order
+        && !boundary_commits.is_empty()
+    {
+        boundary_commits = reorder_rev_list_object_metadata(boundary_commits, order)?;
+    }
+    if schedule.emits_boundary() {
+        if schedule.reverse {
+            commits.extend(boundary_commits);
+            commits.reverse();
+        } else {
+            commits.extend(boundary_commits);
+        }
+    } else if schedule.reverse {
+        commits.reverse();
+    }
+    let mut output = commits
+        .into_iter()
+        .map(|entry| {
+            Ok(CollectedCommitTree {
+                id: entry.id,
+                tree: entry.tree,
+                is_boundary: entry.is_boundary,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(output)
+}
+
+fn apply_rev_list_object_traversal_filters(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    candidates: Vec<RevListObjectCommitCandidate>,
+    schedule: &RevListObjectCommitSchedule<'_>,
+) -> Result<RevListObjectTraversalSelection> {
+    if !schedule.left_right
+        && !schedule.left_only
+        && !schedule.right_only
+        && !schedule.cherry
+        && !schedule.cherry_pick
+        && !schedule.cherry_mark
+    {
+        return Ok(RevListObjectTraversalSelection {
+            candidates,
+            shown_ids: HashSet::new(),
+        });
+    }
+    let commit_id_refs = candidates.iter().map(|entry| &entry.id).collect::<Vec<_>>();
+    let traversal = collect_history_traversal_decoration_uncached_refs(
+        repo,
+        store,
+        revs,
+        &commit_id_refs,
+        schedule.left_right || schedule.left_only || (schedule.right_only && !schedule.cherry),
+        schedule.cherry,
+        schedule.cherry_pick,
+        schedule.cherry_mark,
+        schedule.first_parent,
+    )?;
+    let shown_ids = traversal
+        .markers
+        .keys()
+        .chain(traversal.equivalent_ids.iter())
+        .cloned()
+        .collect();
+    let candidates = candidates
+        .into_iter()
+        .filter(|entry| {
+            if schedule.left_only
+                && traversal.markers.get(&entry.id) != Some(&HistoryTraversalMarker::Left)
+            {
+                return false;
+            }
+            if schedule.right_only
+                && !schedule.cherry
+                && traversal.markers.get(&entry.id) != Some(&HistoryTraversalMarker::Right)
+            {
+                return false;
+            }
+            if schedule.cherry && !traversal.right_ids.contains(&entry.id) {
+                return false;
+            }
+            if schedule.cherry_pick
+                && !schedule.cherry
+                && traversal.equivalent_ids.contains(&entry.id)
+            {
+                return false;
+            }
+            true
+        })
+        .collect::<Vec<_>>();
+    Ok(RevListObjectTraversalSelection {
+        candidates,
+        shown_ids,
+    })
+}
+
+fn collect_rev_list_object_commit_trees_for_schedule(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    traversal_revs: &RevListRevs,
+    path_selection: Option<&HistoryPathSelection>,
+    roots: Option<&[ObjectId]>,
+    collect_limit: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+    schedule: &mut RevListObjectCommitSchedule<'_>,
+) -> Result<RevListObjectCommitSelection> {
+    if let Some(selection) = path_selection {
+        return Ok(RevListObjectCommitSelection::Indexed(
+            collect_history_path_object_selection(
+                repo,
+                store,
+                traversal_revs,
+                selection,
+                schedule,
+            )?,
+        ));
+    }
+    if schedule.requires_full_collection() {
+        let candidates = if let Some(roots) = roots {
+            collect_rev_list_object_commit_candidates_from_ids_with_excluded(
+                repo,
+                store,
+                roots,
+                collect_limit,
+                excluded,
+                schedule,
+            )?
+        } else {
+            collect_rev_list_object_commit_candidates_with_excluded(
+                repo,
+                store,
+                traversal_revs,
+                collect_limit,
+                excluded,
+                schedule,
+            )?
+        };
+        return Ok(RevListObjectCommitSelection::Owned(
+            apply_rev_list_object_commit_candidates(
+                repo,
+                store,
+                traversal_revs,
+                candidates,
+                schedule,
+            )?,
+        ));
+    }
+    let commit_trees = if let Some(roots) = roots {
+        collect_commit_trees_from_ids_uncached_with_excluded(
+            repo,
+            store,
+            roots,
+            collect_limit,
+            excluded,
+        )?
+    } else {
+        collect_commit_trees_with_exclusions_uncached_with_parent_policy(
+            repo,
+            store,
+            traversal_revs,
+            collect_limit,
+            traversal_revs.exclude_first_parent_only,
+        )?
+    };
+    Ok(RevListObjectCommitSelection::Owned(
+        apply_rev_list_object_commit_schedule(commit_trees, schedule)?,
+    ))
+}
+
+struct HistoryPathObjectScheduleEntry {
+    candidate_index: usize,
+    author_timestamp: Option<i64>,
+    committer_timestamp: i64,
+    matches: bool,
+}
+
+struct HistoryPathObjectSelection {
+    candidate_indices: Vec<usize>,
+    boundary_commits: Vec<RevListObjectBoundaryMetadata>,
+}
+
+enum RevListObjectCommitSelection {
+    Owned(Vec<CollectedCommitTree>),
+    Indexed(HistoryPathObjectSelection),
+}
+
+fn collect_history_path_object_selection(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    selection: &HistoryPathSelection,
+    schedule: &mut RevListObjectCommitSchedule<'_>,
+) -> Result<HistoryPathObjectSelection> {
+    let mut entries = Vec::with_capacity(selection.commits.len());
+    for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+        let id = &selection.ids[candidate.id_index];
+        let (author_timestamp, committer_timestamp, matches) = if schedule
+            .needs_full_commit_object()
+        {
+            let object = store.read_object(id)?;
+            if object.kind != GitObjectKind::Commit {
+                return Err(CliError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "object is not a commit",
+                )));
+            }
+            let commit = decode_commit(id.algorithm(), &object.content).map_err(CliError::Io)?;
+            let matches = schedule.matches(id, &commit)?;
+            (
+                selection.author_timestamps[candidate_index],
+                Some(selection.committer_timestamps[candidate_index]),
+                matches,
+            )
+        } else {
+            let matches = schedule.matches_metadata(
+                id,
+                selection.author_timestamps[candidate_index],
+                selection.committer_timestamps[candidate_index],
+                selection.parent_indices[candidate_index].len(),
+            )?;
+            (
+                selection.author_timestamps[candidate_index],
+                Some(selection.committer_timestamps[candidate_index]),
+                matches,
+            )
+        };
+        entries.push(HistoryPathObjectScheduleEntry {
+            candidate_index,
+            author_timestamp,
+            committer_timestamp: committer_timestamp.expect("committer timestamp is validated"),
+            matches,
+        });
+    }
+    let mut shown_ids = HashSet::new();
+    if schedule.left_right
+        || schedule.left_only
+        || schedule.right_only
+        || schedule.cherry
+        || schedule.cherry_pick
+        || schedule.cherry_mark
+    {
+        let commit_id_refs = entries
+            .iter()
+            .map(|entry| &selection.ids[selection.commits[entry.candidate_index].id_index])
+            .collect::<Vec<_>>();
+        let traversal = collect_history_traversal_decoration_uncached_refs(
+            repo,
+            store,
+            revs,
+            &commit_id_refs,
+            schedule.left_right || schedule.left_only || (schedule.right_only && !schedule.cherry),
+            schedule.cherry,
+            schedule.cherry_pick,
+            schedule.cherry_mark,
+            schedule.first_parent,
+        )?;
+        shown_ids.extend(
+            traversal
+                .markers
+                .keys()
+                .chain(traversal.equivalent_ids.iter())
+                .cloned(),
+        );
+        entries.retain(|entry| {
+            let id = &selection.ids[selection.commits[entry.candidate_index].id_index];
+            (!schedule.left_only
+                || traversal.markers.get(id) == Some(&HistoryTraversalMarker::Left))
+                && (!schedule.right_only
+                    || schedule.cherry
+                    || traversal.markers.get(id) == Some(&HistoryTraversalMarker::Right))
+                && (!schedule.cherry || traversal.right_ids.contains(id))
+                && (!schedule.cherry_pick
+                    || schedule.cherry
+                    || !traversal.equivalent_ids.contains(id))
+        });
+    }
+    if schedule.ancestry_path {
+        let bounds = resolve_ancestry_path_bounds(repo, store, revs)?;
+        if !bounds.is_empty() {
+            let mut id_to_candidate = vec![usize::MAX; selection.ids.len()];
+            for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+                id_to_candidate[candidate.id_index] = candidate_index;
+            }
+            let mut children = vec![Vec::<usize>::new(); selection.commits.len()];
+            for (candidate_index, _) in selection.commits.iter().enumerate() {
+                for parent_index in
+                    history_path_traversal_parent_indices(selection, candidate_index)?
+                {
+                    let parent_candidate = id_to_candidate[*parent_index];
+                    if parent_candidate != usize::MAX {
+                        children[parent_candidate].push(candidate_index);
+                    }
+                }
+            }
+            let mut selected = vec![false; selection.commits.len()];
+            let mut pending = Vec::new();
+            for bound in bounds {
+                if let Some((candidate_index, _)) = selection
+                    .commits
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| selection.ids[candidate.id_index] == bound)
+                {
+                    pending.push(candidate_index);
+                }
+            }
+            while let Some(candidate_index) = pending.pop() {
+                if selected[candidate_index] {
+                    continue;
+                }
+                selected[candidate_index] = true;
+                pending.extend(children[candidate_index].iter().copied());
+            }
+            entries.retain(|entry| selected[entry.candidate_index]);
+        }
+    }
+    if schedule.simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(repo, store, schedule.ref_snapshot)?;
+        entries.retain(|entry| {
+            decorated.contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+        });
+    }
+    if let Some(order) = schedule.order {
+        let path_entries = entries
+            .into_iter()
+            .map(|entry| HistoryPathLogEntry {
+                candidate_index: entry.candidate_index,
+                author_timestamp: entry.author_timestamp,
+                committer_timestamp: entry.committer_timestamp,
+            })
+            .collect::<Vec<_>>();
+        entries = reorder_history_path_log_entries(path_entries, selection, order)?
+            .into_iter()
+            .map(|entry| HistoryPathObjectScheduleEntry {
+                candidate_index: entry.candidate_index,
+                author_timestamp: entry.author_timestamp,
+                committer_timestamp: entry.committer_timestamp,
+                matches: true,
+            })
+            .collect();
+    }
+    entries.retain(|entry| entry.matches);
+    if let Some(skip) = schedule.skip {
+        entries = entries.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = schedule.max_count {
+        entries.truncate(max_count);
+    }
+    let candidate_indices = entries
+        .iter()
+        .map(|entry| entry.candidate_index)
+        .collect::<Vec<_>>();
+    let mut boundary_output = Vec::new();
+    if schedule.emits_boundary() {
+        for candidate_index in &candidate_indices {
+            shown_ids.insert(selection.ids[selection.commits[*candidate_index].id_index].clone());
+        }
+        let boundary_ids = collect_rev_list_object_boundary_ids_from_refs(
+            store,
+            candidate_indices.iter().map(|candidate_index| {
+                &selection.ids[selection.commits[*candidate_index].id_index]
+            }),
+            &shown_ids,
+        )?;
+        let mut boundaries = boundary_ids
+            .into_iter()
+            .map(|id| read_rev_list_object_boundary_metadata(store, id))
+            .collect::<Result<Vec<_>>>()?;
+        if let Some(order) = schedule.order
+            && boundaries.len() > 1
+        {
+            boundaries = reorder_rev_list_object_boundary_metadata(boundaries, order)?;
+        }
+        boundary_output = boundaries;
+    }
+    let mut candidate_indices = candidate_indices;
+    if schedule.reverse {
+        candidate_indices.reverse();
+        boundary_output.reverse();
+    }
+    Ok(HistoryPathObjectSelection {
+        candidate_indices,
+        boundary_commits: boundary_output,
+    })
+}
+
+fn history_path_object_tree_indices(
+    selection: &HistoryPathSelection,
+    object_selection: &HistoryPathObjectSelection,
+) -> Vec<usize> {
+    object_selection
+        .candidate_indices
+        .iter()
+        .map(|candidate_index| selection.tree_indices[*candidate_index])
+        .collect()
+}
+
+fn history_path_object_id_refs<'a>(
+    selection: &'a HistoryPathSelection,
+    object_selection: &HistoryPathObjectSelection,
+) -> Vec<&'a ObjectId> {
+    object_selection
+        .candidate_indices
+        .iter()
+        .map(|candidate_index| &selection.ids[selection.commits[*candidate_index].id_index])
+        .collect()
+}
+
+fn reorder_rev_list_object_metadata(
+    commits: Vec<RevListObjectCommitCandidate>,
+    order: HistoryCommitOrder,
+) -> Result<Vec<RevListObjectCommitCandidate>> {
+    let metadata = commits
+        .iter()
+        .enumerate()
+        .map(|(output_index, entry)| {
+            let timestamp = match order {
+                HistoryCommitOrder::AuthorDate => entry.author_timestamp,
+                HistoryCommitOrder::Topo | HistoryCommitOrder::Date => entry.committer_timestamp,
+            }
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "commit has invalid {} timestamp",
+                    if matches!(order, HistoryCommitOrder::AuthorDate) {
+                        "author"
+                    } else {
+                        "committer"
+                    }
+                ),
+            })?;
+            Ok(HistoryOrderMetadataRef {
+                id: &entry.id,
+                parents: &entry.parents,
+                timestamp,
+                original_index: entry.sequence,
+                output_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let ordered_positions = reorder_history_positions(&metadata, order)?;
+    take_owned_by_positions(
+        commits,
+        ordered_positions,
+        "history ordered object commit missing from metadata",
+        "history ordered object commit was emitted twice",
+    )
+}
+
+fn reorder_rev_list_object_boundary_metadata(
+    boundaries: Vec<RevListObjectBoundaryMetadata>,
+    order: HistoryCommitOrder,
+) -> Result<Vec<RevListObjectBoundaryMetadata>> {
+    let empty_parents: &[ObjectId] = &[];
+    let metadata = boundaries
+        .iter()
+        .enumerate()
+        .map(|(output_index, boundary)| {
+            let timestamp = match order {
+                HistoryCommitOrder::AuthorDate => boundary.author_timestamp,
+                HistoryCommitOrder::Topo | HistoryCommitOrder::Date => {
+                    Some(boundary.committer_timestamp)
+                }
+            }
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "commit has invalid {} timestamp",
+                    if matches!(order, HistoryCommitOrder::AuthorDate) {
+                        "author"
+                    } else {
+                        "committer"
+                    }
+                ),
+            })?;
+            Ok(HistoryOrderMetadataRef {
+                id: &boundary.id,
+                parents: empty_parents,
+                timestamp,
+                original_index: output_index,
+                output_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let ordered_positions = reorder_history_positions(&metadata, order)?;
+    take_owned_by_positions(
+        boundaries,
+        ordered_positions,
+        "history ordered boundary missing from metadata",
+        "history ordered boundary was emitted twice",
+    )
+}
+
+fn filter_rev_list_object_metadata_by_ancestry_path(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    commits: Vec<RevListObjectCommitCandidate>,
+) -> Result<Vec<RevListObjectCommitCandidate>> {
+    let bounds = resolve_ancestry_path_bounds(repo, store, revs)?;
+    if bounds.is_empty() {
+        return Ok(commits);
+    }
+    let indices = commits
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (&entry.id, index))
+        .collect::<HashMap<_, _>>();
+    let mut children = vec![Vec::<usize>::new(); commits.len()];
+    for (index, entry) in commits.iter().enumerate() {
+        for parent in &entry.parents {
+            if let Some(&parent_index) = indices.get(parent) {
+                children[parent_index].push(index);
+            }
+        }
+    }
+    let mut selected = vec![false; commits.len()];
+    for bound in bounds {
+        let Some(&bound_index) = indices.get(&bound) else {
+            continue;
+        };
+        let mut pending = vec![bound_index];
+        while let Some(index) = pending.pop() {
+            if selected[index] {
+                continue;
+            }
+            selected[index] = true;
+            pending.extend(children[index].iter().copied());
+        }
+    }
+    Ok(commits
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, entry)| selected[index].then_some(entry))
+        .collect())
 }
 
 fn filter_commits_by_ancestry_path(
@@ -8366,25 +10055,34 @@ fn resolve_ancestry_path_bounds(
 
 fn collect_default_log_decoration_ids(
     repo: &GitRepo,
+    store: &LooseObjectStore,
     ref_snapshot: Option<&RevListRefSnapshot>,
 ) -> Result<HashSet<ObjectId>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = store.algorithm();
+    let head_refs = RefStore::new(&repo.git_dir, algorithm);
+    let refs = RefStore::new(log_repo_common_dir(repo), algorithm);
     let mut decorated = HashSet::new();
-    if let Some(head_id) = ref_snapshot.and_then(|snapshot| snapshot.head_id.clone()) {
-        decorated.insert(head_id);
-    } else if let Ok(head_id) = refs.resolve("HEAD") {
-        decorated.insert(head_id);
+    if let Some(head_id) = ref_snapshot
+        .and_then(|snapshot| snapshot.head_id.clone())
+        .or_else(|| head_refs.resolve("HEAD").ok())
+        && let Some(head_target) = peel_to_commit(store, head_id)?
+    {
+        decorated.insert(head_target);
     }
     if let Some(snapshot) = ref_snapshot {
         for row in &snapshot.refs {
-            if log_decorates_ref_by_default(&row.ref_name) {
-                decorated.insert(row.id.clone());
+            if log_decorates_ref_by_default(&row.ref_name)
+                && let Some(target) = peel_to_commit(store, row.id.clone())?
+            {
+                decorated.insert(target);
             }
         }
     } else {
         refs.for_each_resolved_ref("refs/", |ref_name, id| {
-            if log_decorates_ref_by_default(ref_name) {
-                decorated.insert(id.clone());
+            if log_decorates_ref_by_default(ref_name)
+                && let Some(target) = peel_to_commit(store, id.clone())?
+            {
+                decorated.insert(target);
             }
             Ok::<(), CliError>(())
         })?;
@@ -8444,6 +10142,7 @@ pub(crate) fn log(options: LogOptions<'_>) -> Result<()> {
 
 fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _trace = phase_trace("log.total");
+    validate_history_selection_options(options.raw_args)?;
     let _ = options.count;
     let _accepted_quiet = options.quiet;
     for unsupported in ["--object-names", "--timestamp"] {
@@ -8542,11 +10241,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let date_order = options.date_order || late_options.date_order;
     let author_date_order = options.author_date_order || late_options.author_date_order;
     let zero = options.zero || parsed_zero;
+    let patch_mode = LogPatchMode::from_raw_args(options.raw_args, options.patch, options.no_patch);
     let parsed_log_revs = split_log_revs_and_pickaxe(
         revs,
         options.pickaxe_string,
         options.pickaxe_regex,
-        options.patch,
+        matches!(patch_mode, LogPatchMode::Patch),
         options.pickaxe_regex_mode,
         options.pickaxe_all,
         options.decorate,
@@ -8576,7 +10276,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         });
     }
     let walk_reflogs = options.walk_reflogs;
-    let no_walk = resolve_history_walk_mode(options.raw_args, options.no_walk, options.do_walk);
+    let walk_mode = resolve_history_walk_mode(options.raw_args, options.no_walk, options.do_walk);
+    let no_walk = walk_mode.is_no_walk();
     if !options.grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
@@ -8630,7 +10331,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let skip = resolve_history_skip(options.raw_args, options.skip)?;
     let author_pattern = options.author;
     let committer_pattern = options.committer;
-    let (min_parents, max_parents) = parse_log_parent_bounds(
+    let (min_parents, parsed_max_parents) = parse_log_parent_bounds(
         options.min_parents,
         options.no_min_parents,
         options.no_merges,
@@ -8638,6 +10339,18 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.no_max_parents,
         options.merges,
     )?;
+    let selection = resolve_history_selection_policy(
+        options.right_only,
+        options.cherry,
+        options.cherry_pick,
+        options.cherry_mark,
+        parsed_max_parents,
+    );
+    let right_only = selection.right_only;
+    let cherry = selection.cherry;
+    let cherry_pick = selection.cherry_pick;
+    let cherry_mark = selection.cherry_mark;
+    let max_parents = selection.max_parents;
     let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date);
     let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let encoding = parsed_log_revs.encoding.as_deref().or(options.encoding);
@@ -8645,14 +10358,34 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         log_expand_tabs_enabled(encoding, options.expand_tabs, options.no_expand_tabs);
     let repo = find_repo_or_bare()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
-    let diff_format = options.diff_format(parsed_log_revs.patch);
+    let diff_format = options.diff_format(
+        parsed_log_revs.patch,
+        matches!(patch_mode, LogPatchMode::NoPatch),
+    );
     let merge_diff_mode = options.merge_diff_mode(&repo, diff_format)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
-        .with_transient_packed_object_reads()
-        .with_trusted_packed_object_reads()
-        .with_buffered_pack_reads()
-        .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES)
-        .with_packed_object_read_cache_byte_limit(LOG_PACK_OBJECT_CACHE_BYTES);
+    if options.follow
+        && (diff_format.is_some()
+            || options.diff_required
+            || parsed_log_revs.pickaxe_string.is_some()
+            || parsed_log_revs.pickaxe_regex.is_some()
+            || parsed_log_revs.pickaxe_regex_mode
+            || parsed_log_revs.pickaxe_all
+            || !options.line_ranges.is_empty())
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--follow is not supported with this output mode".into(),
+        });
+    }
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    )
+    .with_transient_packed_object_reads()
+    .with_trusted_packed_object_reads()
+    .with_buffered_pack_reads()
+    .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES)
+    .with_packed_object_read_cache_byte_limit(LOG_PACK_OBJECT_CACHE_BYTES);
     let (mut parsed_revs, implicit_pathspecs) =
         split_log_implicit_pathspecs(&repo, parsed_log_revs.revs.clone());
     let mut parsed_pathspecs = parsed_log_revs.pathspecs.clone();
@@ -8668,13 +10401,18 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         .iter()
         .map(|path| path_arg_to_repo_relative(&repo, Path::new(path)))
         .collect::<Result<Vec<_>>>()?;
+    let mut selector_events = ordered_rev_list_selector_events(options.raw_args);
     let mut requested_revs = if parsed_revs.is_empty() && !options.all && !options.reflog {
         vec!["HEAD".to_owned()]
     } else {
         parsed_revs
     };
     if options.reflog {
-        requested_revs.extend(log_reflog_object_ids(&repo)?);
+        let reflog_ids = log_reflog_object_ids(&repo, store.algorithm())?;
+        requested_revs.extend(reflog_ids.iter().cloned());
+        selector_events.extend(reflog_ids.into_iter().map(RevListSelectorEvent::Revision));
+    } else if !options.all && !rev_list_selector_events_have_positive_selection(&selector_events) {
+        selector_events.push(RevListSelectorEvent::Revision("HEAD".to_owned()));
     }
     let configured_decoration_mode = if parsed_log_revs.decorate.is_none() {
         log_configured_decoration_mode(&repo)?
@@ -8690,33 +10428,64 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 .then_some(LogDecorationMode::Short)
         });
     let ref_snapshot = if options.all
-        || requested_revs.iter().any(|rev| {
-            matches!(
-                rev.as_str(),
-                "--branches" | "--heads" | "--remotes" | "--tags"
-            ) || rev.starts_with("--branches=")
-                || rev.starts_with("--heads=")
-                || rev.starts_with("--remotes=")
-                || rev.starts_with("--tags=")
-        })
+        || selector_events
+            .iter()
+            .any(|event| matches!(event, RevListSelectorEvent::Select(_)))
         || decoration_mode.is_some()
         || options.simplify_by_decoration
     {
-        Some(collect_rev_list_ref_snapshot(&repo)?)
+        Some(collect_rev_list_ref_snapshot(&repo, store.algorithm())?)
     } else {
         None
     };
-    let revs = {
+    let mut revs = {
         let _trace = phase_trace("log.collect_revs");
-        collect_rev_list_revs_with_snapshot(
+        collect_rev_list_revs_with_events(
             &repo,
             &store,
             options.all,
-            requested_revs.clone(),
+            selector_events,
             ref_snapshot.as_ref(),
         )?
     };
+    revs.exclude_first_parent_only = options.exclude_first_parent_only;
     let commit_cache = CommitObjectCache::new(&store);
+    let path_query = HistoryPathQuery::compile(&pathspecs);
+    let follow_policy = options
+        .follow
+        .then(|| {
+            HistoryPathFollowPolicy::for_pathspecs(
+                &pathspecs,
+                if options.reverse {
+                    FollowDirection::Reverse
+                } else {
+                    FollowDirection::Forward
+                },
+            )
+        })
+        .transpose()?;
+    let path_selection = if pathspecs.is_empty() {
+        None
+    } else {
+        let no_additional_exclusions = HashSet::new();
+        Some(collect_history_path_selection(
+            &repo,
+            &store,
+            &revs,
+            &path_query,
+            HistoryPathSelectionPolicy {
+                full_history: options.full_history,
+                sparse: options.sparse,
+                first_parent: options.first_parent,
+                topo_order,
+                rewrite_parents: options.parents,
+                children: options.children,
+                missing_policy: RevListTreeMissingPolicy::default(),
+                additional_excluded: &no_additional_exclusions,
+                follow: follow_policy.as_ref(),
+            },
+        )?)
+    };
     let decorations = LogDecorations::load(
         &repo,
         &store,
@@ -8783,7 +10552,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let simplify_history_topo = options.simplify_merges || options.simplify_by_decoration;
     let history_order_requires_full_collection = matches!(
         history_order,
-        Some(HistoryCommitOrder::Topo | HistoryCommitOrder::AuthorDate)
+        Some(HistoryCommitOrder::Topo | HistoryCommitOrder::Date | HistoryCommitOrder::AuthorDate)
     );
     let post_collection_filters = since.is_some()
         || until.is_some()
@@ -8795,7 +10564,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         || options.ancestry_path
         || options.simplify_by_decoration
         || simplify_history_topo
-        || history_order_requires_full_collection;
+        || history_order_requires_full_collection
+        || !pathspecs.is_empty();
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
     } else {
@@ -8804,6 +10574,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if let LogFormat::Custom { pattern, .. } = &format
         && log_format_supports_metadata_only(pattern)
         && diff_format.is_none()
+        && log_metadata_only_fast_path_allowed(diff_format, merge_diff_mode, patch_mode)
         && !notes_enabled
         && pathspecs.is_empty()
         && !pickaxe_options.enabled()
@@ -8821,10 +10592,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         && !options.first_parent
         && !options.left_right
         && !options.left_only
-        && !options.right_only
-        && !options.cherry
-        && !options.cherry_pick
-        && !options.cherry_mark
+        && !right_only
+        && !cherry
+        && !cherry_pick
+        && !cherry_mark
         && !options.boundary
     {
         let render_plan = LogMetadataRenderPlan::from_pattern(pattern, history_order);
@@ -8860,10 +10631,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                         &commit_hints,
                         render_plan,
                         pattern,
-                        GitHashAlgorithm::Sha1.digest_len() * 2,
+                        full_abbrev_len(store.algorithm()),
                         &decorations,
                         record_terminator,
-                        zero || format.terminates_lines(),
+                        format.emits_record_terminator(zero),
+                        format.separates_records(),
                         &mut out,
                     )?;
                     return Ok(());
@@ -8937,7 +10709,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 if options.reverse {
                     commits.reverse();
                 }
-                let abbrev_len = log_output_abbrev_len(
+                let abbrev_lengths = log_output_abbrev_lengths(
                     &repo,
                     &store,
                     options.no_abbrev_commit,
@@ -8948,15 +10720,22 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 )?;
                 let _render_trace = phase_trace("log.render");
                 for (index, commit) in commits.iter().enumerate() {
+                    let commit_abbrev_len = if uses_abbreviated_ids {
+                        abbrev_lengths.width_for(&commit.id)
+                    } else {
+                        abbrev_lengths.width_for(&commit.id)
+                    };
                     let rendered = render_log_format_author_metadata(
                         pattern,
                         &commit.id,
                         commit,
-                        abbrev_len,
+                        commit_abbrev_len,
                         &decorations,
                     )?;
                     out.write_all(rendered.as_bytes())?;
-                    if zero || format.terminates_lines() || index + 1 < commits.len() {
+                    if format.emits_record_terminator(zero)
+                        || (format.separates_records() && index + 1 < commits.len())
+                    {
                         out.write_all(record_terminator)?;
                     }
                 }
@@ -9030,7 +10809,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 if options.reverse {
                     commits.reverse();
                 }
-                let abbrev_len = log_output_abbrev_len(
+                let abbrev_lengths = log_output_abbrev_lengths(
                     &repo,
                     &store,
                     options.no_abbrev_commit,
@@ -9041,16 +10820,24 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 )?;
                 let _render_trace = phase_trace("log.render");
                 for (index, commit) in commits.iter().enumerate() {
+                    let commit_abbrev_len = if uses_abbreviated_ids {
+                        abbrev_lengths.width_for(&commit.id)
+                    } else {
+                        abbrev_lengths.width_for(&commit.id)
+                    };
                     let rendered = render_log_format_render_metadata(
                         pattern,
                         &commit.id,
                         commit,
-                        abbrev_len,
+                        commit_abbrev_len,
                         &decorations,
                         date_mode,
+                        Some(&abbrev_lengths),
                     )?;
                     out.write_all(rendered.as_bytes())?;
-                    if zero || format.terminates_lines() || index + 1 < commits.len() {
+                    if format.emits_record_terminator(zero)
+                        || (format.separates_records() && index + 1 < commits.len())
+                    {
                         out.write_all(record_terminator)?;
                     }
                 }
@@ -9092,7 +10879,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             if options.reverse {
                 commits.reverse();
             }
-            let abbrev_len = log_output_abbrev_len(
+            let abbrev_lengths = log_output_abbrev_lengths(
                 &repo,
                 &store,
                 options.no_abbrev_commit,
@@ -9103,16 +10890,24 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             )?;
             let _render_trace = phase_trace("log.render");
             for (index, commit) in commits.iter().enumerate() {
+                let commit_abbrev_len = if uses_abbreviated_ids {
+                    abbrev_lengths.width_for(&commit.id)
+                } else {
+                    abbrev_lengths.width_for(&commit.id)
+                };
                 let rendered = render_log_format_metadata(
                     pattern,
                     &commit.id,
                     commit,
-                    abbrev_len,
+                    commit_abbrev_len,
                     &decorations,
                     date_mode,
+                    Some(&abbrev_lengths),
                 )?;
                 out.write_all(rendered.as_bytes())?;
-                if zero || format.terminates_lines() || index + 1 < commits.len() {
+                if format.emits_record_terminator(zero)
+                    || (format.separates_records() && index + 1 < commits.len())
+                {
                     out.write_all(record_terminator)?;
                 }
             }
@@ -9139,10 +10934,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         && !options.first_parent
         && !options.left_right
         && !options.left_only
-        && !options.right_only
-        && !options.cherry
-        && !options.cherry_pick
-        && !options.cherry_mark
+        && !right_only
+        && !cherry
+        && !cherry_pick
+        && !cherry_mark
         && !options.boundary
         && !options.follow
         && !options.graph
@@ -9162,15 +10957,25 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         if options.reverse {
             commits.reverse();
         }
-        let abbrev_len = log_output_abbrev_len(
+        let abbreviated_ids_requested = matches!(format, LogFormat::ShortOneline);
+        let abbrev_ids = commits
+            .iter()
+            .flat_map(|commit| std::iter::once(&commit.id).chain(commit.parents.iter()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let abbrev_lengths = log_output_abbrev_lengths(
             &repo,
             &store,
             options.no_abbrev_commit,
-            matches!(format, LogFormat::ShortOneline),
-            commits
-                .iter()
-                .flat_map(|commit| std::iter::once(&commit.id).chain(commit.parents.iter())),
+            abbreviated_ids_requested,
+            abbrev_ids.iter(),
         )?;
+        let render_abbrev_lengths = implicit_log_abbrev_lengths(
+            &store,
+            &abbrev_lengths,
+            &abbrev_ids,
+            options.no_abbrev_commit,
+        );
         let record_terminator = if zero {
             b"\0".as_slice()
         } else {
@@ -9181,11 +10986,15 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         for commit in &commits {
             match format {
                 LogFormat::ShortOneline => {
+                    let abbrev_len = render_abbrev_lengths.width_for(&commit.id);
                     out.write_all(short_object_id_len(&commit.id, abbrev_len).as_bytes())?;
                     if options.parents {
                         for parent in &commit.parents {
+                            let parent_abbrev_len = render_abbrev_lengths.width_for(parent);
                             out.write_all(b" ")?;
-                            out.write_all(short_object_id_len(parent, abbrev_len).as_bytes())?;
+                            out.write_all(
+                                short_object_id_len(parent, parent_abbrev_len).as_bytes(),
+                            )?;
                         }
                     }
                 }
@@ -9209,6 +11018,45 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         }
         return Ok(());
     }
+    if let Some(path_selection) = path_selection.as_ref() {
+        return render_history_path_log(HistoryPathLogRenderRequest {
+            repo: &repo,
+            store: &store,
+            options: &options,
+            format: &format,
+            decorations: &decorations,
+            notes: &notes,
+            date_mode,
+            expand_tabs,
+            pathspecs: &pathspecs,
+            path_query: &path_query,
+            selection: path_selection,
+            revs: &revs,
+            ref_snapshot: ref_snapshot.as_ref(),
+            history_order,
+            since,
+            until,
+            author_pattern,
+            committer_pattern,
+            min_parents,
+            max_parents,
+            right_only,
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            pickaxe_options,
+            grep_mode,
+            regexp_ignore_case,
+            diff_format,
+            merge_diff_mode,
+            patch_mode,
+            ignore_matching_lines: &ignore_matching_lines,
+            show_root,
+            zero,
+            skip,
+            max_count,
+        });
+    }
     let mut commits = {
         let _trace = phase_trace("log.collect_commits");
         if no_walk && !options.all {
@@ -9219,13 +11067,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 &revs.include,
                 collect_max_count,
             )?
-        } else if options.first_parent && !options.all && revs.exclude.is_empty() {
-            collect_first_parent_commit_objects(
+        } else if options.first_parent {
+            collect_commit_objects_with_exclusions_cached_with_parent_policy(
                 &repo,
                 &store,
                 &commit_cache,
-                &revs.include,
+                &revs,
                 collect_max_count,
+                true,
             )?
         } else {
             collect_commit_objects_with_exclusions_cached(
@@ -9237,6 +11086,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             )?
         }
     };
+    let full_collection_order =
+        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo));
+    let commits_ordered_before_filters = full_collection_order.is_some();
+    if let Some(order) = full_collection_order {
+        commits = reorder_collected_commits(commits, order)?;
+    }
     if let Some(since) = since {
         commits.retain(|entry| {
             signature_timestamp_timezone(&entry.commit.committer)
@@ -9303,17 +11158,15 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
     if options.simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo, ref_snapshot.as_ref())?;
+        let decorated = collect_default_log_decoration_ids(&repo, &store, ref_snapshot.as_ref())?;
         commits.retain(|entry| decorated.contains(&entry.id));
     }
+    let mut boundary_shown_ids = commits
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect::<HashSet<_>>();
     let mut traversal_markers = HashMap::new();
-    if options.left_right
-        || options.left_only
-        || options.right_only
-        || options.cherry
-        || options.cherry_pick
-        || options.cherry_mark
-        || options.boundary
+    if options.left_right || options.left_only || right_only || cherry || cherry_pick || cherry_mark
     {
         let commit_ids = commits
             .iter()
@@ -9322,28 +11175,21 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         let traversal = collect_history_traversal_decoration(
             &repo,
             &store,
-            &commit_cache,
             &revs,
             &commit_ids,
-            options.left_right || options.left_only || options.right_only,
-            options.cherry,
-            options.cherry_pick,
-            options.cherry_mark,
-            options.boundary,
+            options.left_right || options.left_only || (right_only && !cherry),
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            options.first_parent,
         )?;
-        if options.cherry {
-            commits.retain(|entry| traversal.markers.contains_key(&entry.id));
+        boundary_shown_ids.extend(traversal.markers.keys().cloned());
+        boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
+        if cherry {
+            commits.retain(|entry| traversal.right_ids.contains(&entry.id));
         }
-        if options.cherry_pick && !traversal.equivalent_ids.is_empty() {
+        if cherry_pick && !cherry && !traversal.equivalent_ids.is_empty() {
             commits.retain(|entry| !traversal.equivalent_ids.contains(&entry.id));
-        }
-        if options.boundary {
-            for id in &traversal.boundary_ids {
-                commits.push(CollectedCommit {
-                    id: id.clone(),
-                    commit: commit_cache.read_commit(id)?,
-                });
-            }
         }
         traversal_markers = traversal.markers;
     }
@@ -9352,13 +11198,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
         });
     }
-    if options.right_only {
+    if right_only && !cherry {
         commits.retain(|entry| {
             traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Right)
         });
     }
-    if let Some(order) =
-        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+    if !commits_ordered_before_filters
+        && let Some(order) =
+            history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
     {
         commits = reorder_collected_commits(commits, order)?;
     }
@@ -9368,20 +11215,72 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if let Some(max_count) = max_count {
         commits.truncate(max_count);
     }
+    let emit_boundary = options.boundary;
+    let mut boundary_commits = if emit_boundary {
+        let selected_ids = commits
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let boundary_ids =
+            collect_history_boundary_ids(&store, &selected_ids, &boundary_shown_ids)?;
+        for id in &boundary_ids {
+            traversal_markers.insert(id.clone(), HistoryTraversalMarker::Boundary);
+        }
+        boundary_ids
+            .into_iter()
+            .map(|id| {
+                Ok(CollectedCommit {
+                    id: id.clone(),
+                    commit: commit_cache.read_commit(&id)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+    if let Some(order) =
+        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+    {
+        boundary_commits = reorder_collected_commits(boundary_commits, order)?;
+    }
     if options.reverse {
         commits.reverse();
     }
+    if emit_boundary {
+        if options.reverse {
+            boundary_commits.reverse();
+            boundary_commits.extend(commits);
+            commits = boundary_commits;
+        } else {
+            commits.extend(boundary_commits);
+        }
+    }
     let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
-    let abbrev_len = log_output_abbrev_len(
+    let uses_abbreviated_ids = format.uses_abbreviated_object_id()
+        || format.uses_abbreviated_parent_ids()
+        || default_commit_abbrev;
+    let abbrev_ids = commits
+        .iter()
+        .flat_map(|entry| std::iter::once(&entry.id).chain(entry.commit.parents.iter()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let abbrev_lengths = log_output_abbrev_lengths(
         &repo,
         &store,
         options.no_abbrev_commit,
-        format.uses_abbreviated_object_id() || default_commit_abbrev,
-        commits
-            .iter()
-            .flat_map(|entry| std::iter::once(&entry.id).chain(entry.commit.parents.iter())),
+        uses_abbreviated_ids,
+        abbrev_ids.iter(),
     )?;
+    let implicit_abbrev_lengths = implicit_log_abbrev_lengths(
+        &store,
+        &abbrev_lengths,
+        &abbrev_ids,
+        options.no_abbrev_commit,
+    );
+    let render_abbrev_lengths =
+        log_lengths_for_format(&format, &abbrev_lengths, &implicit_abbrev_lengths);
     let terminates_lines = format.terminates_lines();
+    let emits_record_terminator = format.emits_record_terminator(zero);
     let record_terminator = if zero {
         b"\0".as_slice()
     } else {
@@ -9390,20 +11289,36 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let mut out = io::stdout().lock();
     let _render_trace = phase_trace("log.render");
     for (idx, entry) in commits.iter().enumerate() {
-        let commit = entry.commit.as_ref();
-        if commit.parents.len() > 1 && matches!(merge_diff_mode, LogMergeDiffMode::Separate) {
+        let original_commit = entry.commit.as_ref();
+        let commit = original_commit;
+        let commit_abbrev_len = log_commit_abbrev_len(
+            &format,
+            &entry.id,
+            &abbrev_lengths,
+            &implicit_abbrev_lengths,
+        );
+        if original_commit.parents.len() > 1
+            && matches!(merge_diff_mode, LogMergeDiffMode::Separate)
+        {
+            let separate_diff_format = log_commit_diff_format(
+                original_commit,
+                show_root,
+                diff_format,
+                merge_diff_mode,
+                matches!(patch_mode, LogPatchMode::NoPatch),
+            );
             let parent_count = if options.first_parent {
                 1
             } else {
-                commit.parents.len()
+                original_commit.parents.len()
             };
             let mut visible_parent_indexes = Vec::new();
             for parent_index in 0..parent_count {
-                if diff_format.is_some()
+                if separate_diff_format.is_some()
                     && !commit_diff_against_parent_has_entries(
                         &repo,
                         &store,
-                        commit,
+                        original_commit,
                         parent_index,
                         pickaxe_options,
                         &pathspecs,
@@ -9421,7 +11336,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 let from_parent = if options.first_parent {
                     None
                 } else {
-                    commit.parents.get(parent_index)
+                    original_commit.parents.get(parent_index)
                 };
                 let rendered = render_log_with_note_mode(
                     &format,
@@ -9429,7 +11344,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     commit,
                     from_parent,
                     options.parents,
-                    abbrev_len,
+                    commit_abbrev_len,
+                    Some(render_abbrev_lengths),
                     traversal_markers.get(&entry.id).copied(),
                     default_commit_abbrev,
                     expand_tabs,
@@ -9439,22 +11355,24 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     options.standard_notes && !options.show_notes,
                 )?;
                 out.write_all(rendered.as_bytes())?;
-                if let Some(diff_format) = diff_format {
-                    if matches!(
-                        diff_format,
-                        ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
-                    ) {
-                        out.write_all(b"---\n")?;
-                    } else if rendered.ends_with('\n') {
-                        out.write_all(b"\n")?;
-                    } else {
-                        out.write_all(b"\n\n")?;
+                if let Some(diff_format) = separate_diff_format {
+                    if !format.is_empty_user_format() {
+                        if matches!(
+                            diff_format,
+                            ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
+                        ) {
+                            out.write_all(b"---\n")?;
+                        } else if rendered.ends_with('\n') {
+                            out.write_all(b"\n")?;
+                        } else {
+                            out.write_all(b"\n\n")?;
+                        }
                     }
                     drop(out);
                     show_commit_diff_against_parent(
                         &repo,
                         &store,
-                        commit,
+                        original_commit,
                         diff_format,
                         parent_index,
                         pickaxe_options,
@@ -9469,22 +11387,32 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     )?;
                     out = io::stdout().lock();
                 }
-                if zero
-                    || visible_index + 1 < visible_parent_indexes.len()
-                    || idx + 1 < commits.len()
-                {
+                let has_next_record =
+                    visible_index + 1 < visible_parent_indexes.len() || idx + 1 < commits.len();
+                let needs_record_terminator = if separate_diff_format.is_some() {
+                    format.is_empty_user_format() && format.separates_records() && has_next_record
+                } else {
+                    format.emits_record_terminator(zero)
+                        || (format.separates_records() && has_next_record)
+                };
+                if needs_record_terminator {
                     out.write_all(record_terminator)?;
                 }
             }
             continue;
         }
-        let combined_merge_diff = commit.parents.len() > 1
+        let combined_merge_diff = original_commit.parents.len() > 1
             && matches!(
                 merge_diff_mode,
                 LogMergeDiffMode::Combined | LogMergeDiffMode::DenseCombined
             );
-        let commit_diff_format =
-            log_commit_diff_format(commit, show_root, diff_format, merge_diff_mode);
+        let commit_diff_format = log_commit_diff_format(
+            original_commit,
+            show_root,
+            diff_format,
+            merge_diff_mode,
+            matches!(patch_mode, LogPatchMode::NoPatch),
+        );
         if options.diff_required && commit_diff_format.is_none() {
             continue;
         }
@@ -9495,6 +11423,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     show_root,
                     diff_format,
                     merge_diff_mode,
+                    matches!(patch_mode, LogPatchMode::NoPatch),
                 )
                 .is_some()
             })
@@ -9507,7 +11436,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             commit,
             None,
             options.parents,
-            abbrev_len,
+            commit_abbrev_len,
+            Some(render_abbrev_lengths),
             traversal_markers.get(&entry.id).copied(),
             default_commit_abbrev,
             expand_tabs,
@@ -9520,19 +11450,20 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             writeln!(
                 out,
                 "log size {}",
-                log_message_size(commit.message.as_slice())
+                log_message_size(original_commit.message.as_slice())
             )?;
         }
         if options.graph {
             out.write_all(b"* ")?;
         }
         out.write_all(rendered.as_bytes())?;
+        let empty_user_format = format.is_empty_user_format();
         let root_patch_separator =
-            options.root && commit.parents.is_empty() && format.separates_patch();
-        if zero
-            || terminates_lines
-            || next_output
-            || (commit_diff_format.is_some() && !root_patch_separator)
+            options.root && original_commit.parents.is_empty() && format.separates_patch();
+        if !(empty_user_format && commit_diff_format.is_some())
+            && (emits_record_terminator
+                || (format.separates_records() && next_output)
+                || (commit_diff_format.is_some() && !root_patch_separator))
         {
             if !(matches!(
                 commit_diff_format,
@@ -9559,7 +11490,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             show_commit_diff(
                 &repo,
                 &store,
-                commit,
+                original_commit,
                 diff_format,
                 merge_diff_mode,
                 options.dense_combined
@@ -9577,6 +11508,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             )?;
             out = io::stdout().lock();
             if next_output
+                && format.separates_records()
                 && !(terminates_lines
                     && matches!(
                         diff_format,
@@ -9590,7 +11522,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                             | ShowDiffFormat::NameStatus
                     ))
             {
-                out.write_all(b"\n")?;
+                out.write_all(record_terminator)?;
             }
         }
     }
@@ -9674,11 +11606,26 @@ fn log_with_line_ranges(
 
     let commits =
         collect_commit_objects_with_exclusions_cached(repo, store, commit_cache, revs, None)?;
-    let abbrev_len = if options.no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
-    } else {
-        configured_default_abbrev_len(repo, store)?
-    };
+    let abbrev_ids = commits
+        .iter()
+        .flat_map(|entry| std::iter::once(&entry.id).chain(entry.commit.parents.iter()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let abbrev_lengths = log_output_abbrev_lengths(
+        repo,
+        store,
+        options.no_abbrev_commit,
+        true,
+        abbrev_ids.iter(),
+    )?;
+    let implicit_abbrev_lengths = implicit_log_abbrev_lengths(
+        store,
+        &abbrev_lengths,
+        &abbrev_ids,
+        options.no_abbrev_commit,
+    );
+    let render_abbrev_lengths =
+        log_lengths_for_format(format, &abbrev_lengths, &implicit_abbrev_lengths);
     let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
     let mut out = io::stdout().lock();
 
@@ -9716,7 +11663,8 @@ fn log_with_line_ranges(
                 commit,
                 None,
                 false,
-                abbrev_len,
+                log_commit_abbrev_len(format, &entry.id, &abbrev_lengths, &implicit_abbrev_lengths),
+                Some(render_abbrev_lengths),
                 None,
                 default_commit_abbrev,
                 expand_tabs,
@@ -9837,15 +11785,31 @@ fn log_merge_diff_enabled(
     commit.parents.len() > 1 && !matches!(merge_diff_mode, LogMergeDiffMode::Off)
 }
 
+fn log_metadata_only_fast_path_allowed(
+    diff_format: Option<ShowDiffFormat>,
+    merge_diff_mode: LogMergeDiffMode,
+    patch_mode: LogPatchMode,
+) -> bool {
+    diff_format.is_none()
+        && !matches!(merge_diff_mode, LogMergeDiffMode::Separate)
+        && (matches!(patch_mode, LogPatchMode::NoPatch)
+            || !matches!(merge_diff_mode, LogMergeDiffMode::FirstParent))
+}
+
 fn log_commit_diff_format(
     commit: &zmin_git_core::CommitObject,
     root: bool,
     diff_format: Option<ShowDiffFormat>,
     merge_diff_mode: LogMergeDiffMode,
+    patch_suppressed: bool,
 ) -> Option<ShowDiffFormat> {
     let merge_diff_enabled = log_merge_diff_enabled(commit, merge_diff_mode);
     if merge_diff_enabled
-        && matches!(merge_diff_mode, LogMergeDiffMode::FirstParent)
+        && matches!(
+            merge_diff_mode,
+            LogMergeDiffMode::FirstParent | LogMergeDiffMode::Separate
+        )
+        && !patch_suppressed
         && diff_format.is_none()
     {
         return Some(ShowDiffFormat::Patch);
@@ -9872,6 +11836,1012 @@ fn split_log_implicit_pathspecs(repo: &GitRepo, revs: Vec<String>) -> (Vec<Strin
         }
     }
     (parsed_revs, pathspecs)
+}
+
+fn decode_history_path_render_commit(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    rewritten_parent_indices: Option<&[usize]>,
+    ids: &[ObjectId],
+) -> Result<CommitObject> {
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Commit {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "object is not a commit",
+        )));
+    }
+    let mut commit = decode_commit(id.algorithm(), &object.content).map_err(CliError::Io)?;
+    if let Some(parent_indices) = rewritten_parent_indices {
+        commit.parents = parent_indices
+            .iter()
+            .map(|index| ids[*index].clone())
+            .collect();
+    }
+    Ok(commit)
+}
+
+struct HistoryPathLogEntry {
+    candidate_index: usize,
+    author_timestamp: Option<i64>,
+    committer_timestamp: i64,
+}
+
+struct HistoryPathLogReadyEntry {
+    entry_index: usize,
+    timestamp: i64,
+    original_index: usize,
+}
+
+impl PartialEq for HistoryPathLogReadyEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry_index == other.entry_index
+            && self.timestamp == other.timestamp
+            && self.original_index == other.original_index
+    }
+}
+
+impl Eq for HistoryPathLogReadyEntry {}
+
+impl PartialOrd for HistoryPathLogReadyEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HistoryPathLogReadyEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.timestamp
+            .cmp(&other.timestamp)
+            .then_with(|| other.original_index.cmp(&self.original_index))
+            .then_with(|| other.entry_index.cmp(&self.entry_index))
+    }
+}
+
+struct HistoryPathLogOutputEntry {
+    id: ObjectId,
+    candidate_index: Option<usize>,
+    marker: Option<HistoryTraversalMarker>,
+}
+
+fn history_path_traversal_parent_indices<'a>(
+    selection: &'a HistoryPathSelection,
+    candidate_index: usize,
+) -> Result<&'a [usize]> {
+    let parents = selection
+        .parent_indices
+        .get(candidate_index)
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "path history parent metadata missing".into(),
+        })?;
+    let traversal_count = selection
+        .parent_treesame
+        .get(candidate_index)
+        .map_or(parents.len(), Vec::len)
+        .min(parents.len());
+    Ok(&parents[..traversal_count])
+}
+
+fn history_path_follow_candidate_rank(
+    selection: &HistoryPathSelection,
+    candidate_index: usize,
+) -> usize {
+    let Some(ranks) = selection.follow_candidate_rank.as_ref() else {
+        return candidate_index;
+    };
+    let Some(candidate) = selection.commits.get(candidate_index) else {
+        return candidate_index;
+    };
+    let Some(original_candidate_index) = selection
+        .all_candidate_indices_by_id
+        .get(candidate.id_index)
+        .copied()
+    else {
+        return candidate_index;
+    };
+    ranks
+        .get(original_candidate_index)
+        .copied()
+        .filter(|rank| *rank != usize::MAX)
+        .unwrap_or(candidate_index)
+}
+
+fn reorder_history_path_log_entries(
+    entries: Vec<HistoryPathLogEntry>,
+    selection: &HistoryPathSelection,
+    order: HistoryCommitOrder,
+) -> Result<Vec<HistoryPathLogEntry>> {
+    if entries.len() < 2 {
+        return Ok(entries);
+    }
+    let mut candidate_to_entry = vec![usize::MAX; selection.commits.len()];
+    for (entry_index, entry) in entries.iter().enumerate() {
+        candidate_to_entry[entry.candidate_index] = entry_index;
+    }
+    let mut id_to_candidate = vec![usize::MAX; selection.ids.len()];
+    for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+        id_to_candidate[candidate.id_index] = candidate_index;
+    }
+    let mut remaining_children = vec![0usize; entries.len()];
+    for entry in &entries {
+        let parent_indexes =
+            history_path_traversal_parent_indices(selection, entry.candidate_index)?;
+        for parent_id_index in parent_indexes {
+            let Some(&parent_candidate_index) = id_to_candidate.get(*parent_id_index) else {
+                continue;
+            };
+            if parent_candidate_index == usize::MAX {
+                continue;
+            }
+            let parent_entry_index = candidate_to_entry[parent_candidate_index];
+            if parent_entry_index != usize::MAX {
+                remaining_children[parent_entry_index] += 1;
+            }
+        }
+    }
+    let mut ordered_positions = Vec::with_capacity(entries.len());
+    let mut emitted = vec![false; entries.len()];
+    if matches!(order, HistoryCommitOrder::Topo) {
+        let mut roots = entries
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| remaining_children[*index] == 0)
+            .map(|(index, entry)| (index, entry))
+            .collect::<Vec<_>>();
+        roots.sort_by(|(_, left), (_, right)| {
+            let left_rank = history_path_follow_candidate_rank(selection, left.candidate_index);
+            let right_rank = history_path_follow_candidate_rank(selection, right.candidate_index);
+            if selection.follow_candidate_rank.is_some() {
+                right_rank.cmp(&left_rank)
+            } else {
+                left_rank.cmp(&right_rank)
+            }
+        });
+        for (root_index, _) in roots {
+            let mut ready = vec![root_index];
+            while let Some(entry_index) = ready.pop() {
+                if emitted[entry_index] {
+                    continue;
+                }
+                emitted[entry_index] = true;
+                ordered_positions.push(entry_index);
+                let candidate_index = entries[entry_index].candidate_index;
+                let parent_indexes =
+                    history_path_traversal_parent_indices(selection, candidate_index)?.to_vec();
+                for parent_id_index in parent_indexes {
+                    let parent_candidate_index = id_to_candidate[parent_id_index];
+                    if parent_candidate_index == usize::MAX {
+                        continue;
+                    }
+                    let parent_entry_index = candidate_to_entry[parent_candidate_index];
+                    if parent_entry_index == usize::MAX {
+                        continue;
+                    }
+                    remaining_children[parent_entry_index] -= 1;
+                    if remaining_children[parent_entry_index] == 0 {
+                        ready.push(parent_entry_index);
+                    }
+                }
+            }
+        }
+    } else {
+        let mut ready = std::collections::BinaryHeap::new();
+        for (entry_index, entry) in entries.iter().enumerate() {
+            if remaining_children[entry_index] == 0 {
+                let timestamp = if matches!(order, HistoryCommitOrder::AuthorDate) {
+                    entry.author_timestamp
+                } else {
+                    Some(entry.committer_timestamp)
+                }
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "history ordering encountered an invalid commit timestamp".into(),
+                })?;
+                ready.push(HistoryPathLogReadyEntry {
+                    entry_index,
+                    timestamp,
+                    original_index: entry.candidate_index,
+                });
+            }
+        }
+        while let Some(next) = ready.pop() {
+            if emitted[next.entry_index] {
+                continue;
+            }
+            emitted[next.entry_index] = true;
+            ordered_positions.push(next.entry_index);
+            let candidate_index = entries[next.entry_index].candidate_index;
+            let parent_indexes =
+                history_path_traversal_parent_indices(selection, candidate_index)?.to_vec();
+            for parent_id_index in parent_indexes {
+                let parent_candidate_index = id_to_candidate[parent_id_index];
+                if parent_candidate_index == usize::MAX {
+                    continue;
+                }
+                let parent_entry_index = candidate_to_entry[parent_candidate_index];
+                if parent_entry_index == usize::MAX {
+                    continue;
+                }
+                remaining_children[parent_entry_index] -= 1;
+                if remaining_children[parent_entry_index] == 0 {
+                    let parent = &entries[parent_entry_index];
+                    let timestamp = if matches!(order, HistoryCommitOrder::AuthorDate) {
+                        parent.author_timestamp
+                    } else {
+                        Some(parent.committer_timestamp)
+                    }
+                    .ok_or_else(|| CliError::Fatal {
+                        code: 128,
+                        message: "history ordering encountered an invalid commit timestamp".into(),
+                    })?;
+                    ready.push(HistoryPathLogReadyEntry {
+                        entry_index: parent_entry_index,
+                        timestamp,
+                        original_index: parent.candidate_index,
+                    });
+                }
+            }
+        }
+    }
+    if ordered_positions.len() != entries.len() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "path history ordering failed to visit every selected commit".into(),
+        });
+    }
+    take_owned_by_positions(
+        entries,
+        ordered_positions,
+        "path history ordered commit metadata missing",
+        "path history ordered commit was emitted twice",
+    )
+}
+
+fn reorder_history_path_selection_ids(
+    store: &LooseObjectStore,
+    selection: &HistoryPathSelection,
+    order: HistoryCommitOrder,
+) -> Result<Vec<ObjectId>> {
+    let entries = selection
+        .commits
+        .iter()
+        .enumerate()
+        .map(|(candidate_index, candidate)| {
+            let metadata = read_commit_metadata(store, &selection.ids[candidate.id_index])?;
+            let author_timestamp = signature_timestamp(&metadata.author);
+            let committer_timestamp =
+                signature_timestamp(&metadata.committer).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "history ordering encountered an invalid commit timestamp".into(),
+                })?;
+            Ok(HistoryPathLogEntry {
+                candidate_index,
+                author_timestamp,
+                committer_timestamp,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reorder_history_path_log_entries(entries, selection, order).map(|entries| {
+        entries
+            .into_iter()
+            .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+            .collect()
+    })
+}
+
+fn history_path_candidate_index_by_id(
+    selection: &HistoryPathSelection,
+) -> HashMap<ObjectId, usize> {
+    selection
+        .commits
+        .iter()
+        .enumerate()
+        .map(|(candidate_index, candidate)| {
+            (selection.ids[candidate.id_index].clone(), candidate_index)
+        })
+        .collect()
+}
+
+fn history_path_tree_indices_for_commits(
+    selection: &HistoryPathSelection,
+    candidate_index_by_id: &HashMap<ObjectId, usize>,
+    commits: &[CollectedCommitTree],
+) -> Vec<usize> {
+    commits
+        .iter()
+        .filter(|commit| !commit.is_boundary)
+        .filter_map(|commit| candidate_index_by_id.get(&commit.id).copied())
+        .map(|candidate_index| selection.tree_indices[candidate_index])
+        .collect()
+}
+
+fn filter_history_path_rev_list_ids(
+    store: &LooseObjectStore,
+    selection: &HistoryPathSelection,
+    candidate_index_by_id: &HashMap<ObjectId, usize>,
+    commit_ids: Vec<ObjectId>,
+    since: Option<i64>,
+    until: Option<i64>,
+    author_pattern: Option<&str>,
+    committer_pattern: Option<&str>,
+    grep: &[String],
+    all_match: bool,
+    invert_grep: bool,
+    regexp_ignore_case: bool,
+    grep_mode: ShortlogPatternMode,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    let mut filtered = Vec::with_capacity(commit_ids.len());
+    for id in commit_ids {
+        let Some(&candidate_index) = candidate_index_by_id.get(&id) else {
+            filtered.push(id);
+            continue;
+        };
+        let metadata = read_commit_metadata(store, &id)?;
+        let committer_timestamp = signature_timestamp(&metadata.committer);
+        if since.is_some_and(|value| committer_timestamp.is_none_or(|timestamp| timestamp <= value))
+            || until
+                .is_some_and(|value| committer_timestamp.is_none_or(|timestamp| timestamp >= value))
+        {
+            continue;
+        }
+        if author_pattern.is_some_and(|pattern| {
+            !log_signature_matches_pattern(&metadata.author, pattern, regexp_ignore_case, grep_mode)
+        }) || committer_pattern.is_some_and(|pattern| {
+            !log_signature_matches_pattern(
+                &metadata.committer,
+                pattern,
+                regexp_ignore_case,
+                grep_mode,
+            )
+        }) {
+            continue;
+        }
+        let parent_count = selection
+            .parent_indices
+            .get(candidate_index)
+            .map_or(0, Vec::len);
+        if !log_parent_count_matches_bounds(parent_count, min_parents, max_parents) {
+            continue;
+        }
+        if !grep.is_empty() {
+            let object = store.read_object(&id)?;
+            let commit = decode_commit(id.algorithm(), &object.content).map_err(CliError::Io)?;
+            if !shortlog_commit_matches_grep(
+                &commit.message,
+                grep,
+                all_match,
+                invert_grep,
+                regexp_ignore_case,
+                grep_mode,
+            )? {
+                continue;
+            }
+        }
+        filtered.push(id);
+    }
+    Ok(filtered)
+}
+
+struct HistoryPathLogRenderRequest<'a> {
+    repo: &'a GitRepo,
+    store: &'a LooseObjectStore,
+    options: &'a LogOptions<'a>,
+    format: &'a LogFormat<'a>,
+    decorations: &'a LogDecorations,
+    notes: &'a LogNotes,
+    date_mode: LogDateMode<'a>,
+    expand_tabs: bool,
+    pathspecs: &'a [Vec<u8>],
+    path_query: &'a HistoryPathQuery,
+    selection: &'a HistoryPathSelection,
+    revs: &'a RevListRevs,
+    ref_snapshot: Option<&'a RevListRefSnapshot>,
+    history_order: Option<HistoryCommitOrder>,
+    since: Option<i64>,
+    until: Option<i64>,
+    author_pattern: Option<&'a str>,
+    committer_pattern: Option<&'a str>,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+    right_only: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    pickaxe_options: PickaxeOptions<'a>,
+    grep_mode: ShortlogPatternMode,
+    regexp_ignore_case: bool,
+    diff_format: Option<ShowDiffFormat>,
+    merge_diff_mode: LogMergeDiffMode,
+    patch_mode: LogPatchMode,
+    ignore_matching_lines: &'a [Regex],
+    show_root: bool,
+    zero: bool,
+    skip: Option<usize>,
+    max_count: Option<usize>,
+}
+
+fn history_path_output_parent_ids(
+    output: &HistoryPathLogOutputEntry,
+    selection: &HistoryPathSelection,
+    store: &LooseObjectStore,
+) -> Result<Vec<ObjectId>> {
+    if let Some(candidate_index) = output.candidate_index {
+        return selection
+            .rewritten_parent_indices
+            .get(candidate_index)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "path history rewritten parent metadata missing".into(),
+            })
+            .map(|parents| {
+                parents
+                    .iter()
+                    .map(|index| selection.ids[*index].clone())
+                    .collect()
+            });
+    }
+    read_commit_parents_uncached(store, &output.id)
+}
+
+fn reorder_history_path_boundary_ids(
+    store: &LooseObjectStore,
+    ids: Vec<ObjectId>,
+    order: Option<HistoryCommitOrder>,
+) -> Result<Vec<ObjectId>> {
+    let Some(order) = order else {
+        return Ok(ids);
+    };
+    let metadata = ids
+        .iter()
+        .enumerate()
+        .map(|(original_index, id)| {
+            let commit = read_commit_metadata(store, id)?;
+            let timestamp = match order {
+                HistoryCommitOrder::AuthorDate => signature_timestamp(&commit.author),
+                HistoryCommitOrder::Topo | HistoryCommitOrder::Date => {
+                    signature_timestamp(&commit.committer)
+                }
+            }
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "history ordering encountered an invalid commit timestamp".into(),
+            })?;
+            Ok(HistoryOrderMetadata {
+                id: id.clone(),
+                parents: commit.parents,
+                timestamp,
+                original_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reorder_history_from_metadata(metadata, order)
+}
+
+fn render_history_path_log(request: HistoryPathLogRenderRequest<'_>) -> Result<()> {
+    let HistoryPathLogRenderRequest {
+        repo,
+        store,
+        options,
+        format,
+        decorations,
+        notes,
+        date_mode,
+        expand_tabs,
+        pathspecs,
+        path_query,
+        selection,
+        revs,
+        ref_snapshot,
+        history_order,
+        since,
+        until,
+        author_pattern,
+        committer_pattern,
+        min_parents,
+        max_parents,
+        right_only,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        pickaxe_options,
+        grep_mode,
+        regexp_ignore_case,
+        diff_format,
+        merge_diff_mode,
+        patch_mode,
+        ignore_matching_lines,
+        show_root,
+        zero,
+        skip,
+        max_count,
+    } = request;
+
+    let ancestry_bounds = if options.ancestry_path {
+        Some(resolve_ancestry_path_bounds(repo, store, revs)?)
+    } else {
+        None
+    };
+    let mut entries = Vec::with_capacity(selection.commits.len());
+    for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+        let id = &selection.ids[candidate.id_index];
+        let metadata = read_commit_metadata(store, id)?;
+        let author_timestamp = signature_timestamp(&metadata.author);
+        let committer_timestamp =
+            signature_timestamp(&metadata.committer).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("commit {} has invalid committer timestamp", id.to_hex()),
+            })?;
+        let parent_count = selection
+            .parent_indices
+            .get(candidate_index)
+            .map_or(0, Vec::len);
+        if since.is_some_and(|value| committer_timestamp <= value)
+            || until.is_some_and(|value| committer_timestamp >= value)
+            || !log_parent_count_matches_bounds(parent_count, min_parents, max_parents)
+            || author_pattern.is_some_and(|pattern| {
+                !log_signature_matches_pattern(
+                    &metadata.author,
+                    pattern,
+                    regexp_ignore_case,
+                    grep_mode,
+                )
+            })
+            || committer_pattern.is_some_and(|pattern| {
+                !log_signature_matches_pattern(
+                    &metadata.committer,
+                    pattern,
+                    regexp_ignore_case,
+                    grep_mode,
+                )
+            })
+        {
+            continue;
+        }
+        if !options.grep.is_empty() {
+            let object = store.read_object(id)?;
+            let commit = decode_commit(id.algorithm(), &object.content).map_err(CliError::Io)?;
+            if !shortlog_commit_matches_grep(
+                &commit.message,
+                &options.grep,
+                options.all_match,
+                options.invert_grep,
+                regexp_ignore_case,
+                grep_mode,
+            )? {
+                continue;
+            }
+        }
+        if pickaxe_options.enabled() {
+            let tree = read_commit_tree_uncached(store, id)?;
+            if !history_path_commit_matches_pickaxe(
+                store,
+                path_query,
+                &tree,
+                &metadata.parents,
+                merge_diff_mode,
+                pickaxe_options,
+                options.first_parent,
+            )? {
+                continue;
+            }
+        }
+        if let Some(bounds) = ancestry_bounds.as_ref() {
+            if !bounds
+                .iter()
+                .any(|bound| is_ancestor_commit_uncached(store, bound, id).unwrap_or(false))
+            {
+                continue;
+            }
+        }
+        entries.push(HistoryPathLogEntry {
+            candidate_index,
+            author_timestamp,
+            committer_timestamp,
+        });
+    }
+
+    if options.simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(repo, store, ref_snapshot)?;
+        entries.retain(|entry| {
+            decorated.contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+        });
+    }
+
+    let mut traversal_markers = HashMap::new();
+    let mut boundary_shown_ids = entries
+        .iter()
+        .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+        .collect::<HashSet<_>>();
+    if options.left_right || options.left_only || right_only || cherry || cherry_pick || cherry_mark
+    {
+        let commit_ids = entries
+            .iter()
+            .map(|entry| selection.ids[selection.commits[entry.candidate_index].id_index].clone())
+            .collect::<Vec<_>>();
+        let traversal = collect_history_traversal_decoration(
+            repo,
+            store,
+            revs,
+            &commit_ids,
+            options.left_right || options.left_only || (right_only && !cherry),
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            options.first_parent,
+        )?;
+        boundary_shown_ids.extend(traversal.markers.keys().cloned());
+        boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
+        if cherry {
+            entries.retain(|entry| {
+                traversal
+                    .right_ids
+                    .contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+            });
+        }
+        if cherry_pick && !cherry && !traversal.equivalent_ids.is_empty() {
+            entries.retain(|entry| {
+                !traversal
+                    .equivalent_ids
+                    .contains(&selection.ids[selection.commits[entry.candidate_index].id_index])
+            });
+        }
+        if options.left_only {
+            entries.retain(|entry| {
+                traversal
+                    .markers
+                    .get(&selection.ids[selection.commits[entry.candidate_index].id_index])
+                    == Some(&HistoryTraversalMarker::Left)
+            });
+        }
+        if right_only && !cherry {
+            entries.retain(|entry| {
+                traversal
+                    .markers
+                    .get(&selection.ids[selection.commits[entry.candidate_index].id_index])
+                    == Some(&HistoryTraversalMarker::Right)
+            });
+        }
+        traversal_markers = traversal.markers;
+    }
+    if let Some(order) = history_order {
+        entries = reorder_history_path_log_entries(entries, selection, order)?;
+    }
+    if let Some(skip) = skip {
+        entries = entries.into_iter().skip(skip).collect();
+    }
+    if let Some(max_count) = max_count {
+        entries.truncate(max_count);
+    }
+
+    let mut outputs = entries
+        .into_iter()
+        .map(|entry| {
+            let id = selection.ids[selection.commits[entry.candidate_index].id_index].clone();
+            let marker = traversal_markers.get(&id).copied();
+            HistoryPathLogOutputEntry {
+                id,
+                candidate_index: Some(entry.candidate_index),
+                marker,
+            }
+        })
+        .collect::<Vec<_>>();
+    if options.boundary {
+        let selected_ids = outputs
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let boundary_ids = collect_history_boundary_ids(store, &selected_ids, &boundary_shown_ids)?;
+        let boundary_ids = reorder_history_path_boundary_ids(store, boundary_ids, history_order)?;
+        for id in &boundary_ids {
+            traversal_markers.insert(id.clone(), HistoryTraversalMarker::Boundary);
+        }
+        let mut boundaries = boundary_ids
+            .into_iter()
+            .map(|id| HistoryPathLogOutputEntry {
+                id,
+                candidate_index: None,
+                marker: Some(HistoryTraversalMarker::Boundary),
+            })
+            .collect::<Vec<_>>();
+        if options.reverse {
+            outputs.reverse();
+            boundaries.reverse();
+            boundaries.extend(outputs);
+            outputs = boundaries;
+        } else {
+            outputs.extend(boundaries);
+        }
+    } else if options.reverse {
+        outputs.reverse();
+    }
+
+    let mut abbrev_ids = Vec::new();
+    for output in &outputs {
+        let parents = history_path_output_parent_ids(output, selection, store)?;
+        abbrev_ids.push(output.id.clone());
+        abbrev_ids.extend(parents.iter().cloned());
+    }
+    let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
+    let uses_abbreviated_ids = format.uses_abbreviated_object_id()
+        || format.uses_abbreviated_parent_ids()
+        || default_commit_abbrev;
+    let abbrev_lengths = log_output_abbrev_lengths(
+        repo,
+        store,
+        options.no_abbrev_commit,
+        uses_abbreviated_ids,
+        abbrev_ids.iter(),
+    )?;
+    let implicit_abbrev_lengths = implicit_log_abbrev_lengths(
+        store,
+        &abbrev_lengths,
+        &abbrev_ids,
+        options.no_abbrev_commit,
+    );
+    let render_abbrev_lengths =
+        log_lengths_for_format(format, &abbrev_lengths, &implicit_abbrev_lengths);
+    let terminates_lines = format.terminates_lines();
+    let emits_record_terminator = format.emits_record_terminator(zero);
+    let record_terminator = if zero { b"\0" } else { b"\n" };
+    let mut out = io::stdout().lock();
+    for (index, output) in outputs.iter().enumerate() {
+        let rewritten_parent_indices = output
+            .candidate_index
+            .and_then(|candidate_index| selection.rewritten_parent_indices.get(candidate_index));
+        let mut commit = decode_history_path_render_commit(
+            store,
+            &output.id,
+            rewritten_parent_indices.map(|parents| parents.as_slice()),
+            &selection.ids,
+        )?;
+        let output_parents = commit.parents.clone();
+        let original_parents = if let Some(candidate_index) = output.candidate_index {
+            selection
+                .parent_indices
+                .get(candidate_index)
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "path history parent metadata missing".into(),
+                })?
+                .iter()
+                .map(|index| selection.ids[*index].clone())
+                .collect::<Vec<_>>()
+        } else {
+            commit.parents.clone()
+        };
+        let original_parent_count = original_parents.len();
+        let commit_abbrev_len = log_commit_abbrev_len(
+            format,
+            &output.id,
+            &abbrev_lengths,
+            &implicit_abbrev_lengths,
+        );
+        commit.parents = original_parents.clone();
+        let separate_diff_format =
+            if original_parent_count > 1 && matches!(merge_diff_mode, LogMergeDiffMode::Separate) {
+                log_commit_diff_format(
+                    &commit,
+                    show_root,
+                    diff_format,
+                    merge_diff_mode,
+                    matches!(patch_mode, LogPatchMode::NoPatch),
+                )
+            } else {
+                None
+            };
+        commit.parents = output_parents.clone();
+        if let Some(separate_diff_format) = separate_diff_format {
+            let parent_count = if options.first_parent {
+                1
+            } else {
+                original_parent_count
+            };
+            let mut visible_parent_indexes = Vec::new();
+            for parent_index in 0..parent_count {
+                let path_changed = output
+                    .candidate_index
+                    .and_then(|candidate_index| selection.parent_treesame.get(candidate_index))
+                    .and_then(|same| same.get(parent_index))
+                    .is_none_or(|same| !same);
+                if !path_changed {
+                    continue;
+                }
+                if pickaxe_options.enabled() && {
+                    commit.parents = original_parents.clone();
+                    let matches = history_path_commit_matches_pickaxe(
+                        store,
+                        path_query,
+                        &commit.tree,
+                        &original_parents,
+                        merge_diff_mode,
+                        pickaxe_options,
+                        options.first_parent,
+                    )?;
+                    commit.parents = output_parents.clone();
+                    !matches
+                } {
+                    continue;
+                }
+                visible_parent_indexes.push(parent_index);
+            }
+            for (visible_index, parent_index) in visible_parent_indexes.iter().copied().enumerate()
+            {
+                let from_parent = if options.first_parent {
+                    None
+                } else {
+                    original_parents.get(parent_index)
+                };
+                let rendered = render_log_with_note_mode(
+                    format,
+                    &output.id,
+                    &commit,
+                    from_parent,
+                    options.parents,
+                    commit_abbrev_len,
+                    Some(render_abbrev_lengths),
+                    output.marker,
+                    default_commit_abbrev,
+                    expand_tabs,
+                    decorations,
+                    notes,
+                    date_mode,
+                    options.standard_notes && !options.show_notes,
+                )?;
+                if options.graph {
+                    out.write_all(b"* ")?;
+                }
+                out.write_all(rendered.as_bytes())?;
+                commit.parents = original_parents.clone();
+                if !format.is_empty_user_format() {
+                    if matches!(
+                        separate_diff_format,
+                        ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
+                    ) {
+                        out.write_all(b"---\n")?;
+                    } else if rendered.ends_with('\n') {
+                        out.write_all(b"\n")?;
+                    } else {
+                        out.write_all(b"\n\n")?;
+                    }
+                }
+                drop(out);
+                show_commit_diff_against_parent(
+                    repo,
+                    store,
+                    &commit,
+                    separate_diff_format,
+                    parent_index,
+                    pickaxe_options,
+                    ignore_matching_lines,
+                    pathspecs,
+                    None,
+                    None,
+                    zero,
+                    None,
+                    None,
+                    false,
+                )?;
+                out = io::stdout().lock();
+                let has_next =
+                    visible_index + 1 < visible_parent_indexes.len() || index + 1 < outputs.len();
+                if format.is_empty_user_format() && format.separates_records() && has_next
+                    || !format.is_empty_user_format()
+                        && (format.emits_record_terminator(zero)
+                            || (format.separates_records() && has_next))
+                {
+                    out.write_all(record_terminator)?;
+                }
+            }
+            continue;
+        }
+        commit.parents = original_parents.clone();
+        let commit_diff_format = log_commit_diff_format(
+            &commit,
+            show_root,
+            diff_format,
+            merge_diff_mode,
+            matches!(patch_mode, LogPatchMode::NoPatch),
+        );
+        commit.parents = output_parents;
+        let rendered = render_log_with_note_mode(
+            format,
+            &output.id,
+            &commit,
+            None,
+            options.parents,
+            commit_abbrev_len,
+            Some(render_abbrev_lengths),
+            output.marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            date_mode,
+            options.standard_notes && !options.show_notes,
+        )?;
+        if options.log_size {
+            writeln!(out, "log size {}", log_message_size(&commit.message))?;
+        }
+        if options.graph {
+            out.write_all(b"* ")?;
+        }
+        out.write_all(rendered.as_bytes())?;
+        let root_patch_separator =
+            show_root && original_parent_count == 0 && format.separates_patch();
+        if !(format.is_empty_user_format() && commit_diff_format.is_some())
+            && (emits_record_terminator
+                || (format.separates_records() && index + 1 < outputs.len())
+                || (commit_diff_format.is_some() && !root_patch_separator))
+        {
+            out.write_all(record_terminator)?;
+            if commit_diff_format.is_some() && terminates_lines && format.separates_patch() {
+                out.write_all(b"\n")?;
+            }
+        }
+        if let Some(diff_format) = commit_diff_format {
+            commit.parents = original_parents;
+            if matches!(
+                diff_format,
+                ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
+            ) {
+                out.write_all(b"---\n")?;
+            } else if root_patch_separator {
+                out.write_all(b"\n")?;
+            }
+            drop(out);
+            show_commit_diff(
+                repo,
+                store,
+                &commit,
+                diff_format,
+                merge_diff_mode,
+                options.dense_combined
+                    || matches!(merge_diff_mode, LogMergeDiffMode::DenseCombined),
+                show_root,
+                pickaxe_options,
+                ignore_matching_lines,
+                pathspecs,
+                None,
+                None,
+                zero,
+                None,
+                None,
+                false,
+            )?;
+            out = io::stdout().lock();
+            if index + 1 < outputs.len()
+                && format.separates_records()
+                && !(terminates_lines
+                    && matches!(
+                        diff_format,
+                        ShowDiffFormat::Raw
+                            | ShowDiffFormat::Stat
+                            | ShowDiffFormat::StatSummary
+                            | ShowDiffFormat::Numstat
+                            | ShowDiffFormat::Shortstat
+                            | ShowDiffFormat::Summary
+                            | ShowDiffFormat::NameOnly
+                            | ShowDiffFormat::NameStatus
+                    ))
+            {
+                out.write_all(record_terminator)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn history_pathspecs_after_separator(repo: &GitRepo, raw_args: &[String]) -> Result<Vec<Vec<u8>>> {
+    let Some(separator) = raw_args.iter().position(|arg| arg == "--") else {
+        return Ok(Vec::new());
+    };
+    raw_args[separator + 1..]
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, Path::new(path)))
+        .collect()
 }
 
 struct LateLogRevOptions {
@@ -10240,6 +13210,108 @@ fn log_commit_matches_pickaxe(
     commit_diff_against_optional_parent_matches_pickaxe(repo, store, commit, None, pickaxe_options)
 }
 
+fn history_path_commit_matches_pickaxe(
+    store: &LooseObjectStore,
+    query: &HistoryPathQuery,
+    tree: &ObjectId,
+    parents: &[ObjectId],
+    merge_diff_mode: LogMergeDiffMode,
+    pickaxe_options: PickaxeOptions<'_>,
+    first_parent: bool,
+) -> Result<bool> {
+    let parent_count = if parents.len() > 1 && matches!(merge_diff_mode, LogMergeDiffMode::Separate)
+    {
+        parents
+            .len()
+            .min(if first_parent { 1 } else { parents.len() })
+    } else {
+        parents.len().min(1)
+    };
+    if parent_count == 0 {
+        return history_path_tree_pair_matches_pickaxe(
+            store,
+            query,
+            None,
+            Some(tree),
+            pickaxe_options,
+        );
+    }
+    for parent in parents.iter().take(parent_count) {
+        let parent_tree = read_commit_tree_uncached(store, parent)?;
+        if history_path_tree_pair_matches_pickaxe(
+            store,
+            query,
+            Some(&parent_tree),
+            Some(tree),
+            pickaxe_options,
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn history_path_tree_pair_matches_pickaxe(
+    store: &LooseObjectStore,
+    query: &HistoryPathQuery,
+    old_tree: Option<&ObjectId>,
+    new_tree: Option<&ObjectId>,
+    pickaxe_options: PickaxeOptions<'_>,
+) -> Result<bool> {
+    let string_regex = pickaxe_options
+        .string
+        .filter(|_| pickaxe_options.regex_mode)
+        .map(Regex::new)
+        .transpose()
+        .map_err(|error| CliError::Fatal {
+            code: 129,
+            message: format!("invalid pickaxe regex: {error}"),
+        })?;
+    let line_regex = pickaxe_options
+        .regex
+        .map(Regex::new)
+        .transpose()
+        .map_err(|error| CliError::Fatal {
+            code: 129,
+            message: format!("invalid -G regex: {error}"),
+        })?;
+    history_visit_changed_blobs(store, query, old_tree, new_tree, |_, old, new| {
+        let old_content = old
+            .filter(|(mode, _)| *mode != TreeMode::Gitlink)
+            .map(|(_, id)| read_history_pickaxe_blob(store, id))
+            .transpose()?
+            .unwrap_or_default();
+        let new_content = new
+            .filter(|(mode, _)| *mode != TreeMode::Gitlink)
+            .map(|(_, id)| read_history_pickaxe_blob(store, id))
+            .transpose()?
+            .unwrap_or_default();
+        let string_match = if let Some(regex) = string_regex.as_ref() {
+            regex.find_iter(&old_content).count() != regex.find_iter(&new_content).count()
+        } else if let Some(needle) = pickaxe_options.string {
+            count_bytes_occurrences(&old_content, needle.as_bytes())
+                != count_bytes_occurrences(&new_content, needle.as_bytes())
+        } else {
+            false
+        };
+        let regex_match = line_regex
+            .as_ref()
+            .is_some_and(|regex| changed_line_matches(&old_content, &new_content, regex));
+        Ok(string_match || regex_match)
+    })
+}
+
+fn read_history_pickaxe_blob(store: &LooseObjectStore, id: &ObjectId) -> Result<Vec<u8>> {
+    let object = store.read_object(id)?;
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "path pickaxe entry does not point to a blob".into(),
+        });
+    }
+    Ok(object.content)
+}
+
 fn commit_diff_against_parent_matches_pickaxe(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -10485,7 +13557,10 @@ fn log_reflog_targets(
     date_mode: LogDateMode<'_>,
     date_arg: Option<&str>,
 ) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
     let commit_cache = CommitObjectCache::new(&store);
     let (reflog_revs, implicit_pathspecs) =
         split_log_implicit_pathspecs(repo, parsed_revs.revs.clone());
@@ -10499,7 +13574,7 @@ fn log_reflog_targets(
     }
     let mut records = Vec::new();
     for (target_order, target) in targets.into_iter().enumerate() {
-        collect_log_reflog_records(repo, target, target_order, &mut records)?;
+        collect_log_reflog_records(repo, store.algorithm(), target, target_order, &mut records)?;
     }
     records.sort_by(|left, right| {
         right
@@ -10543,13 +13618,26 @@ fn log_reflog_targets(
     let format = log_reflog_format(options, parsed_revs)?;
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();
-    let abbrev_len = if options.no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
+    let mut abbrev_ids = Vec::with_capacity(records.len());
+    for record in &records {
+        abbrev_ids.push(record.entry.new_id.clone());
+        if record.entry.new_id != reflog_zero_object_id(store.algorithm())
+            && let Ok(commit) = commit_cache.read_commit(&record.entry.new_id)
+        {
+            abbrev_ids.extend(commit.parents.iter().cloned());
+        }
+    }
+    let abbrev_lengths = if options.no_abbrev_commit {
+        RenderedAbbrevLengths::fixed(&abbrev_ids, full_abbrev_len(store.algorithm()))
     } else {
-        configured_default_abbrev_len(repo, &store)?
+        rendered_abbrev_len_for_ids(&store, configured_core_abbrev_state(repo)?, &abbrev_ids)?
     };
     let default_commit_abbrev = options.reflog || options.abbrev_commit;
-    let diff_format = options.diff_format(parsed_revs.patch);
+    let patch_mode = LogPatchMode::from_raw_args(options.raw_args, options.patch, options.no_patch);
+    let diff_format = options.diff_format(
+        parsed_revs.patch,
+        matches!(patch_mode, LogPatchMode::NoPatch),
+    );
     let merge_diff_mode = options.merge_diff_mode(repo, diff_format)?;
     let ignore_matching_lines = compile_ignore_matching_lines(&parsed_revs.ignore_matching_lines)?;
     let show_root = options.root || log_showroot_enabled(repo)?;
@@ -10563,7 +13651,7 @@ fn log_reflog_targets(
         }
         if since.is_some_and(|value| record.entry.timestamp < value)
             || until.is_some_and(|value| record.entry.timestamp > value)
-            || record.entry.new_id == zero_object_id()
+            || record.entry.new_id == reflog_zero_object_id(store.algorithm())
         {
             continue;
         }
@@ -10626,7 +13714,7 @@ fn log_reflog_targets(
             &record,
             commit.as_ref(),
             &selector,
-            abbrev_len,
+            &abbrev_lengths,
             default_commit_abbrev,
             &decorations,
             &notes,
@@ -10669,6 +13757,7 @@ fn log_reflog_targets(
 
 fn collect_log_reflog_records(
     repo: &GitRepo,
+    algorithm: GitHashAlgorithm,
     target: &str,
     target_order: usize,
     records: &mut Vec<LogReflogRecord>,
@@ -10690,7 +13779,7 @@ fn collect_log_reflog_records(
     let display = normalize_reflog_display_target(repo, &base)?;
     let mut index = 0usize;
     for_each_reflog_line_rev(file, |line| {
-        let Some(entry) = parse_reflog_entry(line) else {
+        let Some(entry) = parse_reflog_line(line, algorithm) else {
             return Ok(());
         };
         let include = match selector {
@@ -10800,12 +13889,13 @@ fn render_log_reflog_record(
     record: &LogReflogRecord,
     commit: &zmin_git_core::CommitObject,
     selector: &str,
-    abbrev_len: usize,
+    abbrev_lengths: &RenderedAbbrevLengths,
     default_commit_abbrev: bool,
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
+    let abbrev_len = abbrev_lengths.width_for(&record.entry.new_id);
     let mut rendered = match format {
         LogFormat::ShortOneline => format!(
             "{} {selector}: {}",
@@ -10907,6 +13997,7 @@ fn render_log_reflog_custom_format(
         decorations,
         notes,
         date_mode,
+        None,
     )?
     .replace(SELECTOR_TOKEN, selector)
     .replace(SUBJECT_TOKEN, &record.entry.message))
@@ -10924,7 +14015,10 @@ fn log_reflog_target(
     grep_reflog: &[String],
     regexp_ignore_case: bool,
 ) -> Result<usize> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
     let commit_cache = CommitObjectCache::new(&store);
     let display_target = normalize_reflog_display_target(repo, target)?;
     let path = reflog_path(&repo, target)?;
@@ -10946,12 +14040,12 @@ fn log_reflog_target(
         if emitted >= limit {
             return Ok(());
         }
-        let Some(entry) = parse_reflog_entry(line) else {
+        let Some(entry) = parse_reflog_line(line, store.algorithm()) else {
             return Ok(());
         };
         let entry_index = reflog_index;
         reflog_index += 1;
-        if entry.new_id == zero_object_id() {
+        if entry.new_id == reflog_zero_object_id(store.algorithm()) {
             return Ok(());
         }
         if !grep_reflog.is_empty()
@@ -10979,6 +14073,7 @@ fn log_reflog_target(
                     &LogDecorations::empty(),
                     &LogNotes::empty(),
                     date_mode,
+                    None,
                 )?
             }
         } else {
@@ -10992,7 +14087,7 @@ fn log_reflog_target(
 }
 
 fn normalize_reflog_display_target(repo: &GitRepo, target: &str) -> Result<String> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     let resolved_previous = resolve_previous_checkout_expression(repo, target)
         .ok()
         .flatten();
@@ -11056,7 +14151,7 @@ fn log_reflog_branches(
     grep_reflog: &[String],
     regexp_ignore_case: bool,
 ) -> Result<()> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     let mut branches = Vec::new();
     refs.for_each_ref_name("refs/heads/", |ref_name| {
         let short = ref_name
@@ -11174,7 +14269,7 @@ fn reflog_default_date(entry: &ReflogEntry) -> Result<String> {
         .to_string())
 }
 
-fn parse_log_max_count(value: Option<&str>) -> Result<Option<usize>> {
+pub(crate) fn parse_log_max_count(value: Option<&str>) -> Result<Option<usize>> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -11235,8 +14330,42 @@ fn raw_arg_present_before_dashdash(raw_args: &[String], name: &str) -> bool {
         .any(|arg| arg == name)
 }
 
-fn resolve_history_walk_mode(raw_args: &[String], no_walk: bool, do_walk: bool) -> bool {
-    raw_arg_last_toggle(raw_args, "--no-walk", "--do-walk").unwrap_or(no_walk && !do_walk)
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum HistoryWalkMode {
+    Walk,
+    NoWalkSorted,
+    NoWalkUnsorted,
+}
+
+impl HistoryWalkMode {
+    fn is_no_walk(self) -> bool {
+        !matches!(self, Self::Walk)
+    }
+
+    fn is_sorted(self) -> bool {
+        matches!(self, Self::NoWalkSorted)
+    }
+}
+
+fn resolve_history_walk_mode(raw_args: &[String], no_walk: bool, do_walk: bool) -> HistoryWalkMode {
+    let mut effective = if no_walk && !do_walk {
+        HistoryWalkMode::NoWalkSorted
+    } else {
+        HistoryWalkMode::Walk
+    };
+    for arg in raw_args.iter().take_while(|arg| arg.as_str() != "--") {
+        match arg.as_str() {
+            "--no-walk" | "--no-walk=sorted" => effective = HistoryWalkMode::NoWalkSorted,
+            "--no-walk=unsorted" => effective = HistoryWalkMode::NoWalkUnsorted,
+            "--do-walk" => effective = HistoryWalkMode::Walk,
+            "--max-count" => effective = HistoryWalkMode::Walk,
+            value if value.starts_with("--max-count=") => {
+                effective = HistoryWalkMode::Walk;
+            }
+            _ => {}
+        }
+    }
+    effective
 }
 
 fn resolve_history_age_bounds<'a>(
@@ -11489,8 +14618,9 @@ impl LogDecorations {
         let Some(mode) = mode else {
             return Ok(Self::empty());
         };
-        let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-        let refs = RefStore::new(log_repo_common_dir(repo), GitHashAlgorithm::Sha1);
+        let algorithm = store.algorithm();
+        let head_refs = RefStore::new(&repo.git_dir, algorithm);
+        let refs = RefStore::new(log_repo_common_dir(repo), algorithm);
         let mut decorations = Self::empty();
         let current_branch = current_branch_ref(&head_refs).map_err(|error| match error {
             CliError::Io(inner)
@@ -11695,7 +14825,7 @@ impl LogNotes {
         if !enabled {
             return Ok(Self::empty());
         }
-        let runtime = CliPrimitiveRuntime::new_default(repo);
+        let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
         let object_store = runtime.object_store_adapter();
         let refs = runtime.refs_store_adapter();
         let notes = notes_commands::read_notes_map(&object_store, &refs, "refs/notes/commits")?;
@@ -11704,7 +14834,7 @@ impl LogNotes {
             let note = store.read_object(&note_id)?;
             if note.kind == GitObjectKind::Blob {
                 let object_id =
-                    ObjectId::from_hex(GitHashAlgorithm::Sha1, &object).map_err(CliError::Io)?;
+                    ObjectId::from_hex(store.algorithm(), &object).map_err(CliError::Io)?;
                 entries.insert(object_id, note.content);
             }
         }
@@ -11751,7 +14881,7 @@ impl<'a> LogFormat<'a> {
             return Ok(Self::Default);
         };
         match raw {
-            "" | "medium" | "default" => Ok(Self::Default),
+            "medium" | "default" => Ok(Self::Default),
             "short" => Ok(Self::Short),
             "full" => Ok(Self::Full),
             "fuller" => Ok(Self::Fuller),
@@ -11776,13 +14906,33 @@ impl<'a> LogFormat<'a> {
         }
     }
 
+    fn emits_record_terminator(&self, zero: bool) -> bool {
+        !self.is_empty_user_format() && (zero || self.terminates_lines())
+    }
+
+    fn emits_rev_list_builtin_terminator(&self) -> bool {
+        matches!(
+            self,
+            Self::Default | Self::Short | Self::Full | Self::Fuller
+        )
+    }
+
+    fn separates_records(&self) -> bool {
+        !self.is_empty_user_format() || !self.terminates_lines()
+    }
+
+    fn is_empty_user_format(&self) -> bool {
+        matches!(self, Self::Custom { pattern, .. } if pattern.is_empty())
+    }
+
     pub(crate) fn separates_patch(&self) -> bool {
         match self {
             Self::Default | Self::Short | Self::Full | Self::Fuller => true,
             Self::ShortOneline | Self::FullOneline => false,
             Self::Custom {
-                terminates_lines, ..
-            } => *terminates_lines,
+                pattern,
+                terminates_lines,
+            } => !pattern.is_empty() && *terminates_lines,
         }
     }
 
@@ -11807,9 +14957,19 @@ impl<'a> LogFormat<'a> {
     fn uses_abbreviated_object_id(&self) -> bool {
         match self {
             Self::ShortOneline => true,
-            Self::Custom { pattern, .. } => log_format_uses_placeholder(pattern, 'h'),
+            Self::Custom { pattern, .. } => {
+                log_format_uses_placeholder(pattern, 'h')
+                    || log_format_uses_placeholder(pattern, 'p')
+            }
             Self::Default | Self::Short | Self::Full | Self::Fuller | Self::FullOneline => false,
         }
+    }
+
+    fn uses_abbreviated_parent_ids(&self) -> bool {
+        matches!(
+            self,
+            Self::Default | Self::Short | Self::Full | Self::Fuller
+        )
     }
 
     pub(crate) fn render(
@@ -11860,6 +15020,33 @@ impl<'a> LogFormat<'a> {
         )
     }
 
+    pub(crate) fn render_with_context_default_date_lengths(
+        &self,
+        id: &ObjectId,
+        commit: &zmin_git_core::CommitObject,
+        parents: bool,
+        abbrev_lengths: &RenderedAbbrevLengths,
+        marker: Option<HistoryTraversalMarker>,
+        default_commit_abbrev: bool,
+        expand_tabs: bool,
+        decorations: &LogDecorations,
+        notes: &LogNotes,
+    ) -> Result<String> {
+        self.render_with_context_lengths(
+            id,
+            commit,
+            parents,
+            abbrev_lengths.width_for(id),
+            marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            LogDateMode::Builtin(BlameDateMode::Default),
+            Some(abbrev_lengths),
+        )
+    }
+
     fn render_with_context(
         &self,
         id: &ObjectId,
@@ -11873,6 +15060,35 @@ impl<'a> LogFormat<'a> {
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
     ) -> Result<String> {
+        self.render_with_context_lengths(
+            id,
+            commit,
+            parents,
+            abbrev_len,
+            marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            date_mode,
+            None,
+        )
+    }
+
+    fn render_with_context_lengths(
+        &self,
+        id: &ObjectId,
+        commit: &zmin_git_core::CommitObject,
+        parents: bool,
+        abbrev_len: usize,
+        marker: Option<HistoryTraversalMarker>,
+        default_commit_abbrev: bool,
+        expand_tabs: bool,
+        decorations: &LogDecorations,
+        notes: &LogNotes,
+        date_mode: LogDateMode<'_>,
+        parent_abbrev_lengths: Option<&RenderedAbbrevLengths>,
+    ) -> Result<String> {
         match self {
             Self::Default => render_default_log(
                 id,
@@ -11885,6 +15101,7 @@ impl<'a> LogFormat<'a> {
                 decorations,
                 notes,
                 date_mode,
+                parent_abbrev_lengths,
             ),
             Self::Short => render_short_log(
                 id,
@@ -11895,6 +15112,7 @@ impl<'a> LogFormat<'a> {
                 default_commit_abbrev,
                 expand_tabs,
                 notes,
+                parent_abbrev_lengths,
             ),
             Self::Full => render_full_log(
                 id,
@@ -11907,6 +15125,7 @@ impl<'a> LogFormat<'a> {
                 decorations,
                 notes,
                 false,
+                parent_abbrev_lengths,
             ),
             Self::Fuller => render_full_log(
                 id,
@@ -11919,14 +15138,22 @@ impl<'a> LogFormat<'a> {
                 decorations,
                 notes,
                 true,
+                parent_abbrev_lengths,
             ),
             Self::ShortOneline => Ok(format!(
                 "{}{}{}{} {}",
                 marker
                     .map(HistoryTraversalMarker::log_prefix)
                     .unwrap_or_default(),
-                short_object_id_len(id, abbrev_len),
-                short_parent_suffix(commit, parents, abbrev_len),
+                short_object_id_len(
+                    id,
+                    parent_abbrev_lengths
+                        .map(|lengths| lengths.width_for(id))
+                        .unwrap_or(abbrev_len),
+                ),
+                parent_abbrev_lengths
+                    .map(|lengths| short_parent_suffix_lengths(commit, parents, lengths))
+                    .unwrap_or_else(|| short_parent_suffix(commit, parents, abbrev_len)),
                 render_oneline_decorations(decorations, id),
                 commit_subject(&commit.message)
             )),
@@ -11948,6 +15175,7 @@ impl<'a> LogFormat<'a> {
                 decorations,
                 notes,
                 date_mode,
+                parent_abbrev_lengths,
             ),
         }
     }
@@ -11966,6 +15194,37 @@ impl<'a> LogFormat<'a> {
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
     ) -> Result<String> {
+        self.render_with_from_parent_lengths(
+            id,
+            commit,
+            from_parent,
+            parents,
+            abbrev_len,
+            marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            date_mode,
+            None,
+        )
+    }
+
+    fn render_with_from_parent_lengths(
+        &self,
+        id: &ObjectId,
+        commit: &zmin_git_core::CommitObject,
+        from_parent: Option<&ObjectId>,
+        parents: bool,
+        abbrev_len: usize,
+        marker: Option<HistoryTraversalMarker>,
+        default_commit_abbrev: bool,
+        expand_tabs: bool,
+        decorations: &LogDecorations,
+        notes: &LogNotes,
+        date_mode: LogDateMode<'_>,
+        parent_abbrev_lengths: Option<&RenderedAbbrevLengths>,
+    ) -> Result<String> {
         match (self, from_parent) {
             (Self::Default, Some(parent)) => render_default_log_from_parent(
                 id,
@@ -11977,8 +15236,9 @@ impl<'a> LogFormat<'a> {
                 default_commit_abbrev,
                 expand_tabs,
                 date_mode,
+                parent_abbrev_lengths,
             ),
-            _ => self.render_with_context(
+            _ => self.render_with_context_lengths(
                 id,
                 commit,
                 parents,
@@ -11989,28 +15249,70 @@ impl<'a> LogFormat<'a> {
                 decorations,
                 notes,
                 date_mode,
+                parent_abbrev_lengths,
             ),
         }
     }
 }
 
-fn log_output_abbrev_len<'a, I>(
+fn log_output_abbrev_lengths<'a, I>(
     repo: &GitRepo,
     store: &LooseObjectStore,
-    no_abbrev_commit: bool,
+    _no_abbrev_commit: bool,
     uses_abbreviated_ids: bool,
     ids: I,
-) -> Result<usize>
+) -> Result<RenderedAbbrevLengths>
 where
     I: IntoIterator<Item = &'a ObjectId>,
 {
     let _trace = phase_trace("log.abbrev");
-    let full_len = GitHashAlgorithm::Sha1.digest_len() * 2;
-    if no_abbrev_commit || !uses_abbreviated_ids {
-        return Ok(full_len);
-    }
+    let full_len = full_abbrev_len(store.algorithm());
     let ids = ids.into_iter().cloned().collect::<Vec<_>>();
-    configured_default_abbrev_len_for_ids(repo, store, &ids)
+    if !uses_abbreviated_ids {
+        return Ok(RenderedAbbrevLengths::fixed(&ids, full_len));
+    }
+    rendered_abbrev_len_for_ids(store, configured_core_abbrev_state(repo)?, &ids)
+}
+
+fn implicit_log_abbrev_lengths(
+    store: &LooseObjectStore,
+    explicit: &RenderedAbbrevLengths,
+    ids: &[ObjectId],
+    no_abbrev_commit: bool,
+) -> RenderedAbbrevLengths {
+    if no_abbrev_commit {
+        RenderedAbbrevLengths::fixed(ids, full_abbrev_len(store.algorithm()))
+    } else {
+        explicit.clone()
+    }
+}
+
+fn log_lengths_for_format<'a>(
+    format: &LogFormat<'_>,
+    explicit: &'a RenderedAbbrevLengths,
+    implicit: &'a RenderedAbbrevLengths,
+) -> &'a RenderedAbbrevLengths {
+    match format {
+        LogFormat::Default
+        | LogFormat::Short
+        | LogFormat::Full
+        | LogFormat::Fuller
+        | LogFormat::Custom { .. } => explicit,
+        LogFormat::ShortOneline | LogFormat::FullOneline => implicit,
+    }
+}
+
+fn log_commit_abbrev_len(
+    format: &LogFormat<'_>,
+    id: &ObjectId,
+    explicit: &RenderedAbbrevLengths,
+    implicit: &RenderedAbbrevLengths,
+) -> usize {
+    if matches!(format, LogFormat::Custom { .. }) {
+        explicit.width_for(id)
+    } else {
+        implicit.width_for(id)
+    }
 }
 
 fn render_oneline_decorations(decorations: &LogDecorations, id: &ObjectId) -> String {
@@ -12040,6 +15342,7 @@ fn render_default_log(
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -12048,7 +15351,12 @@ fn render_default_log(
         out.push(' ');
     }
     if default_commit_abbrev {
-        out.push_str(&short_object_id_len(id, abbrev_len));
+        out.push_str(&short_object_id_len(
+            id,
+            abbrev_lengths
+                .map(|lengths| lengths.width_for(id))
+                .unwrap_or(abbrev_len),
+        ));
     } else {
         out.push_str(&id.to_hex());
     }
@@ -12063,7 +15371,10 @@ fn render_default_log(
         out.push_str("Merge:");
         for parent in &commit.parents {
             out.push(' ');
-            out.push_str(&short_object_id_len(parent, abbrev_len));
+            let width = abbrev_lengths
+                .map(|lengths| lengths.width_for(parent))
+                .unwrap_or(abbrev_len);
+            out.push_str(&short_object_id_len(parent, width));
         }
         out.push('\n');
     }
@@ -12101,6 +15412,7 @@ fn render_short_log(
     default_commit_abbrev: bool,
     expand_tabs: bool,
     notes: &LogNotes,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -12109,7 +15421,12 @@ fn render_short_log(
         out.push(' ');
     }
     if default_commit_abbrev {
-        out.push_str(&short_object_id_len(id, abbrev_len));
+        out.push_str(&short_object_id_len(
+            id,
+            abbrev_lengths
+                .map(|lengths| lengths.width_for(id))
+                .unwrap_or(abbrev_len),
+        ));
     } else {
         out.push_str(&id.to_hex());
     }
@@ -12117,6 +15434,17 @@ fn render_short_log(
         out.push_str(&parent_suffix(commit, true));
     }
     out.push('\n');
+    if commit.parents.len() > 1 {
+        out.push_str("Merge:");
+        for parent in &commit.parents {
+            out.push(' ');
+            let width = abbrev_lengths
+                .map(|lengths| lengths.width_for(parent))
+                .unwrap_or(abbrev_len);
+            out.push_str(&short_object_id_len(parent, width));
+        }
+        out.push('\n');
+    }
     out.push_str("Author: ");
     out.push_str(&signature_name(&commit.author));
     out.push_str(" <");
@@ -12150,6 +15478,7 @@ fn render_full_log(
     decorations: &LogDecorations,
     notes: &LogNotes,
     fuller: bool,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -12158,7 +15487,12 @@ fn render_full_log(
         out.push(' ');
     }
     if default_commit_abbrev {
-        out.push_str(&short_object_id_len(id, abbrev_len));
+        out.push_str(&short_object_id_len(
+            id,
+            abbrev_lengths
+                .map(|lengths| lengths.width_for(id))
+                .unwrap_or(abbrev_len),
+        ));
     } else {
         out.push_str(&id.to_hex());
     }
@@ -12173,7 +15507,10 @@ fn render_full_log(
         out.push_str("Merge:");
         for parent in &commit.parents {
             out.push(' ');
-            out.push_str(&short_object_id_len(parent, abbrev_len));
+            let width = abbrev_lengths
+                .map(|lengths| lengths.width_for(parent))
+                .unwrap_or(abbrev_len);
+            out.push_str(&short_object_id_len(parent, width));
         }
         out.push('\n');
     }
@@ -12235,6 +15572,7 @@ fn render_default_log_from_parent(
     default_commit_abbrev: bool,
     expand_tabs: bool,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -12243,12 +15581,20 @@ fn render_default_log_from_parent(
         out.push(' ');
     }
     if default_commit_abbrev {
-        out.push_str(&short_object_id_len(id, abbrev_len));
+        out.push_str(&short_object_id_len(
+            id,
+            abbrev_lengths
+                .map(|lengths| lengths.width_for(id))
+                .unwrap_or(abbrev_len),
+        ));
     } else {
         out.push_str(&id.to_hex());
     }
     out.push_str(" (from ");
-    out.push_str(&from_parent.to_hex());
+    let from_parent_width = abbrev_lengths
+        .map(|lengths| lengths.width_for(from_parent))
+        .unwrap_or(abbrev_len);
+    out.push_str(&short_object_id_len(from_parent, from_parent_width));
     out.push(')');
     if parents {
         out.push_str(&parent_suffix(commit, true));
@@ -12258,7 +15604,10 @@ fn render_default_log_from_parent(
         out.push_str("Merge:");
         for parent in &commit.parents {
             out.push(' ');
-            out.push_str(&short_object_id_len(parent, abbrev_len));
+            let width = abbrev_lengths
+                .map(|lengths| lengths.width_for(parent))
+                .unwrap_or(abbrev_len);
+            out.push_str(&short_object_id_len(parent, width));
         }
         out.push('\n');
     }
@@ -12357,7 +15706,7 @@ impl LogMetadataRenderPlan {
                 break;
             };
             match atom {
-                'P' => plan.needs_parents = true,
+                'P' | 'p' => plan.needs_parents = true,
                 'x' => {
                     let _ = chars.next();
                     let _ = chars.next();
@@ -12397,6 +15746,7 @@ impl LogMetadataRenderPlan {
 
     fn supports_author_only_lightweight(self, history_order: Option<HistoryCommitOrder>) -> bool {
         self.supports_lightweight(history_order)
+            && !self.needs_parents
             && !self.needs_author_signature
             && !self.needs_committer_name
             && !self.needs_committer_email
@@ -13350,6 +16700,7 @@ fn render_commit_author_metadata_from_hints_streaming<W: Write>(
     decorations: &LogDecorations,
     record_terminator: &[u8],
     terminate_last: bool,
+    separate_records: bool,
     out: &mut W,
 ) -> Result<()> {
     let workers = std::thread::available_parallelism()
@@ -13379,7 +16730,7 @@ fn render_commit_author_metadata_from_hints_streaming<W: Write>(
                 decorations,
             )?;
             out.write_all(rendered.as_bytes())?;
-            if terminate_last || index + 1 < hints.len() {
+            if terminate_last || (separate_records && index + 1 < hints.len()) {
                 out.write_all(record_terminator)?;
             }
         }
@@ -13436,7 +16787,7 @@ fn render_commit_author_metadata_from_hints_streaming<W: Write>(
                 decorations,
             )?;
             out.write_all(rendered.as_bytes())?;
-            if terminate_last || index + 1 < hints.len() {
+            if terminate_last || (separate_records && index + 1 < hints.len()) {
                 out.write_all(record_terminator)?;
             }
         }
@@ -13459,7 +16810,7 @@ fn log_format_supports_metadata_only(pattern: &str) -> bool {
             return false;
         };
         match atom {
-            '%' | 'H' | 'h' | 'P' | 'd' | 'D' => {}
+            '%' | 'H' | 'h' | 'P' | 'p' | 'd' | 'D' => {}
             'x' => {
                 let Some(high) = chars.next() else {
                     return false;
@@ -13488,6 +16839,7 @@ fn render_log_format_metadata(
     abbrev_len: usize,
     decorations: &LogDecorations,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     let mut chars = pattern.chars();
@@ -13522,6 +16874,11 @@ fn render_log_format_metadata(
                     out.push_str(&parent.to_hex());
                 }
             }
+            'p' => out.push_str(&render_abbreviated_parent_ids(
+                &commit.parents,
+                abbrev_len,
+                abbrev_lengths,
+            )),
             'd' => out.push_str(&render_log_decorations(decorations, id, true)),
             'D' => out.push_str(&render_log_decorations(decorations, id, false)),
             'x' => {
@@ -13707,6 +17064,7 @@ fn render_log_format_render_metadata(
     abbrev_len: usize,
     decorations: &LogDecorations,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     let mut chars = pattern.chars();
@@ -13733,6 +17091,11 @@ fn render_log_format_render_metadata(
                     out.push_str(&parent.to_hex());
                 }
             }
+            'p' => out.push_str(&render_abbreviated_parent_ids(
+                &commit.parents,
+                abbrev_len,
+                abbrev_lengths,
+            )),
             'd' => out.push_str(&render_log_decorations(decorations, id, true)),
             'D' => out.push_str(&render_log_decorations(decorations, id, false)),
             'x' => {
@@ -13801,6 +17164,24 @@ fn render_log_format_render_metadata(
     Ok(out)
 }
 
+fn render_abbreviated_parent_ids(
+    parents: &[ObjectId],
+    abbrev_len: usize,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
+) -> String {
+    let mut out = String::new();
+    for (index, parent) in parents.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        let width = abbrev_lengths
+            .map(|lengths| lengths.width_for(parent))
+            .unwrap_or(abbrev_len);
+        out.push_str(&short_object_id_len(parent, width));
+    }
+    out
+}
+
 fn parent_suffix(commit: &zmin_git_core::CommitObject, parents: bool) -> String {
     if !parents {
         return String::new();
@@ -13829,6 +17210,46 @@ fn short_parent_suffix(
     suffix
 }
 
+fn short_parent_suffix_lengths(
+    commit: &zmin_git_core::CommitObject,
+    parents: bool,
+    abbrev_lengths: &RenderedAbbrevLengths,
+) -> String {
+    if !parents {
+        return String::new();
+    }
+    let mut suffix = String::new();
+    for parent in &commit.parents {
+        suffix.push(' ');
+        suffix.push_str(&short_object_id_len(
+            parent,
+            abbrev_lengths.width_for(parent),
+        ));
+    }
+    suffix
+}
+
+fn render_log_format_with_lengths(
+    pattern: &str,
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    abbrev_lengths: &RenderedAbbrevLengths,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    render_log_format(
+        pattern,
+        id,
+        commit,
+        abbrev_lengths.width_for(id),
+        decorations,
+        notes,
+        date_mode,
+        Some(abbrev_lengths),
+    )
+}
+
 fn render_log_format(
     pattern: &str,
     id: &ObjectId,
@@ -13837,6 +17258,7 @@ fn render_log_format(
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
     let mut out = String::new();
     let mut chars = pattern.chars();
@@ -13863,6 +17285,11 @@ fn render_log_format(
                     out.push_str(&parent.to_hex());
                 }
             }
+            'p' => out.push_str(&render_abbreviated_parent_ids(
+                &commit.parents,
+                abbrev_len,
+                abbrev_lengths,
+            )),
             'd' => out.push_str(&render_log_decorations(decorations, id, true)),
             'D' => out.push_str(&render_log_decorations(decorations, id, false)),
             'N' => {
@@ -13873,6 +17300,7 @@ fn render_log_format(
             'b' => out.push_str(&commit_body(&commit.message)),
             'B' => out.push_str(&String::from_utf8_lossy(&commit.message)),
             's' => out.push_str(&commit_subject(&commit.message)),
+            'n' => out.push('\n'),
             'x' => {
                 let high = chars.next();
                 let low = chars.next();
@@ -14156,45 +17584,71 @@ impl HistoryTraversalMarker {
     }
 }
 
+fn write_rev_list_marker_prefix<W: Write>(
+    out: &mut W,
+    marker: Option<HistoryTraversalMarker>,
+) -> io::Result<()> {
+    if let Some(marker) = marker {
+        write!(out, "{}", marker.rev_list_prefix())?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 struct HistoryTraversalDecoration {
     markers: HashMap<ObjectId, HistoryTraversalMarker>,
-    boundary_ids: Vec<ObjectId>,
     equivalent_ids: HashSet<ObjectId>,
+    right_ids: HashSet<ObjectId>,
 }
 
 fn collect_history_traversal_decoration(
     repo: &GitRepo,
     store: &LooseObjectStore,
-    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     revs: &RevListRevs,
     commit_ids: &[ObjectId],
     left_right: bool,
     cherry: bool,
     cherry_pick: bool,
     cherry_mark: bool,
-    boundary: bool,
+    first_parent: bool,
 ) -> Result<HistoryTraversalDecoration> {
-    if !left_right && !cherry && !cherry_pick && !cherry_mark && !boundary {
+    if !left_right && !cherry && !cherry_pick && !cherry_mark {
         return Ok(HistoryTraversalDecoration::default());
     }
 
     let included_ids = commit_ids.iter().cloned().collect::<HashSet<_>>();
     let (left_ids, right_ids) =
-        collect_history_traversal_side_sets(repo, store, commit_cache, revs, &included_ids)?;
+        collect_history_traversal_side_sets(repo, store, revs, &included_ids, first_parent)?;
     let equivalent_ids = if cherry || cherry_pick || cherry_mark {
-        collect_history_patch_equivalent_ids(store, commit_cache, &left_ids, &right_ids)?
+        collect_history_patch_equivalent_ids(store, &left_ids, &right_ids)?
     } else {
         HashSet::new()
     };
-    let boundary_ids = if boundary {
-        collect_history_boundary_ids(store, commit_ids, &included_ids)?
-    } else {
-        Vec::new()
-    };
+    Ok(history_traversal_decoration_from_sets(
+        commit_ids.iter(),
+        left_ids,
+        right_ids,
+        equivalent_ids,
+        left_right,
+        cherry,
+        cherry_mark,
+    ))
+}
 
+fn history_traversal_decoration_from_sets<'a, I>(
+    commit_ids: I,
+    left_ids: HashSet<ObjectId>,
+    right_ids: HashSet<ObjectId>,
+    equivalent_ids: HashSet<ObjectId>,
+    left_right: bool,
+    cherry: bool,
+    cherry_mark: bool,
+) -> HistoryTraversalDecoration
+where
+    I: DoubleEndedIterator<Item = &'a ObjectId>,
+{
     let mut markers = HashMap::new();
-    for id in commit_ids {
+    for id in commit_ids.rev() {
         let marker = if left_right {
             if cherry_mark && equivalent_ids.contains(id) {
                 Some(HistoryTraversalMarker::Equivalent)
@@ -14205,18 +17659,23 @@ fn collect_history_traversal_decoration(
             } else {
                 None
             }
-        } else if (cherry || cherry_mark) && equivalent_ids.contains(id) {
+        } else if cherry_mark {
+            if equivalent_ids.contains(id) {
+                (left_ids.contains(id) || right_ids.contains(id))
+                    .then_some(HistoryTraversalMarker::Equivalent)
+            } else if left_ids.contains(id) || right_ids.contains(id) {
+                Some(HistoryTraversalMarker::PlainCherry)
+            } else {
+                None
+            }
+        } else if cherry && equivalent_ids.contains(id) {
             right_ids
                 .contains(id)
                 .then_some(HistoryTraversalMarker::Equivalent)
-        } else if cherry || cherry_mark {
-            if left_ids.contains(id) {
-                None
-            } else {
-                right_ids
-                    .contains(id)
-                    .then_some(HistoryTraversalMarker::PlainCherry)
-            }
+        } else if cherry {
+            right_ids
+                .contains(id)
+                .then_some(HistoryTraversalMarker::PlainCherry)
         } else {
             None
         };
@@ -14224,23 +17683,85 @@ fn collect_history_traversal_decoration(
             markers.insert(id.clone(), marker);
         }
     }
-    for id in &boundary_ids {
-        markers.insert(id.clone(), HistoryTraversalMarker::Boundary);
-    }
-
-    Ok(HistoryTraversalDecoration {
+    HistoryTraversalDecoration {
         markers,
-        boundary_ids,
         equivalent_ids,
-    })
+        right_ids,
+    }
+}
+
+fn collect_history_traversal_decoration_uncached(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    commit_ids: &[ObjectId],
+    left_right: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    first_parent: bool,
+) -> Result<HistoryTraversalDecoration> {
+    let commit_id_refs = commit_ids.iter().collect::<Vec<_>>();
+    collect_history_traversal_decoration_uncached_refs(
+        repo,
+        store,
+        revs,
+        &commit_id_refs,
+        left_right,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        first_parent,
+    )
+}
+
+fn collect_history_traversal_decoration_uncached_refs(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    commit_ids: &[&ObjectId],
+    left_right: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    first_parent: bool,
+) -> Result<HistoryTraversalDecoration> {
+    if !left_right && !cherry && !cherry_pick && !cherry_mark {
+        return Ok(HistoryTraversalDecoration::default());
+    }
+    let included_ids = commit_ids
+        .iter()
+        .map(|id| (*id).clone())
+        .collect::<HashSet<_>>();
+    let (left_ids, right_ids) = collect_history_traversal_side_sets_uncached(
+        repo,
+        store,
+        revs,
+        &included_ids,
+        first_parent,
+    )?;
+    let equivalent_ids = if cherry || cherry_pick || cherry_mark {
+        collect_history_patch_equivalent_ids_uncached(store, &left_ids, &right_ids)?
+    } else {
+        HashSet::new()
+    };
+    Ok(history_traversal_decoration_from_sets(
+        commit_ids.iter().copied(),
+        left_ids,
+        right_ids,
+        equivalent_ids,
+        left_right,
+        cherry,
+        cherry_mark,
+    ))
 }
 
 fn collect_history_traversal_side_sets(
     repo: &GitRepo,
     store: &LooseObjectStore,
-    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     revs: &RevListRevs,
     included_ids: &HashSet<ObjectId>,
+    first_parent: bool,
 ) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>)> {
     let Some(symmetric_diff) = revs.symmetric_diff.as_ref() else {
         return Ok((HashSet::new(), included_ids.clone()));
@@ -14252,55 +17773,107 @@ fn collect_history_traversal_side_sets(
         .collect::<HashSet<_>>();
     let left_root = resolve_commitish(repo, store, &symmetric_diff.left)?;
     let right_root = resolve_commitish(repo, store, &symmetric_diff.right)?;
-    let left_ids = collect_commits_from_ids_cached_with_excluded(
+    let mut links_cache = CommitLinksCache::new(store);
+    let left_ids = collect_commits_from_ids_links_cached_with_excluded_with_parent_policy(
         repo,
-        commit_cache,
+        &mut links_cache,
         std::slice::from_ref(&left_root),
-        None,
         &excluded_ids,
-    )?
-    .into_iter()
-    .filter(|id| included_ids.contains(id))
-    .collect::<HashSet<_>>();
-    let right_ids = collect_commits_from_ids_cached_with_excluded(
+        first_parent,
+    )?;
+    let right_ids = collect_commits_from_ids_links_cached_with_excluded_with_parent_policy(
         repo,
-        commit_cache,
+        &mut links_cache,
         std::slice::from_ref(&right_root),
-        None,
         &excluded_ids,
+        first_parent,
+    )?;
+    Ok((left_ids, right_ids))
+}
+
+fn collect_history_traversal_side_sets_uncached(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    included_ids: &HashSet<ObjectId>,
+    first_parent: bool,
+) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>)> {
+    let Some(symmetric_diff) = revs.symmetric_diff.as_ref() else {
+        return Ok((HashSet::new(), included_ids.clone()));
+    };
+    let excluded_ids = symmetric_diff
+        .merge_bases
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let left_root = resolve_commitish(repo, store, &symmetric_diff.left)?;
+    let right_root = resolve_commitish(repo, store, &symmetric_diff.right)?;
+    let left_ids = collect_commits_from_ids_uncached_with_excluded_with_parent_policy(
+        repo,
+        store,
+        std::slice::from_ref(&left_root),
+        &excluded_ids,
+        first_parent,
     )?
     .into_iter()
-    .filter(|id| included_ids.contains(id))
+    .collect::<HashSet<_>>();
+    let right_ids = collect_commits_from_ids_uncached_with_excluded_with_parent_policy(
+        repo,
+        store,
+        std::slice::from_ref(&right_root),
+        &excluded_ids,
+        first_parent,
+    )?
+    .into_iter()
     .collect::<HashSet<_>>();
     Ok((left_ids, right_ids))
 }
 
+struct HistoryPatchDigestMap<'a> {
+    links_cache: CommitLinksCache<'a, LooseObjectStore>,
+    tree_cache: TreeObjectCache<'a, LooseObjectStore>,
+    values: HashMap<ObjectId, Option<String>>,
+}
+
+impl<'a> HistoryPatchDigestMap<'a> {
+    fn new(store: &'a LooseObjectStore) -> Self {
+        Self {
+            links_cache: CommitLinksCache::new(store),
+            tree_cache: TreeObjectCache::new(store),
+            values: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, store: &LooseObjectStore, id: &ObjectId) -> Result<Option<String>> {
+        if let Some(value) = self.values.get(id) {
+            return Ok(value.clone());
+        }
+        let value = reference_commands::commit_patch_id_for_cherry_links_cached(
+            store,
+            &mut self.links_cache,
+            &self.tree_cache,
+            id,
+        )?;
+        self.values.insert(id.clone(), value.clone());
+        Ok(value)
+    }
+}
+
 fn collect_history_patch_equivalent_ids(
     store: &LooseObjectStore,
-    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     left_ids: &HashSet<ObjectId>,
     right_ids: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>> {
-    let tree_cache = TreeObjectCache::new(store);
+    let mut digests = HistoryPatchDigestMap::new(store);
     let mut left_patch_ids = HashSet::new();
     for id in left_ids {
-        if let Some(patch_id) = reference_commands::commit_patch_id_for_cherry_cached(
-            store,
-            commit_cache,
-            &tree_cache,
-            id,
-        )? {
+        if let Some(patch_id) = digests.get(store, id)? {
             left_patch_ids.insert(patch_id);
         }
     }
     let mut right_patch_ids = HashSet::new();
     for id in right_ids {
-        if let Some(patch_id) = reference_commands::commit_patch_id_for_cherry_cached(
-            store,
-            commit_cache,
-            &tree_cache,
-            id,
-        )? {
+        if let Some(patch_id) = digests.get(store, id)? {
             right_patch_ids.insert(patch_id);
         }
     }
@@ -14313,14 +17886,48 @@ fn collect_history_patch_equivalent_ids(
     }
     let mut equivalent_ids = HashSet::new();
     for id in left_ids.iter().chain(right_ids.iter()) {
-        if reference_commands::commit_patch_id_for_cherry_cached(
-            store,
-            commit_cache,
-            &tree_cache,
-            id,
-        )?
-        .as_ref()
-        .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
+        if digests
+            .get(store, id)?
+            .as_ref()
+            .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
+        {
+            equivalent_ids.insert(id.clone());
+        }
+    }
+    Ok(equivalent_ids)
+}
+
+fn collect_history_patch_equivalent_ids_uncached(
+    store: &LooseObjectStore,
+    left_ids: &HashSet<ObjectId>,
+    right_ids: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let mut digests = HistoryPatchDigestMap::new(store);
+    let mut left_patch_ids = HashSet::new();
+    for id in left_ids {
+        if let Some(patch_id) = digests.get(store, id)? {
+            left_patch_ids.insert(patch_id);
+        }
+    }
+    let mut right_patch_ids = HashSet::new();
+    for id in right_ids {
+        if let Some(patch_id) = digests.get(store, id)? {
+            right_patch_ids.insert(patch_id);
+        }
+    }
+    let shared_patch_ids = left_patch_ids
+        .intersection(&right_patch_ids)
+        .cloned()
+        .collect::<HashSet<_>>();
+    if shared_patch_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut equivalent_ids = HashSet::new();
+    for id in left_ids.iter().chain(right_ids.iter()) {
+        if digests
+            .get(store, id)?
+            .as_ref()
+            .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
         {
             equivalent_ids.insert(id.clone());
         }
@@ -14331,13 +17938,13 @@ fn collect_history_patch_equivalent_ids(
 fn collect_history_boundary_ids(
     store: &LooseObjectStore,
     commit_ids: &[ObjectId],
-    included_ids: &HashSet<ObjectId>,
+    shown_ids: &HashSet<ObjectId>,
 ) -> Result<Vec<ObjectId>> {
     let mut boundary_ids = Vec::new();
     let mut seen = HashSet::new();
-    for id in commit_ids {
+    for id in commit_ids.iter().rev() {
         for parent in read_commit_parents_uncached(store, id)? {
-            if !included_ids.contains(&parent) && seen.insert(parent.clone()) {
+            if !shown_ids.contains(&parent) && seen.insert(parent.clone()) {
                 boundary_ids.push(parent);
             }
         }
@@ -14345,10 +17952,230 @@ fn collect_history_boundary_ids(
     Ok(boundary_ids)
 }
 
+fn collect_rev_list_object_boundary_ids(
+    store: &LooseObjectStore,
+    commit_ids: &[ObjectId],
+    shown_ids: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    collect_rev_list_object_boundary_ids_from_refs(store, commit_ids.iter(), shown_ids)
+}
+
+fn collect_rev_list_object_boundary_ids_from_refs<'a, I>(
+    store: &LooseObjectStore,
+    commit_ids: I,
+    shown_ids: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let mut boundary_ids = Vec::new();
+    let mut seen = HashSet::new();
+    for id in commit_ids {
+        for parent in read_commit_parents_uncached(store, id)? {
+            if !shown_ids.contains(&parent) && seen.insert(parent.clone()) {
+                boundary_ids.push(parent);
+            }
+        }
+    }
+    Ok(boundary_ids)
+}
+
+fn collect_rev_list_object_exclusion_edge_commits<'a, I>(
+    store: &LooseObjectStore,
+    included_ids: I,
+    excluded_commits: &[ObjectId],
+) -> Result<Vec<ObjectId>>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let excluded_set = excluded_commits.iter().collect::<HashSet<_>>();
+    let mut edge_commits = Vec::new();
+    let mut seen = HashSet::new();
+    for commit_id in included_ids {
+        for parent in read_commit_parents_uncached(store, commit_id)? {
+            if excluded_set.contains(&parent) && seen.insert(parent.clone()) {
+                edge_commits.push(parent);
+            }
+        }
+    }
+    Ok(edge_commits)
+}
+
+fn history_path_candidate_indices_for_id_refs<'a, I>(
+    selection: &HistoryPathSelection,
+    candidate_index_by_id: &HashMap<ObjectId, usize>,
+    ids: I,
+) -> Vec<usize>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    ids.into_iter()
+        .filter_map(|id| candidate_index_by_id.get(id).copied())
+        .filter(|candidate_index| *candidate_index < selection.commits.len())
+        .collect()
+}
+
+fn collect_history_path_object_exclusion_commits(
+    selection: &HistoryPathSelection,
+    included_candidate_indices: &[usize],
+    excluded_commits: &[ObjectId],
+    edge_only: bool,
+) -> Vec<ObjectId> {
+    if !edge_only {
+        let mut selected = Vec::with_capacity(excluded_commits.len());
+        let mut seen = HashSet::with_capacity(excluded_commits.len());
+        for id in excluded_commits {
+            if seen.insert(id.clone()) {
+                selected.push(id.clone());
+            }
+        }
+        return selected;
+    }
+    let excluded_set = excluded_commits.iter().collect::<HashSet<_>>();
+    let mut edge_commits = Vec::new();
+    let mut seen = HashSet::new();
+    for visible_candidate_index in included_candidate_indices {
+        let Some(_candidate) = selection.commits.get(*visible_candidate_index) else {
+            continue;
+        };
+        let Some(parent_indices) = selection.parent_indices.get(*visible_candidate_index) else {
+            continue;
+        };
+        for parent_id_index in parent_indices {
+            let Some(parent) = selection.ids.get(*parent_id_index) else {
+                continue;
+            };
+            if excluded_set.contains(&parent) && seen.insert(parent.clone()) {
+                edge_commits.push(parent.clone());
+            }
+        }
+    }
+    edge_commits
+}
+
+fn collect_history_path_object_exclusion_commits_for_id_refs<'a, I>(
+    selection: &HistoryPathSelection,
+    candidate_index_by_id: &HashMap<ObjectId, usize>,
+    ids: I,
+    excluded_commits: &[ObjectId],
+    edge_only: bool,
+) -> Vec<ObjectId>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let candidate_indices =
+        history_path_candidate_indices_for_id_refs(selection, candidate_index_by_id, ids);
+    collect_history_path_object_exclusion_commits(
+        selection,
+        &candidate_indices,
+        excluded_commits,
+        edge_only,
+    )
+}
+
+fn collect_history_path_object_edge_ids(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    selection: &HistoryPathSelection,
+    included_candidate_indices: &[usize],
+    excluded_commits: &[ObjectId],
+    aggressive: bool,
+) -> Result<Vec<ObjectId>> {
+    let mut edge_ids = collect_history_path_object_exclusion_commits(
+        selection,
+        included_candidate_indices,
+        excluded_commits,
+        true,
+    );
+    if aggressive {
+        let mut included_set = HashSet::with_capacity(included_candidate_indices.len());
+        for candidate_index in included_candidate_indices {
+            let Some(candidate) = selection.commits.get(*candidate_index) else {
+                continue;
+            };
+            if let Some(id) = selection.ids.get(candidate.id_index) {
+                included_set.insert(id);
+            }
+        }
+        let mut seen = edge_ids.iter().cloned().collect::<HashSet<_>>();
+        for id in collect_rev_list_direct_exclude_tip_ids(repo, store, revs)? {
+            if !included_set.contains(&id) && seen.insert(id.clone()) {
+                edge_ids.push(id);
+            }
+        }
+    }
+    Ok(edge_ids)
+}
+
+fn collect_rev_list_object_edge_ids<'a, I>(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    included_ids: I,
+    excluded_commits: &[ObjectId],
+    aggressive: bool,
+) -> Result<Vec<ObjectId>>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    let included_ids = included_ids.into_iter().collect::<Vec<_>>();
+    let mut edge_ids = collect_rev_list_object_exclusion_edge_commits(
+        store,
+        included_ids.iter().copied(),
+        excluded_commits,
+    )?;
+    if aggressive {
+        let included_set = included_ids.iter().copied().collect::<HashSet<_>>();
+        let mut seen = edge_ids.iter().cloned().collect::<HashSet<_>>();
+        for id in collect_rev_list_direct_exclude_tip_ids(repo, store, revs)? {
+            if !included_set.contains(&id) && seen.insert(id.clone()) {
+                edge_ids.push(id);
+            }
+        }
+    }
+    Ok(edge_ids)
+}
+
+fn collect_rev_list_direct_exclude_tip_ids(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+) -> Result<Vec<ObjectId>> {
+    let mut tips = Vec::with_capacity(revs.exclude.len());
+    let mut seen = HashSet::with_capacity(revs.exclude.len());
+    for rev in &revs.exclude {
+        let id = resolve_commitish(repo, store, rev)?;
+        if seen.insert(id.clone()) {
+            tips.push(id);
+        }
+    }
+    Ok(tips)
+}
+
+fn write_rev_list_object_edge_lines<W: Write>(out: &mut W, edge_ids: &[ObjectId]) -> Result<()> {
+    for id in edge_ids {
+        writeln!(out, "-{id}")?;
+    }
+    Ok(())
+}
+
+fn collect_rev_list_object_first_parent_exclusion_commits(
+    excluded_commits: &[ObjectId],
+) -> Vec<ObjectId> {
+    let mut selected = Vec::with_capacity(excluded_commits.len());
+    let mut seen = HashSet::with_capacity(excluded_commits.len());
+    for id in excluded_commits {
+        if seen.insert(id.clone()) {
+            selected.push(id.clone());
+        }
+    }
+    selected
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ShowOptions<'a> {
-    pub(crate) no_patch: bool,
-    pub(crate) patch: bool,
+    pub(crate) patch_mode: LogPatchMode,
     pub(crate) oneline: bool,
     pub(crate) zero: bool,
     pub(crate) stat: bool,
@@ -14396,13 +18223,14 @@ pub(crate) struct ShowOptions<'a> {
 
 impl ShowOptions<'_> {
     fn diff_format(&self) -> ShowDiffFormat {
-        if (self.patch_with_raw || (self.patch && self.raw)) && self.summary {
+        let patch = matches!(self.patch_mode, LogPatchMode::Patch);
+        if (self.patch_with_raw || (patch && self.raw)) && self.summary {
             ShowDiffFormat::PatchWithRawSummary
-        } else if self.patch_with_raw || (self.patch && self.raw) {
+        } else if self.patch_with_raw || (patch && self.raw) {
             ShowDiffFormat::PatchWithRaw
-        } else if (self.patch_with_stat || (self.patch && self.stat)) && self.summary {
+        } else if (self.patch_with_stat || (patch && self.stat)) && self.summary {
             ShowDiffFormat::PatchWithStatSummary
-        } else if self.patch_with_stat || (self.patch && self.stat) {
+        } else if self.patch_with_stat || (patch && self.stat) {
             ShowDiffFormat::PatchWithStat
         } else if self.stat && self.summary {
             ShowDiffFormat::StatSummary
@@ -14443,7 +18271,7 @@ fn show_additive_diff_formats(options: &ShowOptions<'_>) -> Vec<ShowDiffFormat> 
 fn show_supports_additive_diff_formats(options: &ShowOptions<'_>) -> bool {
     let formats = show_additive_diff_formats(options);
     formats.len() > 1
-        && !options.patch
+        && !matches!(options.patch_mode, LogPatchMode::Patch)
         && !options.patch_with_raw
         && !options.patch_with_stat
         && !options.stat
@@ -14525,10 +18353,6 @@ fn show_effective_decoration_mode(options: &ShowOptions<'_>) -> Result<Option<Lo
     Ok(None)
 }
 
-fn show_default_abbrev_len(repo: &GitRepo, store: &LooseObjectStore) -> Result<usize> {
-    configured_default_abbrev_len(repo, store)
-}
-
 fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
     let _accepted_show_signature = options.show_signature;
     let detect_renames = parse_find_renames_option(options.find_renames)?;
@@ -14568,7 +18392,10 @@ fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
         });
     }
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
     let resolved_revs = history_revs_with_stdin(&positional_revs, options.stdin)?;
     if let Some(argument) = resolved_revs
@@ -14600,6 +18427,7 @@ fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
     let id = resolve_objectish(&repo, &objectish).map_err(|_| show_revision_error(&objectish))?;
     let object = store.read_object(&id)?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
+    let prepared = prepare_show_context(&repo, &store, &options)?;
     let mut object_options = options;
     object_options.stdin = false;
     object_options.args = vec![objectish.clone()];
@@ -14613,7 +18441,7 @@ fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
         &object,
         object_options,
         show_root,
-        None,
+        Some(&prepared),
         detect_renames,
         detect_copies,
     )
@@ -14697,6 +18525,14 @@ fn show_should_use_multi_object_renderer(
     revs.iter().all(|rev| resolve_objectish(repo, rev).is_ok())
 }
 
+fn show_empty_user_format_mode(options: &ShowOptions<'_>) -> Result<(bool, bool)> {
+    let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
+    Ok((
+        format.is_empty_user_format() && format.terminates_lines(),
+        format.is_empty_user_format() && !format.terminates_lines(),
+    ))
+}
+
 fn show_raw_format_requested(options: &ShowOptions<'_>) -> bool {
     options.format == Some("raw") || options.pretty == Some("raw")
 }
@@ -14728,7 +18564,10 @@ fn show_multi_objects(
     detect_copies: Option<u8>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
     if revs.is_empty() {
         revs = positional_revs;
@@ -14738,15 +18577,17 @@ fn show_multi_objects(
     }
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let prepared = prepare_show_context(&repo, &store, &options)?;
+    let (empty_terminating_format, empty_separator_format) = show_empty_user_format_mode(&options)?;
     let separate_objects = show_raw_format_requested(&options)
-        || options.patch
+        || matches!(options.patch_mode, LogPatchMode::Patch)
         || options.patch_with_raw
         || options.patch_with_stat
         || options.stat
         || options.shortstat
-        || options.raw;
+        || options.raw
+        || empty_separator_format;
     for (idx, objectish) in revs.iter().enumerate() {
-        if idx > 0 && separate_objects {
+        if idx > 0 && separate_objects && !empty_terminating_format {
             io::stdout().write_all(b"\n")?;
         }
         let id = resolve_objectish(&repo, objectish).map_err(|_| show_revision_error(objectish))?;
@@ -14779,7 +18620,10 @@ fn show_raw_multi(
     detect_copies: Option<u8>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args.clone());
     if revs.is_empty() {
         revs = positional_revs;
@@ -14836,9 +18680,10 @@ fn show_via_log(
     if options.name_status {
         return show_name_status_multi(options, resolved_revs, detect_renames, detect_copies);
     }
-    let patch_with_raw = options.patch_with_raw || (options.patch && options.raw);
-    let patch_with_stat = options.patch_with_stat || (options.patch && options.stat);
-    let patch = options.patch
+    let patch_selected = matches!(options.patch_mode, LogPatchMode::Patch);
+    let patch_with_raw = options.patch_with_raw || (patch_selected && options.raw);
+    let patch_with_stat = options.patch_with_stat || (patch_selected && options.stat);
+    let patch = !matches!(options.patch_mode, LogPatchMode::NoPatch)
         && !patch_with_raw
         && !patch_with_stat
         && !options.numstat
@@ -14901,15 +18746,8 @@ fn show_via_log(
         boundary: false,
         children: false,
         root: options.root,
-        patch: !(options.no_patch
-            || options.stat
-            || options.numstat
-            || options.shortstat
-            || options.raw
-            || options.summary
-            || options.name_only
-            || options.name_status)
-            || patch,
+        patch,
+        no_patch: matches!(options.patch_mode, LogPatchMode::NoPatch),
         patch_with_stat,
         combined: options.combined,
         dense_combined: false,
@@ -15122,9 +18960,12 @@ fn show_named_diff_multi(
 ) -> Result<()> {
     let _trace = phase_trace("show.named_multi");
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
-        .with_transient_packed_object_reads()
-        .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    )
+    .with_transient_packed_object_reads()
+    .with_packed_file_reader_buffer_capacity(LOG_PACK_FILE_READER_BUFFER_BYTES);
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let merge_diff_mode = show_effective_merge_diff_mode(&options)?;
     let (positional_revs, paths) = split_show_revs_and_paths(&repo, &store, options.args);
@@ -15157,10 +18998,18 @@ fn show_named_diff_multi(
             options.pretty,
         )?)
     };
-    let abbrev_len = if direct_object_parents_header {
-        GitHashAlgorithm::Sha1.digest_len() * 2
+    let resolved_ids = revs
+        .iter()
+        .map(|rev| resolve_objectish(&repo, rev).map_err(|_| ambiguous_revision_error(rev)))
+        .collect::<Result<Vec<_>>>()?;
+    let abbrev_lengths = if direct_object_parents_header {
+        RenderedAbbrevLengths::fixed(&resolved_ids, full_abbrev_len(store.algorithm()))
     } else {
-        default_abbrev_len(&store)?
+        let mut ids = resolved_ids.clone();
+        for id in &resolved_ids {
+            ids.extend(commit_cache.read_commit_links(id)?.parents.iter().cloned());
+        }
+        rendered_abbrev_len_for_ids(&store, configured_core_abbrev_state(&repo)?, &ids)?
     };
     let pathspecs = paths
         .iter()
@@ -15179,8 +19028,7 @@ fn show_named_diff_multi(
     let stdout = io::stdout();
     let stdout = stdout.lock();
     let mut out = io::BufWriter::new(stdout);
-    for rev in revs {
-        let id = resolve_objectish(&repo, &rev).map_err(|_| ambiguous_revision_error(&rev))?;
+    for (_rev, id) in revs.into_iter().zip(resolved_ids.into_iter()) {
         if direct_object_parents_header && stream_tree_diff {
             let commit = commit_cache.read_commit_links(&id)?;
             write_object_parents_header(&mut out, &id, &commit.parents)?;
@@ -15206,11 +19054,11 @@ fn show_named_diff_multi(
         }
         let commit = commit_cache.read_commit(&id)?;
         if let Some(format) = format.as_ref() {
-            let rendered = format.render_with_context_default_date(
+            let rendered = format.render_with_context_default_date_lengths(
                 &id,
                 &commit,
                 options.parents,
-                abbrev_len,
+                &abbrev_lengths,
                 None,
                 false,
                 true,
@@ -15218,7 +19066,7 @@ fn show_named_diff_multi(
                 &notes,
             )?;
             out.write_all(rendered.as_bytes())?;
-            if format.terminates_lines() {
+            if format.terminates_lines() && !format.is_empty_user_format() {
                 out.write_all(b"\n")?;
             }
         } else {
@@ -15334,6 +19182,7 @@ struct PreparedShowContext {
     date_arg: Option<String>,
     pathspecs: Vec<Vec<u8>>,
     tree_indexes: ShowTreeIndexCache,
+    abbrev_lengths: RenderedAbbrevLengths,
 }
 
 struct ShowTreeIndexCache {
@@ -15356,7 +19205,7 @@ fn prepare_show_context(
     let decoration_mode = show_effective_decoration_mode(options)?;
     let decorations = LogDecorations::load(repo, store, decoration_mode, false, None)?;
     let date_arg = history_raw_date_arg(options.raw_args, None, false);
-    let (_, paths) = split_show_revs_and_paths(repo, store, options.args.clone());
+    let (positional_revs, paths) = split_show_revs_and_paths(repo, store, options.args.clone());
     let pathspecs = paths
         .iter()
         .map(|path| normalize_git_path(path).map_err(CliError::Io))
@@ -15364,13 +19213,47 @@ fn prepare_show_context(
         .into_iter()
         .map(String::into_bytes)
         .collect::<Vec<_>>();
+    let commit_cache = CommitObjectCache::new(store);
+    let mut abbrev_ids = Vec::new();
+    for rev in if positional_revs.is_empty() {
+        vec!["HEAD".to_owned()]
+    } else {
+        positional_revs
+    } {
+        let id = resolve_objectish(repo, &rev)?;
+        abbrev_ids.push(id.clone());
+        if let Ok(commit) = commit_cache.read_commit(&id) {
+            abbrev_ids.extend(commit.parents.iter().cloned());
+        }
+    }
+    let abbrev_lengths = rendered_abbrev_len_for_ids(
+        store,
+        show_abbrev_policy(repo, store, options)?,
+        &abbrev_ids,
+    )?;
     Ok(PreparedShowContext {
         repo: repo.clone(),
         decorations,
         date_arg,
         pathspecs,
         tree_indexes: ShowTreeIndexCache::new(),
+        abbrev_lengths,
     })
+}
+
+fn show_abbrev_policy(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    options: &ShowOptions<'_>,
+) -> Result<CoreAbbrevConfigState> {
+    if options.no_abbrev {
+        return Ok(CoreAbbrevConfigState::Full);
+    }
+    if options.abbrev.is_some() {
+        let minimum = parse_diff_abbrev_len(options.abbrev, false, store.algorithm())?.unwrap_or(7);
+        return Ok(CoreAbbrevConfigState::Minimum(minimum));
+    }
+    configured_core_abbrev_state(repo)
 }
 
 fn read_show_tree_index(
@@ -15383,10 +19266,11 @@ fn read_show_tree_index(
             return Ok(index.clone());
         }
         let index = Arc::new(tree_cache.read_tree_to_index(tree_id)?);
-        tree_indexes
-            .indexes
-            .borrow_mut()
-            .insert(tree_id.clone(), index.clone());
+        let mut indexes = tree_indexes.indexes.borrow_mut();
+        if indexes.len() >= SHOW_TREE_INDEX_CACHE_ENTRY_LIMIT {
+            indexes.clear();
+        }
+        indexes.insert(tree_id.clone(), index.clone());
         return Ok(index);
     }
     Ok(Arc::new(tree_cache.read_tree_to_index(tree_id)?))
@@ -15450,7 +19334,7 @@ fn show_object(
         GitObjectKind::Commit => {
             let commit = {
                 let _trace = phase_trace("show.decode_commit");
-                decode_commit(GitHashAlgorithm::Sha1, &object.content)?
+                decode_commit(store.algorithm(), &object.content)?
             };
             let format = {
                 let _trace = phase_trace("show.format.parse");
@@ -15476,11 +19360,24 @@ fn show_object(
                 )?
             };
             let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
+            let fallback_abbrev_lengths;
+            let effective_abbrev_lengths = if let Some(prepared) = prepared {
+                prepared.abbrev_lengths.clone()
+            } else {
+                let mut ids = vec![object.id.clone()];
+                ids.extend(commit.parents.iter().cloned());
+                fallback_abbrev_lengths = rendered_abbrev_len_for_ids(
+                    store,
+                    show_abbrev_policy(repo, store, &options)?,
+                    &ids,
+                )?;
+                fallback_abbrev_lengths
+            };
+            let abbrev_lengths = &effective_abbrev_lengths;
             let raw_abbrev_len = {
                 let _trace = phase_trace("show.abbrev.raw");
                 if show_diff_format_needs_raw_abbrev_len(diff_format) {
-                    parse_diff_abbrev_len(options.abbrev, options.no_abbrev)?
-                        .or(Some(show_default_abbrev_len(&repo, store)?))
+                    parse_diff_abbrev_len(options.abbrev, options.no_abbrev, store.algorithm())?
                 } else {
                     None
                 }
@@ -15488,15 +19385,15 @@ fn show_object(
             let abbrev_len = {
                 let _trace = phase_trace("show.abbrev.commit");
                 if options.no_abbrev_commit {
-                    GitHashAlgorithm::Sha1.digest_len() * 2
+                    full_abbrev_len(store.algorithm())
                 } else if show_format_needs_commit_abbrev_len(
                     &format,
                     default_commit_abbrev,
                     commit.parents.len(),
                 ) {
-                    raw_abbrev_len.unwrap_or(show_default_abbrev_len(&repo, store)?)
+                    raw_abbrev_len.unwrap_or(abbrev_lengths.width_for(&object.id))
                 } else {
-                    GitHashAlgorithm::Sha1.digest_len() * 2
+                    full_abbrev_len(store.algorithm())
                 }
             };
             let has_diff_entries = if pathspecs.is_empty() {
@@ -15528,7 +19425,7 @@ fn show_object(
                     tree_indexes,
                 )?
             };
-            if options.no_patch {
+            if matches!(options.patch_mode, LogPatchMode::NoPatch) {
                 if show_raw_format_requested(&options) {
                     return show_raw_commit(
                         &object.id,
@@ -15539,11 +19436,11 @@ fn show_object(
                 }
                 let rendered = {
                     let _trace = phase_trace("show.render_header");
-                    format.render_with_context(
+                    format.render_with_context_default_date_lengths(
                         &object.id,
                         &commit,
                         effective_parents,
-                        abbrev_len,
+                        abbrev_lengths,
                         None,
                         default_commit_abbrev,
                         log_expand_tabs_enabled(
@@ -15553,11 +19450,10 @@ fn show_object(
                         ),
                         &decorations,
                         &notes,
-                        date_mode,
                     )?
                 };
                 io::stdout().write_all(rendered.as_bytes())?;
-                if format.terminates_lines() {
+                if format.terminates_lines() && !format.is_empty_user_format() {
                     io::stdout().write_all(b"\n")?;
                 }
                 return Ok(());
@@ -15620,7 +19516,7 @@ fn show_object(
             if options.separate_merges && commit.parents.len() > 1 {
                 let mut out = io::stdout().lock();
                 for (idx, parent) in commit.parents.iter().enumerate() {
-                    let rendered = format.render_with_from_parent(
+                    let rendered = format.render_with_from_parent_lengths(
                         &object.id,
                         &commit,
                         Some(parent),
@@ -15636,6 +19532,7 @@ fn show_object(
                         &decorations,
                         &notes,
                         date_mode,
+                        Some(abbrev_lengths),
                     )?;
                     out.write_all(rendered.as_bytes())?;
                     if format.separates_patch()
@@ -15645,7 +19542,9 @@ fn show_object(
                         )
                     {
                         out.write_all(b"---\n")?;
-                    } else if format.terminates_lines() || format.separates_patch() {
+                    } else if !format.is_empty_user_format()
+                        && (format.terminates_lines() || format.separates_patch())
+                    {
                         out.write_all(b"\n")?;
                     }
                     drop(out);
@@ -15703,7 +19602,7 @@ fn show_object(
             if zero_diff_header {
                 io::stdout().write_all(b"\0")?;
             }
-            if format.terminates_lines() {
+            if format.terminates_lines() && !format.is_empty_user_format() {
                 io::stdout().write_all(b"\n")?;
             }
             if commit.parents.is_empty() && !show_root {
@@ -15718,10 +19617,18 @@ fn show_object(
                 if has_diff_entries {
                     io::stdout().write_all(b"---\n")?;
                 }
-            } else if format.separates_patch() && has_diff_entries && !zero_diff_header {
+            } else if format.separates_patch()
+                && !format.is_empty_user_format()
+                && has_diff_entries
+                && !zero_diff_header
+            {
                 io::stdout().write_all(b"\n")?;
             }
-            if commit.parents.len() > 1 && format.terminates_lines() && !format.separates_patch() {
+            if commit.parents.len() > 1
+                && format.terminates_lines()
+                && !format.is_empty_user_format()
+                && !format.separates_patch()
+            {
                 io::stdout().write_all(b"\n")?;
             }
             if additive_diff_formats.len() > 1 {
@@ -15954,6 +19861,7 @@ fn write_rev_list_header_record(
     out: &mut dyn io::Write,
     id: &ObjectId,
     content: &[u8],
+    children: RevListChildrenView<'_>,
 ) -> Result<()> {
     let message_start = content
         .windows(2)
@@ -15965,7 +19873,9 @@ fn write_rev_list_header_record(
         })?;
     let headers = &content[..message_start - 2];
     let message = &content[message_start..];
-    writeln!(out, "{}", id.to_hex())?;
+    write!(out, "{}", id.to_hex())?;
+    append_rev_list_children_to_writer(out, children)?;
+    writeln!(out)?;
     out.write_all(headers)?;
     out.write_all(b"\n\n")?;
     write_indented_message(out, message)?;
@@ -16015,6 +19925,7 @@ fn show_commit_diff(
         };
         return print_tree_raw_entries(
             store,
+            configured_core_abbrev_state(repo)?,
             old_tree.as_ref(),
             &commit.tree,
             pathspecs,
@@ -16045,10 +19956,12 @@ fn show_commit_diff(
         let parent_indexes =
             diff_commands::combined_diff_tree_parent_indexes(commit, &commit_cache, &tree_cache)?;
         let result_index = read_show_tree_index(&tree_cache, tree_indexes, &commit.tree)?;
+        let abbrev_policy = configured_core_abbrev_state(repo)?;
         match format {
             ShowDiffFormat::Patch => {
                 diff_commands::print_combined_diff_tree_patches(
                     store,
+                    abbrev_policy,
                     &parent_indexes,
                     result_index.as_ref(),
                     pathspecs,
@@ -16065,6 +19978,7 @@ fn show_commit_diff(
             ShowDiffFormat::PatchWithRaw | ShowDiffFormat::PatchWithRawSummary => {
                 diff_commands::print_combined_diff_tree_raw_entries(
                     store,
+                    abbrev_policy,
                     &parent_indexes,
                     result_index.as_ref(),
                     pathspecs,
@@ -16083,6 +19997,7 @@ fn show_commit_diff(
                 println!();
                 diff_commands::print_combined_diff_tree_patches(
                     store,
+                    abbrev_policy,
                     &parent_indexes,
                     result_index.as_ref(),
                     pathspecs,
@@ -16122,6 +20037,7 @@ fn show_commit_diff(
                 println!();
                 diff_commands::print_combined_diff_tree_patches(
                     store,
+                    abbrev_policy,
                     &parent_indexes,
                     result_index.as_ref(),
                     pathspecs,
@@ -16263,6 +20179,7 @@ fn show_commit_diff_against_optional_parent(
         };
         return print_tree_raw_entries(
             store,
+            configured_core_abbrev_state(repo)?,
             old_tree.as_ref(),
             &commit.tree,
             pathspecs,
@@ -16669,6 +20586,7 @@ fn show_diff_between_indexes(
                 &entries,
                 RawPrintOptions {
                     abbrev_len: raw_abbrev_len,
+                    abbrev_policy: None,
                     relative_prefix: None,
                     nul_terminated,
                 },
@@ -16730,6 +20648,7 @@ fn show_diff_between_indexes(
             &entries,
             RawPrintOptions {
                 abbrev_len: raw_abbrev_len,
+                abbrev_policy: None,
                 relative_prefix: None,
                 nul_terminated,
             },
@@ -16755,7 +20674,7 @@ fn show_tag_object(
     options: ShowOptions<'_>,
     show_root: bool,
 ) -> Result<()> {
-    let tag = decode_tag(GitHashAlgorithm::Sha1, content)?;
+    let tag = decode_tag(store.algorithm(), content)?;
     let mut out = io::stdout().lock();
     out.write_all(b"tag ")?;
     out.write_all(&tag.name)?;
@@ -16907,7 +20826,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) single_worktree: bool,
     pub(crate) commit_header: bool,
     pub(crate) no_commit_header: bool,
-    pub(crate) disk_usage: bool,
+    pub(crate) disk_usage: Option<RevListDiskUsageMode>,
     pub(crate) progress: bool,
     pub(crate) no_filter: bool,
     pub(crate) missing: Option<&'a str>,
@@ -16983,6 +20902,7 @@ fn render_rev_list_format(
     id: &ObjectId,
     commit: &zmin_git_core::CommitObject,
     parents: bool,
+    children: RevListChildrenView<'_>,
     abbrev_len: usize,
     marker: Option<HistoryTraversalMarker>,
     default_commit_abbrev: bool,
@@ -16990,8 +20910,34 @@ fn render_rev_list_format(
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
 ) -> Result<String> {
+    if parents && matches!(format, LogFormat::ShortOneline) {
+        return render_rev_list_short_oneline(
+            id,
+            commit,
+            abbrev_len,
+            abbrev_lengths,
+            marker,
+            decorations,
+            notes,
+            children,
+        );
+    }
     match format {
+        LogFormat::ShortOneline | LogFormat::FullOneline => {
+            Ok(render_rev_list_oneline_with_children(
+                format,
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                abbrev_lengths,
+                marker,
+                decorations,
+                children,
+            ))
+        }
         LogFormat::Custom { pattern, .. } if log_format_uses_placeholder(pattern, 'N') => {
             let literal_pattern = pattern.replace("%N", "%%N");
             render_log_format(
@@ -17002,9 +20948,10 @@ fn render_rev_list_format(
                 decorations,
                 notes,
                 date_mode,
+                abbrev_lengths,
             )
         }
-        _ => format.render_with_context(
+        _ => format.render_with_context_lengths(
             id,
             commit,
             parents,
@@ -17015,7 +20962,87 @@ fn render_rev_list_format(
             decorations,
             notes,
             date_mode,
+            abbrev_lengths,
         ),
+    }
+}
+
+fn render_rev_list_short_oneline(
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    abbrev_len: usize,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
+    marker: Option<HistoryTraversalMarker>,
+    decorations: &LogDecorations,
+    _notes: &LogNotes,
+    children: RevListChildrenView<'_>,
+) -> Result<String> {
+    let mut out = String::new();
+    out.push_str(
+        &marker
+            .map(HistoryTraversalMarker::log_prefix)
+            .unwrap_or_default(),
+    );
+    out.push_str(&short_object_id_len(
+        id,
+        abbrev_lengths
+            .map(|lengths| lengths.width_for(id))
+            .unwrap_or(abbrev_len),
+    ));
+    out.push_str(&parent_suffix(commit, true));
+    append_rev_list_children(&mut out, children);
+    out.push_str(&render_oneline_decorations(decorations, id));
+    out.push(' ');
+    out.push_str(&commit_subject(&commit.message));
+    Ok(out)
+}
+
+fn render_rev_list_oneline_with_children(
+    format: &LogFormat<'_>,
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    parents: bool,
+    abbrev_len: usize,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
+    marker: Option<HistoryTraversalMarker>,
+    decorations: &LogDecorations,
+    children: RevListChildrenView<'_>,
+) -> String {
+    let mut out = String::new();
+    out.push_str(
+        &marker
+            .map(HistoryTraversalMarker::log_prefix)
+            .unwrap_or_default(),
+    );
+    if matches!(format, LogFormat::ShortOneline) {
+        out.push_str(&short_object_id_len(
+            id,
+            abbrev_lengths
+                .map(|lengths| lengths.width_for(id))
+                .unwrap_or(abbrev_len),
+        ));
+        out.push_str(
+            &abbrev_lengths
+                .map(|lengths| short_parent_suffix_lengths(commit, parents, lengths))
+                .unwrap_or_else(|| short_parent_suffix(commit, parents, abbrev_len)),
+        );
+    } else {
+        out.push_str(&id.to_hex());
+        out.push_str(&parent_suffix(commit, parents));
+    }
+    append_rev_list_children(&mut out, children);
+    out.push_str(&render_oneline_decorations(decorations, id));
+    out.push(' ');
+    out.push_str(&commit_subject(&commit.message));
+    out
+}
+
+fn append_rev_list_children(out: &mut String, children: RevListChildrenView<'_>) {
+    for child_index in children.indices {
+        if let Some(child) = children.ids.get(*child_index) {
+            out.push(' ');
+            out.push_str(&child.to_hex());
+        }
     }
 }
 
@@ -17026,6 +21053,7 @@ fn render_log_with_note_mode(
     from_parent: Option<&ObjectId>,
     parents: bool,
     abbrev_len: usize,
+    abbrev_lengths: Option<&RenderedAbbrevLengths>,
     marker: Option<HistoryTraversalMarker>,
     default_commit_abbrev: bool,
     expand_tabs: bool,
@@ -17047,10 +21075,11 @@ fn render_log_with_note_mode(
             decorations,
             notes,
             date_mode,
+            abbrev_lengths,
         );
     }
     if from_parent.is_some() {
-        return format.render_with_from_parent(
+        return format.render_with_from_parent_lengths(
             id,
             commit,
             from_parent,
@@ -17062,9 +21091,10 @@ fn render_log_with_note_mode(
             decorations,
             notes,
             date_mode,
+            abbrev_lengths,
         );
     }
-    format.render_with_context(
+    format.render_with_context_lengths(
         id,
         commit,
         parents,
@@ -17075,6 +21105,7 @@ fn render_log_with_note_mode(
         decorations,
         notes,
         date_mode,
+        abbrev_lengths,
     )
 }
 
@@ -17083,6 +21114,74 @@ enum RevListObjectFilter {
     BlobNone,
     BlobLimit(usize),
     ObjectType(GitObjectKind),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RevListDiskUsageMode {
+    Bytes,
+    Human,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RevListChildRowMode {
+    None,
+    CommitRows,
+    ObjectRows,
+}
+
+impl RevListChildRowMode {
+    fn for_command(
+        children: bool,
+        objects: bool,
+        quiet: bool,
+        count: bool,
+        disk_usage: Option<RevListDiskUsageMode>,
+        bisect_vars: bool,
+        no_walk: bool,
+    ) -> Self {
+        if !children || quiet || count || disk_usage.is_some() || bisect_vars || no_walk {
+            return Self::None;
+        }
+        if objects {
+            Self::ObjectRows
+        } else {
+            Self::CommitRows
+        }
+    }
+
+    fn needs_topology(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+fn format_rev_list_disk_usage_human(bytes: u64) -> String {
+    if bytes > 1 << 30 {
+        let fractional = (bytes & ((1 << 30) - 1)) / 10_737_419;
+        return format!("{}.{fractional:02} GiB", bytes >> 30);
+    }
+    if bytes > 1 << 20 {
+        let rounded = bytes.saturating_add(5_243);
+        let fractional = ((rounded & ((1 << 20) - 1)) * 100) >> 20;
+        return format!("{}.{fractional:02} MiB", rounded >> 20);
+    }
+    if bytes > 1 << 10 {
+        let rounded = bytes.saturating_add(5);
+        let fractional = ((rounded & ((1 << 10) - 1)) * 100) >> 10;
+        return format!("{}.{fractional:02} KiB", rounded >> 10);
+    }
+    if bytes == 1 {
+        "1 byte".to_owned()
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
+fn read_rev_list_commit_transient(
+    store: &LooseObjectStore,
+    id: &ObjectId,
+) -> Result<zmin_git_core::CommitObject> {
+    let object = store.read_object(id)?;
+    Ok(decode_commit(store.algorithm(), &object.content)?)
 }
 
 pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
@@ -17197,7 +21296,10 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         raw_args,
         revs,
     } = options;
+    validate_history_selection_options(raw_args)?;
+    validate_rev_list_output_options(parents, children, simplify_merges, simplify_by_decoration)?;
     let objects = objects || objects_edge || objects_edge_aggressive;
+    validate_rev_list_filter_options(filter.as_deref(), objects)?;
     let _accepted_exclude = exclude;
     let _accepted_exclude_first_parent_only = exclude_first_parent_only;
     let _accepted_exclude_hidden = exclude_hidden;
@@ -17226,6 +21328,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let _accepted_no_filter = no_filter;
     let _accepted_commit_header = commit_header;
     let _accepted_no_commit_header = no_commit_header;
+    let disk_usage_mode = disk_usage;
+    let commit_header_mode = RevListCommitHeaderMode::from_flag(no_commit_header);
     let _accepted_exclude_promisor_objects = exclude_promisor_objects;
     let _accepted_filter_print_omitted = filter_print_omitted;
     let _accepted_use_bitmap_index = use_bitmap_index;
@@ -17233,6 +21337,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     if progress {
         return Err(rev_list_usage_error());
     }
+    validate_rev_list_promisor_options(exclude_promisor_objects, missing)?;
     if merge {
         return Err(CliError::Fatal {
             code: 128,
@@ -17242,7 +21347,18 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         });
     }
     let walk_reflogs = walk_reflogs || reflog;
-    let no_walk = resolve_history_walk_mode(raw_args, no_walk, do_walk);
+    let walk_mode = resolve_history_walk_mode(raw_args, no_walk, do_walk);
+    let no_walk = walk_mode.is_no_walk();
+    let no_walk_sorted = walk_mode.is_sorted();
+    let child_row_mode = RevListChildRowMode::for_command(
+        children,
+        objects,
+        quiet,
+        count,
+        disk_usage_mode,
+        bisect_vars,
+        no_walk,
+    );
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
@@ -17293,11 +21409,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     };
     let date = date.or(embedded_date).unwrap_or_default();
     let date = (!date.is_empty()).then_some(date);
-    let format = format
-        .map(str::to_owned)
-        .or(embedded_format)
-        .unwrap_or_default();
-    let format = (!format.is_empty()).then_some(format);
+    let format = format.map(str::to_owned).or(embedded_format);
     let rendered_format = if oneline
         || format.is_some()
         || pretty.is_some()
@@ -17313,7 +21425,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let date_mode = parse_log_date_mode(date.as_deref())?;
     let expand_tabs = false;
     let default_commit_abbrev = abbrev_commit && !no_abbrev_commit;
-    let (min_parents, max_parents) = parse_log_parent_bounds(
+    let (min_parents, parsed_max_parents) = parse_log_parent_bounds(
         min_parents,
         no_min_parents,
         no_merges,
@@ -17321,10 +21433,19 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         no_max_parents,
         merges,
     )?;
-    let revs = revs
-        .into_iter()
-        .take_while(|rev| rev != "--")
-        .collect::<Vec<_>>();
+    let selection = resolve_history_selection_policy(
+        right_only,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        parsed_max_parents,
+    );
+    let right_only = selection.right_only;
+    let cherry = selection.cherry;
+    let cherry_pick = selection.cherry_pick;
+    let cherry_mark = selection.cherry_mark;
+    let max_parents = selection.max_parents;
+    let selector_events = ordered_rev_list_selector_events(raw_args);
     let post_collection_filters = since.is_some()
         || until.is_some()
         || author.is_some()
@@ -17334,37 +21455,48 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         || max_parents.is_some()
         || ancestry_path
         || simplify_by_decoration
+        || first_parent
+        || left_only
+        || right_only
+        || cherry
+        || cherry_pick
+        || cherry_mark
+        || boundary
+        || reverse
         || simplify_history_topo
-        || history_order.is_some();
+        || history_order.is_some()
+        || children
+        || no_walk_sorted;
     let object_filter = filter.as_deref().map(parse_rev_list_filter).transpose()?;
-    let _ = filter_provided_objects;
-    if revs.is_empty() && !all {
+    if revs.is_empty()
+        && !all
+        && !rev_list_selector_events_have_positive_selection(&selector_events)
+    {
         return Err(CliError::Message("`rev-list` requires a revision".into()));
     }
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
-        .with_stable_pack_snapshot()
-        .with_packed_objects_first()
-        .with_transient_packed_object_reads()
-        .with_trusted_packed_object_reads()
-        .with_buffered_pack_reads()
-        .with_packed_object_read_cache_byte_limit(REV_LIST_PACK_OBJECT_CACHE_BYTES);
-    let abbrev_len = if no_abbrev_commit {
-        GitHashAlgorithm::Sha1.digest_len() * 2
-    } else if default_commit_abbrev
-        || rendered_format
-            .as_ref()
-            .is_some_and(LogFormat::uses_abbreviated_object_id)
-    {
-        configured_default_abbrev_len(&repo, &store)?
-    } else {
-        GitHashAlgorithm::Sha1.digest_len() * 2
-    };
-    let commit_cache = CommitObjectCache::new(&store);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    )
+    .with_stable_pack_snapshot()
+    .with_packed_objects_first()
+    .with_transient_packed_object_reads()
+    .with_trusted_packed_object_reads()
+    .with_buffered_pack_reads()
+    .with_packed_object_read_cache_byte_limit(REV_LIST_PACK_OBJECT_CACHE_BYTES);
+    if quiet && disk_usage_mode.is_none() {
+        return Ok(());
+    }
+    let abbreviated_ids_requested = default_commit_abbrev
+        || rendered_format.as_ref().is_some_and(|format| {
+            format.uses_abbreviated_object_id() || format.uses_abbreviated_parent_ids()
+        });
     if walk_reflogs {
         if quiet {
             return Ok(());
         }
+        let commit_cache = CommitObjectCache::new(&store);
         let reflog_revs = rev_list_reflog_targets(&revs);
         if let Some(target) = rev_list_walk_reflogs_exclusion_target(&reflog_revs) {
             return Err(CliError::Fatal {
@@ -17380,7 +21512,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 rendered_format: rendered_format.as_ref(),
                 date_mode,
                 default_commit_abbrev,
-                abbrev_len,
+                no_abbrev_commit,
+                commit_header_mode,
+                abbreviated_ids_requested,
                 parents,
                 regexp_ignore_case,
                 count,
@@ -17390,26 +21524,44 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             &grep_reflog,
         );
     }
-    let mut revs = collect_rev_list_revs(&repo, &store, all, revs)?;
-    let promisor_objects = if exclude_promisor_objects {
-        collect_promisor_object_ids(&repo, &store)?
-    } else {
-        HashSet::new()
-    };
-    let promised_missing = if matches!(missing_mode, Some(RevListMissingMode::AllowPromisor))
-        || matches!(missing_mode, Some(RevListMissingMode::Print))
+    let ref_snapshot = if all
+        || selector_events
+            .iter()
+            .any(|event| matches!(event, RevListSelectorEvent::Select(_)))
+        || simplify_by_decoration
     {
-        collect_promised_missing_object_ids(&repo, &store)?
+        Some(collect_rev_list_ref_snapshot(&repo, store.algorithm())?)
+    } else {
+        None
+    };
+    let mut revs = collect_rev_list_revs_with_events(
+        &repo,
+        &store,
+        all,
+        selector_events,
+        ref_snapshot.as_ref(),
+    )?;
+    revs.exclude_first_parent_only = exclude_first_parent_only;
+    let pathspecs = history_pathspecs_after_separator(&repo, raw_args)?;
+    let path_query = (!pathspecs.is_empty()).then(|| HistoryPathQuery::compile(&pathspecs));
+    let policy_promised_objects = if exclude_promisor_objects {
+        collect_promisor_object_ids_for_policy(
+            &repo,
+            &store,
+            RevListPromisorObjectPolicy::ExcludePromisorObjects,
+        )?
+    } else if matches!(
+        missing_mode,
+        Some(RevListMissingMode::AllowPromisor | RevListMissingMode::Print)
+    ) {
+        collect_promisor_object_ids_for_policy(
+            &repo,
+            &store,
+            RevListPromisorObjectPolicy::MissingPromisorObjects,
+        )?
     } else {
         HashSet::new()
     };
-    let mut policy_promised_objects = HashSet::with_capacity(
-        promisor_objects
-            .len()
-            .saturating_add(promised_missing.len()),
-    );
-    policy_promised_objects.extend(promisor_objects.iter().cloned());
-    policy_promised_objects.extend(promised_missing.iter().cloned());
     sanitize_rev_list_promised_inputs(
         &repo,
         &store,
@@ -17422,8 +21574,31 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         allow_any: matches!(missing_mode, Some(RevListMissingMode::AllowAny)),
         exclude_promisor_objects,
         emit_missing_objects: matches!(missing_mode, Some(RevListMissingMode::Print)),
+        fatal_on_missing_tree: false,
         promised_objects: (!policy_promised_objects.is_empty()).then_some(&policy_promised_objects),
     };
+    let path_selection = path_query
+        .as_ref()
+        .map(|query| {
+            collect_history_path_selection(
+                &repo,
+                &store,
+                &revs,
+                query,
+                HistoryPathSelectionPolicy {
+                    full_history,
+                    sparse,
+                    first_parent,
+                    topo_order: matches!(history_order, Some(HistoryCommitOrder::Topo)),
+                    rewrite_parents: parents,
+                    children: child_row_mode.needs_topology(),
+                    missing_policy: tree_missing_policy,
+                    additional_excluded: &policy_promised_objects,
+                    follow: None,
+                },
+            )
+        })
+        .transpose()?;
     let mut promised_commit_excludes = Vec::new();
     let mut promised_excluded_commits = Vec::new();
     for id in &policy_promised_objects {
@@ -17446,9 +21621,104 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             exclude,
             extra_objects: revs.extra_objects.clone(),
             symmetric_diff: revs.symmetric_diff.clone(),
+            exclude_first_parent_only: revs.exclude_first_parent_only,
         }
     });
+    let object_history_order =
+        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo));
+    let mut object_commit_schedule = RevListObjectCommitSchedule {
+        order: object_history_order,
+        reverse,
+        max_count,
+        skip,
+        since,
+        until,
+        author,
+        committer,
+        grep: &grep,
+        all_match,
+        invert_grep,
+        regexp_ignore_case,
+        grep_mode,
+        min_parents,
+        max_parents,
+        ancestry_path,
+        simplify_by_decoration,
+        ref_snapshot: ref_snapshot.as_ref(),
+        first_parent,
+        left_right,
+        left_only,
+        right_only,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        boundary,
+    };
+    let object_commit_collect_limit = if object_commit_schedule.requires_full_collection() {
+        None
+    } else {
+        expand_history_max_count(max_count, skip)
+    };
+    let path_candidate_index_by_id = path_selection
+        .as_ref()
+        .map(history_path_candidate_index_by_id);
+    let mut pathless_children_topology =
+        if child_row_mode.needs_topology() && path_selection.is_none() {
+            let mut grep_predicate = |_: &ObjectId, commit: &CommitObject| {
+                shortlog_commit_matches_grep(
+                    &commit.message,
+                    &grep,
+                    all_match,
+                    invert_grep,
+                    regexp_ignore_case,
+                    grep_mode,
+                )
+            };
+            let mut metadata = if grep.is_empty() {
+                collect_commit_metadata_with_exclusions_with_parent_policy(
+                    &repo,
+                    &store,
+                    &revs,
+                    None,
+                    first_parent,
+                )?
+            } else {
+                collect_commit_metadata_with_exclusions_with_parent_policy_and_predicate(
+                    &repo,
+                    &store,
+                    &revs,
+                    None,
+                    first_parent,
+                    &mut grep_predicate,
+                    true,
+                )?
+            };
+            if let Some(order) = object_history_order {
+                metadata = reorder_collected_commit_metadata(metadata, order)?;
+            }
+            let display_indices = select_rev_list_children_metadata_indices(
+                &metadata,
+                RevListChildrenMetadataFilter {
+                    since,
+                    until,
+                    author,
+                    committer,
+                    grep: &grep,
+                    regexp_ignore_case,
+                    grep_mode,
+                    min_parents,
+                    max_parents,
+                },
+            )?;
+            Some((
+                RevListChildrenTopology::from_metadata(metadata, boundary),
+                display_indices,
+            ))
+        } else {
+            None
+        };
     if quiet
+        && disk_usage_mode.is_none()
         && !objects
         && !count
         && !parents
@@ -17460,18 +21730,24 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     {
         return Ok(());
     }
-    if objects && no_object_names && object_filter.is_some() {
+    if objects && object_filter.is_some() && (no_object_names || count) && disk_usage_mode.is_none()
+    {
         let filter = object_filter.expect("checked filter");
         let mut excluded_commits =
             collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
         excluded_commits.extend(promised_excluded_commits.iter().cloned());
-        let mut commit_trees = if policy_promised_objects.is_empty() {
-            let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
-            collect_commit_trees_with_exclusions_uncached(
+        let excluded_set = excluded_commits.iter().cloned().collect::<HashSet<_>>();
+        let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
+        let commit_selection = if policy_promised_objects.is_empty() {
+            collect_rev_list_object_commit_trees_for_schedule(
                 &repo,
                 &store,
                 traversal_revs,
-                expand_history_max_count(max_count, skip),
+                path_selection.as_ref(),
+                None,
+                object_commit_collect_limit,
+                &excluded_set,
+                &mut object_commit_schedule,
             )?
         } else {
             let mut roots = Vec::with_capacity(revs.include.len());
@@ -17482,20 +21758,140 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                     roots.push(id);
                 }
             }
-            let excluded = excluded_commits.iter().cloned().collect::<HashSet<_>>();
-            collect_commit_trees_from_ids_uncached_with_excluded(
+            collect_rev_list_object_commit_trees_for_schedule(
                 &repo,
                 &store,
-                &roots,
-                expand_history_max_count(max_count, skip),
-                &excluded,
+                &revs,
+                path_selection.as_ref(),
+                Some(&roots),
+                object_commit_collect_limit,
+                &excluded_set,
+                &mut object_commit_schedule,
             )?
         };
-        if let Some(skip) = skip {
-            commit_trees = commit_trees.into_iter().skip(skip).collect();
+        if let RevListObjectCommitSelection::Indexed(object_selection) = &commit_selection {
+            let Some(selection) = path_selection.as_ref() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "path query selection missing for object filter".into(),
+                });
+            };
+            let selected_ids = history_path_object_id_refs(selection, &object_selection);
+            if exclude_first_parent_only || first_parent {
+                excluded_commits = collect_history_path_object_exclusion_commits(
+                    selection,
+                    &object_selection.candidate_indices,
+                    &excluded_commits,
+                    exclude_first_parent_only,
+                );
+            }
+            let mut out =
+                io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
+            let mut count_value = 0usize;
+            let topology_children = if children {
+                if let Some((topology, indices)) = pathless_children_topology.as_ref() {
+                    Some((
+                        topology,
+                        collect_rev_list_children_from_topology(
+                            topology,
+                            indices,
+                            &topology.ids,
+                            &[],
+                            &[],
+                        )?,
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            for id in selected_ids.iter().copied().chain(
+                object_selection
+                    .boundary_commits
+                    .iter()
+                    .map(|boundary| &boundary.id),
+            ) {
+                if rev_list_filter_includes(&store, id, filter)? {
+                    count_value += 1;
+                    if !count {
+                        write!(out, "{id}")?;
+                        if let Some((topology, children_by_id)) = topology_children.as_ref()
+                            && let Some(candidate_index) =
+                                topology.candidate_index_for_id(id, &topology.ids)
+                        {
+                            append_rev_list_children_to_writer(
+                                &mut out,
+                                RevListChildrenView {
+                                    indices: children_by_id.get(candidate_index),
+                                    ids: &topology.ids,
+                                },
+                            )?;
+                        }
+                        writeln!(out)?;
+                    }
+                }
+            }
+            let tree_indices = history_path_object_tree_indices(selection, &object_selection);
+            let provided_object_ids = revs
+                .extra_objects
+                .iter()
+                .map(|(id, _)| id)
+                .collect::<HashSet<_>>();
+            for_each_history_path_object_line_with_tree_indices(
+                &store,
+                &selection.ids,
+                &tree_indices,
+                &revs.extra_objects,
+                &excluded_commits,
+                path_query.as_ref().expect("path query selection exists"),
+                tree_missing_policy,
+                |id, kind, _| {
+                    if !filter_provided_objects && provided_object_ids.contains(&id) {
+                        count_value += 1;
+                        if !count {
+                            writeln!(out, "{id}")?;
+                        }
+                    } else if rev_list_filter_includes_known_kind(&store, id, kind, filter)? {
+                        count_value += 1;
+                        if !count {
+                            writeln!(out, "{id}")?;
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            if count {
+                println!("{count_value}");
+            }
+            return Ok(());
         }
-        if reverse {
-            commit_trees.reverse();
+        let commit_trees = match commit_selection {
+            RevListObjectCommitSelection::Owned(commit_trees) => commit_trees,
+            RevListObjectCommitSelection::Indexed(_) => {
+                unreachable!("indexed path selection handled")
+            }
+        };
+        if exclude_first_parent_only || first_parent {
+            excluded_commits = if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                collect_history_path_object_exclusion_commits_for_id_refs(
+                    selection,
+                    candidate_index_by_id,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &excluded_commits,
+                    exclude_first_parent_only,
+                )
+            } else if exclude_first_parent_only {
+                collect_rev_list_object_exclusion_edge_commits(
+                    &store,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &excluded_commits,
+                )?
+            } else {
+                collect_rev_list_object_first_parent_exclusion_commits(&excluded_commits)
+            };
         }
         let extra_object_ids = revs
             .extra_objects
@@ -17505,45 +21901,122 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         let mut out =
             io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
         let mut count_value = 0usize;
+        let topology_children = if children {
+            if let Some((topology, indices)) = pathless_children_topology.as_ref() {
+                Some((
+                    topology,
+                    collect_rev_list_children_from_topology(
+                        topology,
+                        indices,
+                        &topology.ids,
+                        &[],
+                        &[],
+                    )?,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         for commit in &commit_trees {
             if rev_list_filter_includes(&store, &commit.id, filter)? {
                 count_value += 1;
                 if !count {
-                    writeln!(out, "{}", commit.id)?;
+                    write!(out, "{}", commit.id)?;
+                    if let Some((topology, children_by_id)) = topology_children.as_ref()
+                        && let Some(candidate_index) =
+                            topology.candidate_index_for_id(&commit.id, &topology.ids)
+                    {
+                        append_rev_list_children_to_writer(
+                            &mut out,
+                            RevListChildrenView {
+                                indices: children_by_id.get(candidate_index),
+                                ids: &topology.ids,
+                            },
+                        )?;
+                    }
+                    writeln!(out)?;
                 }
             }
         }
-        let visited = for_each_rev_list_filtered_object_id(
-            &store,
-            &commit_trees,
-            &extra_object_ids,
-            &excluded_commits,
-            filter,
-            |id| {
-                count_value += 1;
-                if !count {
-                    writeln!(out, "{id}")?;
-                }
-                Ok(())
-            },
-        )?;
+        let visited = if let Some(query) = path_query.as_ref() {
+            let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "path query selection missing for object filter".into(),
+                });
+            };
+            let tree_indices = history_path_tree_indices_for_commits(
+                selection,
+                candidate_index_by_id,
+                &commit_trees,
+            );
+            let provided_object_ids = extra_object_ids.iter().collect::<HashSet<_>>();
+            for_each_history_path_object_line_with_tree_indices(
+                &store,
+                &selection.ids,
+                &tree_indices,
+                &revs.extra_objects,
+                &excluded_commits,
+                query,
+                tree_missing_policy,
+                |id, kind, _| {
+                    if !filter_provided_objects && provided_object_ids.contains(&id) {
+                        count_value += 1;
+                        if !count {
+                            writeln!(out, "{id}")?;
+                        }
+                    } else if rev_list_filter_includes_known_kind(&store, id, kind, filter)? {
+                        count_value += 1;
+                        if !count {
+                            writeln!(out, "{id}")?;
+                        }
+                    }
+                    Ok(())
+                },
+            )?
+        } else {
+            for_each_rev_list_filtered_object_id(
+                &store,
+                &commit_trees,
+                &extra_object_ids,
+                &excluded_commits,
+                filter,
+                filter_provided_objects,
+                |id| {
+                    count_value += 1;
+                    if !count {
+                        writeln!(out, "{id}")?;
+                    }
+                    Ok(())
+                },
+            )?
+        };
         let _ = visited;
         if count {
             println!("{count_value}");
         }
         return Ok(());
     }
-    if objects && count {
+    if objects && count && disk_usage_mode.is_none() {
         let mut excluded_commits =
             collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
         excluded_commits.extend(promised_excluded_commits.iter().cloned());
-        let mut commit_trees = if policy_promised_objects.is_empty() {
-            let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
-            collect_commit_trees_with_exclusions_uncached(
+        let excluded_set = excluded_commits.iter().cloned().collect::<HashSet<_>>();
+        let traversal_revs = revs_with_promisor_commit_excludes.as_ref().unwrap_or(&revs);
+        let commit_selection = if policy_promised_objects.is_empty() {
+            collect_rev_list_object_commit_trees_for_schedule(
                 &repo,
                 &store,
                 traversal_revs,
-                expand_history_max_count(max_count, skip),
+                path_selection.as_ref(),
+                None,
+                object_commit_collect_limit,
+                &excluded_set,
+                &mut object_commit_schedule,
             )?
         } else {
             let mut roots = Vec::with_capacity(revs.include.len());
@@ -17554,29 +22027,120 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                     roots.push(id);
                 }
             }
-            let excluded = excluded_commits.iter().cloned().collect::<HashSet<_>>();
-            collect_commit_trees_from_ids_uncached_with_excluded(
+            collect_rev_list_object_commit_trees_for_schedule(
                 &repo,
                 &store,
-                &roots,
-                expand_history_max_count(max_count, skip),
-                &excluded,
+                &revs,
+                path_selection.as_ref(),
+                Some(&roots),
+                object_commit_collect_limit,
+                &excluded_set,
+                &mut object_commit_schedule,
             )?
         };
-        if let Some(skip) = skip {
-            commit_trees = commit_trees.into_iter().skip(skip).collect();
-        }
-        if reverse {
-            commit_trees.reverse();
-        }
-        if count {
-            let object_count = count_rev_list_objects_uncached(
+        if let RevListObjectCommitSelection::Indexed(object_selection) = &commit_selection {
+            let Some(selection) = path_selection.as_ref() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "path query selection missing for object count".into(),
+                });
+            };
+            if exclude_first_parent_only || first_parent {
+                excluded_commits = collect_history_path_object_exclusion_commits(
+                    selection,
+                    &object_selection.candidate_indices,
+                    &excluded_commits,
+                    exclude_first_parent_only,
+                );
+            }
+            let tree_indices = history_path_object_tree_indices(selection, object_selection);
+            let mut path_count = 0usize;
+            for_each_history_path_object_line_with_tree_indices(
                 &store,
-                &commit_trees,
+                &selection.ids,
+                &tree_indices,
                 &revs.extra_objects,
                 &excluded_commits,
+                path_query.as_ref().expect("path query selection exists"),
                 tree_missing_policy,
+                |_, _, _| {
+                    path_count += 1;
+                    Ok(())
+                },
             )?;
+            println!(
+                "{}",
+                object_selection.candidate_indices.len()
+                    + object_selection.boundary_commits.len()
+                    + path_count
+            );
+            return Ok(());
+        }
+        let commit_trees = match commit_selection {
+            RevListObjectCommitSelection::Owned(commit_trees) => commit_trees,
+            RevListObjectCommitSelection::Indexed(_) => unreachable!("indexed path count handled"),
+        };
+        if exclude_first_parent_only || first_parent {
+            excluded_commits = if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                collect_history_path_object_exclusion_commits_for_id_refs(
+                    selection,
+                    candidate_index_by_id,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &excluded_commits,
+                    exclude_first_parent_only,
+                )
+            } else if exclude_first_parent_only {
+                collect_rev_list_object_exclusion_edge_commits(
+                    &store,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &excluded_commits,
+                )?
+            } else {
+                collect_rev_list_object_first_parent_exclusion_commits(&excluded_commits)
+            };
+        }
+        if count {
+            let object_count = if let Some(query) = path_query.as_ref() {
+                let mut path_count = 0usize;
+                if let (Some(selection), Some(candidate_index_by_id)) =
+                    (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+                {
+                    let tree_indices = history_path_tree_indices_for_commits(
+                        selection,
+                        candidate_index_by_id,
+                        &commit_trees,
+                    );
+                    for_each_history_path_object_line_with_tree_indices(
+                        &store,
+                        &selection.ids,
+                        &tree_indices,
+                        &revs.extra_objects,
+                        &excluded_commits,
+                        query,
+                        tree_missing_policy,
+                        |_, _, _| {
+                            path_count += 1;
+                            Ok(())
+                        },
+                    )?;
+                } else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "path query selection missing for object count".into(),
+                    });
+                }
+                path_count
+            } else {
+                count_rev_list_objects_uncached(
+                    &store,
+                    &commit_trees,
+                    &revs.extra_objects,
+                    &excluded_commits,
+                    tree_missing_policy,
+                )?
+            };
             println!("{}", commit_trees.len() + object_count);
             return Ok(());
         }
@@ -17600,7 +22164,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         )?;
         return Ok(());
     }
-    if count && !objects && !post_collection_filters {
+    if count
+        && !objects
+        && !post_collection_filters
+        && path_selection.is_none()
+        && disk_usage_mode.is_none()
+    {
         let count_value = if policy_promised_objects.is_empty() {
             count_commits_with_exclusions(
                 &repo,
@@ -17621,6 +22190,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 .into_iter()
                 .collect::<HashSet<_>>();
             excluded.extend(policy_promised_objects.iter().cloned());
+            let commit_cache = CommitObjectCache::new(&store);
             collect_commits_from_ids_cached_with_excluded(
                 &repo,
                 &commit_cache,
@@ -17634,7 +22204,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
 
-    if objects && !parents && !children {
+    if objects && !parents && !children && disk_usage_mode.is_none() {
         let _branch_trace = phase_trace("rev_list.objects");
         let mut traversal_excluded_commits = {
             let _trace = phase_trace("rev_list.objects.collect_excluded");
@@ -17645,8 +22215,10 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             .iter()
             .cloned()
             .collect::<HashSet<_>>();
-        let object_walk_excluded_commits = if exclude_promisor_objects {
-            collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?
+        let mut object_walk_excluded_commits = if exclude_first_parent_only {
+            Vec::new()
+        } else if first_parent {
+            collect_rev_list_object_first_parent_exclusion_commits(&traversal_excluded_commits)
         } else {
             traversal_excluded_commits.clone()
         };
@@ -17655,14 +22227,18 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         } else {
             &revs
         };
-        let mut commit_trees = {
+        let commit_selection = {
             let _trace = phase_trace("rev_list.objects.collect_commits");
             if policy_promised_objects.is_empty() {
-                collect_commit_trees_with_exclusions_uncached(
+                collect_rev_list_object_commit_trees_for_schedule(
                     &repo,
                     &store,
                     traversal_revs,
-                    expand_history_max_count(max_count, skip),
+                    path_selection.as_ref(),
+                    None,
+                    object_commit_collect_limit,
+                    &excluded,
+                    &mut object_commit_schedule,
                 )?
             } else {
                 let mut roots = Vec::with_capacity(revs.include.len());
@@ -17673,49 +22249,249 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                         roots.push(id);
                     }
                 }
-                collect_commits_from_ids_cached_with_excluded(
+                collect_rev_list_object_commit_trees_for_schedule(
                     &repo,
-                    &commit_cache,
-                    &roots,
-                    expand_history_max_count(max_count, skip),
+                    &store,
+                    &revs,
+                    path_selection.as_ref(),
+                    Some(&roots),
+                    object_commit_collect_limit,
                     &excluded,
+                    &mut object_commit_schedule,
                 )?
-                .into_iter()
-                .map(|id| {
-                    Ok(CollectedCommitTree {
-                        tree: read_commit_tree_uncached(&store, &id)?,
-                        id,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?
             }
         };
-        if let Some(skip) = skip {
-            commit_trees = commit_trees.into_iter().skip(skip).collect();
+        if let RevListObjectCommitSelection::Indexed(object_selection) = &commit_selection {
+            let Some(selection) = path_selection.as_ref() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "path query selection missing for object traversal".into(),
+                });
+            };
+            let selected_ids = history_path_object_id_refs(selection, object_selection);
+            let object_walk_excluded_commits = if exclude_first_parent_only || first_parent {
+                collect_history_path_object_exclusion_commits(
+                    selection,
+                    &object_selection.candidate_indices,
+                    &traversal_excluded_commits,
+                    exclude_first_parent_only,
+                )
+            } else {
+                traversal_excluded_commits.clone()
+            };
+            let mut out =
+                io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
+            let object_traversal = if left_right || cherry || cherry_mark {
+                collect_history_traversal_decoration_uncached_refs(
+                    &repo,
+                    &store,
+                    &revs,
+                    &selected_ids,
+                    left_right,
+                    cherry,
+                    cherry_pick,
+                    cherry_mark,
+                    first_parent,
+                )?
+            } else {
+                HistoryTraversalDecoration::default()
+            };
+            let object_edge_ids = if objects_edge || objects_edge_aggressive {
+                collect_history_path_object_edge_ids(
+                    &repo,
+                    &store,
+                    &revs,
+                    selection,
+                    &object_selection.candidate_indices,
+                    &traversal_excluded_commits,
+                    objects_edge_aggressive,
+                )?
+            } else {
+                Vec::new()
+            };
+            for id in &object_edge_ids {
+                writeln!(out, "-{id}")?;
+            }
+            if !quiet {
+                for candidate_index in &object_selection.candidate_indices {
+                    let id = &selection.ids[selection.commits[*candidate_index].id_index];
+                    let marker = object_traversal.markers.get(id).copied();
+                    write_rev_list_marker_prefix(&mut out, marker)?;
+                    write!(out, "{id}")?;
+                    if parents {
+                        if let Some(parent_indices) =
+                            selection.rewritten_parent_indices.get(*candidate_index)
+                        {
+                            for parent_index in parent_indices {
+                                write!(out, " {}", selection.ids[*parent_index])?;
+                            }
+                        }
+                    }
+                    writeln!(out)?;
+                }
+                for boundary in &object_selection.boundary_commits {
+                    write_rev_list_marker_prefix(&mut out, Some(HistoryTraversalMarker::Boundary))?;
+                    writeln!(out, "{}", boundary.id)?;
+                }
+            }
+            let provided_object_ids = revs
+                .extra_objects
+                .iter()
+                .map(|(id, _)| id)
+                .collect::<HashSet<_>>();
+            let mut deferred_missing_ids = Vec::new();
+            let mut visit_object =
+                |id: &ObjectId, kind: Option<GitObjectKind>, name: Option<&[u8]>| -> Result<()> {
+                    let missing = !store.contains_object(id).map_err(CliError::Io)?;
+                    if quiet && !missing {
+                        return Ok(());
+                    }
+                    if matches!(missing_mode, Some(RevListMissingMode::Print)) && missing {
+                        deferred_missing_ids.push(id.clone());
+                        return Ok(());
+                    }
+                    if let Some(filter) = object_filter {
+                        let is_provided = provided_object_ids.contains(id);
+                        if (filter_provided_objects || !is_provided)
+                            && !rev_list_filter_includes_known_kind(&store, id, kind, filter)?
+                        {
+                            return Ok(());
+                        }
+                    }
+                    let name = if no_object_names { None } else { name };
+                    write_rev_list_object_output(&store, &mut out, id, name, missing_mode)
+                };
+            let tree_indices = history_path_object_tree_indices(selection, object_selection);
+            for_each_history_path_object_line_with_tree_indices(
+                &store,
+                &selection.ids,
+                &tree_indices,
+                &revs.extra_objects,
+                &object_walk_excluded_commits,
+                path_query.as_ref().expect("path query selection exists"),
+                tree_missing_policy,
+                &mut visit_object,
+            )?;
+            for id in deferred_missing_ids {
+                write_rev_list_object_output(&store, &mut out, &id, None, missing_mode)?;
+            }
+            out.flush()?;
+            return Ok(());
         }
-        if reverse {
-            commit_trees.reverse();
+        let commit_trees = match commit_selection {
+            RevListObjectCommitSelection::Owned(commit_trees) => commit_trees,
+            RevListObjectCommitSelection::Indexed(_) => {
+                unreachable!("indexed path objects handled")
+            }
+        };
+        if exclude_first_parent_only || first_parent {
+            object_walk_excluded_commits = if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                collect_history_path_object_exclusion_commits_for_id_refs(
+                    selection,
+                    candidate_index_by_id,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &traversal_excluded_commits,
+                    exclude_first_parent_only,
+                )
+            } else if exclude_first_parent_only {
+                collect_rev_list_object_exclusion_edge_commits(
+                    &store,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &traversal_excluded_commits,
+                )?
+            } else {
+                collect_rev_list_object_first_parent_exclusion_commits(&traversal_excluded_commits)
+            };
         }
         let mut out =
             io::BufWriter::with_capacity(REV_LIST_OUTPUT_BUFFER_BYTES, io::stdout().lock());
+        let object_traversal = if left_right || cherry || cherry_mark {
+            let object_commit_id_refs = commit_trees
+                .iter()
+                .map(|entry| &entry.id)
+                .collect::<Vec<_>>();
+            collect_history_traversal_decoration_uncached_refs(
+                &repo,
+                &store,
+                &revs,
+                &object_commit_id_refs,
+                left_right,
+                cherry,
+                cherry_pick,
+                cherry_mark,
+                first_parent,
+            )?
+        } else {
+            HistoryTraversalDecoration::default()
+        };
+        let object_edge_ids = if objects_edge || objects_edge_aggressive {
+            if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                let candidate_indices = history_path_candidate_indices_for_id_refs(
+                    selection,
+                    candidate_index_by_id,
+                    commit_trees.iter().map(|commit| &commit.id),
+                );
+                collect_history_path_object_edge_ids(
+                    &repo,
+                    &store,
+                    &revs,
+                    selection,
+                    &candidate_indices,
+                    &traversal_excluded_commits,
+                    objects_edge_aggressive,
+                )?
+            } else {
+                collect_rev_list_object_edge_ids(
+                    &repo,
+                    &store,
+                    &revs,
+                    commit_trees.iter().map(|commit| &commit.id),
+                    &traversal_excluded_commits,
+                    objects_edge_aggressive,
+                )?
+            }
+        } else {
+            Vec::new()
+        };
+        if !object_edge_ids.is_empty() {
+            for id in &object_edge_ids {
+                writeln!(out, "-{id}")?;
+            }
+        }
         let mut deferred_missing_ids = Vec::new();
         {
             let _trace = phase_trace("rev_list.objects.write_commits");
             if !quiet {
                 for commit in &commit_trees {
-                    writeln!(out, "{}", commit.id)?;
+                    let marker = if commit.is_boundary {
+                        Some(HistoryTraversalMarker::Boundary)
+                    } else {
+                        object_traversal.markers.get(&commit.id).copied()
+                    };
+                    write_rev_list_marker_prefix(&mut out, marker)?;
+                    write!(out, "{}", commit.id)?;
+                    if parents {
+                        for parent in read_commit_parents_uncached(&store, &commit.id)? {
+                            write!(out, " {parent}")?;
+                        }
+                    }
+                    writeln!(out)?;
                 }
             }
         }
         {
             let _trace = phase_trace("rev_list.objects.walk_trees");
-            for_each_rev_list_object_line_with_trees(
-                &store,
-                &commit_trees,
-                &revs.extra_objects,
-                &object_walk_excluded_commits,
-                tree_missing_policy,
-            |id, kind, name| {
+            let provided_object_ids = revs
+                .extra_objects
+                .iter()
+                .map(|(id, _)| id)
+                .collect::<HashSet<_>>();
+            let mut visit_object =
+                |id: &ObjectId, kind: Option<GitObjectKind>, name: Option<&[u8]>| -> Result<()> {
                     let missing = !store.contains_object(id).map_err(CliError::Io)?;
                     if quiet && !missing {
                         return Ok(());
@@ -17726,15 +22502,52 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                         return Ok(());
                     }
                     if let Some(filter) = object_filter {
-                        if !rev_list_filter_includes_known_kind(&store, id, kind, filter)? {
+                        let is_provided = provided_object_ids.contains(id);
+                        if (filter_provided_objects || !is_provided)
+                            && !rev_list_filter_includes_known_kind(&store, id, kind, filter)?
+                        {
                             return Ok(());
                         }
                     }
                     let name = if no_object_names { None } else { name };
                     write_rev_list_object_output(&store, &mut out, id, name, missing_mode)?;
                     Ok(())
-                },
-            )?;
+                };
+            if let Some(query) = path_query.as_ref() {
+                if let (Some(selection), Some(candidate_index_by_id)) =
+                    (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+                {
+                    let tree_indices = history_path_tree_indices_for_commits(
+                        selection,
+                        candidate_index_by_id,
+                        &commit_trees,
+                    );
+                    for_each_history_path_object_line_with_tree_indices(
+                        &store,
+                        &selection.ids,
+                        &tree_indices,
+                        &revs.extra_objects,
+                        &object_walk_excluded_commits,
+                        query,
+                        tree_missing_policy,
+                        &mut visit_object,
+                    )?;
+                } else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "path query selection missing for object traversal".into(),
+                    });
+                }
+            } else {
+                for_each_rev_list_object_line_with_trees(
+                    &store,
+                    &commit_trees,
+                    &revs.extra_objects,
+                    &object_walk_excluded_commits,
+                    tree_missing_policy,
+                    &mut visit_object,
+                )?;
+            }
         }
         if phase_trace_enabled() {
             let (entries, bytes) = store.packed_object_read_cache_usage()?;
@@ -17754,20 +22567,34 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
 
-    let collect_max_count = if count || objects {
+    let collect_max_count = if post_collection_filters {
+        None
+    } else if count || objects {
         expand_history_max_count(max_count, skip)
     } else {
-        max_count
-    };
-    let collect_max_count = if post_collection_filters && (count || objects) {
-        None
-    } else {
-        collect_max_count
+        expand_history_max_count(max_count, skip)
     };
 
-    let mut commit_ids = if post_collection_filters {
+    let mut pathless_child_display_indices = None;
+    let mut commit_ids = if let Some(path_selection) = path_selection.as_ref() {
+        let mut ids = path_selection
+            .commits
+            .iter()
+            .map(|candidate| path_selection.ids[candidate.id_index].clone())
+            .collect::<Vec<_>>();
+        if let Some(order) =
+            history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+        {
+            ids = reorder_history_path_selection_ids(&store, path_selection, order)?;
+        }
+        ids
+    } else if let Some((topology, display_indices)) = pathless_children_topology.as_mut() {
+        let ids = topology.take_ids();
+        pathless_child_display_indices = Some(std::mem::take(display_indices));
+        ids
+    } else if post_collection_filters {
         let commit_cache = CommitObjectCache::new(&store);
-        let mut commits = if no_walk && !all {
+        let mut commits = if no_walk {
             collect_no_walk_commit_objects(
                 &repo,
                 &store,
@@ -17775,13 +22602,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 &revs.include,
                 collect_max_count,
             )?
-        } else if first_parent && !all {
-            collect_first_parent_commit_objects_with_exclusions(
+        } else if first_parent {
+            collect_commit_objects_with_exclusions_cached_with_parent_policy(
                 &repo,
                 &store,
                 &commit_cache,
                 &revs,
                 collect_max_count,
+                true,
             )?
         } else {
             collect_commit_objects_with_exclusions_cached(
@@ -17792,6 +22620,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 collect_max_count,
             )?
         };
+        if let Some(order) =
+            history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+        {
+            commits = reorder_collected_commits(commits, order)?;
+        }
+        if no_walk_sorted && no_walk {
+            commits = reorder_collected_commits(commits, HistoryCommitOrder::Date)?;
+        }
         if let Some(since) = since {
             commits.retain(|entry| {
                 signature_timestamp_timezone(&entry.commit.committer)
@@ -17850,7 +22686,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
         commits.into_iter().map(|entry| entry.id).collect()
     } else {
-        if no_walk && !all {
+        let commit_cache = CommitObjectCache::new(&store);
+        if no_walk {
             collect_no_walk_commit_objects(
                 &repo,
                 &store,
@@ -17861,13 +22698,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             .into_iter()
             .map(|entry| entry.id)
             .collect()
-        } else if first_parent && !all {
-            collect_first_parent_commit_objects_with_exclusions(
+        } else if first_parent {
+            collect_commit_objects_with_exclusions_cached_with_parent_policy(
                 &repo,
                 &store,
                 &commit_cache,
                 &revs,
                 collect_max_count,
+                true,
             )?
             .into_iter()
             .map(|entry| entry.id)
@@ -17899,52 +22737,277 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             }
         }
     };
+    if let (Some(path_selection), Some(candidate_index_by_id)) =
+        (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+    {
+        commit_ids = filter_history_path_rev_list_ids(
+            &store,
+            path_selection,
+            candidate_index_by_id,
+            commit_ids,
+            since,
+            until,
+            author,
+            committer,
+            &grep,
+            all_match,
+            invert_grep,
+            regexp_ignore_case,
+            grep_mode,
+            min_parents,
+            max_parents,
+        )?;
+    }
+    let mut boundary_shown_ids = commit_ids.iter().cloned().collect::<HashSet<_>>();
     if ancestry_path {
-        commit_ids =
-            filter_commit_ids_by_ancestry_path(&repo, &store, &commit_cache, &revs, commit_ids)?;
+        let commit_cache = CommitObjectCache::new(&store);
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            let selected_ids = indices
+                .iter()
+                .filter_map(|index| commit_ids.get(*index))
+                .cloned()
+                .collect::<Vec<_>>();
+            let retained = filter_commit_ids_by_ancestry_path(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs,
+                selected_ids,
+            )?;
+            let retained = retained.into_iter().collect::<HashSet<_>>();
+            retain_rev_list_display_indices(indices, &commit_ids, |id| retained.contains(id));
+        } else {
+            commit_ids = filter_commit_ids_by_ancestry_path(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs,
+                commit_ids,
+            )?;
+        }
     }
     if simplify_by_decoration {
-        let decorated = collect_default_log_decoration_ids(&repo, None)?;
-        commit_ids.retain(|id| decorated.contains(id));
+        let decorated = collect_default_log_decoration_ids(&repo, &store, ref_snapshot.as_ref())?;
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            retain_rev_list_display_indices(indices, &commit_ids, |id| decorated.contains(id));
+        } else {
+            commit_ids.retain(|id| decorated.contains(id));
+        }
     }
     let traversal = collect_history_traversal_decoration(
         &repo,
         &store,
-        &commit_cache,
         &revs,
         &commit_ids,
-        left_right || left_only || right_only,
+        left_right || left_only || (right_only && !cherry),
         cherry,
         cherry_pick,
         cherry_mark,
-        boundary,
+        first_parent,
     )?;
+    boundary_shown_ids.extend(traversal.markers.keys().cloned());
+    boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
     if cherry {
-        commit_ids.retain(|id| traversal.markers.contains_key(id));
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            retain_rev_list_display_indices(indices, &commit_ids, |id| {
+                traversal.right_ids.contains(id)
+            });
+        } else {
+            commit_ids.retain(|id| traversal.right_ids.contains(id));
+        }
     }
-    if cherry_pick && !traversal.equivalent_ids.is_empty() {
-        commit_ids.retain(|id| !traversal.equivalent_ids.contains(id));
-    }
-    if boundary {
-        commit_ids.extend(traversal.boundary_ids.iter().cloned());
+    if cherry_pick && !cherry && !traversal.equivalent_ids.is_empty() {
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            retain_rev_list_display_indices(indices, &commit_ids, |id| {
+                !traversal.equivalent_ids.contains(id)
+            });
+        } else {
+            commit_ids.retain(|id| !traversal.equivalent_ids.contains(id));
+        }
     }
     if left_only {
-        commit_ids.retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Left));
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            retain_rev_list_display_indices(indices, &commit_ids, |id| {
+                traversal.markers.get(id) == Some(&HistoryTraversalMarker::Left)
+            });
+        } else {
+            commit_ids
+                .retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Left));
+        }
     }
-    if right_only {
-        commit_ids.retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Right));
+    if right_only && !cherry {
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            retain_rev_list_display_indices(indices, &commit_ids, |id| {
+                traversal.markers.get(id) == Some(&HistoryTraversalMarker::Right)
+            });
+        } else {
+            commit_ids
+                .retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Right));
+        }
     }
-    if let Some(order) =
-        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+    if !post_collection_filters
+        && let Some(order) =
+            history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
     {
+        let commit_cache = CommitObjectCache::new(&store);
         commit_ids = reorder_commit_ids(&commit_cache, commit_ids, order)?;
     }
     if let Some(skip) = skip {
-        commit_ids = commit_ids.into_iter().skip(skip).collect();
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            *indices = indices.iter().copied().skip(skip).collect();
+        } else {
+            commit_ids = commit_ids.into_iter().skip(skip).collect();
+        }
     }
+    if let Some(max_count) = max_count {
+        if let Some(indices) = pathless_child_display_indices.as_mut() {
+            indices.truncate(max_count);
+        } else {
+            commit_ids.truncate(max_count);
+        }
+    }
+    if let Some(indices) = pathless_child_display_indices.as_ref() {
+        boundary_shown_ids.clear();
+        boundary_shown_ids.extend(
+            indices
+                .iter()
+                .filter_map(|index| commit_ids.get(*index))
+                .cloned(),
+        );
+        boundary_shown_ids.extend(traversal.markers.keys().cloned());
+        boundary_shown_ids.extend(traversal.equivalent_ids.iter().cloned());
+    }
+    let emit_boundary = boundary;
+    let boundary_seed_ids = pathless_child_display_indices.as_ref().map(|indices| {
+        indices
+            .iter()
+            .filter_map(|index| commit_ids.get(*index))
+            .cloned()
+            .collect::<Vec<_>>()
+    });
+    let boundary_seed_indices = pathless_child_display_indices.as_ref().cloned();
+    let mut selected_boundary_handles = if emit_boundary {
+        if let (Some(topology), Some(seed_indices)) = (
+            pathless_children_topology
+                .as_ref()
+                .map(|(topology, _)| topology),
+            boundary_seed_indices.as_ref(),
+        ) {
+            topology.boundary_handles_for(seed_indices, &boundary_shown_ids, &commit_ids)
+        } else {
+            collect_history_boundary_ids(
+                &store,
+                boundary_seed_ids.as_deref().unwrap_or(&commit_ids),
+                &boundary_shown_ids,
+            )?
+            .into_iter()
+            .map(|id| RevListChildrenBoundaryHandle {
+                id,
+                candidate_index: None,
+                external_parent_index: None,
+            })
+            .collect()
+        }
+    } else {
+        Vec::new()
+    };
+    if let Some(order) = object_history_order
+        && !selected_boundary_handles.is_empty()
+    {
+        let boundary_ids = selected_boundary_handles
+            .iter()
+            .map(|handle| handle.id.clone())
+            .collect();
+        let commit_cache = CommitObjectCache::new(&store);
+        let ordered_ids = reorder_commit_ids(&commit_cache, boundary_ids, order)?;
+        let mut handles_by_id = selected_boundary_handles
+            .into_iter()
+            .map(|handle| (handle.id.clone(), handle))
+            .collect::<HashMap<_, _>>();
+        selected_boundary_handles = ordered_ids
+            .into_iter()
+            .filter_map(|id| handles_by_id.remove(&id))
+            .collect();
+    }
+    let selected_boundary_ids = selected_boundary_handles
+        .iter()
+        .map(|handle| handle.id.clone())
+        .collect::<Vec<_>>();
+    let boundary_id_set = selected_boundary_ids
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut pathless_boundary_output_indices = Vec::new();
+    let mut prepared_output_indices = if let Some(indices) = pathless_child_display_indices.as_mut()
+    {
+        let prepared_indices = indices.clone();
+        let mut handles = prepared_indices.clone();
+        if emit_boundary {
+            for boundary_handle in &selected_boundary_handles {
+                let output_index = if let Some(candidate_index) = boundary_handle.candidate_index {
+                    candidate_index
+                } else {
+                    let output_index = commit_ids.len();
+                    commit_ids.push(boundary_handle.id.clone());
+                    output_index
+                };
+                handles.push(output_index);
+                pathless_boundary_output_indices.push(output_index);
+            }
+        }
+        *indices = prepared_indices;
+        handles
+    } else {
+        if emit_boundary {
+            commit_ids.extend(selected_boundary_ids);
+        }
+        (0..commit_ids.len()).collect()
+    };
+    let pre_render_output_indices = prepared_output_indices.clone();
     if reverse {
-        commit_ids.reverse();
+        prepared_output_indices.reverse();
+        if pathless_child_display_indices.is_some() {
+            pathless_boundary_output_indices.reverse();
+            selected_boundary_handles.reverse();
+        }
     }
+    let output_indices = prepared_output_indices;
+    let output_id_refs = output_indices
+        .iter()
+        .filter_map(|index| commit_ids.get(*index))
+        .collect::<Vec<_>>();
+    let pathless_bisection_children = if children && (bisect || bisect_all) {
+        pathless_children_topology
+            .as_ref()
+            .map(|(topology, _)| {
+                collect_rev_list_children_from_topology(
+                    topology,
+                    pathless_child_display_indices.as_deref().unwrap_or(&[]),
+                    &commit_ids,
+                    &[],
+                    &[],
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let abbrev_ids = if abbreviated_ids_requested {
+        let mut ids = output_id_refs.iter().copied().cloned().collect::<Vec<_>>();
+        for id in output_id_refs.iter().copied() {
+            ids.extend(read_commit_parents_uncached(&store, id)?);
+        }
+        ids
+    } else {
+        Vec::new()
+    };
+    let abbrev_lengths = if !abbreviated_ids_requested {
+        RenderedAbbrevLengths::fixed(&abbrev_ids, full_abbrev_len(store.algorithm()))
+    } else {
+        rendered_abbrev_len_for_ids(&store, configured_core_abbrev_state(&repo)?, &abbrev_ids)?
+    };
+    let implicit_abbrev_lengths =
+        implicit_log_abbrev_lengths(&store, &abbrev_lengths, &abbrev_ids, no_abbrev_commit);
     let excluded_commits = if objects {
         let mut excluded_commits = collect_rev_list_excluded_commits(&repo, &store, &revs)?;
         if !exclude_promisor_objects {
@@ -17954,105 +23017,514 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     } else {
         Vec::new()
     };
-    if disk_usage {
+    let disk_bytes = disk_usage_mode
+        .map(|_| {
+            let disk_path_tree_indices = if path_query.is_some() {
+                path_selection
+                    .as_ref()
+                    .zip(path_candidate_index_by_id.as_ref())
+                    .map(|(selection, candidate_index_by_id)| {
+                        history_path_candidate_indices_for_id_refs(
+                            selection,
+                            candidate_index_by_id,
+                            output_id_refs.iter().copied(),
+                        )
+                        .into_iter()
+                        .map(|candidate_index| selection.tree_indices[candidate_index])
+                        .collect::<Vec<_>>()
+                    })
+            } else {
+                None
+            };
+            rev_list_disk_usage_bytes(
+                &store,
+                &output_id_refs,
+                &revs.extra_objects,
+                &excluded_commits,
+                tree_missing_policy,
+                objects,
+                object_filter,
+                filter_provided_objects,
+                path_query.as_ref(),
+                path_selection
+                    .as_ref()
+                    .map(|selection| selection.ids.as_slice()),
+                disk_path_tree_indices.as_deref(),
+            )
+        })
+        .transpose()?;
+    let show_traversal_markers = left_right || cherry || cherry_mark || boundary;
+    if count && !objects && children && path_selection.is_none() {
+        let count = if disk_usage_mode.is_some() {
+            0
+        } else {
+            pathless_child_display_indices
+                .as_ref()
+                .map_or(commit_ids.len(), Vec::len)
+        };
+        println!("{count}");
+        if let (Some(mode), Some(bytes)) = (disk_usage_mode, disk_bytes) {
+            print_rev_list_disk_usage(mode, bytes);
+        }
+        return Ok(());
+    }
+    if count && !objects && path_selection.is_some() {
         println!(
             "{}",
-            rev_list_disk_usage_bytes(&repo, &store, &commit_ids, no_walk, all)?
+            if disk_usage_mode.is_some() {
+                0
+            } else {
+                output_id_refs.len()
+            }
         );
+        if let (Some(mode), Some(bytes)) = (disk_usage_mode, disk_bytes) {
+            print_rev_list_disk_usage(mode, bytes);
+        }
         return Ok(());
     }
-    let show_traversal_markers = left_right || cherry || cherry_mark || boundary;
     if count {
-        let object_count =
-            count_rev_list_objects(&store, &commit_ids, &revs.extra_objects, &excluded_commits)?;
-        println!("{}", commit_ids.len() + object_count);
+        let count = if disk_usage_mode.is_some() {
+            0
+        } else if objects {
+            let object_count = count_rev_list_object_refs(
+                &store,
+                &output_id_refs,
+                &revs.extra_objects,
+                &excluded_commits,
+            )?;
+            output_id_refs.len() + object_count
+        } else {
+            output_id_refs.len()
+        };
+        println!("{count}");
+        if let (Some(mode), Some(bytes)) = (disk_usage_mode, disk_bytes) {
+            print_rev_list_disk_usage(mode, bytes);
+        }
         return Ok(());
     }
+    if let (Some(mode), Some(bytes)) = (disk_usage_mode, disk_bytes) {
+        print_rev_list_disk_usage(mode, bytes);
+        return Ok(());
+    }
+    let object_edge_ids = if objects && (objects_edge || objects_edge_aggressive) {
+        if let (Some(selection), Some(candidate_index_by_id)) =
+            (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+        {
+            let candidate_indices = history_path_candidate_indices_for_id_refs(
+                selection,
+                candidate_index_by_id,
+                commit_ids.iter(),
+            );
+            collect_history_path_object_edge_ids(
+                &repo,
+                &store,
+                &revs,
+                selection,
+                &candidate_indices,
+                &excluded_commits,
+                objects_edge_aggressive,
+            )?
+        } else {
+            collect_rev_list_object_edge_ids(
+                &repo,
+                &store,
+                &revs,
+                output_id_refs.iter().copied(),
+                &excluded_commits,
+                objects_edge_aggressive,
+            )?
+        }
+    } else {
+        Vec::new()
+    };
     if bisect {
-        if let Some(id) = rev_list_bisect_choice(&commit_ids) {
-            println!("{id}");
+        let bisection_graph = rev_list_bisection_parent_graph(
+            &store,
+            &commit_ids,
+            pathless_children_topology
+                .as_ref()
+                .map(|(topology, _)| topology),
+            path_selection.as_ref(),
+            first_parent,
+            path_selection.is_some(),
+            sparse,
+        )?;
+        let mut weights = RevListBisectionWeights::new(bisection_graph.parents.len());
+        weights.compute(&bisection_graph.parents, &bisection_graph.treesame);
+        if let Some(candidate_index) = weights.best_candidate(
+            &pre_render_output_indices,
+            &bisection_graph.parents,
+            &bisection_graph.treesame,
+        ) {
+            if let Some(id) = commit_ids.get(candidate_index) {
+                let mut out = io::stdout().lock();
+                write!(out, "{id}")?;
+                if let (Some((topology, _)), Some(children_by_parent)) = (
+                    pathless_children_topology.as_ref(),
+                    pathless_bisection_children.as_ref(),
+                ) {
+                    append_rev_list_precomputed_children_for_id(
+                        &mut out,
+                        topology,
+                        children_by_parent,
+                        &commit_ids,
+                        id,
+                    )?;
+                }
+                writeln!(out)?;
+            }
         }
         return Ok(());
     }
     if bisect_all {
+        let bisection_graph = rev_list_bisection_parent_graph(
+            &store,
+            &commit_ids,
+            pathless_children_topology
+                .as_ref()
+                .map(|(topology, _)| topology),
+            path_selection.as_ref(),
+            first_parent,
+            path_selection.is_some(),
+            sparse,
+        )?;
+        let mut weights = RevListBisectionWeights::new(bisection_graph.parents.len());
+        weights.compute(&bisection_graph.parents, &bisection_graph.treesame);
         let decorations =
             LogDecorations::load(&repo, &store, Some(LogDecorationMode::Short), false, None)?;
-        let last_distance = commit_ids.len().saturating_sub(1);
-        for (index, id) in commit_ids.iter().rev().enumerate() {
-            let distance = last_distance.saturating_sub(index);
+        let bisect_rows = weights.sorted_rows(
+            &commit_ids,
+            &pre_render_output_indices,
+            &bisection_graph.treesame,
+        );
+        for (candidate_index, distance) in bisect_rows {
+            let Some(id) = commit_ids.get(candidate_index) else {
+                continue;
+            };
             if let Some(items) = decorations.get(id) {
                 let mut parts = items.to_vec();
                 parts.push(format!("dist={distance}"));
-                println!("{id} ({})", parts.join(", "));
+                let mut out = io::stdout().lock();
+                write!(out, "{id}")?;
+                if let (Some((topology, _)), Some(children_by_parent)) = (
+                    pathless_children_topology.as_ref(),
+                    pathless_bisection_children.as_ref(),
+                ) {
+                    append_rev_list_precomputed_children_for_id(
+                        &mut out,
+                        topology,
+                        children_by_parent,
+                        &commit_ids,
+                        id,
+                    )?;
+                }
+                writeln!(out, " ({})", parts.join(", "))?;
             } else {
-                println!("{id} (dist={distance})");
+                let mut out = io::stdout().lock();
+                write!(out, "{id}")?;
+                if let (Some((topology, _)), Some(children_by_parent)) = (
+                    pathless_children_topology.as_ref(),
+                    pathless_bisection_children.as_ref(),
+                ) {
+                    append_rev_list_precomputed_children_for_id(
+                        &mut out,
+                        topology,
+                        children_by_parent,
+                        &commit_ids,
+                        id,
+                    )?;
+                }
+                writeln!(out, " (dist={distance})")?;
             }
         }
         return Ok(());
     }
     if bisect_vars {
-        if let Some(id) = rev_list_bisect_choice(&commit_ids) {
+        let bisection_graph = rev_list_bisection_parent_graph(
+            &store,
+            &commit_ids,
+            pathless_children_topology
+                .as_ref()
+                .map(|(topology, _)| topology),
+            path_selection.as_ref(),
+            first_parent,
+            path_selection.is_some(),
+            sparse,
+        )?;
+        let mut weights = RevListBisectionWeights::new(bisection_graph.parents.len());
+        weights.compute(&bisection_graph.parents, &bisection_graph.treesame);
+        if let Some(candidate_index) = weights.best_candidate(
+            &pre_render_output_indices,
+            &bisection_graph.parents,
+            &bisection_graph.treesame,
+        ) && let Some(id) = commit_ids.get(candidate_index)
+        {
+            let all = pre_render_output_indices
+                .iter()
+                .filter(|index| {
+                    **index < bisection_graph.parents.len() && !bisection_graph.treesame[**index]
+                })
+                .count();
+            let reaches = weights.weight(candidate_index);
+            let count = all.saturating_sub(reaches).max(reaches);
             println!("bisect_rev='{id}'");
-            println!("bisect_nr=0");
-            println!("bisect_good=0");
-            println!("bisect_bad=0");
-            println!("bisect_all={}", commit_ids.len());
-            println!("bisect_steps=0");
+            println!("bisect_nr={}", count.saturating_sub(1));
+            println!(
+                "bisect_good={}",
+                all.saturating_sub(reaches).saturating_sub(1)
+            );
+            println!("bisect_bad={}", reaches.saturating_sub(1));
+            println!("bisect_all={all}");
+            println!("bisect_steps={}", rev_list_bisect_step_count(all));
         }
         return Ok(());
     }
     if header {
         let mut out = io::stdout().lock();
-        for id in &commit_ids {
+        write_rev_list_object_edge_lines(&mut out, &object_edge_ids)?;
+        let header_path_children = if children {
+            if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                Some(collect_history_path_children(
+                    selection,
+                    candidate_index_by_id,
+                    &commit_ids,
+                    &output_indices,
+                    history_order,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let header_children_by_commit = if children && header_path_children.is_none() && !no_walk {
+            if let Some((topology, _)) = pathless_children_topology.as_ref() {
+                Some(collect_rev_list_children_from_topology(
+                    topology,
+                    pathless_child_display_indices.as_deref().unwrap_or(&[]),
+                    &commit_ids,
+                    &selected_boundary_handles,
+                    &pathless_boundary_output_indices,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let empty_header_children = RevListChildren::empty(commit_ids.len());
+        for (row_index, candidate_index) in output_indices.iter().copied().enumerate() {
+            let Some(id) = commit_ids.get(candidate_index) else {
+                continue;
+            };
+            let marker = if boundary_id_set.contains(id) {
+                Some(HistoryTraversalMarker::Boundary)
+            } else {
+                show_traversal_markers
+                    .then(|| traversal.markers.get(id).copied())
+                    .flatten()
+            };
+            write_rev_list_marker_prefix(&mut out, marker)?;
             let content = store.read_object(id)?;
-            write_rev_list_header_record(&mut out, id, &content.content)?;
+            let row_children = rev_list_children_view(
+                row_index,
+                candidate_index,
+                header_path_children.as_ref(),
+                path_selection.as_ref(),
+                header_children_by_commit
+                    .as_ref()
+                    .unwrap_or(&empty_header_children),
+                &commit_ids,
+            );
+            write_rev_list_header_record(&mut out, id, &content.content, row_children)?;
         }
         return Ok(());
     }
-    let children_by_commit = if children {
-        collect_rev_list_children(&store, &commit_ids, reverse)?
+    let path_children = if children {
+        if let (Some(selection), Some(candidate_index_by_id)) =
+            (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+        {
+            Some(collect_history_path_children(
+                selection,
+                candidate_index_by_id,
+                &commit_ids,
+                &output_indices,
+                history_order,
+            )?)
+        } else {
+            None
+        }
     } else {
-        HashMap::new()
+        None
+    };
+    let children_by_commit = if children && path_children.is_none() && !no_walk {
+        if let Some((topology, _)) = pathless_children_topology.as_ref() {
+            collect_rev_list_children_from_topology(
+                topology,
+                pathless_child_display_indices.as_deref().unwrap_or(&[]),
+                &commit_ids,
+                &selected_boundary_handles,
+                &pathless_boundary_output_indices,
+            )?
+        } else {
+            RevListChildren::empty(commit_ids.len())
+        }
+    } else {
+        RevListChildren::empty(commit_ids.len())
     };
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();
     let mut out = io::stdout().lock();
-    for id in &commit_ids {
+    write_rev_list_object_edge_lines(&mut out, &object_edge_ids)?;
+    for (commit_index, candidate_index) in output_indices.iter().copied().enumerate() {
+        let Some(id) = commit_ids.get(candidate_index) else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "rev-list child topology output index out of range".into(),
+            });
+        };
         if quiet && objects {
             continue;
         }
-        let marker = show_traversal_markers
-            .then(|| traversal.markers.get(id).copied())
-            .flatten();
+        let row_children = if children {
+            rev_list_children_view(
+                commit_index,
+                candidate_index,
+                path_children.as_ref(),
+                path_selection.as_ref(),
+                &children_by_commit,
+                &commit_ids,
+            )
+        } else {
+            RevListChildrenView::empty()
+        };
+        let implicit_abbrev_len = implicit_abbrev_lengths.width_for(id);
+        let marker = if boundary_id_set.contains(id) {
+            Some(HistoryTraversalMarker::Boundary)
+        } else {
+            show_traversal_markers
+                .then(|| traversal.markers.get(id).copied())
+                .flatten()
+        };
+        let path_commit = match path_selection.as_ref() {
+            Some(selection) if rendered_format.is_some() || parents || timestamp => {
+                let rewritten_parents = path_candidate_index_by_id
+                    .as_ref()
+                    .and_then(|candidate_index_by_id| candidate_index_by_id.get(id).copied())
+                    .and_then(|index| selection.rewritten_parent_indices.get(index))
+                    .and_then(|parent_indices| {
+                        if objects && parents && parent_indices.is_empty() {
+                            None
+                        } else {
+                            Some(parent_indices.as_slice())
+                        }
+                    });
+                Some(decode_history_path_render_commit(
+                    &store,
+                    id,
+                    rewritten_parents,
+                    &selection.ids,
+                )?)
+            }
+            _ => None,
+        };
         if let Some(format) = rendered_format.as_ref() {
-            let commit = commit_cache.read_commit(id)?;
-            let rendered = render_rev_list_format(
-                format,
-                id,
-                commit.as_ref(),
-                parents,
-                abbrev_len,
-                marker,
-                default_commit_abbrev,
-                expand_tabs,
-                &decorations,
-                &notes,
-                date_mode,
-            )?;
-            if matches!(format, LogFormat::Custom { .. }) {
-                writeln!(out, "commit {}", id.to_hex())?;
+            let custom_format = matches!(format, LogFormat::Custom { .. });
+            let render_abbrev_lengths =
+                log_lengths_for_format(format, &abbrev_lengths, &implicit_abbrev_lengths);
+            let abbrev_len =
+                log_commit_abbrev_len(format, id, &abbrev_lengths, &implicit_abbrev_lengths);
+            let rendered = if let Some(commit) = path_commit.as_ref() {
+                render_rev_list_format(
+                    format,
+                    id,
+                    commit,
+                    parents,
+                    row_children,
+                    abbrev_len,
+                    (!custom_format).then_some(marker).flatten(),
+                    default_commit_abbrev,
+                    expand_tabs,
+                    &decorations,
+                    &notes,
+                    date_mode,
+                    Some(render_abbrev_lengths),
+                )?
+            } else if children && pathless_children_topology.is_some() {
+                let content = store.read_object(id)?;
+                let commit = decode_commit(store.algorithm(), &content.content)?;
+                render_rev_list_format(
+                    format,
+                    id,
+                    &commit,
+                    parents,
+                    row_children,
+                    abbrev_len,
+                    (!custom_format).then_some(marker).flatten(),
+                    default_commit_abbrev,
+                    expand_tabs,
+                    &decorations,
+                    &notes,
+                    date_mode,
+                    Some(render_abbrev_lengths),
+                )?
+            } else {
+                let commit = read_rev_list_commit_transient(&store, id)?;
+                render_rev_list_format(
+                    format,
+                    id,
+                    &commit,
+                    parents,
+                    row_children,
+                    abbrev_len,
+                    (!custom_format).then_some(marker).flatten(),
+                    default_commit_abbrev,
+                    expand_tabs,
+                    &decorations,
+                    &notes,
+                    date_mode,
+                    Some(render_abbrev_lengths),
+                )?
+            };
+            if matches!(format, LogFormat::Custom { .. })
+                && matches!(commit_header_mode, RevListCommitHeaderMode::Automatic)
+            {
+                write!(out, "commit ")?;
+                write_rev_list_marker_prefix(&mut out, marker)?;
+                write!(out, "{}", id.to_hex())?;
+                if parents {
+                    if let Some(commit) = path_commit.as_ref() {
+                        for parent in &commit.parents {
+                            write!(out, " {parent}")?;
+                        }
+                    } else {
+                        for parent in read_commit_parents_uncached(&store, id)? {
+                            write!(out, " {parent}")?;
+                        }
+                    }
+                }
+                append_rev_list_children_to_writer(&mut out, row_children)?;
+                writeln!(out)?;
+            } else if custom_format {
+                write_rev_list_marker_prefix(&mut out, marker)?;
             }
             out.write_all(rendered.as_bytes())?;
-            if format.terminates_lines() {
+            if !format.is_empty_user_format()
+                && (format.terminates_lines() || format.emits_rev_list_builtin_terminator())
+            {
                 out.write_all(b"\n")?;
             }
         } else if parents {
-            if timestamp {
-                let commit = commit_cache.read_commit(id)?;
-                let timestamp = signature_timestamp_timezone(&commit.committer)
-                    .map(|(timestamp, _)| timestamp)
-                    .unwrap_or_default();
-                write!(out, "{timestamp} ")?;
+            if let Some(commit) = path_commit.as_ref() {
+                if timestamp {
+                    let timestamp = signature_timestamp_timezone(&commit.committer)
+                        .map(|(timestamp, _)| timestamp)
+                        .unwrap_or_default();
+                    write!(out, "{timestamp} ")?;
+                }
+                write_rev_list_marker_prefix(&mut out, marker)?;
                 write!(out, "{id}")?;
                 for parent in &commit.parents {
                     write!(out, " {parent}")?;
@@ -18060,6 +23532,21 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 writeln!(out)?;
                 continue;
             }
+            if timestamp {
+                let commit = read_rev_list_commit_transient(&store, id)?;
+                let timestamp = signature_timestamp_timezone(&commit.committer)
+                    .map(|(timestamp, _)| timestamp)
+                    .unwrap_or_default();
+                write!(out, "{timestamp} ")?;
+                write_rev_list_marker_prefix(&mut out, marker)?;
+                write!(out, "{id}")?;
+                for parent in &commit.parents {
+                    write!(out, " {parent}")?;
+                }
+                writeln!(out)?;
+                continue;
+            }
+            write_rev_list_marker_prefix(&mut out, marker)?;
             let parents = read_commit_parents_uncached(&store, id)?;
             write!(out, "{id}")?;
             for parent in parents {
@@ -18067,26 +23554,31 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             }
             writeln!(out)?;
         } else if children {
+            write_rev_list_marker_prefix(&mut out, marker)?;
             write!(out, "{id}")?;
-            if let Some(children) = children_by_commit.get(id) {
-                for child in children {
-                    write!(out, " {child}")?;
-                }
-            }
+            append_rev_list_children_to_writer(&mut out, row_children)?;
             writeln!(out)?;
         } else {
-            if timestamp {
-                let commit = commit_cache.read_commit(id)?;
+            if let Some(commit) = path_commit.as_ref() {
+                if timestamp {
+                    let timestamp = signature_timestamp_timezone(&commit.committer)
+                        .map(|(timestamp, _)| timestamp)
+                        .unwrap_or_default();
+                    write!(out, "{timestamp} ")?;
+                }
+                write_rev_list_marker_prefix(&mut out, marker)?;
+            } else if timestamp {
+                let commit = read_rev_list_commit_transient(&store, id)?;
                 let timestamp = signature_timestamp_timezone(&commit.committer)
                     .map(|(timestamp, _)| timestamp)
                     .unwrap_or_default();
                 write!(out, "{timestamp} ")?;
-            }
-            if let Some(marker) = marker {
-                write!(out, "{}", marker.rev_list_prefix())?;
+                write_rev_list_marker_prefix(&mut out, marker)?;
+            } else {
+                write_rev_list_marker_prefix(&mut out, marker)?;
             }
             if default_commit_abbrev {
-                writeln!(out, "{}", short_object_id_len(id, abbrev_len))?;
+                writeln!(out, "{}", short_object_id_len(id, implicit_abbrev_len))?;
             } else if graph {
                 writeln!(out, "* {id}")?;
             } else {
@@ -18096,13 +23588,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     if objects {
         let mut deferred_missing_ids = Vec::new();
-        for_each_rev_list_object_line_with(
-            &store,
-            &commit_ids,
-            &revs.extra_objects,
-            &excluded_commits,
-            tree_missing_policy,
-            |id, _, name| {
+        let mut visit_object =
+            |id: &ObjectId, _kind: Option<GitObjectKind>, name: Option<&[u8]>| -> Result<()> {
                 let missing = !store.contains_object(id).map_err(CliError::Io)?;
                 if quiet && !missing {
                     return Ok(());
@@ -18112,10 +23599,45 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                     let _ = name;
                     return Ok(());
                 }
+                let name = if no_object_names { None } else { name };
                 write_rev_list_object_output(&store, &mut out, id, name, missing_mode)?;
                 Ok(())
-            },
-        )?;
+            };
+        if let Some(query) = path_query.as_ref() {
+            if let (Some(selection), Some(candidate_index_by_id)) =
+                (path_selection.as_ref(), path_candidate_index_by_id.as_ref())
+            {
+                let tree_indices = commit_ids
+                    .iter()
+                    .filter_map(|id| candidate_index_by_id.get(id).copied())
+                    .map(|candidate_index| selection.tree_indices[candidate_index])
+                    .collect::<Vec<_>>();
+                for_each_history_path_object_line_with_tree_indices(
+                    &store,
+                    &selection.ids,
+                    &tree_indices,
+                    &revs.extra_objects,
+                    &excluded_commits,
+                    query,
+                    tree_missing_policy,
+                    &mut visit_object,
+                )?;
+            } else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "path query selection missing for object traversal".into(),
+                });
+            }
+        } else {
+            for_each_rev_list_object_line_with_refs(
+                &store,
+                &output_id_refs,
+                &revs.extra_objects,
+                &excluded_commits,
+                tree_missing_policy,
+                &mut visit_object,
+            )?;
+        }
         for id in deferred_missing_ids {
             write_rev_list_object_output(&store, &mut out, &id, None, missing_mode)?;
         }
@@ -18123,48 +23645,678 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     Ok(())
 }
 
-fn rev_list_bisect_choice(commit_ids: &[ObjectId]) -> Option<&ObjectId> {
-    if commit_ids.is_empty() {
-        None
+struct RevListBisectionWeights {
+    weights: Vec<usize>,
+    marks: Vec<u32>,
+    generation: u32,
+    stack: Vec<usize>,
+}
+
+const REV_LIST_BISECTION_UNRESOLVED_ROUND: usize = usize::MAX - 1;
+
+fn rev_list_bisection_single_parent_schedule(
+    prepared_indices: &[usize],
+    parents: &RevListBisectionParents<'_>,
+    candidate_count: usize,
+) -> Vec<usize> {
+    let mut prepared_position = vec![usize::MAX; candidate_count];
+    for (position, candidate_index) in prepared_indices.iter().copied().enumerate() {
+        if candidate_index < prepared_position.len() {
+            prepared_position[candidate_index] = position;
+        }
+    }
+    let mut rounds = vec![usize::MAX; candidate_count];
+    let mut chain = Vec::new();
+    for start in prepared_indices.iter().copied() {
+        if rounds.get(start).copied().unwrap_or(usize::MAX) != usize::MAX {
+            continue;
+        }
+        chain.clear();
+        let mut current = start;
+        loop {
+            if rounds.get(current).copied().unwrap_or(usize::MAX) != usize::MAX {
+                break;
+            }
+            if parents.parent_count(current) != 1 {
+                rounds[current] = 0;
+                break;
+            }
+            let Some(parent) = parents.first_parent(current) else {
+                rounds[current] = 0;
+                break;
+            };
+            if parent >= rounds.len()
+                || prepared_position.get(parent).copied().unwrap_or(usize::MAX) == usize::MAX
+            {
+                rounds[current] = REV_LIST_BISECTION_UNRESOLVED_ROUND;
+                break;
+            }
+            chain.push(current);
+            current = parent;
+        }
+        while let Some(candidate_index) = chain.pop() {
+            let Some(parent) = parents.first_parent(candidate_index) else {
+                rounds[candidate_index] = 0;
+                continue;
+            };
+            let parent_round = rounds.get(parent).copied().unwrap_or(0);
+            if parent_round == REV_LIST_BISECTION_UNRESOLVED_ROUND {
+                rounds[candidate_index] = REV_LIST_BISECTION_UNRESOLVED_ROUND;
+                continue;
+            }
+            let parent_rank = prepared_position.get(parent).copied().unwrap_or(usize::MAX);
+            let candidate_rank = prepared_position
+                .get(candidate_index)
+                .copied()
+                .unwrap_or(usize::MAX);
+            rounds[candidate_index] =
+                parent_round.saturating_add(usize::from(parent_rank > candidate_rank));
+        }
+    }
+    let max_round = prepared_indices
+        .iter()
+        .copied()
+        .filter(|candidate_index| parents.parent_count(*candidate_index) == 1)
+        .filter_map(|candidate_index| {
+            rounds.get(candidate_index).copied().filter(|round| {
+                *round != usize::MAX && *round != REV_LIST_BISECTION_UNRESOLVED_ROUND
+            })
+        })
+        .max()
+        .unwrap_or(0);
+    let mut round_counts = vec![0usize; max_round.saturating_add(1)];
+    for candidate_index in prepared_indices.iter().copied() {
+        if parents.parent_count(candidate_index) == 1 {
+            let Some(round) = rounds.get(candidate_index).copied().filter(|round| {
+                *round != usize::MAX && *round != REV_LIST_BISECTION_UNRESOLVED_ROUND
+            }) else {
+                continue;
+            };
+            round_counts[round] += 1;
+        }
+    }
+    let mut round_starts = vec![0usize; round_counts.len() + 1];
+    for round in 0..round_counts.len() {
+        round_starts[round + 1] = round_starts[round] + round_counts[round];
+    }
+    let mut round_cursors = round_starts[..round_counts.len()].to_vec();
+    let mut scheduled_singles = vec![0usize; round_starts[round_counts.len()]];
+    for candidate_index in prepared_indices.iter().copied() {
+        if parents.parent_count(candidate_index) != 1 {
+            continue;
+        }
+        let Some(round) = rounds
+            .get(candidate_index)
+            .copied()
+            .filter(|round| *round != usize::MAX && *round != REV_LIST_BISECTION_UNRESOLVED_ROUND)
+        else {
+            continue;
+        };
+        let position = round_cursors[round];
+        scheduled_singles[position] = candidate_index;
+        round_cursors[round] += 1;
+    }
+    scheduled_singles
+}
+
+impl RevListBisectionWeights {
+    fn new(candidate_count: usize) -> Self {
+        Self {
+            weights: vec![0; candidate_count],
+            marks: vec![0; candidate_count],
+            generation: 0,
+            stack: Vec::new(),
+        }
+    }
+
+    fn compute(&mut self, parents: &RevListBisectionParents<'_>, treesame: &[bool]) {
+        for candidate_index in (0..self.weights.len()).rev() {
+            if candidate_index >= parents.len() {
+                continue;
+            }
+            let is_treesame = treesame.get(candidate_index).copied().unwrap_or(false);
+            self.weights[candidate_index] = match parents.parent_count(candidate_index) {
+                0 => usize::from(!is_treesame),
+                1 => self
+                    .weights
+                    .get(parents.first_parent(candidate_index).unwrap_or(usize::MAX))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(usize::from(!is_treesame)),
+                _ => self.count_merge_distance(parents, treesame, candidate_index),
+            };
+        }
+    }
+
+    fn count_merge_distance(
+        &mut self,
+        parents: &RevListBisectionParents<'_>,
+        treesame: &[bool],
+        start: usize,
+    ) -> usize {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        if self.generation == 1 {
+            self.marks.fill(0);
+        }
+        self.stack.clear();
+        self.stack.push(start);
+        let generation = self.generation;
+        let mut count = 0usize;
+        while let Some(candidate_index) = self.stack.pop() {
+            let Some(mark) = self.marks.get_mut(candidate_index) else {
+                continue;
+            };
+            if *mark == generation {
+                continue;
+            }
+            *mark = generation;
+            count += usize::from(!treesame.get(candidate_index).copied().unwrap_or(false));
+            parents.for_each_parent(candidate_index, |parent| self.stack.push(parent));
+        }
+        count
+    }
+
+    fn weight(&self, candidate_index: usize) -> usize {
+        self.weights.get(candidate_index).copied().unwrap_or(0)
+    }
+
+    fn best_candidate(
+        &self,
+        output_indices: &[usize],
+        parents: &RevListBisectionParents<'_>,
+        treesame: &[bool],
+    ) -> Option<usize> {
+        let all = output_indices
+            .iter()
+            .filter(|index| {
+                **index < self.weights.len() && !treesame.get(**index).copied().unwrap_or(false)
+            })
+            .count();
+        let prepared_indices = output_indices.iter().rev().copied().collect::<Vec<_>>();
+        let mut known = vec![false; self.weights.len()];
+        for candidate_index in &prepared_indices {
+            if parents.parent_count(*candidate_index) == 0 {
+                known[*candidate_index] = true;
+            }
+        }
+        for candidate_index in &prepared_indices {
+            if parents.parent_count(*candidate_index) <= 1 {
+                continue;
+            }
+            known[*candidate_index] = true;
+            if !treesame.get(*candidate_index).copied().unwrap_or(false)
+                && rev_list_bisect_approx_halfway(self.weight(*candidate_index), all)
+            {
+                return Some(*candidate_index);
+            }
+        }
+        let scheduled_singles = rev_list_bisection_single_parent_schedule(
+            &prepared_indices,
+            parents,
+            self.weights.len(),
+        );
+        for candidate_index in scheduled_singles {
+            if known.get(candidate_index).copied().unwrap_or(false) {
+                continue;
+            }
+            known[candidate_index] = true;
+            if !treesame.get(candidate_index).copied().unwrap_or(false)
+                && rev_list_bisect_approx_halfway(self.weight(candidate_index), all)
+            {
+                return Some(candidate_index);
+            }
+        }
+        let mut best = None;
+        let mut best_distance = 0usize;
+        for index in prepared_indices.iter().copied() {
+            if index >= self.weights.len() || treesame.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let distance = self
+                .weight(index)
+                .min(all.saturating_sub(self.weight(index)));
+            if best.is_none() || distance > best_distance {
+                best = Some(index);
+                best_distance = distance;
+            }
+        }
+        best
+    }
+
+    fn sorted_rows(
+        &self,
+        candidate_ids: &[ObjectId],
+        output_indices: &[usize],
+        treesame: &[bool],
+    ) -> Vec<(usize, usize)> {
+        let all = output_indices
+            .iter()
+            .filter(|index| {
+                **index < self.weights.len() && !treesame.get(**index).copied().unwrap_or(false)
+            })
+            .count();
+        let mut rows = output_indices
+            .iter()
+            .copied()
+            .filter(|candidate_index| {
+                *candidate_index < self.weights.len()
+                    && !treesame.get(*candidate_index).copied().unwrap_or(false)
+            })
+            .filter_map(|candidate_index| {
+                let id = candidate_ids.get(candidate_index)?;
+                let weight = self.weight(candidate_index);
+                Some((candidate_index, weight.min(all.saturating_sub(weight)), id))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|left, right| {
+            right
+                .1
+                .cmp(&left.1)
+                .then_with(|| left.2.as_bytes().cmp(right.2.as_bytes()))
+        });
+        rows.into_iter()
+            .map(|(candidate_index, distance, _)| (candidate_index, distance))
+            .collect()
+    }
+}
+
+fn rev_list_bisect_approx_halfway(weight: usize, all: usize) -> bool {
+    let diff = 2_i128 * weight as i128 - all as i128;
+    match diff {
+        -1..=1 => true,
+        _ => diff.unsigned_abs() < (all / 1024) as u128,
+    }
+}
+
+enum RevListBisectionParents<'a> {
+    Topology {
+        topology: &'a RevListChildrenTopology,
+        first_parent: bool,
+    },
+    Owned(Vec<Vec<usize>>),
+}
+
+impl RevListBisectionParents<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Topology { topology, .. } => topology.parent_indices.len(),
+            Self::Owned(parents) => parents.len(),
+        }
+    }
+
+    fn parent_count(&self, candidate_index: usize) -> usize {
+        match self {
+            Self::Topology {
+                topology,
+                first_parent,
+            } => topology
+                .parent_indices
+                .get(candidate_index)
+                .map_or(0, |parents| {
+                    if *first_parent {
+                        parents.len().min(1)
+                    } else {
+                        parents.len()
+                    }
+                }),
+            Self::Owned(parents) => parents.get(candidate_index).map_or(0, Vec::len),
+        }
+    }
+
+    fn first_parent(&self, candidate_index: usize) -> Option<usize> {
+        match self {
+            Self::Topology { topology, .. } => topology
+                .parent_indices
+                .get(candidate_index)
+                .and_then(|parents| parents.first().copied()),
+            Self::Owned(parents) => parents
+                .get(candidate_index)
+                .and_then(|parents| parents.first().copied()),
+        }
+    }
+
+    fn for_each_parent(&self, candidate_index: usize, mut visit: impl FnMut(usize)) {
+        match self {
+            Self::Topology {
+                topology,
+                first_parent,
+            } => {
+                if let Some(parents) = topology.parent_indices.get(candidate_index) {
+                    for parent in
+                        parents
+                            .iter()
+                            .copied()
+                            .take(if *first_parent { 1 } else { usize::MAX })
+                    {
+                        visit(parent);
+                    }
+                }
+            }
+            Self::Owned(parents) => {
+                if let Some(parents) = parents.get(candidate_index) {
+                    for parent in parents.iter().copied() {
+                        visit(parent);
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct RevListBisectionParentGraph<'a> {
+    parents: RevListBisectionParents<'a>,
+    treesame: Vec<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RevListBisectionCommitKind {
+    Root,
+    SingleParent,
+    Merge,
+}
+
+fn rev_list_bisection_treesame_for_kind(
+    kind: RevListBisectionCommitKind,
+    treesame_enabled: bool,
+    sparse: bool,
+    relevant_parent_count: usize,
+    all_relevant_tree_same: bool,
+    all_irrelevant_tree_same: bool,
+) -> bool {
+    if !treesame_enabled {
+        return false;
+    }
+    match kind {
+        RevListBisectionCommitKind::Root => all_irrelevant_tree_same,
+        RevListBisectionCommitKind::SingleParent | RevListBisectionCommitKind::Merge => {
+            let all_relevant_or_irrelevant_tree_same = if relevant_parent_count > 0 {
+                all_relevant_tree_same
+            } else {
+                all_irrelevant_tree_same
+            };
+            !(sparse && matches!(kind, RevListBisectionCommitKind::SingleParent))
+                && all_relevant_or_irrelevant_tree_same
+        }
+    }
+}
+
+fn rev_list_bisection_parent_graph<'a>(
+    store: &LooseObjectStore,
+    candidate_ids: &[ObjectId],
+    topology: Option<&'a RevListChildrenTopology>,
+    path_selection: Option<&HistoryPathSelection>,
+    first_parent: bool,
+    treesame_enabled: bool,
+    sparse: bool,
+) -> Result<RevListBisectionParentGraph<'a>> {
+    if let Some(selection) = path_selection {
+        let mut candidate_by_id_index = vec![usize::MAX; selection.ids.len()];
+        for (candidate_index, candidate) in selection.commits.iter().enumerate() {
+            candidate_by_id_index[candidate.id_index] = candidate_index;
+        }
+        let candidate_by_id = selection
+            .commits
+            .iter()
+            .enumerate()
+            .map(|(candidate_index, candidate)| {
+                (&selection.ids[candidate.id_index], candidate_index)
+            })
+            .collect::<HashMap<_, _>>();
+        let mut output_index_by_candidate = vec![usize::MAX; selection.commits.len()];
+        for (output_index, id) in candidate_ids.iter().enumerate() {
+            if let Some(selection_candidate_index) = candidate_by_id.get(id).copied() {
+                output_index_by_candidate[selection_candidate_index] = output_index;
+            }
+        }
+        let mut parents = vec![Vec::new(); candidate_ids.len()];
+        let mut treesame = vec![false; candidate_ids.len()];
+        for (candidate_index, id) in candidate_ids.iter().enumerate() {
+            let Some(selection_candidate_index) = candidate_by_id.get(id).copied() else {
+                continue;
+            };
+            let parent_ids = selection
+                .parent_indices
+                .get(selection_candidate_index)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let parent_treesame = selection
+                .parent_treesame
+                .get(selection_candidate_index)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let parent_limit = if first_parent { 1 } else { usize::MAX };
+            let mut relevant_tree_parent_count = 0usize;
+            let mut all_relevant_tree_same = true;
+            let mut all_irrelevant_tree_same = if parent_ids.is_empty() {
+                parent_treesame.first().copied().unwrap_or(false)
+            } else {
+                true
+            };
+            for (parent_id_index, parent_is_treesame) in parent_ids
+                .iter()
+                .copied()
+                .zip(parent_treesame.iter().copied())
+                .take(parent_limit)
+            {
+                if selection
+                    .all_candidate_indices_by_id
+                    .get(parent_id_index)
+                    .copied()
+                    .is_some_and(|index| index != usize::MAX)
+                {
+                    relevant_tree_parent_count += 1;
+                    all_relevant_tree_same &= parent_is_treesame;
+                } else {
+                    all_irrelevant_tree_same &= parent_is_treesame;
+                }
+            }
+            let kind = match parent_ids.len() {
+                0 => RevListBisectionCommitKind::Root,
+                1 => RevListBisectionCommitKind::SingleParent,
+                _ => RevListBisectionCommitKind::Merge,
+            };
+            treesame[candidate_index] = rev_list_bisection_treesame_for_kind(
+                kind,
+                treesame_enabled,
+                sparse,
+                relevant_tree_parent_count,
+                all_relevant_tree_same,
+                all_irrelevant_tree_same,
+            );
+            for parent_id_index in parent_ids.iter().copied().take(parent_limit) {
+                if let Some(parent_candidate_index) = candidate_by_id_index
+                    .get(parent_id_index)
+                    .copied()
+                    .filter(|index| *index != usize::MAX)
+                {
+                    if let Some(parent_output_index) = output_index_by_candidate
+                        .get(parent_candidate_index)
+                        .copied()
+                        .filter(|index| *index != usize::MAX)
+                    {
+                        parents[candidate_index].push(parent_output_index);
+                    }
+                }
+            }
+        }
+        return Ok(RevListBisectionParentGraph {
+            parents: RevListBisectionParents::Owned(parents),
+            treesame,
+        });
+    }
+    if let Some(topology) = topology {
+        return Ok(RevListBisectionParentGraph {
+            parents: RevListBisectionParents::Topology {
+                topology,
+                first_parent,
+            },
+            treesame: vec![false; topology.parent_indices.len()],
+        });
+    }
+    let by_id = candidate_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id, index))
+        .collect::<HashMap<_, _>>();
+    let mut links_cache = CommitLinksCache::new(store);
+    let mut parents = Vec::with_capacity(candidate_ids.len());
+    let mut treesame = Vec::with_capacity(candidate_ids.len());
+    for id in candidate_ids {
+        let links = links_cache.read_links(id)?;
+        let kind = match links.parents.len() {
+            0 => RevListBisectionCommitKind::Root,
+            1 => RevListBisectionCommitKind::SingleParent,
+            _ => RevListBisectionCommitKind::Merge,
+        };
+        let parent_count = if first_parent {
+            links.parents.len().min(1)
+        } else {
+            links.parents.len()
+        };
+        let mut candidate_parents = Vec::with_capacity(parent_count);
+        let mut relevant_parent_count = 0usize;
+        let mut all_treesame = true;
+        let all_irrelevant_treesame = true;
+        for parent_position in 0..parent_count {
+            let parent = &links.parents[parent_position];
+            if let Some(parent_index) = by_id.get(parent).copied() {
+                candidate_parents.push(parent_index);
+                if treesame_enabled {
+                    relevant_parent_count += 1;
+                    all_treesame &= links_cache.read_links(parent)?.tree == links.tree;
+                }
+            }
+        }
+        parents.push(candidate_parents);
+        treesame.push(rev_list_bisection_treesame_for_kind(
+            kind,
+            treesame_enabled,
+            sparse,
+            relevant_parent_count,
+            all_treesame,
+            all_irrelevant_treesame,
+        ));
+    }
+    Ok(RevListBisectionParentGraph {
+        parents: RevListBisectionParents::Owned(parents),
+        treesame,
+    })
+}
+
+fn rev_list_bisect_step_count(all: usize) -> usize {
+    if all < 3 {
+        return 0;
+    }
+    let highest_bit = (usize::BITS - 1 - all.leading_zeros()) as usize;
+    let power = 1usize << highest_bit;
+    if power < 3 * all.saturating_sub(power) {
+        highest_bit
     } else {
-        commit_ids.get(commit_ids.len() / 2)
+        highest_bit.saturating_sub(1)
     }
 }
 
 fn rev_list_disk_usage_bytes(
-    repo: &GitRepo,
     store: &LooseObjectStore,
-    commit_ids: &[ObjectId],
-    no_walk: bool,
-    all: bool,
+    commit_ids: &[&ObjectId],
+    extra_objects: &[(ObjectId, String)],
+    excluded_commits: &[ObjectId],
+    missing_policy: RevListTreeMissingPolicy<'_>,
+    objects: bool,
+    object_filter: Option<RevListObjectFilter>,
+    filter_provided_objects: bool,
+    path_query: Option<&HistoryPathQuery>,
+    path_ids: Option<&[ObjectId]>,
+    path_tree_indices: Option<&[usize]>,
 ) -> Result<u64> {
-    if no_walk || all {
-        return Ok(0);
-    }
     let mut total = 0_u64;
+    if !objects {
+        for id in commit_ids {
+            if let Some(size) = store.object_disk_size_hint(id)? {
+                total = total.saturating_add(size);
+            }
+        }
+        return Ok(total);
+    }
     for id in commit_ids {
-        let Some((kind, _)) = store.object_header_hint(id)? else {
-            continue;
-        };
-        if kind != GitObjectKind::Commit {
-            continue;
+        if let Some(size) = store.object_disk_size_hint(id)? {
+            total = total.saturating_add(size);
         }
-        let path = repo
-            .objects_dir
-            .join(id.to_hex().get(..2).unwrap_or_default())
-            .join(id.to_hex().get(2..).unwrap_or_default());
-        if let Ok(metadata) = fs::metadata(path) {
-            total = total.saturating_add(metadata.len());
+    }
+    let provided_object_ids = extra_objects
+        .iter()
+        .map(|(id, _)| id)
+        .collect::<HashSet<_>>();
+    let mut add_object = |id: &ObjectId, kind: Option<GitObjectKind>| -> Result<()> {
+        if let Some(filter) = object_filter {
+            let is_provided = provided_object_ids.contains(id);
+            if (filter_provided_objects || !is_provided)
+                && !rev_list_filter_includes_known_kind(store, id, kind, filter)?
+            {
+                return Ok(());
+            }
         }
+        if let Some(size) = store.object_disk_size_hint(id)? {
+            total = total.saturating_add(size);
+        }
+        Ok(())
+    };
+    if let (Some(query), Some(ids), Some(tree_indices)) = (path_query, path_ids, path_tree_indices)
+    {
+        for_each_history_path_object_line_with_tree_indices(
+            store,
+            ids,
+            tree_indices,
+            extra_objects,
+            excluded_commits,
+            query,
+            missing_policy,
+            |id, kind, _| add_object(id, kind),
+        )?;
+    } else {
+        for_each_rev_list_object_line_with_refs(
+            store,
+            commit_ids,
+            extra_objects,
+            excluded_commits,
+            missing_policy,
+            |id, kind, _| add_object(id, kind),
+        )?;
     }
     Ok(total)
+}
+
+fn print_rev_list_disk_usage(mode: RevListDiskUsageMode, bytes: u64) {
+    let rendered = match mode {
+        RevListDiskUsageMode::Bytes => bytes.to_string(),
+        RevListDiskUsageMode::Human => format_rev_list_disk_usage_human(bytes),
+    };
+    println!("{rendered}");
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RevListCommitHeaderMode {
+    Automatic,
+    Suppressed,
+}
+
+impl RevListCommitHeaderMode {
+    fn from_flag(no_commit_header: bool) -> Self {
+        if no_commit_header {
+            Self::Suppressed
+        } else {
+            Self::Automatic
+        }
+    }
 }
 
 struct RevListReflogRenderOptions<'a> {
     rendered_format: Option<&'a LogFormat<'a>>,
     date_mode: LogDateMode<'a>,
     default_commit_abbrev: bool,
-    abbrev_len: usize,
+    no_abbrev_commit: bool,
+    commit_header_mode: RevListCommitHeaderMode,
+    abbreviated_ids_requested: bool,
     parents: bool,
     regexp_ignore_case: bool,
     count: bool,
@@ -18199,30 +24351,63 @@ fn rev_list_walk_reflogs(
         println!("{}", commit_ids.len());
         return Ok(());
     }
+    let abbrev_ids = if options.abbreviated_ids_requested {
+        let mut ids = commit_ids.to_vec();
+        for id in &commit_ids {
+            ids.extend(read_commit_parents_uncached(store, id)?);
+        }
+        ids
+    } else {
+        Vec::new()
+    };
+    let abbrev_lengths = if options.abbreviated_ids_requested {
+        rendered_abbrev_len_for_ids(store, configured_core_abbrev_state(repo)?, &abbrev_ids)?
+    } else {
+        RenderedAbbrevLengths::fixed(&abbrev_ids, full_abbrev_len(store.algorithm()))
+    };
+    let implicit_abbrev_lengths = implicit_log_abbrev_lengths(
+        store,
+        &abbrev_lengths,
+        &abbrev_ids,
+        options.no_abbrev_commit,
+    );
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();
     let mut out = io::stdout().lock();
     for id in &commit_ids {
         if let Some(format) = options.rendered_format {
+            let render_abbrev_lengths =
+                log_lengths_for_format(format, &abbrev_lengths, &implicit_abbrev_lengths);
+            let abbrev_len =
+                log_commit_abbrev_len(format, id, &abbrev_lengths, &implicit_abbrev_lengths);
             let commit = commit_cache.read_commit(id)?;
             let rendered = render_rev_list_format(
                 format,
                 id,
                 commit.as_ref(),
                 options.parents,
-                options.abbrev_len,
+                RevListChildrenView::empty(),
+                abbrev_len,
                 None,
                 options.default_commit_abbrev,
                 false,
                 &decorations,
                 &notes,
                 options.date_mode,
+                Some(render_abbrev_lengths),
             )?;
-            if matches!(format, LogFormat::Custom { .. }) {
+            if matches!(format, LogFormat::Custom { .. })
+                && matches!(
+                    options.commit_header_mode,
+                    RevListCommitHeaderMode::Automatic
+                )
+            {
                 writeln!(out, "commit {}", id.to_hex())?;
             }
             out.write_all(rendered.as_bytes())?;
-            if format.terminates_lines() {
+            if !format.is_empty_user_format()
+                && (format.terminates_lines() || format.emits_rev_list_builtin_terminator())
+            {
                 out.write_all(b"\n")?;
             }
         } else if options.parents {
@@ -18233,7 +24418,11 @@ fn rev_list_walk_reflogs(
             }
             writeln!(out)?;
         } else if options.default_commit_abbrev {
-            writeln!(out, "{}", short_object_id_len(id, options.abbrev_len))?;
+            writeln!(
+                out,
+                "{}",
+                short_object_id_len(id, implicit_abbrev_lengths.width_for(id))
+            )?;
         } else {
             writeln!(out, "{id}")?;
         }
@@ -18290,7 +24479,7 @@ where
 
 fn collect_rev_list_reflog_commit_ids(
     repo: &GitRepo,
-    _store: &LooseObjectStore,
+    store: &LooseObjectStore,
     revs: &[String],
     grep_reflog: &[String],
     regexp_ignore_case: bool,
@@ -18317,10 +24506,10 @@ fn collect_rev_list_reflog_commit_ids(
             if commit_ids.len() >= limit {
                 return Ok(());
             }
-            let Some(entry) = parse_reflog_entry(line) else {
+            let Some(entry) = parse_reflog_line(line, store.algorithm()) else {
                 return Ok(());
             };
-            if entry.new_id == zero_object_id() {
+            if entry.new_id == reflog_zero_object_id(store.algorithm()) {
                 return Ok(());
             }
             if !grep_reflog.is_empty()
@@ -18342,37 +24531,441 @@ fn collect_rev_list_reflog_commit_ids(
     Ok(commit_ids)
 }
 
-fn collect_rev_list_children(
-    store: &LooseObjectStore,
-    commit_ids: &[ObjectId],
-    reverse: bool,
-) -> Result<HashMap<ObjectId, Vec<ObjectId>>> {
-    let included = commit_ids.iter().cloned().collect::<HashSet<_>>();
-    let mut children = HashMap::<ObjectId, Vec<ObjectId>>::new();
-    if reverse {
-        for child in commit_ids {
-            collect_rev_list_child_edges(store, child, &included, &mut children)?;
+struct RevListChildren {
+    by_parent: Vec<Vec<usize>>,
+}
+
+struct HistoryPathChildren {
+    by_parent: Vec<Vec<usize>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HistoryPathPreparedReady {
+    candidate_index: usize,
+    timestamp: i64,
+    original_index: usize,
+}
+
+impl Ord for HistoryPathPreparedReady {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.timestamp
+            .cmp(&other.timestamp)
+            .then_with(|| other.original_index.cmp(&self.original_index))
+            .then_with(|| other.candidate_index.cmp(&self.candidate_index))
+    }
+}
+
+impl PartialOrd for HistoryPathPreparedReady {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl HistoryPathChildren {
+    fn empty(commit_count: usize) -> Self {
+        Self {
+            by_parent: vec![Vec::new(); commit_count],
         }
-    } else {
-        for child in commit_ids.iter().rev() {
-            collect_rev_list_child_edges(store, child, &included, &mut children)?;
+    }
+
+    fn get(&self, parent_index: usize) -> &[usize] {
+        self.by_parent
+            .get(parent_index)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+impl RevListChildren {
+    fn empty(commit_count: usize) -> Self {
+        Self {
+            by_parent: vec![Vec::new(); commit_count],
+        }
+    }
+
+    fn get(&self, parent_index: usize) -> &[usize] {
+        self.by_parent
+            .get(parent_index)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RevListChildrenView<'a> {
+    indices: &'a [usize],
+    ids: &'a [ObjectId],
+}
+
+impl RevListChildrenView<'_> {
+    fn empty() -> Self {
+        Self {
+            indices: &[],
+            ids: &[],
+        }
+    }
+}
+
+fn rev_list_children_view<'a>(
+    row_index: usize,
+    candidate_index: usize,
+    path_children: Option<&'a HistoryPathChildren>,
+    path_selection: Option<&'a HistoryPathSelection>,
+    children_by_commit: &'a RevListChildren,
+    commit_ids: &'a [ObjectId],
+) -> RevListChildrenView<'a> {
+    if let (Some(path_children), Some(path_selection)) = (path_children, path_selection) {
+        return RevListChildrenView {
+            indices: path_children.get(row_index),
+            ids: &path_selection.ids,
+        };
+    }
+    RevListChildrenView {
+        indices: children_by_commit.get(candidate_index),
+        ids: commit_ids,
+    }
+}
+
+fn append_rev_list_children_to_writer(
+    out: &mut dyn io::Write,
+    children: RevListChildrenView<'_>,
+) -> Result<()> {
+    for child_index in children.indices {
+        if let Some(child) = children.ids.get(*child_index) {
+            write!(out, " {}", child.to_hex())?;
+        }
+    }
+    Ok(())
+}
+
+fn append_rev_list_precomputed_children_for_id(
+    out: &mut dyn io::Write,
+    topology: &RevListChildrenTopology,
+    children: &RevListChildren,
+    candidate_ids: &[ObjectId],
+    id: &ObjectId,
+) -> Result<()> {
+    let Some(candidate_index) = topology.candidate_index_for_id(id, candidate_ids) else {
+        return Ok(());
+    };
+    for child_index in children.get(candidate_index) {
+        if let Some(child_id) = candidate_ids.get(*child_index) {
+            write!(out, " {}", child_id.to_hex())?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_rev_list_children_from_topology(
+    topology: &RevListChildrenTopology,
+    displayed_candidate_indices: &[usize],
+    output_ids: &[ObjectId],
+    boundary_handles: &[RevListChildrenBoundaryHandle],
+    boundary_output_indices: &[usize],
+) -> Result<RevListChildren> {
+    let mut displayed = vec![false; topology.parent_indices.len()];
+    for candidate_index in displayed_candidate_indices.iter().copied() {
+        if candidate_index >= displayed.len() {
+            continue;
+        }
+        displayed[candidate_index] = true;
+    }
+    let mut boundary_candidates = vec![false; topology.parent_indices.len()];
+    for handle in boundary_handles {
+        if let Some(candidate_index) = handle.candidate_index {
+            if let Some(boundary_candidate) = boundary_candidates.get_mut(candidate_index) {
+                *boundary_candidate = true;
+            }
+        }
+    }
+    let mut children = RevListChildren::empty(output_ids.len());
+    for child_index in (0..topology.parent_indices.len()).rev() {
+        for parent_index in topology
+            .parent_indices
+            .get(child_index)
+            .into_iter()
+            .flatten()
+        {
+            if !displayed.get(*parent_index).copied().unwrap_or(false)
+                && !boundary_candidates
+                    .get(*parent_index)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            children.by_parent[*parent_index].push(child_index);
+        }
+    }
+    for (handle, output_index) in boundary_handles
+        .iter()
+        .zip(boundary_output_indices.iter().copied())
+    {
+        let Some(parent_id) = output_ids.get(output_index) else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "rev-list child topology output index out of range".into(),
+            });
+        };
+        if handle.id != *parent_id {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "rev-list child topology boundary handle mismatch".into(),
+            });
+        }
+        if let Some(external_parent_index) = handle.external_parent_index {
+            children.by_parent[output_index].extend(
+                topology
+                    .external_children_for_index(external_parent_index)
+                    .iter()
+                    .copied(),
+            );
         }
     }
     Ok(children)
 }
 
-fn collect_rev_list_child_edges(
-    store: &LooseObjectStore,
-    child: &ObjectId,
-    included: &HashSet<ObjectId>,
-    children: &mut HashMap<ObjectId, Vec<ObjectId>>,
-) -> Result<()> {
-    for parent in read_commit_parents_uncached(store, child)? {
-        if included.contains(&parent) {
-            children.entry(parent).or_default().push(child.clone());
+fn collect_history_path_children(
+    selection: &HistoryPathSelection,
+    candidate_index_by_id: &HashMap<ObjectId, usize>,
+    commit_ids: &[ObjectId],
+    output_indices: &[usize],
+    order: Option<HistoryCommitOrder>,
+) -> Result<HistoryPathChildren> {
+    let mut rows_by_id = vec![Vec::<usize>::new(); selection.ids.len()];
+    for (row_index, candidate_index) in output_indices.iter().copied().enumerate() {
+        let Some(id) = commit_ids.get(candidate_index) else {
+            continue;
+        };
+        let Some(candidate_index) = candidate_index_by_id.get(id).copied() else {
+            continue;
+        };
+        let Some(candidate) = selection.commits.get(candidate_index) else {
+            continue;
+        };
+        rows_by_id[candidate.id_index].push(row_index);
+    }
+    let mut children = HistoryPathChildren::empty(output_indices.len());
+    for child_candidate_index in history_path_prepared_candidate_order(selection, order)?
+        .into_iter()
+        .rev()
+    {
+        append_history_path_child_edges(
+            selection,
+            &rows_by_id,
+            &mut children,
+            child_candidate_index,
+        );
+    }
+    Ok(children)
+}
+
+fn history_path_prepared_candidate_order(
+    selection: &HistoryPathSelection,
+    order: Option<HistoryCommitOrder>,
+) -> Result<Vec<usize>> {
+    let Some(child_metadata) = selection.child_metadata.as_ref() else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "path child metadata was not retained for child output".into(),
+        });
+    };
+    let candidate_count = child_metadata.all_candidate_id_indices.len();
+    let Some(order) = order else {
+        return Ok((0..candidate_count).collect());
+    };
+    if candidate_count < 2 {
+        return Ok((0..candidate_count).collect());
+    }
+
+    let mut remaining_children = vec![0usize; candidate_count];
+    for candidate_index in 0..candidate_count {
+        let parent_count = child_metadata
+            .all_traversal_parent_counts
+            .get(candidate_index)
+            .copied()
+            .unwrap_or_default();
+        let Some(parent_indices) = child_metadata.all_parent_indices.get(candidate_index) else {
+            continue;
+        };
+        for parent_id_index in parent_indices.iter().take(parent_count) {
+            let Some(&parent_candidate_index) = selection
+                .all_candidate_indices_by_id
+                .get(*parent_id_index)
+                .filter(|index| **index != usize::MAX)
+            else {
+                continue;
+            };
+            remaining_children[parent_candidate_index] += 1;
         }
     }
-    Ok(())
+
+    let mut ordered = Vec::with_capacity(candidate_count);
+    let mut emit_parents = |candidate_index: usize,
+                            remaining_children: &mut [usize],
+                            ready: &mut Vec<usize>| {
+        let parent_count = child_metadata
+            .all_traversal_parent_counts
+            .get(candidate_index)
+            .copied()
+            .unwrap_or_default();
+        let Some(parent_indices) = child_metadata.all_parent_indices.get(candidate_index) else {
+            return;
+        };
+        for parent_id_index in parent_indices.iter().take(parent_count) {
+            let Some(&parent_candidate_index) = selection
+                .all_candidate_indices_by_id
+                .get(*parent_id_index)
+                .filter(|index| **index != usize::MAX)
+            else {
+                continue;
+            };
+            remaining_children[parent_candidate_index] =
+                remaining_children[parent_candidate_index].saturating_sub(1);
+            if remaining_children[parent_candidate_index] == 0 {
+                ready.push(parent_candidate_index);
+            }
+        }
+    };
+
+    if matches!(order, HistoryCommitOrder::Topo) {
+        let mut roots = (0..candidate_count)
+            .filter(|candidate_index| remaining_children[*candidate_index] == 0)
+            .collect::<Vec<_>>();
+        roots.sort_unstable();
+        let mut emitted = vec![false; candidate_count];
+        for root in roots {
+            let mut ready = vec![root];
+            while let Some(candidate_index) = ready.pop() {
+                if emitted[candidate_index] {
+                    continue;
+                }
+                emitted[candidate_index] = true;
+                ordered.push(candidate_index);
+                emit_parents(candidate_index, &mut remaining_children, &mut ready);
+            }
+        }
+    } else {
+        let mut ready = std::collections::BinaryHeap::new();
+        for candidate_index in 0..candidate_count {
+            if remaining_children[candidate_index] != 0 {
+                continue;
+            }
+            let timestamp = match order {
+                HistoryCommitOrder::AuthorDate => child_metadata
+                    .all_author_timestamps
+                    .get(candidate_index)
+                    .copied()
+                    .flatten(),
+                HistoryCommitOrder::Date => child_metadata
+                    .all_committer_timestamps
+                    .get(candidate_index)
+                    .copied(),
+                HistoryCommitOrder::Topo => None,
+            }
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "history ordering encountered an invalid commit timestamp".into(),
+            })?;
+            ready.push(HistoryPathPreparedReady {
+                candidate_index,
+                timestamp,
+                original_index: candidate_index,
+            });
+        }
+        while let Some(next) = ready.pop() {
+            ordered.push(next.candidate_index);
+            let mut parent_candidates = Vec::new();
+            emit_parents(
+                next.candidate_index,
+                &mut remaining_children,
+                &mut parent_candidates,
+            );
+            for parent_candidate_index in parent_candidates {
+                let timestamp = match order {
+                    HistoryCommitOrder::AuthorDate => child_metadata
+                        .all_author_timestamps
+                        .get(parent_candidate_index)
+                        .copied()
+                        .flatten(),
+                    HistoryCommitOrder::Date => child_metadata
+                        .all_committer_timestamps
+                        .get(parent_candidate_index)
+                        .copied(),
+                    HistoryCommitOrder::Topo => None,
+                }
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "history ordering encountered an invalid commit timestamp".into(),
+                })?;
+                ready.push(HistoryPathPreparedReady {
+                    candidate_index: parent_candidate_index,
+                    timestamp,
+                    original_index: parent_candidate_index,
+                });
+            }
+        }
+    }
+    if ordered.len() != candidate_count {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "path history ordering failed to visit every candidate".into(),
+        });
+    }
+    Ok(ordered)
+}
+
+fn append_history_path_child_edges(
+    selection: &HistoryPathSelection,
+    output_indices: &[Vec<usize>],
+    children: &mut HistoryPathChildren,
+    child_candidate_index: usize,
+) {
+    let Some(child_metadata) = selection.child_metadata.as_ref() else {
+        return;
+    };
+    if !child_metadata
+        .child_candidate_universe
+        .get(child_candidate_index)
+        .copied()
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(&child_id_index) = child_metadata
+        .all_candidate_id_indices
+        .get(child_candidate_index)
+    else {
+        return;
+    };
+    let parent_count = child_metadata
+        .all_traversal_parent_counts
+        .get(child_candidate_index)
+        .copied()
+        .unwrap_or_default();
+    let Some(parent_indices) = child_metadata.all_parent_indices.get(child_candidate_index) else {
+        return;
+    };
+    for parent_id_index in parent_indices.iter().take(parent_count) {
+        let Some(&parent_candidate_index) = selection
+            .all_candidate_indices_by_id
+            .get(*parent_id_index)
+            .filter(|index| **index != usize::MAX)
+        else {
+            continue;
+        };
+        if !child_metadata
+            .child_candidate_universe
+            .get(parent_candidate_index)
+            .copied()
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        for parent_output_index in output_indices.get(*parent_id_index).into_iter().flatten() {
+            children.by_parent[*parent_output_index].push(child_id_index);
+        }
+    }
 }
 
 fn parse_rev_list_filter(value: &str) -> Result<RevListObjectFilter> {
@@ -18391,7 +24984,9 @@ fn parse_rev_list_filter(value: &str) -> Result<RevListObjectFilter> {
             _ => {
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: format!("invalid filter-spec '{value}'"),
+                    message: format!(
+                        "'{kind}' for 'object:type=<type>' is not a valid object type"
+                    ),
                 });
             }
         };
@@ -18401,6 +24996,20 @@ fn parse_rev_list_filter(value: &str) -> Result<RevListObjectFilter> {
         code: 128,
         message: format!("invalid filter-spec '{value}'"),
     })
+}
+
+fn validate_rev_list_promisor_options(
+    exclude_promisor_objects: bool,
+    missing: Option<&str>,
+) -> Result<()> {
+    if exclude_promisor_objects && missing.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--exclude_promisor_objects' and '--missing' cannot be used together"
+                .into(),
+        });
+    }
+    Ok(())
 }
 
 fn parse_rev_list_missing_mode(value: Option<&str>) -> Result<Option<RevListMissingMode>> {
@@ -18553,62 +25162,33 @@ fn for_each_rev_list_filtered_object_id<F>(
     extra_objects: &[ObjectId],
     excluded_commits: &[ObjectId],
     filter: RevListObjectFilter,
+    filter_provided_objects: bool,
     mut visit: F,
 ) -> Result<usize>
 where
     F: FnMut(&ObjectId) -> Result<()>,
 {
     let mut count = 0usize;
-    write_rev_list_object_ids_uncached_filtered(
-        store,
-        commits,
-        extra_objects,
-        excluded_commits,
-        filter,
-        |id| {
-            count += 1;
-            visit(id)
-        },
-    )?;
-    Ok(count)
-}
-
-fn write_rev_list_object_ids_uncached_filtered<F>(
-    store: &LooseObjectStore,
-    commits: &[CollectedCommitTree],
-    extra_objects: &[ObjectId],
-    excluded_commits: &[ObjectId],
-    filter: RevListObjectFilter,
-    mut visit: F,
-) -> Result<()>
-where
-    F: FnMut(&ObjectId) -> Result<()>,
-{
-    let mut out = Vec::new();
-    write_rev_list_object_ids_uncached(
+    let provided_object_ids = extra_objects.iter().cloned().collect::<HashSet<_>>();
+    for_each_rev_list_object_id_with_trees(
         store,
         commits,
         extra_objects,
         excluded_commits,
         RevListTreeMissingPolicy::default(),
-        &mut out,
+        |id, kind| {
+            if !filter_provided_objects && provided_object_ids.contains(id) {
+                count += 1;
+                return visit(id);
+            }
+            if rev_list_filter_includes_known_kind(store, id, kind, filter)? {
+                count += 1;
+                visit(id)?;
+            }
+            Ok(())
+        },
     )?;
-    for line in out.split(|byte| *byte == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        let text = std::str::from_utf8(line).map_err(|error| {
-            CliError::Io(io::Error::new(
-                io::ErrorKind::InvalidData,
-                error.to_string(),
-            ))
-        })?;
-        let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, text).map_err(CliError::Io)?;
-        if rev_list_filter_includes(store, &id, filter)? {
-            visit(&id)?;
-        }
-    }
-    Ok(())
+    Ok(count)
 }
 
 pub(crate) fn last_modified(
@@ -18812,7 +25392,10 @@ pub(crate) fn merge_base(
     }
 
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let commit_cache = CommitObjectCache::new(&store);
     let commit_graph = CommitGraphIndex::open(&repo)?;
     let resolved = commits
@@ -18855,7 +25438,7 @@ pub(crate) fn merge_base(
     }
 
     if all {
-        for base in merge_bases_all_cached(&commit_cache, left, right)? {
+        for base in merge_bases_all_cached(&store, &commit_cache, left, right)? {
             println!("{}", base.to_hex());
         }
         return Ok(());
@@ -19950,6 +26533,34 @@ mod tests {
     use zmin_git_core::{CommitBuilder, GitObjectSink, Signature, encode_tree};
 
     #[test]
+    fn rev_list_human_disk_usage_matches_git_thresholds_and_rounding() {
+        assert_eq!(format_rev_list_disk_usage_human(1), "1 byte");
+        assert_eq!(format_rev_list_disk_usage_human(2), "2 bytes");
+        assert_eq!(format_rev_list_disk_usage_human(1 << 10), "1024 bytes");
+        assert_eq!(format_rev_list_disk_usage_human((1 << 10) + 1), "1.00 KiB");
+        assert_eq!(format_rev_list_disk_usage_human(1 << 20), "1024.00 KiB");
+        assert_eq!(format_rev_list_disk_usage_human(1 << 30), "1024.00 MiB");
+        assert_eq!(format_rev_list_disk_usage_human((1 << 30) + 1), "1.00 GiB");
+    }
+
+    #[test]
+    fn rev_list_bisection_round_schedule_processes_parent_before_child_rank() {
+        let parents = RevListBisectionParents::Owned(vec![vec![], vec![0], vec![1]]);
+        let prepared = [2, 1, 0];
+        assert_eq!(
+            rev_list_bisection_single_parent_schedule(&prepared, &parents, 3),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn rev_list_bisection_round_schedule_excludes_unresolved_parent_chain() {
+        let parents = RevListBisectionParents::Owned(vec![vec![], vec![7], vec![1]]);
+        let prepared = [2, 1, 0];
+        assert!(rev_list_bisection_single_parent_schedule(&prepared, &parents, 3).is_empty());
+    }
+
+    #[test]
     fn reversed_reflog_reader_streams_lines_from_newest_to_oldest() {
         let dir = TempDir::new().expect("temp dir");
         let path = dir.path().join("HEAD");
@@ -20112,6 +26723,113 @@ mod tests {
         assert_eq!(metadata.parents.as_ref(), [parent].as_slice());
         assert_eq!(store.full_reads.get(), 0);
         assert_eq!(store.prefix_reads.get(), 1);
+    }
+
+    #[test]
+    fn borrowed_history_order_handles_sparse_ties_and_parent_edges() {
+        let id = |digit: char| {
+            ObjectId::from_hex(GitHashAlgorithm::Sha1, &digit.to_string().repeat(40))
+                .expect("test object id")
+        };
+        let root = id('1');
+        let left = id('2');
+        let right = id('3');
+        let merge = id('4');
+        let sparse = vec![
+            HistoryOrderMetadata {
+                id: root.clone(),
+                parents: Vec::new(),
+                timestamp: 1700000000,
+                original_index: 41,
+            },
+            HistoryOrderMetadata {
+                id: left.clone(),
+                parents: Vec::new(),
+                timestamp: 1700000000,
+                original_index: 7,
+            },
+            HistoryOrderMetadata {
+                id: right.clone(),
+                parents: Vec::new(),
+                timestamp: 1700000000,
+                original_index: 99,
+            },
+        ];
+        let sparse_refs = sparse
+            .iter()
+            .enumerate()
+            .map(|(output_index, entry)| entry.as_ref(output_index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reorder_history_positions(&sparse_refs, HistoryCommitOrder::Date)
+                .expect("sparse equal-time order"),
+            vec![1, 0, 2]
+        );
+
+        let parent_edges = vec![
+            HistoryOrderMetadata {
+                id: root,
+                parents: Vec::new(),
+                timestamp: 1,
+                original_index: 41,
+            },
+            HistoryOrderMetadata {
+                id: left.clone(),
+                parents: vec![id('1')],
+                timestamp: 2,
+                original_index: 7,
+            },
+            HistoryOrderMetadata {
+                id: right.clone(),
+                parents: vec![id('1')],
+                timestamp: 3,
+                original_index: 99,
+            },
+            HistoryOrderMetadata {
+                id: merge,
+                parents: vec![left, right],
+                timestamp: 4,
+                original_index: 12,
+            },
+        ];
+        let parent_refs = parent_edges
+            .iter()
+            .enumerate()
+            .map(|(output_index, entry)| entry.as_ref(output_index))
+            .collect::<Vec<_>>();
+        let topo = reorder_history_positions(&parent_refs, HistoryCommitOrder::Topo)
+            .expect("parent-edge topo order");
+        assert_eq!(topo, vec![3, 2, 1, 0]);
+        for (child, parent) in [(3, 2), (3, 1), (2, 0), (1, 0)] {
+            assert!(
+                topo.iter().position(|index| *index == child)
+                    < topo.iter().position(|index| *index == parent)
+            );
+        }
+    }
+
+    #[test]
+    fn history_patch_digest_map_retains_more_than_8192_cached_entries() {
+        let dir = TempDir::new().expect("temp dir");
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).expect("objects dir");
+        let store = LooseObjectStore::new(&objects, GitHashAlgorithm::Sha1);
+        let mut digests = HistoryPatchDigestMap::new(&store);
+        let ids = (1..=9000)
+            .map(|index| {
+                ObjectId::from_hex(GitHashAlgorithm::Sha1, &format!("{index:040x}"))
+                    .expect("test object id")
+            })
+            .collect::<Vec<_>>();
+        for id in &ids {
+            digests.values.insert(id.clone(), None);
+        }
+
+        assert_eq!(digests.values.len(), ids.len());
+        for id in ids.iter().step_by(257) {
+            assert_eq!(digests.get(&store, id).expect("cached digest"), None);
+        }
+        assert_eq!(digests.values.len(), ids.len());
     }
 
     fn write_history_test_commit(

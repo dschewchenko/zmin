@@ -1,7 +1,7 @@
-family	prefix	count	reason	scope_decision
-t5323-pack-redundant	t5323	1	deprecated command scheduled for removal, not practical replace-git core flow	exclude from core upstream suite
-git-svn	t91	69	external Subversion bridge, not core replace-git CLI parity	exclude from core upstream suite
-git-cvsserver	t94	3	legacy CVS server integration, not common developer flow	exclude from core upstream suite
-gitweb	t95	3	web UI surface, not CLI replacement parity	exclude from core upstream suite
-cvsimport	t96	5	legacy CVS import bridge, not core replace-git CLI parity	exclude from core upstream suite
-git-p4	t98	38	external Perforce bridge, not core replace-git CLI parity	exclude from core upstream suite
+family	pattern	count	reason	classification	scope_decision	evidence
+t5323-pack-redundant	t5323	1	deprecated command scheduled for removal, not practical replace-git core flow	upstream deprecated/removed	exclude from current nondeprecated scope	Documentation/git-pack-redundant.adoc:14-26; t/t5323-pack-redundant.sh:39-53; command-list.txt:152
+git-svn	t91	69	current Subversion bridge kept outside narrowed core developer-flow track	external-but-current	exclude from core-only suite; include in current contract	Documentation/git-svn.adoc:1-24; t/t9100-git-svn-basic.sh-t9169-git-svn-dcommit-crlf.sh; command-list.txt:195
+git-cvsserver	t94	3	current CVS server integration kept outside narrowed core developer-flow track	external-but-current	exclude from core-only suite; include in current contract	Documentation/git-cvsserver.adoc:1-35; t/t9400-git-cvsserver-server.sh-t9402-git-cvsserver-refs.sh; command-list.txt:91-92
+gitweb	t95	3	current Git web interface kept outside narrowed CLI developer-flow track	external-but-current	exclude from core-only suite; include in current contract	Documentation/gitweb.adoc:1-32; t/t9500-gitweb-standalone-no-errors.sh-t9502-gitweb-standalone-parse-output.sh; command-list.txt:247
+cvsimport	t96	5	current CVS import bridge kept outside narrowed core developer-flow track	external-but-current	exclude from core-only suite; include in current contract	Documentation/git-cvsimport.adoc:1-28; t/t9600-cvsimport.sh-t9604-cvsimport-timestamps.sh; command-list.txt:91-92
+git-p4	t98[0-3]	37	current Perforce bridge kept outside narrowed core developer-flow track	external-but-current	exclude from core-only suite; include in current contract	Documentation/git-p4.adoc:1-29; t/t9800-git-p4-basic.sh-t9835-git-p4-metadata-encoding-python2.sh and t/t9836-git-p4-metadata-encoding-python3.sh; command-list.txt:150

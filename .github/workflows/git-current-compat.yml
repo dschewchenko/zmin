@@ -1,0 +1,187 @@
+name: Current Git compatibility replay
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Build and preparation concurrency"
+        required: true
+        type: string
+        default: "4"
+      per_test_timeout:
+        description: "Per-test timeout in seconds; nonzero marks the run diagnostic"
+        required: true
+        type: string
+        default: "0"
+  push:
+    branches:
+      - compat/current-git-v2.55-replay
+
+permissions:
+  contents: read
+
+concurrency:
+  group: git-current-compat-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'push' &&
+           github.ref == 'refs/heads/compat/current-git-v2.55-replay' &&
+           github.event.created == true &&
+           github.run_attempt == 1) }}
+    name: Current Git replay (Linux x86_64)
+    # 1,045 upstream files can take most of a runner allocation.  Keep the
+    # authority lane bounded by the maximum GitHub-hosted-job timeout.
+    timeout-minutes: 360
+    runs-on: ubuntu-24.04
+    env:
+      REPLAY_JOBS: ${{ inputs.jobs || '4' }}
+      REPLAY_PER_TEST_TIMEOUT: ${{ inputs.per_test_timeout || '0' }}
+      REPLAY_RUST_TOOLCHAIN: stable
+      RUSTUP_MAX_RETRIES: "0"
+      CARGO_NET_RETRY: "0"
+      CARGO_TERM_COLOR: never
+
+    steps:
+      - name: Checkout triggering commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          clean: true
+          persist-credentials: false
+
+      - name: Verify checkout and native runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$(getconf LONG_BIT)" = 64
+          test ! -e "$GITHUB_WORKSPACE/.tmp"
+          mkdir -p "$GITHUB_WORKSPACE/.replay/artifacts"
+
+      - name: Install pinned Git test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get -o Acquire::Retries=0 update
+          apt_packages=(
+            bash build-essential ca-certificates curl file findutils gawk gettext
+            git make perl python3 rsync tar zlib1g-dev libssl-dev
+            libcurl4-openssl-dev libexpat1-dev libpcre2-dev libzstd-dev liblz4-dev
+            tcl tk cvs cvsps subversion
+            libsvn-perl libcgi-pm-perl libdbi-perl libdbd-sqlite3-perl
+            ripgrep
+          )
+          missing_packages=()
+          for package in "${apt_packages[@]}"; do
+            apt-cache show "$package" >/dev/null 2>&1 || missing_packages+=("$package")
+          done
+          mkdir -p "$GITHUB_WORKSPACE/.replay/artifacts"
+          if ((${#missing_packages[@]})); then
+            printf 'apt_required_missing\t%s\n' "${missing_packages[*]}" >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+            printf 'Required Git compatibility dependencies are unavailable: %s\n' "${missing_packages[*]}" >&2
+            exit 1
+          fi
+          sudo apt-get -o Acquire::Retries=0 install -y --no-install-recommends "${apt_packages[@]}"
+          printf 'apt_required_missing\tnone\n' >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          for package in "${apt_packages[@]}"; do
+            dpkg-query -W -f='apt_package\t${Package}\t${Version}\t${Status}\n' "$package" \
+              >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          done
+          for command in bash cargo rustc rustup make gcc perl curl tar sha256sum rg cvs cvsps svn; do
+            command_path="$(command -v "$command")"
+            case "$command_path" in /*) ;; *) exit 1 ;; esac
+            printf 'command_path\t%s\t%s\n' "$command" "$command_path" \
+              >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+            printf 'command_version\t%s\t%s\n' "$command" \
+              "$("$command" --version 2>&1 | head -n 1 | tr '\n' ';')" \
+              >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          done
+          test "$(rustup toolchain list | awk '$1 == "stable" { print $1; exit }')" = stable
+          {
+            printf 'rustup_toolchain\t%s\n' "$(rustup toolchain list | tr '\n' ';')"
+            printf 'cargo_path\t%s\n' "$(command -v cargo)"
+            printf 'cargo_version\t%s\n' "$(cargo --version)"
+            printf 'rustc_path\t%s\n' "$(command -v rustc)"
+            printf 'rustc_version\t%s\n' "$(rustc --version --verbose | tr '\n' ';')"
+            printf 'git_path\t%s\n' "$(command -v git)"
+            printf 'git_version\t%s\n' "$(git --version)"
+          } >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+
+      - name: Run stock control and Zmin replay
+        id: replay
+        if: always()
+        shell: bash
+        continue-on-error: true
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.replay/work/cargo-home
+        run: |
+          set +e
+          bash tools/git-current-compat-replay.sh \
+            "$REPLAY_JOBS" \
+            "$REPLAY_PER_TEST_TIMEOUT" \
+            "$GITHUB_WORKSPACE/.replay/artifacts"
+          rc=$?
+          printf 'exit_code=%s\n' "$rc" >>"$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Collect infrastructure outcome
+        if: always()
+        shell: bash
+        env:
+          REPLAY_STEP_EXIT: ${{ steps.replay.outputs.exit_code }}
+        run: |
+          set +e
+          artifact_root="$GITHUB_WORKSPACE/.replay/artifacts"
+          mkdir -p "$artifact_root"
+          if [[ -f "$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv" && ! -f "$artifact_root/dependency-preflight.tsv" ]]; then
+            cp "$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv" "$artifact_root/dependency-preflight.tsv"
+          fi
+          if [[ ! -f "$artifact_root/outcome.tsv" ]]; then
+            {
+              printf 'result\tfail\n'
+              printf 'exit_code\t2\n'
+              printf 'reason\tinfrastructure failed before replay outcome was written\n'
+              printf 'replay_step_exit\t%s\n' "${REPLAY_STEP_EXIT:-missing}"
+            } >"$artifact_root/outcome.tsv"
+          fi
+          {
+            printf 'collector\tworkflow infrastructure\n'
+            printf 'runner_os\t%s\n' "${RUNNER_OS:-unknown}"
+            printf 'uname\t%s\n' "$(uname -a 2>/dev/null || true)"
+            printf 'checkout\t%s\n' "$(git rev-parse HEAD 2>/dev/null || printf unavailable)"
+            printf 'replay_step_exit\t%s\n' "${REPLAY_STEP_EXIT:-missing}"
+          } >"$artifact_root/infrastructure-collector.tsv"
+          (
+            cd "$artifact_root"
+            while IFS= read -r -d '' file; do
+              sha256sum "${file#./}"
+            done < <(find . -type f ! -name checksums.sha256 -print0 | LC_ALL=C sort -z)
+          ) >"$artifact_root/checksums.sha256"
+
+      - name: Upload replay evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: git-current-compat-full1045-${{ github.sha }}
+          path: .replay/artifacts
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Fail according to replay outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          outcome_file="$GITHUB_WORKSPACE/.replay/artifacts/outcome.tsv"
+          test -f "$outcome_file"
+          stored_exit="$(awk -F '\t' '$1 == "exit_code" { print $2; exit }' "$outcome_file")"
+          test -n "$stored_exit"
+          test "$stored_exit" -eq 0

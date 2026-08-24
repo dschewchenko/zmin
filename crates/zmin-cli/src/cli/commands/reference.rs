@@ -1,4 +1,7 @@
-use crate::runtime;
+use crate::{
+    cli::commands::reference_commands::{self, LsTreeAbbrev},
+    runtime,
+};
 
 pub(crate) fn dispatch(
     command: runtime::Command,
@@ -82,10 +85,12 @@ pub(crate) fn dispatch(
             options.dereference,
             options.hash,
             options.abbrev,
+            options.no_abbrev,
             options.verify,
             options.exists,
             options.exclude_existing,
             options.refs,
+            raw_args,
         ),
         runtime::Command::ForEachRef { options } => run_for_each_ref(options),
         runtime::Command::LsTree {
@@ -103,6 +108,7 @@ pub(crate) fn dispatch(
                     no_full_name,
                     full_tree,
                     abbrev,
+                    no_abbrev,
                     format,
                     treeish,
                     paths,
@@ -118,7 +124,7 @@ pub(crate) fn dispatch(
             object_only,
             full_name > 0 && no_full_name == 0,
             full_tree,
-            abbrev,
+            reference_commands::parse_ls_tree_abbrev(raw_args, abbrev, no_abbrev)?,
             format,
             treeish,
             paths,
@@ -627,24 +633,76 @@ pub(crate) fn run_show_ref(
     dereference: bool,
     hash: Option<usize>,
     abbrev: Option<usize>,
+    no_abbrev: bool,
     verify: bool,
     exists: bool,
     exclude_existing: Option<String>,
     refs: Vec<String>,
+    raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
+    let output_options = parse_show_ref_output_options(raw_args, hash, abbrev, no_abbrev);
     super::reference_commands::show_ref(
         quiet,
         head,
         heads,
         tags,
         dereference,
-        hash,
-        abbrev,
+        output_options,
         verify,
         exists,
         exclude_existing.as_deref(),
         refs,
     )
+}
+
+fn parse_show_ref_output_options(
+    raw_args: &[String],
+    hash: Option<usize>,
+    abbrev: Option<usize>,
+    no_abbrev: bool,
+) -> Vec<runtime::ShowRefOutputOption> {
+    let mut options = Vec::new();
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--hash" || arg == "-s" {
+            options.push(runtime::ShowRefOutputOption::Hash(None));
+        } else if let Some(value) = arg.strip_prefix("--hash=") {
+            if let Ok(value) = value.parse() {
+                options.push(runtime::ShowRefOutputOption::Hash(Some(value)));
+            }
+        } else if let Some(value) = arg.strip_prefix("-s=") {
+            if let Ok(value) = value.parse() {
+                options.push(runtime::ShowRefOutputOption::Hash(Some(value)));
+            }
+        } else if let Some(value) = arg.strip_prefix("-s")
+            && !value.is_empty()
+            && let Ok(value) = value.parse()
+        {
+            options.push(runtime::ShowRefOutputOption::Hash(Some(value)));
+        } else if arg == "--abbrev" {
+            options.push(runtime::ShowRefOutputOption::Abbrev(None));
+        } else if let Some(value) = arg.strip_prefix("--abbrev=") {
+            if let Ok(value) = value.parse() {
+                options.push(runtime::ShowRefOutputOption::Abbrev(Some(value)));
+            }
+        } else if arg == "--no-abbrev" {
+            options.push(runtime::ShowRefOutputOption::NoAbbrev);
+        }
+    }
+    if options.is_empty() {
+        if let Some(value) = hash {
+            options.push(runtime::ShowRefOutputOption::Hash(Some(value)));
+        }
+        if let Some(value) = abbrev {
+            options.push(runtime::ShowRefOutputOption::Abbrev(Some(value)));
+        }
+        if no_abbrev {
+            options.push(runtime::ShowRefOutputOption::NoAbbrev);
+        }
+    }
+    options
 }
 
 pub(crate) fn run_for_each_ref(
@@ -685,12 +743,12 @@ pub(crate) fn run_ls_tree(
     object_only: bool,
     full_name: bool,
     full_tree: bool,
-    abbrev: Option<usize>,
+    abbrev: LsTreeAbbrev,
     format: Option<String>,
     treeish: String,
     paths: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::reference_commands::ls_tree_command(
+    super::reference_commands::ls_tree_command_with_abbrev(
         directory_only,
         recursive,
         show_trees,

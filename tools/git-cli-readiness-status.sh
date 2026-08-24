@@ -32,6 +32,46 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+upstream_cache="${ZMIN_UPSTREAM_GIT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zmin/git-upstream}"
+current_source="$upstream_cache/git-v2.55.0"
+[[ -d "$current_source" ]] || {
+  echo "validated Git v2.55.0 source is missing: $current_source" >&2
+  exit 1
+}
+current_source="$(cd "$current_source" && pwd -P)"
+[[ "$(basename "$current_source")" == "git-v2.55.0" ]] || {
+  echo "validated Git source basename is not git-v2.55.0: $current_source" >&2
+  exit 1
+}
+[[ -d "$current_source/Documentation" ]] || {
+  echo "validated Git Documentation directory is missing: $current_source/Documentation" >&2
+  exit 1
+}
+current_command_list="$current_source/command-list.txt"
+[[ -f "$current_command_list" && ! -L "$current_command_list" ]] || {
+  echo "validated Git command-list.txt is missing: $current_command_list" >&2
+  exit 1
+}
+archive_sha="$(awk -F '\t' '$1 == "upstream_archive_sha256" { print $2 }' "$repo_root/tools/git-upstream-compat-contract.tsv")"
+[[ "$archive_sha" =~ ^[0-9a-f]{64}$ ]] || {
+  echo "validated Git archive identity is missing from the current contract" >&2
+  exit 1
+}
+marker="$current_source/.zmin-pristine-source.sha256"
+[[ -f "$marker" ]] || {
+  echo "validated Git source identity marker is missing: $marker" >&2
+  exit 1
+}
+actual_archive_sha="$(tr -d '[:space:]' < "$marker")"
+[[ "$actual_archive_sha" == "$archive_sha" ]] || {
+  echo "validated Git source identity mismatch: expected $archive_sha, got ${actual_archive_sha:-<empty>}" >&2
+  exit 1
+}
+export ZMIN_GIT_BASELINE=v2.55.0
+export ZMIN_GIT_DOC_CACHE="$current_source"
+export ZMIN_GIT_COMMAND_LIST="$current_command_list"
+export ZMIN_GIT_SOURCE_ARCHIVE_SHA256="$archive_sha"
+
 resolve_cargo_target_dir() {
   cargo metadata --no-deps --format-version 1 |
     python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])'

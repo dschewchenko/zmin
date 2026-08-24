@@ -58,20 +58,33 @@ git status
 git fetch --prune --no-tags
 ```
 
-Current macOS checkpoint (2026-07-17): release SHA-256
+All dated benchmark, compatibility, differential, and replay results below are
+retained historical evidence, including later reruns in this document; they are
+non-authoritative for current HEAD and do not establish current compatibility,
+parity, speed, or RSS claims. Current authoritative claims require the exact
+contract and retained evidence described in
+[`performance_evidence_contract.md`](performance_evidence_contract.md).
+
+Historical pre-W5 macOS checkpoint (2026-07-17; non-authoritative for current
+HEAD): release SHA-256
 `f789a0204b00d3e96fff0ad885e34305c99cc8bf572d11a81e94e0c6b069c632`
 passes the replacement smoke and the observed-client differential tests.
 The 20-repeat real-workspace replay is byte-exact for exit status, stdout, and
 stderr across all ten GUI lanes. It uses less p95 RSS in all ten lanes; on this
 dirty workspace median wall time is lower in `9/10` lanes, with the unbounded
 `log` lane at `1.183x` median and `1.374x` p95 wall time.
-The normal seven-operation performance corpus is below Git for both median time
-and p95 RSS in all seven operations.
+In that historical corpus, the normal seven-operation performance result was
+below Git for both median time and p95 RSS in all seven operations.
 
-The current release replay (20 repeats, `init`, `status`, `log`, `rev-list`,
+The same historical release replay (20 repeats, `init`, `status`, `log`, `rev-list`,
 `merge-base`, `pack-objects`, and `index-pack`) remained semantically exact and
 below Git on both gates in all seven lanes; the slowest median-time ratio was
 `0.990x` for `index-pack`, and the worst p95 RSS ratio was `0.985x`.
+
+These pre-W5 results are retained for history only and do not establish a
+current performance claim. Current authoritative claims require the exact
+sampling, equivalence, provenance, and strict-gate contract in
+[`performance_evidence_contract.md`](performance_evidence_contract.md).
 
 The version line must start with the Git 2.47 compatibility baseline, currently
 `git version 2.47.1.zmin`, and include the real Zmin package version after it. Some
@@ -85,19 +98,20 @@ cargo test -q -p zmin-cli --test git_replacement_dogfood_compat -- --nocapture
 tools/git-replacement-dogfood-smoke.sh
 ```
 
-Current durable replace-git gates on the main workspace as of 2026-07-02:
+Historical durable replace-git gate snapshot (2026-07-02; non-authoritative for
+current HEAD):
 
 - `cargo test -q -p zmin-cli --test git_runtime_dependency_audit -- --nocapture`
-  passed, confirming the audited stock-Git dependency patterns remain confined
-  to test-only `src` zones.
+  passed in that snapshot, confirming the audited stock-Git dependency patterns
+  remained confined to test-only `src` zones.
 - `cargo test -q -p zmin-cli --test git_replacement_dogfood_compat -- --nocapture`
-  passed `5/5`, keeping the shell shim smoke, the focused shim-routed built-in
-  LFS discovery lane, both stock-style LFS hook takeover lanes (default hooks
-  directory and custom `core.hooksPath`), and the publish/pull repository-state
-  comparison green.
+  passed `5/5` in that snapshot; the shell shim smoke, the focused shim-routed
+  built-in LFS discovery lane, both stock-style LFS hook takeover lanes
+  (default hooks directory and custom `core.hooksPath`), and the publish/pull
+  repository-state comparison were green there.
 - `cargo test -q -p zmin-cli --test git_observed_client_compat -- --nocapture`
-  passed `16/16`, keeping the current observed IDE/client command families green
-  on the focused fixture set, including history queries, commit-detail
+  passed `16/16` in that snapshot; the observed IDE/client command families
+  were green on the focused fixture set, including history queries, commit-detail
   `show --stdin` shapes, including the exact fuller/decorated
   `raw + numstat + shortstat` stdin family, Local Changes status/ls-files
   lanes, and poison-git checks that verify the exercised observed commands do
@@ -121,7 +135,8 @@ common LFS discovery probes many clients/plugins issue separately:
 upgrade path where a repository already has stock `git-lfs` local hooks and the
 shim reruns `git lfs install --local --skip-smudge`, proving Zmin can take over
 that existing hook lane instead of treating the hook files as foreign. The Rust
-integration tests are the durable gate for CI/local verification; they now also
+integration tests were the durable gate for CI/local verification in that
+snapshot; they also
 assert that a local `git` shim routing into Zmin answers `git lfs version`,
 `git lfs env`, empty-repo `git lfs ls-files`, and the manual install/update
 discovery commands without relying on the shell smoke alone, and that rerunning
@@ -166,7 +181,8 @@ those families need an explicit deterministic fixture before they become a
 compatibility gate. Mismatch artifacts remain private in the reported output
 directory.
 
-A live replay on the dirty main workspace on 2026-07-14 passed `1/1` captured
+Historical live replay on the dirty main workspace (2026-07-14;
+non-authoritative for current HEAD) passed `1/1` captured
 read-only invocations with identical exit code, stdout, stderr, and semantic
 state. The workspace contained an IDE Unix socket; replay materialized that
 special file as an inert regular placeholder in the private fixture instead of
@@ -180,15 +196,30 @@ tools/git-observed-client-bench.sh /path/to/repo
 ```
 
 The script compares stock Git and the selected `ZMIN_BIN` (otherwise the newest
-available release, compat, debug, or local-alias binary) on the current practical
+available local binary) on the current practical
 problem lanes:
 machine-readable Local Changes `status`, the `.idea`-scoped `ls-files` lane
 that drives nested Local Changes trees, commit-details `show --numstat`,
 stdin-fed commit-details `show --name-status`, and the unbounded observed
 `log --decorate=full ... --date-order --` history query.
-The default run warms each tool/lane pair once before recording samples, and
-each measured repeat alternates stock-Git/Zmin execution order. A small process
-runner
+The fallback binary selection is exploratory only. For an authoritative run,
+set `ZMIN_OBSERVED_BENCH_EVIDENCE_MODE=authoritative`, provide an explicit
+release binary with a matching identity sidecar, set
+`ZMIN_OBSERVED_BENCH_MAKE=/absolute/trusted/path/make`, and retain the output
+directory. The Make path, first version line, and SHA-256 are authenticated at
+both start and finish. See
+[`performance_evidence_contract.md`](performance_evidence_contract.md) for the
+exact identity, sample-count, pairing, metric, and supported-platform
+requirements. The current descriptor-bound Make runner supports Linux only;
+it opens the sealed Make object read-only through /proc/self/fd before launch.
+Darwin and Windows authoritative runs fail closed before even make --version.
+
+The default exploratory run warms each tool/lane pair once before recording
+samples, and each measured repeat alternates stock-Git/Zmin execution order.
+Authoritative process-cold pairs use fresh child processes while recording
+`filesystem_cache=warm` and `filesystem_cache_drop=no-drop`; they are not disk-
+cold measurements. A
+small process runner
 measures wall time at nanosecond resolution and normalizes `ru_maxrss` to bytes
 on macOS and Linux. The TSV output and terminal summary report median and p95
 wall time plus p95 maximum resident bytes, and optional ratio gates can fail a

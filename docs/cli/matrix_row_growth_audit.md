@@ -1,5 +1,11 @@
 # Matrix Row Growth Audit
 
+> Historical v2.47.1 evidence only. The preserved row-growth notes and CLI
+> snippets below are non-runnable historical records unless a section
+> explicitly points to the current v2.55.0 census runbook. They are not the
+> current denominator or a drop-in compatibility claim; current authority is
+> `tools/git-upstream-compat-contract.tsv` and `docs/cli/census/`.
+
 This file explains behavior-row count growth on
 `compat/status-pathspec-matrix` and defines the guardrail for future matrix
 imports.

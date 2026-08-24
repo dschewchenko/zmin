@@ -1,15 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use flate2::read::ZlibDecoder;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 
 use crate::{
     GitHashAlgorithm, GitObjectKind, GitObjectStore, LooseObjectStore, ObjectId, decode_tag,
+    reftable_reader::{
+        ReftableLogCursor, ReftableParsedLogRecord as ParsedReftableLogRecord,
+        ReftableParsedRefTarget, open_stack as open_reftable_stack,
+    },
     reftable_writer::{
         ReftableEncodedRecord, ReftableWriteOptions, encode_reftable as encode_reftable_table,
     },
@@ -17,25 +23,55 @@ use crate::{
 
 const PACKED_REFS_IO_BUFFER_CAPACITY: usize = 64 * 1024;
 const PACKED_REF_LINE_INITIAL_CAPACITY: usize = 128;
-const REFTABLE_HEADER_V1_LEN: usize = 24;
-const REFTABLE_HEADER_V2_LEN: usize = 28;
-const REFTABLE_BLOCK_HEADER_LEN: usize = 4;
-const REFTABLE_RESTART_COUNT_LEN: usize = 2;
 #[cfg(test)]
 const REFTABLE_COMPACTION_TABLE_LIMIT: usize = 64;
 const REFTABLE_DEFAULT_GEOMETRIC_FACTOR: u64 = 2;
-const REFTABLE_FOOTER_V1_LEN: usize = 68;
-const REFTABLE_FOOTER_V2_LEN: usize = 72;
 const REFTABLE_TABLE_NAME_CAPACITY: usize = 45;
 const REFTABLE_LOCK_TIMEOUT_ENV: &str = "ZMIN_REFTABLE_LOCK_TIMEOUT_MS";
 const REFTABLE_BLOCK_SIZE_ENV: &str = "ZMIN_REFTABLE_BLOCK_SIZE";
 const REFTABLE_INDEX_OBJECTS_ENV: &str = "ZMIN_REFTABLE_INDEX_OBJECTS";
 const REFTABLE_RESTART_INTERVAL_ENV: &str = "ZMIN_REFTABLE_RESTART_INTERVAL";
+const REFTABLE_FAIL_TABLE_LIST_COMMIT_ENV: &str = "ZMIN_REFTABLE_FAIL_TABLE_LIST_COMMIT";
+const REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC_ENV: &str =
+    "ZMIN_REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC";
+
+static REFTABLE_TABLE_NAME_NONCE: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static REFTABLE_FAIL_TABLE_LIST_COMMIT: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
+#[cfg(test)]
+static REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC: std::sync::Mutex<Option<PathBuf>> =
+    std::sync::Mutex::new(None);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefTarget {
     Direct(ObjectId),
     Symbolic(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RawRefName(Vec<u8>);
+
+impl RawRefName {
+    pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
+        validate_raw_ref_name(bytes)?;
+        Ok(Self(bytes.to_vec()))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RawRefSnapshot {
+    names: BTreeSet<Vec<u8>>,
+}
+
+impl RawRefSnapshot {
+    pub fn contains(&self, name: &RawRefName) -> bool {
+        self.names.contains(name.as_bytes())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +113,61 @@ pub struct ReftableLogRecord {
     pub timestamp: u64,
     pub timezone_offset: i16,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReftableLogUpdate {
+    Update(ReftableLogRecord),
+    Deletion { ref_name: String, update_index: u64 },
+    ExistenceMarker { ref_name: String },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReftableTransaction {
+    pub ref_updates: BTreeMap<String, Option<RefTarget>>,
+    pub log_updates: Vec<ReftableLogUpdate>,
+}
+
+impl ReftableLogUpdate {
+    fn into_parsed(
+        self,
+        algorithm: GitHashAlgorithm,
+        update_index: u64,
+    ) -> ParsedReftableLogRecord {
+        match self {
+            Self::Update(record) => ParsedReftableLogRecord::Update(record),
+            Self::Deletion {
+                ref_name,
+                update_index,
+            } => ParsedReftableLogRecord::Deletion {
+                ref_name,
+                update_index,
+            },
+            Self::ExistenceMarker { ref_name } => {
+                let zero = reftable_zero_object_id(algorithm);
+                ParsedReftableLogRecord::Update(ReftableLogRecord {
+                    ref_name,
+                    update_index,
+                    old_id: zero.clone(),
+                    new_id: zero,
+                    name: String::new(),
+                    email: String::new(),
+                    timestamp: 0,
+                    timezone_offset: 0,
+                    message: String::new(),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReftableLogSummary {
+    pub update_index: u64,
+    pub old_id: ObjectId,
+    pub new_id: ObjectId,
+    pub timestamp: u64,
+    pub timezone_offset: i16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,6 +380,71 @@ impl RefStore {
         }
     }
 
+    pub fn read_ref_bytes(&self, name: &RawRefName) -> io::Result<RefTarget> {
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let name = std::str::from_utf8(name.as_bytes()).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "non-UTF-8 ref names are unsupported by reftable",
+                )
+            })?;
+            return self.read_ref(name);
+        }
+        if let Some(target) = self.read_loose_ref_bytes(name)? {
+            return Ok(target);
+        }
+        self.read_packed_ref_bytes(name)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ref not found"))
+    }
+
+    pub fn raw_ref_snapshot(&self) -> io::Result<RawRefSnapshot> {
+        let names = if self.storage_kind()? == RefStorageKind::Reftable {
+            self.read_reftable_refs()?
+                .keys()
+                .map(|name| name.as_bytes().to_vec())
+                .collect()
+        } else {
+            self.read_packed_ref_names_bytes()?
+        };
+        Ok(RawRefSnapshot { names })
+    }
+
+    pub fn raw_ref_exists(&self, name: &RawRefName, snapshot: &RawRefSnapshot) -> io::Result<bool> {
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            return Ok(snapshot.contains(name));
+        }
+        match self.read_loose_ref_bytes(name)? {
+            Some(_) => Ok(true),
+            None => Ok(snapshot.contains(name)),
+        }
+    }
+
+    fn read_loose_ref_bytes(&self, name: &RawRefName) -> io::Result<Option<RefTarget>> {
+        let path = raw_ref_path(self.storage_root()?, name.as_bytes())?;
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let target = fs::read_link(&path)?;
+                let target = raw_os_str_bytes(target.as_os_str())?;
+                let target = std::str::from_utf8(target)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "reference broken"))?;
+                validate_ref_format(target, true)?;
+                Ok(Some(RefTarget::Symbolic(target.to_owned())))
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                if !dir_contains_only_empty_dirs(&path)? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::IsADirectory,
+                        "non-empty ref directory",
+                    ));
+                }
+                Ok(None)
+            }
+            Ok(_) => parse_raw_ref_file(self.algorithm, &fs::read(&path)?).map(Some),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn list_refs(&self, prefix: &str) -> io::Result<Vec<String>> {
         let mut refs = Vec::new();
         self.for_each_ref_name(prefix, |name| {
@@ -368,7 +524,15 @@ impl RefStore {
         Ok(())
     }
 
-    pub fn for_each_resolved_ref<E, F>(
+    pub fn for_each_resolved_ref<E, F>(&self, prefix: &str, on_ref: F) -> std::result::Result<(), E>
+    where
+        E: From<io::Error>,
+        F: FnMut(&str, &ObjectId) -> std::result::Result<(), E>,
+    {
+        self.for_each_resolved_ref_streaming(prefix, on_ref)
+    }
+
+    pub fn for_each_resolved_ref_streaming<E, F>(
         &self,
         prefix: &str,
         mut on_ref: F,
@@ -377,10 +541,129 @@ impl RefStore {
         E: From<io::Error>,
         F: FnMut(&str, &ObjectId) -> std::result::Result<(), E>,
     {
-        for (name, id) in self.resolved_refs(prefix).map_err(E::from)? {
-            on_ref(&name, &id)?;
+        validate_ref_prefix(prefix).map_err(E::from)?;
+        if self.storage_kind().map_err(E::from)? == RefStorageKind::Reftable {
+            let targets = self.read_reftable_refs().map_err(E::from)?;
+            for name in targets.keys().filter(|name| name.starts_with(prefix)) {
+                match resolve_reftable_target(&targets, name, &mut BTreeSet::new()) {
+                    Ok(id) => on_ref(name, &id)?,
+                    Err(error) if should_skip_resolved_ref_error(&error) => {}
+                    Err(error) => return Err(E::from(error)),
+                }
+            }
+            return Ok(());
         }
-        Ok(())
+
+        let packed = self.read_packed_refs().map_err(E::from)?;
+        let mut packed_refs = packed
+            .iter()
+            .filter(|(name, _)| name.starts_with(prefix))
+            .peekable();
+        let mut loose_refs =
+            LooseRefWalker::new(self.storage_root().map_err(E::from)?, prefix).map_err(E::from)?;
+        let mut loose_name = loose_refs.next_ref().map_err(E::from)?;
+        let mut packed_ref = packed_refs.next();
+
+        loop {
+            match (&loose_name, &packed_ref) {
+                (None, None) => return Ok(()),
+                (Some(name), None) => {
+                    let current_name = name.clone();
+                    match self.resolve_streaming_ref(&current_name, &packed, &mut BTreeSet::new()) {
+                        Ok(id) => on_ref(&current_name, &id)?,
+                        Err(error) if should_skip_resolved_ref_error(&error) => {}
+                        Err(error) => return Err(E::from(error)),
+                    }
+                    loose_name = loose_refs.next_ref().map_err(E::from)?;
+                }
+                (None, Some((name, id))) => {
+                    on_ref(name, id)?;
+                    packed_ref = packed_refs.next();
+                }
+                (Some(loose), Some((packed_name, packed_id))) => match loose.cmp(packed_name) {
+                    std::cmp::Ordering::Less => {
+                        let current_name = loose.clone();
+                        match self.resolve_streaming_ref(
+                            &current_name,
+                            &packed,
+                            &mut BTreeSet::new(),
+                        ) {
+                            Ok(id) => on_ref(&current_name, &id)?,
+                            Err(error) if should_skip_resolved_ref_error(&error) => {}
+                            Err(error) => return Err(E::from(error)),
+                        }
+                        loose_name = loose_refs.next_ref().map_err(E::from)?;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        let current_name = loose.clone();
+                        match self.resolve_streaming_ref(
+                            &current_name,
+                            &packed,
+                            &mut BTreeSet::new(),
+                        ) {
+                            Ok(id) => on_ref(&current_name, &id)?,
+                            Err(error) if should_skip_resolved_ref_error(&error) => {
+                                on_ref(packed_name, packed_id)?;
+                            }
+                            Err(error) => return Err(E::from(error)),
+                        }
+                        loose_name = loose_refs.next_ref().map_err(E::from)?;
+                        packed_ref = packed_refs.next();
+                    }
+                    std::cmp::Ordering::Greater => {
+                        on_ref(packed_name, packed_id)?;
+                        packed_ref = packed_refs.next();
+                    }
+                },
+            }
+        }
+    }
+
+    fn resolve_streaming_ref(
+        &self,
+        name: &str,
+        packed: &BTreeMap<String, ObjectId>,
+        seen: &mut BTreeSet<String>,
+    ) -> io::Result<ObjectId> {
+        if !seen.insert(name.to_owned()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "symbolic ref cycle detected",
+            ));
+        }
+        let target = if name == "HEAD" {
+            self.read_head()?
+        } else {
+            match inspect_ref_path(&self.ref_path(name), self.algorithm, true)? {
+                RefPathState::Valid(target) => target,
+                RefPathState::Missing | RefPathState::EmptyDir => packed
+                    .get(name)
+                    .cloned()
+                    .map(RefTarget::Direct)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ref not found"))?,
+                RefPathState::BrokenFile => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "reference broken",
+                    ));
+                }
+                RefPathState::BlockingDir => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::IsADirectory,
+                        "non-empty ref directory",
+                    ));
+                }
+            }
+        };
+        match target {
+            RefTarget::Direct(id) => Ok(id),
+            RefTarget::Symbolic(target) => {
+                validate_storable_ref_name(&target).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "symbolic ref target is invalid")
+                })?;
+                self.resolve_streaming_ref(&target, packed, seen)
+            }
+        }
     }
 
     pub fn pack_refs(&self, options: PackRefsOptions) -> io::Result<()> {
@@ -782,6 +1065,125 @@ impl RefStore {
         Ok(found)
     }
 
+    fn read_packed_ref_bytes(&self, name: &RawRefName) -> io::Result<Option<RefTarget>> {
+        let path = self.storage_root()?.join("packed-refs");
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut reader = packed_refs_reader(file);
+        let mut line = Vec::with_capacity(PACKED_REF_LINE_INITIAL_CAPACITY);
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line)? == 0 {
+                return Ok(None);
+            }
+            if line.last() != Some(&b'\n') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unterminated line in .git/packed-refs",
+                ));
+            }
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            if line.is_empty() || line[0] == b'#' || line[0] == b'^' {
+                continue;
+            }
+            let Some(separator) = line.iter().position(|byte| *byte == b' ') else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                ));
+            };
+            let id = std::str::from_utf8(&line[..separator]).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            let ref_name = &line[separator + 1..];
+            let parsed_name = RawRefName::from_bytes(ref_name).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            let id = ObjectId::from_hex(self.algorithm, id).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            if parsed_name.as_bytes() == name.as_bytes() {
+                return Ok(Some(RefTarget::Direct(id)));
+            }
+        }
+    }
+
+    fn read_packed_ref_names_bytes(&self) -> io::Result<BTreeSet<Vec<u8>>> {
+        let path = self.storage_root()?.join("packed-refs");
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(BTreeSet::new());
+            }
+            Err(error) => return Err(error),
+        };
+        let mut reader = packed_refs_reader(file);
+        let mut names = BTreeSet::new();
+        let mut line = Vec::with_capacity(PACKED_REF_LINE_INITIAL_CAPACITY);
+        loop {
+            line.clear();
+            if reader.read_until(b'\n', &mut line)? == 0 {
+                return Ok(names);
+            }
+            if line.last() != Some(&b'\n') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unterminated line in .git/packed-refs",
+                ));
+            }
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            if line.is_empty() || line[0] == b'#' || line[0] == b'^' {
+                continue;
+            }
+            let separator = line.iter().position(|byte| *byte == b' ').ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            ObjectId::from_hex(
+                self.algorithm,
+                std::str::from_utf8(&line[..separator]).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unexpected line in .git/packed-refs",
+                    )
+                })?,
+            )
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            let name = RawRefName::from_bytes(&line[separator + 1..]).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected line in .git/packed-refs",
+                )
+            })?;
+            names.insert(name.as_bytes().to_vec());
+        }
+    }
+
     fn read_packed_refs(&self) -> io::Result<BTreeMap<String, ObjectId>> {
         let mut refs = BTreeMap::new();
         self.for_each_packed_ref(|id, ref_name| {
@@ -891,6 +1293,30 @@ impl RefStore {
             .collect())
     }
 
+    pub fn for_each_reftable_log_newest_first(
+        &self,
+        ref_name: &str,
+        mut on_log: impl FnMut(ReftableLogSummary) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if self.storage_kind()? != RefStorageKind::Reftable {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "reftable logs require the reftable ref backend",
+            ));
+        }
+        let reftable_dir = self.storage_root()?.join("reftable");
+        let snapshot = match open_reftable_stack(&reftable_dir, self.algorithm) {
+            Ok(snapshot) => snapshot,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        let mut cursor = ReftableLogCursor::new_newest_to_oldest(&snapshot, ref_name)?;
+        while let Some(record) = cursor.next()? {
+            on_log(record)?;
+        }
+        Ok(())
+    }
+
     fn all_reftable_logs(&self) -> io::Result<Vec<ReftableLogRecord>> {
         if self.storage_kind()? != RefStorageKind::Reftable {
             return Err(io::Error::new(
@@ -912,7 +1338,7 @@ impl RefStore {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let lock = acquire_reftable_stack_lock(&reftable_dir)?;
-        record.update_index = next_reftable_update_index(&reftable_dir)?;
+        record.update_index = next_reftable_update_index(&reftable_dir, self.algorithm)?;
         append_reftable_delta_with_lock(
             git_dir,
             self.algorithm,
@@ -939,9 +1365,15 @@ impl RefStore {
         let reftable_dir = git_dir.join("reftable");
         fs::create_dir_all(&reftable_dir)?;
         let lock = acquire_reftable_stack_lock(&reftable_dir)?;
-        let current = read_reftable_stack(git_dir, self.algorithm)?;
+        let current = read_reftable_stack(git_dir, self.algorithm).or_else(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                Ok(BTreeMap::new())
+            } else {
+                Err(error)
+            }
+        })?;
         ensure_no_reftable_ref_name_conflict(&current, name)?;
-        let update_index = next_reftable_update_index(&reftable_dir)?;
+        let update_index = next_reftable_update_index(&reftable_dir, self.algorithm)?;
         for log in &mut logs {
             log.update_index = update_index;
         }
@@ -951,6 +1383,82 @@ impl RefStore {
             .map(ParsedReftableLogRecord::Update)
             .collect::<Vec<_>>();
         append_reftable_delta_with_lock(git_dir, self.algorithm, &updates, &logs, lock)
+    }
+
+    pub fn apply_reftable_transaction(&self, transaction: ReftableTransaction) -> io::Result<()> {
+        if self.storage_kind()? != RefStorageKind::Reftable {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "reftable transactions require the reftable ref backend",
+            ));
+        }
+        if transaction.ref_updates.is_empty() && transaction.log_updates.is_empty() {
+            return Ok(());
+        }
+        for name in transaction.ref_updates.keys() {
+            validate_storable_ref_name(name)?;
+        }
+        for target in transaction.ref_updates.values().flatten() {
+            if let RefTarget::Direct(id) = target
+                && id.algorithm() != self.algorithm
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "object id algorithm does not match reftable transaction",
+                ));
+            }
+        }
+        for update in &transaction.log_updates {
+            match update {
+                ReftableLogUpdate::Update(record) => {
+                    validate_storable_ref_name(&record.ref_name)?;
+                    if record.old_id.algorithm() != self.algorithm
+                        || record.new_id.algorithm() != self.algorithm
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "log object id algorithm does not match reftable transaction",
+                        ));
+                    }
+                }
+                ReftableLogUpdate::Deletion { ref_name, .. } => {
+                    validate_storable_ref_name(ref_name)?;
+                }
+                ReftableLogUpdate::ExistenceMarker { ref_name } => {
+                    validate_storable_ref_name(ref_name)?;
+                }
+            }
+        }
+
+        let git_dir = self.storage_root()?;
+        let reftable_dir = git_dir.join("reftable");
+        fs::create_dir_all(&reftable_dir)?;
+        let lock = acquire_reftable_stack_lock(&reftable_dir)?;
+        let current = read_reftable_stack(git_dir, self.algorithm).or_else(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                Ok(BTreeMap::new())
+            } else {
+                Err(error)
+            }
+        })?;
+        for (name, target) in &transaction.ref_updates {
+            if target.is_some() {
+                ensure_no_reftable_ref_name_conflict(&current, name)?;
+            }
+        }
+        let transaction_update_index = next_reftable_update_index(&reftable_dir, self.algorithm)?;
+        let logs = transaction
+            .log_updates
+            .into_iter()
+            .map(|update| update.into_parsed(self.algorithm, transaction_update_index))
+            .collect::<Vec<_>>();
+        append_reftable_delta_with_lock(
+            git_dir,
+            self.algorithm,
+            &transaction.ref_updates,
+            &logs,
+            lock,
+        )
     }
 
     pub fn delete_reftable_ref_with_log(&self, name: &str) -> io::Result<bool> {
@@ -964,7 +1472,14 @@ impl RefStore {
         let git_dir = self.storage_root()?;
         let reftable_dir = git_dir.join("reftable");
         let lock = acquire_reftable_stack_lock(&reftable_dir)?;
-        let existed = read_reftable_stack(git_dir, self.algorithm)?.contains_key(name);
+        let current = read_reftable_stack(git_dir, self.algorithm).or_else(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                Ok(BTreeMap::new())
+            } else {
+                Err(error)
+            }
+        })?;
+        let existed = current.contains_key(name);
         if !existed {
             return Ok(false);
         }
@@ -989,10 +1504,16 @@ impl RefStore {
                 "reftable logs require the reftable ref backend",
             ));
         }
-        Ok(self
-            .all_reftable_logs()?
-            .iter()
-            .any(|record| record.ref_name == ref_name))
+        let reftable_dir = self.storage_root()?.join("reftable");
+        let snapshot = match open_reftable_stack(&reftable_dir, self.algorithm) {
+            Ok(snapshot) => snapshot,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let mut cursor = ReftableLogCursor::new_newest_to_oldest_including_existence_markers(
+            &snapshot, ref_name,
+        )?;
+        Ok(cursor.next()?.is_some())
     }
 
     pub fn create_reftable_log(&self, ref_name: &str) -> io::Result<()> {
@@ -1060,7 +1581,7 @@ impl RefStore {
                 record.ref_name == ref_name && !deleting.contains(&record.update_index)
             });
             if !has_remaining {
-                let update_index = next_reftable_update_index(&reftable_dir)?;
+                let update_index = next_reftable_update_index(&reftable_dir, self.algorithm)?;
                 let zero = reftable_zero_object_id(self.algorithm);
                 records.push(ParsedReftableLogRecord::Update(ReftableLogRecord {
                     ref_name: ref_name.to_owned(),
@@ -1277,41 +1798,24 @@ fn read_reftable_stack(
     algorithm: GitHashAlgorithm,
 ) -> io::Result<BTreeMap<String, RefTarget>> {
     let reftable_dir = git_dir.join("reftable");
-    read_consistent_reftable_stack(&reftable_dir, |tables| {
-        let mut refs = BTreeMap::new();
-        for table in tables.lines() {
-            let table = table.trim();
-            if table.is_empty() {
-                continue;
-            }
-            for (name, target) in read_reftable_file(&reftable_dir.join(table), algorithm)? {
-                if let Some(target) = target {
-                    refs.insert(name, target);
-                } else {
+    let snapshot = open_reftable_stack(&reftable_dir, algorithm)?;
+    let mut refs = BTreeMap::new();
+    for table in snapshot.tables() {
+        for (name, target) in table.read_refs()? {
+            match target {
+                None => {
                     refs.remove(&name);
+                }
+                Some(ReftableParsedRefTarget::Direct(id)) => {
+                    refs.insert(name, RefTarget::Direct(id));
+                }
+                Some(ReftableParsedRefTarget::Symbolic(target)) => {
+                    refs.insert(name, RefTarget::Symbolic(target));
                 }
             }
         }
-        Ok(refs)
-    })
-}
-
-#[derive(Debug, Clone)]
-enum ParsedReftableLogRecord {
-    Update(ReftableLogRecord),
-    Deletion { ref_name: String, update_index: u64 },
-}
-
-impl ParsedReftableLogRecord {
-    fn key(&self) -> (String, u64) {
-        match self {
-            Self::Update(record) => (record.ref_name.clone(), record.update_index),
-            Self::Deletion {
-                ref_name,
-                update_index,
-            } => (ref_name.clone(), *update_index),
-        }
     }
+    Ok(refs)
 }
 
 fn read_reftable_log_stack(
@@ -1319,214 +1823,22 @@ fn read_reftable_log_stack(
     algorithm: GitHashAlgorithm,
 ) -> io::Result<Vec<ReftableLogRecord>> {
     let reftable_dir = git_dir.join("reftable");
-    read_consistent_reftable_stack(&reftable_dir, |tables| {
-        let mut logs = BTreeMap::new();
-        for table in tables.lines() {
-            let table = table.trim();
-            if table.is_empty() {
-                continue;
-            }
-            for record in read_reftable_log_file(&reftable_dir.join(table), algorithm)? {
-                let key = record.key();
-                match record {
-                    ParsedReftableLogRecord::Update(record) => {
-                        logs.insert(key, Some(record));
-                    }
-                    ParsedReftableLogRecord::Deletion { .. } => {
-                        logs.insert(key, None);
-                    }
+    let snapshot = open_reftable_stack(&reftable_dir, algorithm)?;
+    let mut logs = BTreeMap::new();
+    for table in snapshot.tables() {
+        for record in table.read_logs()? {
+            let key = record.key();
+            match record {
+                ParsedReftableLogRecord::Update(record) => {
+                    logs.insert(key, Some(record));
+                }
+                ParsedReftableLogRecord::Deletion { .. } => {
+                    logs.insert(key, None);
                 }
             }
         }
-        Ok(logs.into_values().flatten().collect())
-    })
-}
-
-fn read_consistent_reftable_stack<T>(
-    reftable_dir: &Path,
-    mut read_tables: impl FnMut(&str) -> io::Result<T>,
-) -> io::Result<T> {
-    let table_list_path = reftable_dir.join("tables.list");
-    loop {
-        let before = fs::read_to_string(&table_list_path)?;
-        match read_tables(&before) {
-            Ok(value) => {
-                if fs::read_to_string(&table_list_path)? == before {
-                    return Ok(value);
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                if fs::read_to_string(&table_list_path)? == before {
-                    return Err(error);
-                }
-            }
-            Err(error) => return Err(error),
-        }
-        thread::yield_now();
     }
-}
-
-fn read_reftable_log_file(
-    path: &Path,
-    algorithm: GitHashAlgorithm,
-) -> io::Result<Vec<ParsedReftableLogRecord>> {
-    let bytes = fs::read(path)?;
-    let header = parse_reftable_header(&bytes, algorithm)?;
-    let footer_len = match algorithm {
-        GitHashAlgorithm::Sha1 => REFTABLE_FOOTER_V1_LEN,
-        GitHashAlgorithm::Sha256 => REFTABLE_FOOTER_V2_LEN,
-    };
-    let footer_start = bytes
-        .len()
-        .checked_sub(footer_len)
-        .ok_or_else(|| reftable_invalid("truncated reftable footer"))?;
-    let footer_log_offset = header
-        .header_len
-        .checked_add(24)
-        .ok_or_else(|| reftable_invalid("reftable footer offset overflow"))?;
-    let log_position = usize::try_from(read_u64(&bytes[footer_start..], footer_log_offset)?)
-        .map_err(|_| reftable_invalid("reftable log position overflow"))?;
-    let first_block_is_log = bytes.get(header.header_len).copied() == Some(b'g');
-    if log_position == 0 && !first_block_is_log {
-        return Ok(Vec::new());
-    }
-    let mut block_start = log_position;
-    let mut records = Vec::new();
-    while block_start < footer_start {
-        let header_offset = if block_start == 0 {
-            header.header_len
-        } else {
-            0
-        };
-        let block_type_offset = block_start
-            .checked_add(header_offset)
-            .ok_or_else(|| reftable_invalid("reftable log block offset overflow"))?;
-        if bytes.get(block_type_offset).copied() != Some(b'g') {
-            break;
-        }
-        let block_len = read_u24(&bytes, block_type_offset + 1)?;
-        let block_header_len = header_offset + REFTABLE_BLOCK_HEADER_LEN;
-        let body_len = block_len
-            .checked_sub(block_header_len)
-            .ok_or_else(|| reftable_invalid("invalid reftable log block length"))?;
-        let compressed_start = block_start
-            .checked_add(block_header_len)
-            .ok_or_else(|| reftable_invalid("reftable log data offset overflow"))?;
-        if compressed_start > footer_start {
-            return Err(reftable_invalid("truncated reftable log block"));
-        }
-        let mut decoder = ZlibDecoder::new(&bytes[compressed_start..footer_start]);
-        let mut body = Vec::with_capacity(body_len);
-        decoder.read_to_end(&mut body)?;
-        if body.len() != body_len {
-            return Err(reftable_invalid(
-                "invalid inflated reftable log block length",
-            ));
-        }
-        let consumed = usize::try_from(decoder.total_in())
-            .map_err(|_| reftable_invalid("reftable compressed block length overflow"))?;
-        parse_reftable_log_block(&body, algorithm, &mut records)?;
-        block_start = compressed_start
-            .checked_add(consumed)
-            .ok_or_else(|| reftable_invalid("reftable log block offset overflow"))?;
-    }
-    Ok(records)
-}
-
-fn parse_reftable_log_block(
-    body: &[u8],
-    algorithm: GitHashAlgorithm,
-    records: &mut Vec<ParsedReftableLogRecord>,
-) -> io::Result<()> {
-    let restart_count_offset = body
-        .len()
-        .checked_sub(REFTABLE_RESTART_COUNT_LEN)
-        .ok_or_else(|| reftable_invalid("truncated reftable log restart count"))?;
-    let restart_count =
-        u16::from_be_bytes([body[restart_count_offset], body[restart_count_offset + 1]]) as usize;
-    let record_end = restart_count_offset
-        .checked_sub(
-            restart_count
-                .checked_mul(3)
-                .ok_or_else(|| reftable_invalid("reftable log restart table overflow"))?,
-        )
-        .ok_or_else(|| reftable_invalid("truncated reftable log restart table"))?;
-    let mut cursor = 0;
-    let mut prior_key = Vec::new();
-    while cursor < record_end {
-        let prefix_len = read_reftable_varint(body, &mut cursor)? as usize;
-        let suffix_and_type = read_reftable_varint(body, &mut cursor)?;
-        let suffix_len = (suffix_and_type >> 3) as usize;
-        let value_type = (suffix_and_type & 0x7) as u8;
-        if prefix_len > prior_key.len() || cursor + suffix_len > record_end {
-            return Err(reftable_invalid("invalid reftable log key"));
-        }
-        let mut key = prior_key[..prefix_len].to_vec();
-        key.extend_from_slice(&body[cursor..cursor + suffix_len]);
-        cursor += suffix_len;
-        let (ref_name, update_index) = parse_reftable_log_key(&key)?;
-        let parsed = match value_type {
-            0 => ParsedReftableLogRecord::Deletion {
-                ref_name,
-                update_index,
-            },
-            1 => {
-                let old_id = read_reftable_object_id(body, &mut cursor, algorithm, record_end)?;
-                let new_id = read_reftable_object_id(body, &mut cursor, algorithm, record_end)?;
-                let name = read_reftable_string(body, &mut cursor, record_end)?;
-                let email = read_reftable_string(body, &mut cursor, record_end)?;
-                let timestamp = read_reftable_varint(body, &mut cursor)?;
-                if cursor + 2 > record_end {
-                    return Err(reftable_invalid("truncated reftable log timezone"));
-                }
-                let timezone_offset = i16::from_be_bytes([body[cursor], body[cursor + 1]]);
-                cursor += 2;
-                let message = read_reftable_string(body, &mut cursor, record_end)?;
-                ParsedReftableLogRecord::Update(ReftableLogRecord {
-                    ref_name,
-                    update_index,
-                    old_id,
-                    new_id,
-                    name,
-                    email,
-                    timestamp,
-                    timezone_offset,
-                    message,
-                })
-            }
-            _ => return Err(reftable_invalid("unsupported reftable log value type")),
-        };
-        prior_key = key;
-        records.push(parsed);
-    }
-    Ok(())
-}
-
-fn parse_reftable_log_key(key: &[u8]) -> io::Result<(String, u64)> {
-    if key.len() <= 9 || key[key.len() - 9] != 0 {
-        return Err(reftable_invalid("invalid reftable log key"));
-    }
-    let name_end = key.len() - 9;
-    let ref_name = String::from_utf8(key[..name_end].to_vec())
-        .map_err(|_| reftable_invalid("non-utf8 reftable log ref name"))?;
-    validate_storable_ref_name(&ref_name)?;
-    let encoded = u64::from_be_bytes(
-        key[key.len() - 8..]
-            .try_into()
-            .expect("reftable log key length checked"),
-    );
-    Ok((ref_name, u64::MAX - encoded))
-}
-
-fn read_reftable_string(bytes: &[u8], cursor: &mut usize, record_end: usize) -> io::Result<String> {
-    let len = read_reftable_varint(bytes, cursor)? as usize;
-    if *cursor + len > record_end {
-        return Err(reftable_invalid("truncated reftable string"));
-    }
-    let value = String::from_utf8(bytes[*cursor..*cursor + len].to_vec())
-        .map_err(|_| reftable_invalid("non-utf8 reftable string"))?;
-    *cursor += len;
-    Ok(value)
+    Ok(logs.into_values().flatten().collect())
 }
 
 fn write_reftable_stack(
@@ -1564,22 +1876,26 @@ fn write_reftable_stack_with_logs_locked(
         .collect::<Vec<_>>();
     let reftable_dir = git_dir.join("reftable");
     let old_tables = fs::read_to_string(reftable_dir.join("tables.list")).unwrap_or_default();
-    let next_update_index = next_reftable_update_index(&reftable_dir)?;
-    let latest_update_index = next_update_index.saturating_sub(1);
-    let min_update_index = logs
-        .iter()
-        .map(|record| record.update_index)
-        .min()
-        .unwrap_or(next_update_index);
-    let max_update_index = logs
-        .iter()
-        .map(|record| record.update_index)
-        .max()
-        .unwrap_or(next_update_index)
-        .max(latest_update_index)
-        .max(min_update_index);
-    let table_name = reftable_table_name(min_update_index, max_update_index);
-    let table_path = reftable_dir.join(&table_name);
+    let next_update_index = next_reftable_update_index(&reftable_dir, algorithm)?;
+    let (mut min_update_index, mut max_update_index) =
+        reftable_stack_update_range(&reftable_dir, algorithm, next_update_index)?;
+    if !logs.is_empty() && old_tables.lines().all(|line| line.trim().is_empty()) {
+        min_update_index = logs
+            .iter()
+            .map(|log| log.update_index)
+            .min()
+            .expect("non-empty reftable log import");
+        max_update_index = logs
+            .iter()
+            .map(|log| log.update_index)
+            .max()
+            .expect("non-empty reftable log import");
+    } else {
+        for log in logs {
+            min_update_index = min_update_index.min(log.update_index);
+            max_update_index = max_update_index.max(log.update_index);
+        }
+    }
     let updates = refs
         .iter()
         .map(|(name, target)| (name.clone(), Some(target.clone())))
@@ -1592,8 +1908,14 @@ fn write_reftable_stack_with_logs_locked(
         algorithm,
         reftable_write_options(&reftable_dir)?,
     )?;
-    atomic_write(table_path, &bytes)?;
-    lock.commit(format!("{table_name}\n").as_bytes())?;
+    let (table_name, table_path) =
+        write_reftable_table(&reftable_dir, min_update_index, max_update_index, &bytes)?;
+    if let Err(error) = lock.commit(format!("{table_name}\n").as_bytes()) {
+        if !error.is_published() {
+            rollback_reftable_table(&table_path);
+        }
+        return Err(error.into_io_error());
+    }
     for old_table in old_tables
         .lines()
         .map(str::trim)
@@ -1622,35 +1944,29 @@ fn append_reftable_delta_with_lock(
     }
     write_reftable_dummy_files(git_dir)?;
     let reftable_dir = git_dir.join("reftable");
-    let next_update_index = next_reftable_update_index(&reftable_dir)?;
-    let min_update_index = logs
-        .iter()
-        .map(|record| record.key().1)
-        .min()
-        .unwrap_or(next_update_index);
-    let max_update_index = logs
-        .iter()
-        .map(|record| record.key().1)
-        .max()
-        .unwrap_or(next_update_index)
-        .max(min_update_index);
-    let table_name = reftable_table_name(min_update_index, max_update_index);
+    let next_update_index = next_reftable_update_index(&reftable_dir, algorithm)?;
     let bytes = encode_reftable(
-        min_update_index,
-        max_update_index,
+        next_update_index,
+        next_update_index,
         updates,
         logs,
         algorithm,
         reftable_write_options(&reftable_dir)?,
     )?;
-    atomic_write(reftable_dir.join(&table_name), &bytes)?;
+    let (table_name, table_path) =
+        write_reftable_table(&reftable_dir, next_update_index, next_update_index, &bytes)?;
     let mut tables = fs::read_to_string(reftable_dir.join("tables.list")).unwrap_or_default();
     if !tables.is_empty() && !tables.ends_with('\n') {
         tables.push('\n');
     }
     tables.push_str(&table_name);
     tables.push('\n');
-    lock.commit(tables.as_bytes())?;
+    if let Err(error) = lock.commit(tables.as_bytes()) {
+        if !error.is_published() {
+            rollback_reftable_table(&table_path);
+        }
+        return Err(error.into_io_error());
+    }
     if reftable_auto_compaction_enabled() {
         let _ = auto_compact_reftable_stack(git_dir, algorithm);
     }
@@ -1747,20 +2063,34 @@ fn compact_reftable_range_locked(
     let last = selected
         .last()
         .ok_or_else(|| reftable_invalid("empty reftable compaction range"))?;
-    let first_header = parse_reftable_header(&fs::read(reftable_dir.join(first))?, algorithm)?;
-    let last_header = parse_reftable_header(&fs::read(reftable_dir.join(last))?, algorithm)?;
+    let snapshot = open_reftable_stack(&reftable_dir, algorithm)?;
+    let first_table = snapshot
+        .table(first)
+        .ok_or_else(|| reftable_invalid("missing reftable compaction start table"))?;
+    let last_table = snapshot
+        .table(last)
+        .ok_or_else(|| reftable_invalid("missing reftable compaction end table"))?;
+    let first_min_update_index = first_table.min_update_index();
+    let last_max_update_index = last_table.max_update_index();
     let mut updates = BTreeMap::new();
     let mut logs = BTreeMap::new();
     for table in selected {
-        let path = reftable_dir.join(table);
-        for (name, target) in read_reftable_file(&path, algorithm)? {
+        let table_snapshot = snapshot
+            .table(table)
+            .ok_or_else(|| reftable_invalid("missing reftable compaction table"))?;
+        for (name, target) in table_snapshot.read_refs()? {
+            let target = target.map(|target| match target {
+                ReftableParsedRefTarget::Direct(id) => RefTarget::Direct(id),
+                ReftableParsedRefTarget::Symbolic(target) => RefTarget::Symbolic(target),
+            });
             updates.insert(name, target);
         }
-        for record in read_reftable_log_file(&path, algorithm)? {
+        for record in table_snapshot.read_logs()? {
             let key = record.key();
             logs.insert(key, record);
         }
     }
+    drop(snapshot);
     if start == 0 {
         updates.retain(|_, target| target.is_some());
     }
@@ -1768,17 +2098,20 @@ fn compact_reftable_range_locked(
         .into_values()
         .filter(|record| start != 0 || matches!(record, ParsedReftableLogRecord::Update(_)))
         .collect::<Vec<_>>();
-    let table_name =
-        reftable_table_name(first_header.min_update_index, last_header.max_update_index);
     let bytes = encode_reftable(
-        first_header.min_update_index,
-        last_header.max_update_index,
+        first_min_update_index,
+        last_max_update_index,
         &updates,
         &logs,
         algorithm,
         reftable_write_options(&reftable_dir)?,
     )?;
-    atomic_write(reftable_dir.join(&table_name), &bytes)?;
+    let (table_name, table_path) = write_reftable_table(
+        &reftable_dir,
+        first_min_update_index,
+        last_max_update_index,
+        &bytes,
+    )?;
     let mut new_tables = Vec::with_capacity(tables.len() - selected.len() + 1);
     new_tables.extend_from_slice(&tables[..start]);
     new_tables.push(table_name.clone());
@@ -1789,7 +2122,12 @@ fn compact_reftable_range_locked(
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    lock.commit(table_list.as_bytes())?;
+    if let Err(error) = lock.commit(table_list.as_bytes()) {
+        if !error.is_published() {
+            rollback_reftable_table(&table_path);
+        }
+        return Err(error.into_io_error());
+    }
     for old_table in selected {
         if old_table != &table_name {
             match fs::remove_file(reftable_dir.join(old_table)) {
@@ -1817,6 +2155,35 @@ struct ReftableStackLock {
     committed: bool,
 }
 
+struct ReftableStackCommitError {
+    error: io::Error,
+    published: bool,
+}
+
+impl ReftableStackCommitError {
+    fn unpublished(error: io::Error) -> Self {
+        Self {
+            error,
+            published: false,
+        }
+    }
+
+    fn published(error: io::Error) -> Self {
+        Self {
+            error,
+            published: true,
+        }
+    }
+
+    fn is_published(&self) -> bool {
+        self.published
+    }
+
+    fn into_io_error(self) -> io::Error {
+        self.error
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ReftableLockTimeout {
     Infinite,
@@ -1824,18 +2191,31 @@ enum ReftableLockTimeout {
 }
 
 impl ReftableStackLock {
-    fn commit(mut self, bytes: &[u8]) -> io::Result<()> {
-        let mut file = self
-            .file
-            .take()
-            .ok_or_else(|| io::Error::other("reftable stack lock is already closed"))?;
-        file.set_len(0)?;
-        file.write_all(bytes)?;
-        file.flush()?;
-        file.sync_all()?;
+    fn commit(mut self, bytes: &[u8]) -> Result<(), ReftableStackCommitError> {
+        let mut file = self.file.take().ok_or_else(|| {
+            ReftableStackCommitError::unpublished(io::Error::other(
+                "reftable stack lock is already closed",
+            ))
+        })?;
+        file.set_len(0)
+            .map_err(ReftableStackCommitError::unpublished)?;
+        file.write_all(bytes)
+            .map_err(ReftableStackCommitError::unpublished)?;
+        file.flush()
+            .map_err(ReftableStackCommitError::unpublished)?;
+        file.sync_all()
+            .map_err(ReftableStackCommitError::unpublished)?;
         drop(file);
-        replace_with_lock(&self.lock_path, &self.target_path)?;
+        if reftable_table_list_commit_should_fail(&self.target_path) {
+            return Err(ReftableStackCommitError::unpublished(io::Error::other(
+                "injected reftable tables.list commit failure",
+            )));
+        }
+        replace_with_lock(&self.lock_path, &self.target_path)
+            .map_err(ReftableStackCommitError::unpublished)?;
         self.committed = true;
+        sync_reftable_table_list_parent(&self.target_path)
+            .map_err(ReftableStackCommitError::published)?;
         Ok(())
     }
 }
@@ -1897,7 +2277,71 @@ fn reftable_lock_timeout(reftable_dir: &Path) -> io::Result<ReftableLockTimeout>
         .ok()
         .or_else(reftable_lock_timeout_from_environment)
         .or_else(|| reftable_lock_timeout_from_config(reftable_dir));
-    parse_reftable_lock_timeout(configured.as_deref().unwrap_or("100"))
+    parse_reftable_lock_timeout(configured.as_deref().unwrap_or("500"))
+}
+
+fn reftable_table_list_commit_should_fail(target_path: &Path) -> bool {
+    #[cfg(not(test))]
+    let _ = target_path;
+    if std::env::var(REFTABLE_FAIL_TABLE_LIST_COMMIT_ENV)
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+    {
+        return true;
+    }
+    #[cfg(test)]
+    if REFTABLE_FAIL_TABLE_LIST_COMMIT
+        .lock()
+        .ok()
+        .and_then(|path| path.clone())
+        .is_some_and(|path| path == target_path)
+    {
+        return true;
+    }
+    false
+}
+
+fn sync_reftable_table_list_parent(target_path: &Path) -> io::Result<()> {
+    if reftable_table_list_post_rename_sync_should_fail(target_path) {
+        return Err(io::Error::other(
+            "injected post-rename reftable tables.list directory sync failure",
+        ));
+    }
+    if let Some(parent) = target_path.parent() {
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn reftable_table_list_post_rename_sync_should_fail(target_path: &Path) -> bool {
+    #[cfg(not(test))]
+    let _ = target_path;
+    if std::env::var(REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC_ENV)
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+    {
+        return true;
+    }
+    #[cfg(test)]
+    if REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC
+        .lock()
+        .ok()
+        .and_then(|path| path.clone())
+        .is_some_and(|path| path == target_path)
+    {
+        return true;
+    }
+    false
 }
 
 fn reftable_write_options(reftable_dir: &Path) -> io::Result<ReftableWriteOptions> {
@@ -2122,38 +2566,144 @@ fn write_reftable_dummy_files(git_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn next_reftable_update_index(reftable_dir: &Path) -> io::Result<u64> {
+fn next_reftable_update_index(reftable_dir: &Path, algorithm: GitHashAlgorithm) -> io::Result<u64> {
     let tables = match fs::read_to_string(reftable_dir.join("tables.list")) {
         Ok(tables) => tables,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(1),
         Err(error) => return Err(error),
     };
-    let Some(last_table) = tables
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-    else {
+    if tables.lines().all(|line| line.trim().is_empty()) {
         return Ok(1);
-    };
-    let bytes = fs::read(reftable_dir.join(last_table))?;
-    let algorithm = if bytes.get(4).copied() == Some(2) && bytes.get(24..28) == Some(b"s256") {
-        GitHashAlgorithm::Sha256
-    } else {
-        GitHashAlgorithm::Sha1
-    };
-    parse_reftable_header(&bytes, algorithm)?
-        .max_update_index
+    }
+    let snapshot = open_reftable_stack(reftable_dir, algorithm)?;
+    snapshot
+        .tables()
+        .last()
+        .ok_or_else(|| reftable_invalid("empty reftable stack"))?
+        .max_update_index()
         .checked_add(1)
         .ok_or_else(|| reftable_invalid("reftable update index overflow"))
 }
 
+fn reftable_stack_update_range(
+    reftable_dir: &Path,
+    algorithm: GitHashAlgorithm,
+    fallback_update_index: u64,
+) -> io::Result<(u64, u64)> {
+    let snapshot = match open_reftable_stack(reftable_dir, algorithm) {
+        Ok(snapshot) => snapshot,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok((fallback_update_index, fallback_update_index));
+        }
+        Err(error) => return Err(error),
+    };
+    let Some(first) = snapshot.tables().first() else {
+        return Ok((fallback_update_index, fallback_update_index));
+    };
+    let Some(last) = snapshot.tables().last() else {
+        return Ok((fallback_update_index, fallback_update_index));
+    };
+    Ok((first.min_update_index(), last.max_update_index()))
+}
+
 fn reftable_table_name(min_update_index: u64, max_update_index: u64) -> String {
+    let nonce = REFTABLE_TABLE_NAME_NONCE.fetch_add(1, Ordering::Relaxed);
+    reftable_table_name_with_nonce(min_update_index, max_update_index, nonce)
+}
+
+fn reftable_table_name_with_nonce(
+    min_update_index: u64,
+    max_update_index: u64,
+    nonce: u64,
+) -> String {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let mut random = elapsed.as_secs()
+        ^ u64::from(elapsed.subsec_nanos()).rotate_left(29)
+        ^ nonce.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    random ^= random >> 30;
+    random = random.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    random ^= random >> 27;
+    random = random.wrapping_mul(0x94d0_49bb_1331_11eb);
+    random ^= random >> 31;
     let mut name = String::with_capacity(REFTABLE_TABLE_NAME_CAPACITY);
     name.push_str(&format!(
-        "0x{min_update_index:012x}-0x{max_update_index:012x}-zmin.ref"
+        "0x{min_update_index:012x}-0x{max_update_index:012x}-{random:016x}.ref"
     ));
     name
+}
+
+fn write_reftable_table(
+    reftable_dir: &Path,
+    min_update_index: u64,
+    max_update_index: u64,
+    bytes: &[u8],
+) -> io::Result<(String, PathBuf)> {
+    write_reftable_table_with_first_name(
+        reftable_dir,
+        min_update_index,
+        max_update_index,
+        bytes,
+        None,
+    )
+}
+
+fn write_reftable_table_with_first_name(
+    reftable_dir: &Path,
+    min_update_index: u64,
+    max_update_index: u64,
+    bytes: &[u8],
+    first_name: Option<String>,
+) -> io::Result<(String, PathBuf)> {
+    const MAX_TABLE_NAME_ATTEMPTS: usize = 128;
+
+    fs::create_dir_all(reftable_dir)?;
+    let mut candidate = first_name;
+    for _ in 0..MAX_TABLE_NAME_ATTEMPTS {
+        let table_name = candidate
+            .take()
+            .unwrap_or_else(|| reftable_table_name(min_update_index, max_update_index));
+        let table_path = reftable_dir.join(&table_name);
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&table_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            Ok::<(), io::Error>(())
+        })();
+        drop(file);
+        if let Err(error) = result {
+            let _ = fs::remove_file(&table_path);
+            let _ = sync_directory(reftable_dir);
+            return Err(error);
+        }
+        if let Err(error) = sync_directory(reftable_dir) {
+            let _ = fs::remove_file(&table_path);
+            let _ = sync_directory(reftable_dir);
+            return Err(error);
+        }
+        return Ok((table_name, table_path));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "unable to allocate a unique reftable table name",
+    ))
+}
+
+fn rollback_reftable_table(table_path: &Path) {
+    if fs::remove_file(table_path).is_ok()
+        && let Some(parent) = table_path.parent()
+    {
+        let _ = sync_directory(parent);
+    }
 }
 
 fn encode_reftable(
@@ -2257,219 +2807,6 @@ fn write_reftable_encoded_string(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
-fn read_reftable_file(
-    path: &Path,
-    algorithm: GitHashAlgorithm,
-) -> io::Result<Vec<(String, Option<RefTarget>)>> {
-    let bytes = fs::read(path)?;
-    let header = parse_reftable_header(&bytes, algorithm)?;
-    let mut refs = Vec::new();
-    let mut block_start = header.header_len;
-    while block_start + REFTABLE_BLOCK_HEADER_LEN <= bytes.len() {
-        if &bytes[block_start..block_start + 4] == b"REFT" {
-            break;
-        }
-        let block_type = bytes[block_start];
-        if block_type != b'r' {
-            break;
-        }
-        if block_type == 0 {
-            break;
-        }
-        let block_len = read_u24(&bytes, block_start + 1)?;
-        if block_len == 0 {
-            break;
-        }
-        let block_end = if block_start == header.header_len {
-            block_len
-        } else {
-            block_start
-                .checked_add(block_len)
-                .ok_or_else(|| reftable_invalid("reftable block length overflow"))?
-        };
-        if block_end > bytes.len() || block_end <= block_start + REFTABLE_BLOCK_HEADER_LEN {
-            return Err(reftable_invalid("invalid reftable block length"));
-        }
-        parse_reftable_ref_block(
-            &bytes,
-            block_start,
-            block_end,
-            header.min_update_index,
-            algorithm,
-            &mut refs,
-        )?;
-        block_start = if header.block_size != 0 {
-            let next = if block_start == header.header_len {
-                header.block_size
-            } else {
-                block_start
-                    .checked_add(header.block_size)
-                    .ok_or_else(|| reftable_invalid("reftable block offset overflow"))?
-            };
-            if next <= block_start { block_end } else { next }
-        } else {
-            block_end
-        };
-    }
-    Ok(refs)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ReftableHeader {
-    header_len: usize,
-    block_size: usize,
-    min_update_index: u64,
-    max_update_index: u64,
-}
-
-fn parse_reftable_header(bytes: &[u8], algorithm: GitHashAlgorithm) -> io::Result<ReftableHeader> {
-    if bytes.len() < REFTABLE_HEADER_V1_LEN || &bytes[0..4] != b"REFT" {
-        return Err(reftable_invalid("invalid reftable header"));
-    }
-    let version = bytes[4];
-    let block_size = read_u24(bytes, 5)?;
-    let min_update_index = read_u64(bytes, 8)?;
-    let max_update_index = read_u64(bytes, 16)?;
-    match version {
-        1 => {
-            if algorithm != GitHashAlgorithm::Sha1 {
-                return Err(reftable_invalid("reftable v1 requires sha1"));
-            }
-            Ok(ReftableHeader {
-                header_len: REFTABLE_HEADER_V1_LEN,
-                block_size,
-                min_update_index,
-                max_update_index,
-            })
-        }
-        2 => {
-            if bytes.len() < REFTABLE_HEADER_V2_LEN {
-                return Err(reftable_invalid("truncated reftable v2 header"));
-            }
-            let hash_id = &bytes[24..28];
-            let expected = match algorithm {
-                GitHashAlgorithm::Sha1 => b"sha1".as_slice(),
-                GitHashAlgorithm::Sha256 => b"s256".as_slice(),
-            };
-            if hash_id != expected {
-                return Err(reftable_invalid("reftable hash id mismatch"));
-            }
-            Ok(ReftableHeader {
-                header_len: REFTABLE_HEADER_V2_LEN,
-                block_size,
-                min_update_index,
-                max_update_index,
-            })
-        }
-        _ => Err(reftable_invalid("unsupported reftable version")),
-    }
-}
-
-fn parse_reftable_ref_block(
-    bytes: &[u8],
-    block_start: usize,
-    block_end: usize,
-    min_update_index: u64,
-    algorithm: GitHashAlgorithm,
-    refs: &mut Vec<(String, Option<RefTarget>)>,
-) -> io::Result<()> {
-    let restart_count_offset = block_end
-        .checked_sub(REFTABLE_RESTART_COUNT_LEN)
-        .ok_or_else(|| reftable_invalid("truncated reftable restart count"))?;
-    let restart_count =
-        u16::from_be_bytes([bytes[restart_count_offset], bytes[restart_count_offset + 1]]) as usize;
-    let record_end = restart_count_offset
-        .checked_sub(
-            restart_count
-                .checked_mul(3)
-                .ok_or_else(|| reftable_invalid("reftable restart table length overflow"))?,
-        )
-        .ok_or_else(|| reftable_invalid("truncated reftable restart table"))?;
-    let mut cursor = block_start + REFTABLE_BLOCK_HEADER_LEN;
-    let mut prior_name = Vec::new();
-    while cursor < record_end {
-        let prefix_len = read_reftable_varint(bytes, &mut cursor)?;
-        let suffix_and_type = read_reftable_varint(bytes, &mut cursor)?;
-        let suffix_len = (suffix_and_type >> 3) as usize;
-        let value_type = (suffix_and_type & 0x7) as u8;
-        if prefix_len as usize > prior_name.len() || cursor + suffix_len > record_end {
-            return Err(reftable_invalid("invalid reftable ref name"));
-        }
-        let mut name = prior_name[..prefix_len as usize].to_vec();
-        name.extend_from_slice(&bytes[cursor..cursor + suffix_len]);
-        cursor += suffix_len;
-        let _update_index = min_update_index
-            .checked_add(read_reftable_varint(bytes, &mut cursor)?)
-            .ok_or_else(|| reftable_invalid("reftable update index overflow"))?;
-        let name = String::from_utf8(name).map_err(|_| reftable_invalid("non-utf8 ref name"))?;
-        let target = match value_type {
-            0 => None,
-            1 | 2 => {
-                let id = read_reftable_object_id(bytes, &mut cursor, algorithm, record_end)?;
-                if value_type == 2 {
-                    let _peeled =
-                        read_reftable_object_id(bytes, &mut cursor, algorithm, record_end)?;
-                }
-                Some(RefTarget::Direct(id))
-            }
-            3 => {
-                let target_len = read_reftable_varint(bytes, &mut cursor)? as usize;
-                if cursor + target_len > record_end {
-                    return Err(reftable_invalid("truncated symbolic reftable ref"));
-                }
-                let target = String::from_utf8(bytes[cursor..cursor + target_len].to_vec())
-                    .map_err(|_| reftable_invalid("non-utf8 symbolic reftable ref"))?;
-                cursor += target_len;
-                Some(RefTarget::Symbolic(target))
-            }
-            _ => return Err(reftable_invalid("unsupported reftable ref value type")),
-        };
-        prior_name = name.as_bytes().to_vec();
-        if validate_storable_ref_name(&name).is_ok() {
-            refs.push((name, target));
-        }
-    }
-    Ok(())
-}
-
-fn read_reftable_object_id(
-    bytes: &[u8],
-    cursor: &mut usize,
-    algorithm: GitHashAlgorithm,
-    record_end: usize,
-) -> io::Result<ObjectId> {
-    let len = match algorithm {
-        GitHashAlgorithm::Sha1 => 20,
-        GitHashAlgorithm::Sha256 => 32,
-    };
-    if *cursor + len > record_end {
-        return Err(reftable_invalid("truncated reftable object id"));
-    }
-    let id = ObjectId::new(algorithm, &bytes[*cursor..*cursor + len]);
-    *cursor += len;
-    Ok(id)
-}
-
-fn read_reftable_varint(bytes: &[u8], cursor: &mut usize) -> io::Result<u64> {
-    if *cursor >= bytes.len() {
-        return Err(reftable_invalid("truncated reftable varint"));
-    }
-    let mut value = (bytes[*cursor] & 0x7f) as u64;
-    while bytes[*cursor] & 0x80 != 0 {
-        *cursor += 1;
-        if *cursor >= bytes.len() {
-            return Err(reftable_invalid("truncated reftable varint"));
-        }
-        value = value
-            .checked_add(1)
-            .and_then(|value| value.checked_shl(7))
-            .map(|value| value | (bytes[*cursor] & 0x7f) as u64)
-            .ok_or_else(|| reftable_invalid("reftable varint overflow"))?;
-    }
-    *cursor += 1;
-    Ok(value)
-}
-
 fn write_reftable_varint(out: &mut Vec<u8>, value: u64) {
     let mut parts = vec![(value & 0x7f) as u8];
     let mut value = value >> 7;
@@ -2479,26 +2816,6 @@ fn write_reftable_varint(out: &mut Vec<u8>, value: u64) {
         value >>= 7;
     }
     out.extend(parts.into_iter().rev());
-}
-
-fn read_u24(bytes: &[u8], offset: usize) -> io::Result<usize> {
-    if offset + 3 > bytes.len() {
-        return Err(reftable_invalid("truncated uint24"));
-    }
-    Ok(((bytes[offset] as usize) << 16)
-        | ((bytes[offset + 1] as usize) << 8)
-        | bytes[offset + 2] as usize)
-}
-
-fn read_u64(bytes: &[u8], offset: usize) -> io::Result<u64> {
-    if offset + 8 > bytes.len() {
-        return Err(reftable_invalid("truncated uint64"));
-    }
-    Ok(u64::from_be_bytes(
-        bytes[offset..offset + 8]
-            .try_into()
-            .expect("slice length checked"),
-    ))
 }
 
 fn reftable_invalid(message: &str) -> io::Error {
@@ -2536,7 +2853,7 @@ fn validate_ref_name(name: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_storable_ref_name(name: &str) -> io::Result<()> {
+pub(crate) fn validate_storable_ref_name(name: &str) -> io::Result<()> {
     if is_valid_pseudoref_name(name) || validate_ref_format(name, true).is_ok() {
         return Ok(());
     }
@@ -2558,6 +2875,100 @@ fn validate_ref_lookup_name(name: &str) -> io::Result<()> {
         io::ErrorKind::InvalidInput,
         "invalid git ref name",
     ))
+}
+
+fn validate_raw_ref_name(name: &[u8]) -> io::Result<()> {
+    if !name.starts_with(b"refs/") || validate_raw_ref_format(name, false).is_err() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid git ref name",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_raw_ref_format(name: &[u8], allow_onelevel: bool) -> io::Result<()> {
+    if name.is_empty()
+        || name == b"@"
+        || name.ends_with(b"/")
+        || name.ends_with(b".")
+        || name.windows(2).any(|window| window == b"//")
+        || (!allow_onelevel && !name.contains(&b'/'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid git ref name",
+        ));
+    }
+    if name.split(|byte| *byte == b'/').any(|part| {
+        part.is_empty()
+            || part == b"."
+            || part == b".."
+            || part.starts_with(b".")
+            || part.ends_with(b".lock")
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid git ref component",
+        ));
+    }
+    if name.windows(2).any(|window| window == b"..")
+        || name.windows(2).any(|window| window == b"@{")
+        || name.iter().any(|byte| *byte < 0x20 || *byte == 0x7f)
+        || name
+            .iter()
+            .any(|byte| matches!(*byte, b' ' | b'~' | b'^' | b':' | b'?' | b'*' | b'['))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid git ref character",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_raw_ref_file(algorithm: GitHashAlgorithm, raw: &[u8]) -> io::Result<RefTarget> {
+    let raw = raw.strip_suffix(b"\n").unwrap_or(raw);
+    let value = std::str::from_utf8(raw)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "reference broken"))?;
+    parse_ref_target(algorithm, value, true)
+}
+
+fn raw_ref_path(root: &Path, name: &[u8]) -> io::Result<PathBuf> {
+    let mut path = root.to_path_buf();
+    for component in name.split(|byte| *byte == b'/') {
+        #[cfg(unix)]
+        {
+            path.push(OsStr::from_bytes(component));
+        }
+        #[cfg(not(unix))]
+        {
+            let component = std::str::from_utf8(component).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "non-UTF-8 ref names are unsupported on this platform",
+                )
+            })?;
+            path.push(component);
+        }
+    }
+    Ok(path)
+}
+
+fn raw_os_str_bytes(value: &OsStr) -> io::Result<&[u8]> {
+    #[cfg(unix)]
+    {
+        Ok(value.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        value.to_str().map(str::as_bytes).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "non-UTF-8 symbolic ref target is unsupported on this platform",
+            )
+        })
+    }
 }
 
 fn validate_ref_format(name: &str, allow_onelevel: bool) -> io::Result<()> {
@@ -2734,6 +3145,80 @@ fn collect_loose_refs(git_dir: &Path, prefix: &str, refs: &mut BTreeSet<String>)
         return Ok(());
     }
     collect_loose_refs_from_dir(&root, prefix.trim_end_matches('/'), refs)
+}
+
+struct LooseRefWalker {
+    directories: Vec<LooseRefDirectory>,
+}
+
+struct LooseRefDirectory {
+    prefix: String,
+    entries: Vec<fs::DirEntry>,
+    next: usize,
+}
+
+impl LooseRefWalker {
+    fn new(root: &Path, prefix: &str) -> io::Result<Self> {
+        let path = root.join(prefix);
+        match Self::read_directory(&path, prefix.trim_end_matches('/').to_owned())? {
+            Some(directory) => Ok(Self {
+                directories: vec![directory],
+            }),
+            None => Ok(Self {
+                directories: Vec::new(),
+            }),
+        }
+    }
+
+    fn read_directory(path: &Path, prefix: String) -> io::Result<Option<LooseRefDirectory>> {
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut entries = entries.collect::<io::Result<Vec<_>>>()?;
+        entries.sort_by_cached_key(|entry| ref_component_sort_key(&entry.file_name()));
+        Ok(Some(LooseRefDirectory {
+            prefix,
+            entries,
+            next: 0,
+        }))
+    }
+
+    fn next_ref(&mut self) -> io::Result<Option<String>> {
+        loop {
+            let Some(directory) = self.directories.last_mut() else {
+                return Ok(None);
+            };
+            if directory.next == directory.entries.len() {
+                self.directories.pop();
+                continue;
+            }
+            let entry = &directory.entries[directory.next];
+            directory.next += 1;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let ref_name = format!("{}/{}", directory.prefix, name);
+            let file_type = entry.file_type()?;
+            if file_type.is_dir() {
+                if let Some(child) = Self::read_directory(&entry.path(), ref_name)? {
+                    self.directories.push(child);
+                }
+            } else if file_type.is_file() && !name.ends_with(".lock") {
+                return Ok(Some(ref_name));
+            }
+        }
+    }
+}
+
+fn ref_component_sort_key(name: &OsStr) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        name.as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        name.to_string_lossy().as_bytes().to_vec()
+    }
 }
 
 fn should_skip_resolved_ref_error(error: &io::Error) -> bool {
@@ -3084,7 +3569,8 @@ fn write_lock_file(lock_path: &Path, bytes: &[u8]) -> io::Result<()> {
         .write(true)
         .create_new(true)
         .open(lock_path)?;
-    lock.write_all(bytes)
+    lock.write_all(bytes)?;
+    lock.sync_all()
 }
 
 fn resolve_ref_storage_location(git_dir: &Path, include_environment: bool) -> RefStorageLocation {
@@ -3178,6 +3664,16 @@ fn lock_path(path: &Path) -> PathBuf {
     let mut value = OsString::from(path.as_os_str());
     value.push(".lock");
     PathBuf::from(value)
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -3343,6 +3839,18 @@ mod tests {
 
         assert_eq!(actual.to_hex(), expected);
         assert!(names.contains(&"refs/heads/feature".to_owned()));
+    }
+
+    #[test]
+    fn raw_ref_snapshot_membership_is_byte_exact() {
+        let snapshot = RawRefSnapshot {
+            names: BTreeSet::from([b"refs/heads/\x80".to_vec()]),
+        };
+        let present = RawRefName::from_bytes(b"refs/heads/\x80").expect("raw ref name");
+        let absent = RawRefName::from_bytes(b"refs/heads/\x81").expect("raw ref name");
+
+        assert!(snapshot.contains(&present));
+        assert!(!snapshot.contains(&absent));
     }
 
     #[test]
@@ -3591,42 +4099,367 @@ mod tests {
     }
 
     #[test]
-    fn reftable_compaction_preserves_latest_ref_and_logs() {
+    fn reftable_log_presence_includes_empty_log_marker_without_retaining_messages() {
         let repo = git_init();
         let refs = configured_reftable_store(&repo);
-        let initial = ObjectId::new(GitHashAlgorithm::Sha1, &[1; 20]);
-        refs.write_ref("refs/heads/main", &initial)
-            .expect("write initial reftable ref");
-        refs.append_reftable_log(ReftableLogRecord {
-            ref_name: "refs/heads/main".to_owned(),
-            update_index: 0,
-            old_id: ObjectId::new(GitHashAlgorithm::Sha1, &[0; 20]),
-            new_id: initial,
-            name: "Zmin Test".to_owned(),
-            email: "zmin@example.invalid".to_owned(),
-            timestamp: 1_700_000_000,
-            timezone_offset: 0,
-            message: "create\n".to_owned(),
-        })
-        .expect("append reftable log");
+        assert!(
+            !refs
+                .reftable_log_exists("refs/heads/main")
+                .expect("check absent reftable log")
+        );
+        refs.create_reftable_log("refs/heads/main")
+            .expect("create empty reftable log");
+        assert!(
+            refs.reftable_log_exists("refs/heads/main")
+                .expect("check empty reftable log")
+        );
+    }
 
-        let mut latest = ObjectId::new(GitHashAlgorithm::Sha1, &[2; 20]);
-        for value in 2..REFTABLE_COMPACTION_TABLE_LIMIT {
-            latest = ObjectId::new(GitHashAlgorithm::Sha1, &[value as u8; 20]);
-            refs.write_ref("refs/heads/main", &latest)
-                .expect("append reftable update before compaction");
+    #[test]
+    fn reftable_compaction_preserves_latest_ref_and_logs() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let repo = git_init();
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            let initial = test_object_id(algorithm, 1);
+            refs.write_ref("refs/heads/main", &initial)
+                .expect("write initial reftable ref");
+            refs.append_reftable_log(ReftableLogRecord {
+                ref_name: "refs/heads/main".to_owned(),
+                update_index: 0,
+                old_id: test_zero_object_id(algorithm),
+                new_id: initial,
+                name: "Zmin Test".to_owned(),
+                email: "zmin@example.invalid".to_owned(),
+                timestamp: 1_700_000_000,
+                timezone_offset: 0,
+                message: "create\n".to_owned(),
+            })
+            .expect("append reftable log");
+
+            let mut latest = test_object_id(algorithm, 2);
+            for value in 2..REFTABLE_COMPACTION_TABLE_LIMIT {
+                latest = test_object_id(algorithm, value as u8);
+                refs.write_ref("refs/heads/main", &latest)
+                    .expect("append reftable update before compaction");
+            }
+
+            assert_eq!(reftable_table_count(&repo), 1);
+            assert_eq!(
+                refs.resolve("refs/heads/main")
+                    .expect("resolve compacted ref"),
+                latest
+            );
+            assert_eq!(refs.reftable_logs().expect("read compacted logs").len(), 1);
+            assert_eq!(reftable_table_ranges(&repo), vec![(1, 64)]);
+            if algorithm == GitHashAlgorithm::Sha1 {
+                assert_eq!(
+                    git(&repo, ["rev-parse", "refs/heads/main"]),
+                    latest.to_hex()
+                );
+            }
         }
+    }
 
-        assert_eq!(reftable_table_count(&repo), 1);
+    #[test]
+    fn reftable_stash_transactions_cover_sha1_sha256_drop_clear_and_ranges() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let repo = reftable_stash_fixture(algorithm, 3);
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            let mut records = refs.reftable_logs().expect("read stash logs");
+            records.sort_by_key(|record| record.update_index);
+            let zero = test_zero_object_id(algorithm);
+
+            let survivors = vec![records[0].clone(), records[2].clone()];
+            let mut log_updates = vec![ReftableLogUpdate::Deletion {
+                ref_name: "refs/stash".to_owned(),
+                update_index: records[1].update_index,
+            }];
+            log_updates.extend(rewrite_reftable_log_chain(&survivors, &zero));
+            refs.apply_reftable_transaction(ReftableTransaction {
+                ref_updates: BTreeMap::new(),
+                log_updates,
+            })
+            .expect("drop non-top stash entry");
+            let logs = refs.reftable_logs().expect("read non-top result");
+            assert_eq!(logs.len(), 2);
+            assert_eq!(logs[0].old_id, zero);
+            assert_eq!(logs[1].old_id, logs[0].new_id);
+            assert_eq!(
+                refs.resolve("refs/stash").expect("resolve stash"),
+                logs[1].new_id
+            );
+            assert_reftable_table_ranges_are_ordered(&repo);
+
+            let repo = reftable_stash_fixture(algorithm, 3);
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            let mut records = refs.reftable_logs().expect("read stash logs");
+            records.sort_by_key(|record| record.update_index);
+            let survivors = vec![records[0].clone(), records[1].clone()];
+            let mut log_updates = vec![ReftableLogUpdate::Deletion {
+                ref_name: "refs/stash".to_owned(),
+                update_index: records[2].update_index,
+            }];
+            log_updates.extend(rewrite_reftable_log_chain(
+                &survivors,
+                &test_zero_object_id(algorithm),
+            ));
+            refs.apply_reftable_transaction(ReftableTransaction {
+                ref_updates: BTreeMap::from([(
+                    "refs/stash".to_owned(),
+                    Some(RefTarget::Direct(records[1].new_id.clone())),
+                )]),
+                log_updates,
+            })
+            .expect("drop top stash entry");
+            assert_eq!(
+                refs.resolve("refs/stash").expect("resolve top drop"),
+                records[1].new_id
+            );
+            assert_reftable_table_ranges_are_ordered(&repo);
+
+            let repo = reftable_stash_fixture(algorithm, 1);
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            let record = refs
+                .reftable_logs()
+                .expect("read final stash log")
+                .into_iter()
+                .next()
+                .expect("final stash record");
+            refs.apply_reftable_transaction(ReftableTransaction {
+                ref_updates: BTreeMap::from([("refs/stash".to_owned(), None)]),
+                log_updates: vec![
+                    ReftableLogUpdate::Deletion {
+                        ref_name: "refs/stash".to_owned(),
+                        update_index: record.update_index,
+                    },
+                    ReftableLogUpdate::ExistenceMarker {
+                        ref_name: "refs/stash".to_owned(),
+                    },
+                ],
+            })
+            .expect("drop final stash entry");
+            assert!(refs.resolve("refs/stash").is_err());
+            assert!(
+                refs.reftable_logs()
+                    .expect("read empty stash logs")
+                    .is_empty()
+            );
+            assert!(
+                refs.reftable_log_exists("refs/stash")
+                    .expect("check stash existence")
+            );
+            assert_reftable_table_ranges_are_ordered(&repo);
+
+            let repo = reftable_stash_fixture(algorithm, 3);
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            assert!(
+                refs.delete_reftable_ref_with_log("refs/stash")
+                    .expect("clear stash")
+            );
+            assert!(refs.resolve("refs/stash").is_err());
+            assert!(refs.reftable_logs().expect("read cleared logs").is_empty());
+            assert!(
+                !refs
+                    .reftable_log_exists("refs/stash")
+                    .expect("check cleared logs")
+            );
+            assert_reftable_table_ranges_are_ordered(&repo);
+        }
+    }
+
+    #[test]
+    fn reftable_transaction_failure_preserves_stack_for_sha1_sha256() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let repo = reftable_stash_fixture(algorithm, 1);
+            let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+            let tables_path = repo.path().join(".git/reftable/tables.list");
+            let before = std::fs::read(&tables_path).expect("read tables before failure");
+            let wrong_algorithm = match algorithm {
+                GitHashAlgorithm::Sha1 => GitHashAlgorithm::Sha256,
+                GitHashAlgorithm::Sha256 => GitHashAlgorithm::Sha1,
+            };
+            let error = refs
+                .apply_reftable_transaction(ReftableTransaction {
+                    ref_updates: BTreeMap::from([(
+                        "refs/stash".to_owned(),
+                        Some(RefTarget::Direct(test_object_id(wrong_algorithm, 9))),
+                    )]),
+                    log_updates: Vec::new(),
+                })
+                .expect_err("wrong algorithm transaction should fail");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert_eq!(
+                std::fs::read(&tables_path).expect("read tables after failure"),
+                before
+            );
+            assert!(!tables_path.with_extension("list.lock").exists());
+            assert_eq!(reftable_table_count(&repo), 1);
+        }
+    }
+
+    #[test]
+    fn fresh_reftable_log_import_sets_global_header_range_and_next_index() {
+        let repo = git_init();
+        let refs = configured_reftable_store(&repo);
+        let first = test_object_id(GitHashAlgorithm::Sha1, 1);
+        let second = test_object_id(GitHashAlgorithm::Sha1, 2);
+        let logs = vec![
+            ReftableLogRecord {
+                ref_name: "refs/heads/main".to_owned(),
+                update_index: 41,
+                old_id: test_zero_object_id(GitHashAlgorithm::Sha1),
+                new_id: first.clone(),
+                name: "Zmin Test".to_owned(),
+                email: "zmin@example.invalid".to_owned(),
+                timestamp: 1_700_000_000,
+                timezone_offset: 0,
+                message: "first\n".to_owned(),
+            },
+            ReftableLogRecord {
+                ref_name: "refs/heads/main".to_owned(),
+                update_index: 99,
+                old_id: first,
+                new_id: second.clone(),
+                name: "Zmin Test".to_owned(),
+                email: "zmin@example.invalid".to_owned(),
+                timestamp: 1_700_000_001,
+                timezone_offset: 0,
+                message: "second\n".to_owned(),
+            },
+        ];
+
+        refs.write_fresh_refs_with_logs(
+            &[("refs/heads/main".to_owned(), second.clone())],
+            &[],
+            &logs,
+        )
+        .expect("import fresh reftable refs and logs");
+
+        assert_eq!(reftable_table_ranges(&repo), vec![(41, 99)]);
+        assert_eq!(refs.reftable_logs().expect("read imported logs").len(), 2);
+        let next = test_object_id(GitHashAlgorithm::Sha1, 3);
+        refs.write_ref("refs/heads/main", &next)
+            .expect("append after imported global index");
+        assert_eq!(reftable_table_ranges(&repo), vec![(41, 100)]);
+    }
+
+    #[test]
+    fn reftable_table_list_commit_failure_preserves_existing_table() {
+        let repo = git_init();
+        let refs = configured_reftable_store(&repo);
+        let first = test_object_id(GitHashAlgorithm::Sha1, 1);
+        let second = test_object_id(GitHashAlgorithm::Sha1, 2);
+        refs.write_ref("refs/heads/main", &first)
+            .expect("write initial reftable ref");
+        let reftable_dir = repo.path().join(".git/reftable");
+        let tables_path = reftable_dir.join("tables.list");
+        let before_tables = std::fs::read(&tables_path).expect("read existing table list");
+        let old_table = before_tables
+            .split(|byte| *byte == b'\n')
+            .find(|line| !line.is_empty())
+            .expect("existing table name");
+        let old_table_path =
+            reftable_dir.join(std::str::from_utf8(old_table).expect("utf8 table name"));
+        let before_table = std::fs::read(&old_table_path).expect("read existing table");
+
+        *REFTABLE_FAIL_TABLE_LIST_COMMIT
+            .lock()
+            .expect("lock failure injection") = Some(tables_path.clone());
+        let error = refs
+            .write_ref("refs/heads/main", &second)
+            .expect_err("injected table list commit should fail");
+        *REFTABLE_FAIL_TABLE_LIST_COMMIT
+            .lock()
+            .expect("lock failure injection") = None;
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(
+            std::fs::read(&tables_path).expect("read preserved table list"),
+            before_tables
+        );
+        assert_eq!(
+            std::fs::read(&old_table_path).expect("read preserved table"),
+            before_table
+        );
         assert_eq!(
             refs.resolve("refs/heads/main")
-                .expect("resolve compacted ref"),
-            latest
+                .expect("resolve preserved ref"),
+            first
         );
-        assert_eq!(refs.reftable_logs().expect("read compacted logs").len(), 1);
+        assert_eq!(reftable_table_count(&repo), 1);
+        assert!(!tables_path.with_extension("list.lock").exists());
+    }
+
+    #[test]
+    fn reftable_post_rename_sync_failure_preserves_published_table() {
+        let repo = git_init();
+        let refs = configured_reftable_store(&repo);
+        let first = test_object_id(GitHashAlgorithm::Sha1, 1);
+        let second = test_object_id(GitHashAlgorithm::Sha1, 2);
+        refs.write_ref("refs/heads/main", &first)
+            .expect("write initial reftable ref");
+        let reftable_dir = repo.path().join(".git/reftable");
+        let tables_path = reftable_dir.join("tables.list");
+        let before_tables = std::fs::read(&tables_path).expect("read existing table list");
+
+        *REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC
+            .lock()
+            .expect("lock post-rename failure injection") = Some(tables_path.clone());
+        let error = refs
+            .write_ref("refs/heads/main", &second)
+            .expect_err("post-rename directory sync should fail");
+        *REFTABLE_FAIL_TABLE_LIST_POST_RENAME_SYNC
+            .lock()
+            .expect("lock post-rename failure injection") = None;
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        let after_tables = std::fs::read(&tables_path).expect("read published table list");
+        assert_ne!(after_tables, before_tables);
         assert_eq!(
-            git(&repo, ["rev-parse", "refs/heads/main"]),
-            latest.to_hex()
+            refs.resolve("refs/heads/main")
+                .expect("resolve published ref"),
+            second
+        );
+        for table in after_tables
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+        {
+            let table = std::str::from_utf8(table).expect("utf8 published table name");
+            assert!(reftable_dir.join(table).is_file(), "missing {table}");
+        }
+        assert!(!tables_path.with_extension("list.lock").exists());
+    }
+
+    #[test]
+    fn reftable_table_name_collision_does_not_overwrite_existing_file() {
+        let repo = git_init();
+        let reftable_dir = repo.path().join(".git/reftable");
+        std::fs::create_dir_all(&reftable_dir).expect("create reftable directory");
+        let colliding_name = reftable_table_name(7, 7);
+        let colliding_path = reftable_dir.join(&colliding_name);
+        let original = b"preexisting table bytes";
+        std::fs::write(&colliding_path, original).expect("write colliding table");
+
+        let (written_name, written_path) = write_reftable_table_with_first_name(
+            &reftable_dir,
+            7,
+            7,
+            b"new table bytes",
+            Some(colliding_name),
+        )
+        .expect("retry after table name collision");
+
+        assert_ne!(
+            written_name,
+            colliding_path.file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            std::fs::read(&colliding_path).expect("read colliding table"),
+            original
+        );
+        assert_eq!(
+            std::fs::read(&written_path).expect("read new table"),
+            b"new table bytes"
         );
     }
 
@@ -4125,12 +4958,117 @@ mod tests {
     }
 
     fn configured_reftable_store(repo: &TempDir) -> RefStore {
+        configured_reftable_store_with_algorithm(repo, GitHashAlgorithm::Sha1)
+    }
+
+    fn configured_reftable_store_with_algorithm(
+        repo: &TempDir,
+        algorithm: GitHashAlgorithm,
+    ) -> RefStore {
         std::fs::write(
             repo.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 1\n[extensions]\n\trefStorage = reftable\n",
         )
         .expect("configure reftable");
-        RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1)
+        RefStore::new(repo.path().join(".git"), algorithm)
+    }
+
+    fn test_object_id(algorithm: GitHashAlgorithm, value: u8) -> ObjectId {
+        ObjectId::new(algorithm, &vec![value; algorithm.digest_len()])
+    }
+
+    fn test_zero_object_id(algorithm: GitHashAlgorithm) -> ObjectId {
+        test_object_id(algorithm, 0)
+    }
+
+    fn stash_log_record(old_id: ObjectId, new_id: ObjectId, value: u8) -> ReftableLogRecord {
+        ReftableLogRecord {
+            ref_name: "refs/stash".to_owned(),
+            update_index: 1,
+            old_id,
+            new_id,
+            name: "Zmin Test".to_owned(),
+            email: "zmin@example.invalid".to_owned(),
+            timestamp: 1_700_000_000 + u64::from(value),
+            timezone_offset: 0,
+            message: format!("stash-{value}\n"),
+        }
+    }
+
+    fn reftable_stash_fixture(algorithm: GitHashAlgorithm, count: u8) -> TempDir {
+        let repo = git_init();
+        let refs = configured_reftable_store_with_algorithm(&repo, algorithm);
+        let mut old_id = test_zero_object_id(algorithm);
+        let first_id = test_object_id(algorithm, 1);
+        let first_log = stash_log_record(old_id.clone(), first_id.clone(), 1);
+        refs.write_fresh_refs_with_logs(
+            &[("refs/stash".to_owned(), first_id.clone())],
+            &[],
+            &[first_log],
+        )
+        .expect("write initial stash transaction");
+        old_id = first_id;
+        for value in 2..=count {
+            let new_id = test_object_id(algorithm, value);
+            refs.write_reftable_ref_with_logs(
+                "refs/stash",
+                RefTarget::Direct(new_id.clone()),
+                vec![stash_log_record(old_id, new_id.clone(), value)],
+            )
+            .expect("write stash transaction");
+            old_id = new_id;
+        }
+        repo
+    }
+
+    fn rewrite_reftable_log_chain(
+        records: &[ReftableLogRecord],
+        zero: &ObjectId,
+    ) -> Vec<ReftableLogUpdate> {
+        let mut old_id = zero.clone();
+        records
+            .iter()
+            .map(|record| {
+                let mut rewritten = record.clone();
+                rewritten.old_id = old_id.clone();
+                old_id = record.new_id.clone();
+                ReftableLogUpdate::Update(rewritten)
+            })
+            .collect()
+    }
+
+    fn reftable_table_ranges(repo: &TempDir) -> Vec<(u64, u64)> {
+        std::fs::read_to_string(repo.path().join(".git/reftable/tables.list"))
+            .expect("read reftable table ranges")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                let mut parts = line.split('-');
+                let min = u64::from_str_radix(
+                    parts
+                        .next()
+                        .expect("table minimum")
+                        .trim_start_matches("0x"),
+                    16,
+                )
+                .expect("parse table minimum");
+                let max = u64::from_str_radix(
+                    parts
+                        .next()
+                        .expect("table maximum")
+                        .trim_start_matches("0x"),
+                    16,
+                )
+                .expect("parse table maximum");
+                (min, max)
+            })
+            .collect()
+    }
+
+    fn assert_reftable_table_ranges_are_ordered(repo: &TempDir) {
+        for pair in reftable_table_ranges(repo).windows(2) {
+            assert!(pair[0].1 < pair[1].0, "overlapping ranges: {pair:?}");
+        }
     }
 
     fn reftable_table_count(repo: &TempDir) -> usize {

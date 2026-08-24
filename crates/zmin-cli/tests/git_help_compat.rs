@@ -580,84 +580,137 @@ fn builtin_help_flags_match_stock_git() {
     }
 }
 
+fn pinned_stock_git_v2_55() -> PathBuf {
+    let path = std::env::var_os("ZMIN_STOCK_GIT")
+        .map(PathBuf::from)
+        .expect("set ZMIN_STOCK_GIT to the pinned Git v2.55.0 comparator");
+    let output = std::process::Command::new(&path)
+        .arg("--version")
+        .output()
+        .expect("run pinned Git comparator");
+    assert!(output.status.success(), "pinned Git --version failed");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "git version 2.55.0",
+        "ZMIN_STOCK_GIT must be exactly Git v2.55.0"
+    );
+    path
+}
+
+fn t0450_synopsis(output: &str) -> String {
+    output
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .map(|line| {
+            line.strip_prefix("usage: ")
+                .or_else(|| line.trim_start_matches(' ').strip_prefix("or: "))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn t0450_align_after_nl(builtin: &str, synopsis: &str) -> String {
+    let padding = " ".repeat(format!("git {builtin} ").len());
+    synopsis
+        .lines()
+        .map(|line| {
+            if line
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| *byte == b' ' || *byte == b'\t')
+            {
+                format!(
+                    "{padding}{}",
+                    line.trim_start_matches(|character| character == ' ' || character == '\t')
+                )
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
-fn builtin_help_synopses_match_pinned_v2_47() {
+fn builtin_help_synopses_match_pinned_v2_55() {
     let dir = TempDir::new().expect("temp dir");
     let repo = dir.path().join("sub");
-    std::process::Command::new(stock_git_bin())
+    std::process::Command::new(pinned_stock_git_v2_55())
         .args(["init", "-q", repo.to_str().expect("repo path")])
         .status()
-        .expect("init repo");
+        .expect("init repo with pinned Git");
+    let stock = pinned_stock_git_v2_55();
+    let stock = stock.to_str().expect("pinned Git path");
     let cases: &[(&[&str], &str)] = &[
-        (
-            &["-C", "sub", "cat-file", "-h"],
-            "usage: git cat-file <type> <object>\n   or: git cat-file (-e | -p) <object>\n   or: git cat-file (-t | -s) [--allow-unknown-type] <object>",
-        ),
-        (
-            &["-C", "sub", "commit", "-h"],
-            "usage: git commit [-a | --interactive | --patch] [-s] [-v] [-u<mode>] [--amend]",
-        ),
-        (
-            &["-C", "sub", "fsck", "-h"],
-            "usage: git fsck [--tags] [--root] [--unreachable] [--cache] [--no-reflogs]\n                [--[no-]full] [--strict] [--verbose] [--lost-found]\n                [--[no-]dangling] [--[no-]progress] [--connectivity-only]\n                [--[no-]name-objects] [<object>...]",
-        ),
-        (
-            &["-C", "sub", "mv", "-h"],
-            "usage: git mv [<options>] <source>... <destination>",
-        ),
-        (
-            &["-C", "sub", "reflog", "-h"],
-            "usage: git reflog [show] [<log-options>] [<ref>]\n   or: git reflog list\n   or: git reflog expire [--expire=<time>] [--expire-unreachable=<time>]\n                         [--rewrite] [--updateref] [--stale-fix]\n                         [--dry-run | -n] [--verbose] [--all [--single-worktree] | <refs>...]\n   or: git reflog delete [--rewrite] [--updateref]\n                         [--dry-run | -n] [--verbose] <ref>@{<specifier>}...\n   or: git reflog exists <ref>",
-        ),
-        (
-            &["-C", "sub", "refs", "-h"],
-            "usage: git refs migrate --ref-format=<format> [--dry-run]\n   or: git refs verify [--strict] [--verbose]",
-        ),
-        (
-            &["-C", "sub", "show-index", "-h"],
-            "usage: git show-index [--object-format=<hash-algorithm>]",
-        ),
+        (&["-C", "sub", "commit", "-h"], "commit"),
+        (&["-C", "sub", "config", "-h"], "config"),
+        (&["-C", "sub", "fetch", "-h"], "fetch"),
+        (&["-C", "sub", "diff", "-h"], "diff"),
+        (&["-C", "sub", "for-each-ref", "-h"], "for-each-ref"),
+        (&["-C", "sub", "fsck", "-h"], "fsck"),
+        (&["-C", "sub", "mv", "-h"], "mv"),
+        (&["-C", "sub", "pack-objects", "-h"], "pack-objects"),
+        (&["-C", "sub", "show-index", "-h"], "show-index"),
+        (&["-C", "sub", "reflog", "-h"], "reflog"),
+        (&["-C", "sub", "bisect", "-h"], "bisect"),
     ];
 
-    for (args, synopsis) in cases {
-        let output = command_any_output(zmin_bin(), dir.path(), args, "zmin v2.47 builtin help");
-        assert_eq!(output.0, 129, "args: {args:?}");
-        assert!(
-            output.1.starts_with(synopsis),
-            "args: {args:?}\n{}",
-            output.1
+    for (args, builtin) in cases {
+        let git = command_any_output(stock, dir.path(), args, "pinned Git v2.55 help");
+        let zmin = command_any_output(zmin_bin(), dir.path(), args, "zmin help");
+        assert_eq!(zmin.0, git.0, "exit code for {builtin}");
+        assert_eq!(zmin.2, git.2, "stderr for {builtin}");
+        assert_eq!(
+            t0450_align_after_nl(builtin, &t0450_synopsis(&zmin.1)),
+            t0450_align_after_nl(builtin, &t0450_synopsis(&git.1)),
+            "t0450-normalized synopsis for {builtin}"
         );
-        assert!(output.2.is_empty(), "args: {args:?}\n{}", output.2);
     }
 }
 
 #[test]
-fn diff_help_flag_matches_upstream_builtin_stdout_shape() {
+fn zmin_extension_help_remains_explicit() {
     let dir = TempDir::new().expect("temp dir");
+    let cat_file = command_any_output(
+        zmin_bin(),
+        dir.path(),
+        &["cat-file", "-h"],
+        "zmin cat-file extension help",
+    );
+    let extension_help = cat_file
+        .1
+        .split_once("\n\nZmin extensions\n")
+        .map(|(_, extension_help)| extension_help)
+        .expect("cat-file help must emit its Zmin extension section after stock help");
+    assert!(cat_file.1.contains("--allow-unknown-type"));
+    for alias in ["--type", "--size", "--exists", "--pretty"] {
+        assert!(
+            extension_help.contains(alias),
+            "missing cat-file alias {alias} in Zmin extension help"
+        );
+    }
+}
+
+#[test]
+fn diff_help_flag_matches_pinned_git_output_channels() {
+    let dir = TempDir::new().expect("temp dir");
+    let stock = pinned_stock_git_v2_55();
     let repo = dir.path().join("sub");
-    std::process::Command::new(stock_git_bin())
+    std::process::Command::new(&stock)
         .args(["init", "-q", repo.to_str().expect("repo path")])
         .status()
         .expect("init repo");
 
-    let output = command_failure_output_with_env(
-        zmin_bin(),
+    let args = ["-C", "sub", "diff", "-h"];
+    let stock = command_any_output(
+        stock.to_str().expect("pinned stock Git path"),
         dir.path(),
-        &["-C", "sub", "diff", "-h"],
-        HELP_ENVS,
-        "zmin diff help",
+        &args,
+        "pinned Git diff help",
     );
-    assert_eq!(output.0, 129);
-    assert!(
-        output.2.is_empty(),
-        "expected empty stderr, got: {}",
-        output.2
-    );
-    assert!(
-        output.1.starts_with("usage: git diff "),
-        "expected diff usage on stdout, got: {}",
-        output.1
-    );
+    let zmin = command_any_output(zmin_bin(), dir.path(), &args, "zmin diff help");
+    assert_eq!(zmin, stock);
 }
 
 #[test]
@@ -864,12 +917,21 @@ fn builtin_help_flags_do_not_depend_on_stock_git_runtime() {
             )
         };
         assert_eq!(output.0, *expected_code, "args: {:?}", args);
-        assert!(!output.1.is_empty(), "expected stdout for args {:?}", args);
-        assert!(
-            output.2.is_empty(),
-            "expected empty stderr for args {:?}, got: {}",
-            args,
-            output.2
-        );
+        if matches!(*args, ["-C", "sub", "diff", "-h"]) {
+            assert!(
+                output.1.is_empty(),
+                "expected empty stdout for diff help, got: {}",
+                output.1
+            );
+            assert!(!output.2.is_empty(), "expected stderr usage for diff help");
+        } else {
+            assert!(!output.1.is_empty(), "expected stdout for args {:?}", args);
+            assert!(
+                output.2.is_empty(),
+                "expected empty stderr for args {:?}, got: {}",
+                args,
+                output.2
+            );
+        }
     }
 }

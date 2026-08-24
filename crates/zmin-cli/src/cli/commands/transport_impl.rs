@@ -1,7 +1,11 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::runtime::PackOperationLock;
 use zmin_primitives::git_runtime::GitTransport;
 
 const HTTP_HELPER_INLINE_BODY_LIMIT: usize = 8 * 1024 * 1024;
@@ -17,6 +21,14 @@ const PKT_LINE_PAYLOAD_INITIAL_CAPACITY_LIMIT: usize = 64 * 1024;
 const HTTP_RESPONSE_LINE_LIMIT: usize = 64 * 1024;
 const TRANSPORT_TEXT_LINE_LIMIT: usize = 64 * 1024;
 const TRANSPORT_STDIN_BUF_CAPACITY: usize = TRANSPORT_TEXT_LINE_LIMIT;
+const UPLOAD_PACK_BLOB_PACKFILE_URI_CONFIG_COUNT_LIMIT: usize = 128;
+const UPLOAD_PACK_BLOB_PACKFILE_URI_VALUE_LENGTH_LIMIT: usize = 64 * 1024;
+const UPLOAD_PACK_BLOB_PACKFILE_URI_SELECTED_COUNT_LIMIT: usize = 128;
+const UPLOAD_PACK_BLOB_PACKFILE_URI_METADATA_LENGTH_LIMIT: usize = 60 * 1024;
+const UPLOAD_PACK_URI_PROTOCOL_COUNT_LIMIT: usize = 32;
+const UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT: usize = 16 * 1024;
+const UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT: usize = 64;
+const UPLOAD_PACK_PROMISOR_REMOTE_VALUE_LENGTH_LIMIT: usize = 16 * 1024;
 const HTTP_REMOTE_REF_ROWS_CAPACITY_HINT: usize = 64;
 const HTTP_REMOTE_REF_ROW_BYTES_HINT: usize = 80;
 const RECEIVE_PACK_UPDATE_CAPACITY_HINT: usize = 8;
@@ -29,14 +41,492 @@ const UPLOAD_PACK_OBJECT_ID_GROWTH_CAPACITY_LIMIT: usize = 8192;
 const TRANSPORT_HISTORY_COLLECTION_CAPACITY_LIMIT: usize = 8192;
 const TRANSPORT_REF_COLLECTION_CAPACITY_LIMIT: usize = 8192;
 const TAG_PEEL_SEEN_CAPACITY_HINT: usize = 4;
-const CLONE_CONFIG_VALUES_CAPACITY_HINT: usize = 9;
+const CLONE_CONFIG_VALUES_CAPACITY_HINT: usize = 12;
 const HTTP_EXTRA_HEADER_CAPACITY_HINT: usize = 4;
 const HTTP_CREDENTIAL_HELPER_CAPACITY_HINT: usize = 2;
-const HTTP_REDIRECT_LIMIT: usize = 10;
+// libcurl (and Git's http.c redirect guard) allow twenty followed redirects.
+const HTTP_REDIRECT_LIMIT: usize = 20;
+const BUNDLE_HTTP_MAX_BYTES: u64 = 1024 * 1024 * 1024;
+const BUNDLE_HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 const COPY_REACHABLE_SEEN_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_MISSING_REACHABLE_OBJECT_THRESHOLD: usize = 128;
 static TEMP_HTTP_HELPER_BODY_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
+
+fn load_bundle_source_from_http(repo: &GitRepo, uri: &str) -> Result<BundleLoadedSource> {
+    let url = parsed_http_url_with_extra_headers(Some(repo), uri)?;
+    let output_path = temp_http_helper_output_path()?;
+    let result = (|| {
+        let mut helper = RemoteHttpHelperSession::spawn_for_bundle(&url)?;
+        let head = helper.request_to_file_redirects(
+            &url,
+            "GET",
+            "",
+            &[],
+            &PackBody::Empty,
+            &output_path,
+        )?;
+        if head.status_code != 200 {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("HTTP bundle download returned {}", head.status_line),
+            });
+        }
+        let Some(content_length) = head.content_length else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "HTTP bundle download did not report a Content-Length".into(),
+            });
+        };
+        if u64::try_from(content_length)
+            .ok()
+            .is_none_or(|length| length > BUNDLE_HTTP_MAX_BYTES)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "HTTP bundle download exceeds the {BUNDLE_HTTP_MAX_BYTES}-byte limit"
+                ),
+            });
+        }
+        BundleLoadedSource::from_owned_temp(output_path.clone())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&output_path);
+    }
+    result
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_OWNED_PACK_KEEP_LOCK_ACQUIRE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ForceIndexReasons {
+    keep_pack: bool,
+    promisor: bool,
+    packfile_uri: bool,
+    fsck_objects: bool,
+}
+
+impl ForceIndexReasons {
+    fn requires_index(self) -> bool {
+        self.keep_pack || self.promisor || self.packfile_uri || self.fsck_objects
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackStorageMode {
+    Loose,
+    Indexed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackKeepPolicy {
+    None,
+    Transient,
+    Persistent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PackReceiveDecision {
+    storage: PackStorageMode,
+    keep: PackKeepPolicy,
+}
+
+/// Internal ownership needed while a promisor marker is being published.
+///
+/// This is deliberately separate from `PackKeepPolicy`: Git's `--keep`
+/// decision controls the installed pack's eventual keep state, while this
+/// short-lived receipt protects an indexed promisor pack between publication
+/// of its pack files and publication of the `.promisor` marker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PackInstallProtection {
+    None,
+    UntilPromisorMarker,
+}
+
+impl PackInstallProtection {
+    fn for_decision(policy: FetchPackPolicy, storage: PackStorageMode) -> Self {
+        if matches!(storage, PackStorageMode::Indexed) && policy.force_index.promisor {
+            Self::UntilPromisorMarker
+        } else {
+            Self::None
+        }
+    }
+
+    fn keep_policy(self, upstream_keep: PackKeepPolicy) -> PackKeepPolicy {
+        if matches!(self, Self::UntilPromisorMarker)
+            && matches!(upstream_keep, PackKeepPolicy::None)
+        {
+            PackKeepPolicy::Transient
+        } else {
+            upstream_keep
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FetchPackPolicy {
+    unpack_limit: Option<u32>,
+    force_index: ForceIndexReasons,
+    validation_mode: Option<zmin_git_core::pack::PackValidationMode>,
+}
+
+impl FetchPackPolicy {
+    fn threshold_default() -> Self {
+        Self {
+            unpack_limit: Some(PACK_MISSING_REACHABLE_OBJECT_THRESHOLD as u32),
+            force_index: ForceIndexReasons::default(),
+            validation_mode: None,
+        }
+    }
+
+    pub(crate) fn resolve(repo: &GitRepo, mut force_index: ForceIndexReasons) -> Result<Self> {
+        let fetch_limit = read_config_value(repo, "fetch.unpackLimit")?;
+        let transfer_limit = read_config_value(repo, "transfer.unpackLimit")?;
+        let parsed_fetch_limit = fetch_limit.as_deref().map(parse_unpack_limit).transpose()?;
+        let parsed_transfer_limit = transfer_limit
+            .as_deref()
+            .map(parse_unpack_limit)
+            .transpose()?;
+        let unpack_limit = parsed_fetch_limit
+            .flatten()
+            .or(parsed_transfer_limit.flatten())
+            .or(Some(100));
+        let fsck_objects = fetch_fsck_objects(repo)?;
+        force_index.fsck_objects = force_index.fsck_objects || fsck_objects;
+        let validation_mode = if fsck_objects {
+            Some(if force_index.promisor {
+                zmin_git_core::pack::PackValidationMode::FsckObjects
+            } else {
+                zmin_git_core::pack::PackValidationMode::Strict
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            unpack_limit: unpack_limit.or(Some(100)),
+            force_index,
+            validation_mode,
+        })
+    }
+
+    fn resolve_for_objects_dir(
+        objects_dir: &std::path::Path,
+        force_index: ForceIndexReasons,
+    ) -> Result<Self> {
+        let git_dir = objects_dir.parent().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "object store has no repository parent".into(),
+        })?;
+        let repo = GitRepo {
+            root: git_dir.to_path_buf(),
+            git_dir: git_dir.to_path_buf(),
+            objects_dir: objects_dir.to_path_buf(),
+            index_path: git_dir.join("index"),
+        };
+        Self::resolve(&repo, force_index)
+    }
+
+    fn receive_decision(self, raw_count: Option<usize>) -> PackReceiveDecision {
+        let threshold_reached = self.unpack_limit.is_some_and(|limit| {
+            limit > 0 && raw_count.is_some_and(|count| count >= limit as usize)
+        });
+        PackReceiveDecision {
+            storage: if threshold_reached || self.force_index.requires_index() {
+                PackStorageMode::Indexed
+            } else {
+                PackStorageMode::Loose
+            },
+            keep: if threshold_reached
+                || self.force_index.keep_pack
+                || self.force_index.packfile_uri
+            {
+                PackKeepPolicy::Transient
+            } else {
+                PackKeepPolicy::None
+            },
+        }
+    }
+
+    fn should_rewrite_promisor_marker(self, raw_count: Option<usize>) -> bool {
+        let threshold_reached = self.unpack_limit.is_some_and(|limit| {
+            limit > 0 && raw_count.is_some_and(|count| count >= limit as usize)
+        });
+        threshold_reached || self.force_index.keep_pack
+    }
+}
+
+fn fetch_fsck_objects(repo: &GitRepo) -> Result<bool> {
+    let fetch_entry = read_config_entry(repo, "fetch.fsckObjects")?;
+    let transfer_entry = read_config_entry(repo, "transfer.fsckObjects")?;
+    let fetch_value = fetch_entry
+        .as_ref()
+        .map(|entry| parse_config_bool_entry(entry, "fetch.fsckObjects"))
+        .transpose()?;
+    let transfer_value = transfer_entry
+        .as_ref()
+        .map(|entry| parse_config_bool_entry(entry, "transfer.fsckObjects"))
+        .transpose()?;
+    Ok(fetch_value.or(transfer_value).unwrap_or(false))
+}
+
+fn selected_remote_is_promisor(repo: &GitRepo, remote: &str) -> Result<bool> {
+    let entry = read_config_section_entry(repo, "remote", remote, "promisor")?;
+    let configured_promisor = entry
+        .as_ref()
+        .map(|entry| parse_config_bool_entry(entry, &format!("remote.{remote}.promisor")))
+        .transpose()
+        .map(|value| value.unwrap_or(false))?;
+    let partial_clone_remote = read_config_value(repo, "extensions.partialclone")?;
+    Ok(configured_promisor || partial_clone_remote.as_deref() == Some(remote))
+}
+
+fn configured_promisor_filter(repo: &GitRepo, remote: &str) -> Result<Option<String>> {
+    if !selected_remote_is_promisor(repo, remote)? {
+        return Ok(None);
+    }
+    read_config_section_value(repo, "remote", remote, "partialclonefilter").map_err(CliError::Io)
+}
+
+fn selected_remote_force_index_reasons(
+    repo: &GitRepo,
+    remote: &str,
+    keep_pack: bool,
+) -> Result<ForceIndexReasons> {
+    // Git marks a received pack as promisor only when this fetch carries the
+    // from-promisor/filter transport option.  A remote.promisor or
+    // extensions.partialclone entry identifies the configured promisor remote,
+    // but does not by itself turn an ordinary fetch into a partial fetch.
+    let _selected_promisor = selected_remote_is_promisor(repo, remote)?;
+    Ok(ForceIndexReasons {
+        keep_pack,
+        promisor: false,
+        ..ForceIndexReasons::default()
+    })
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FetchPackUriConfig {
+    protocols: Vec<String>,
+}
+
+impl FetchPackUriConfig {
+    fn from_repo(repo: &GitRepo) -> Result<Self> {
+        let mut protocols = Vec::new();
+        if let Some(entry) = read_config_entries(repo)?.into_iter().rev().find(|entry| {
+            entry.section == "fetch" && entry.subsection.is_empty() && entry.key == "uriprotocols"
+        }) {
+            for protocol in entry.value.split(',') {
+                match protocol {
+                    "http" => protocols.push("http".to_owned()),
+                    "https" => protocols.push("https".to_owned()),
+                    _ => {}
+                }
+            }
+        }
+        Ok(Self { protocols })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.protocols.is_empty()
+    }
+}
+
+fn parse_fetch_bool(value: &str) -> Result<bool> {
+    if value.is_empty() {
+        return Ok(false);
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" => return Ok(true),
+        "false" | "no" | "off" => return Ok(false),
+        _ => {}
+    }
+    parse_git_config_integer(value)
+        .map(|number| number != 0)
+        .map_err(|reason| CliError::Fatal {
+            code: 128,
+            message: format!("invalid boolean value for fsckObjects: {value}: {reason}"),
+        })
+}
+
+fn parse_config_bool_entry(entry: &ConfigEntry, key: &str) -> Result<bool> {
+    if entry.implicit_bool {
+        return Ok(true);
+    }
+    if entry.value.is_empty() {
+        return Ok(false);
+    }
+    parse_fetch_bool(&entry.value).map_err(|error| match error {
+        CliError::Fatal { message, .. } => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "invalid boolean value for {key} from {}: {message}",
+                entry.origin
+            ),
+        },
+        other => other,
+    })
+}
+
+fn parse_unpack_limit(value: &str) -> Result<Option<u32>> {
+    let parsed = parse_git_config_integer(value).map_err(|reason| CliError::Fatal {
+        code: 128,
+        message: format!("invalid unpack limit '{value}': {reason}"),
+    })?;
+    if parsed < 0 {
+        Ok(None)
+    } else {
+        Ok(Some(parsed as u32))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SmartTransportHash {
+    algorithm: GitHashAlgorithm,
+    pack_policy: FetchPackPolicy,
+}
+
+impl SmartTransportHash {
+    fn sha1() -> Self {
+        Self {
+            algorithm: GitHashAlgorithm::Sha1,
+            pack_policy: FetchPackPolicy::threshold_default(),
+        }
+    }
+
+    fn for_algorithm(algorithm: GitHashAlgorithm) -> Self {
+        Self {
+            algorithm,
+            pack_policy: FetchPackPolicy::threshold_default(),
+        }
+    }
+
+    fn with_pack_policy(self, pack_policy: FetchPackPolicy) -> Self {
+        Self {
+            algorithm: self.algorithm,
+            pack_policy,
+        }
+    }
+
+    fn for_repo(repo: &GitRepo) -> Result<Self> {
+        repo_hash_algorithm_from_config(repo)
+            .map(Self::for_algorithm)
+            .map_err(CliError::Io)
+    }
+
+    pub(crate) fn for_objects_dir_with_policy(
+        objects_dir: &std::path::Path,
+        pack_policy: FetchPackPolicy,
+    ) -> Result<Self> {
+        let git_dir = objects_dir.parent().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "object store has no repository parent".into(),
+        })?;
+        let repo = GitRepo {
+            root: git_dir.to_path_buf(),
+            git_dir: git_dir.to_path_buf(),
+            objects_dir: objects_dir.to_path_buf(),
+            index_path: git_dir.join("index"),
+        };
+        Ok(Self {
+            algorithm: repo_hash_algorithm_from_config(&repo).map_err(CliError::Io)?,
+            pack_policy,
+        })
+    }
+
+    fn name(self) -> &'static str {
+        match self.algorithm {
+            GitHashAlgorithm::Sha1 => "sha1",
+            GitHashAlgorithm::Sha256 => "sha256",
+        }
+    }
+
+    fn from_object_format(value: &[u8]) -> Result<Self> {
+        let algorithm = match value {
+            b"sha1" => GitHashAlgorithm::Sha1,
+            b"sha256" => GitHashAlgorithm::Sha256,
+            _ => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "unknown object format '{}' specified by server",
+                        String::from_utf8_lossy(value)
+                    ),
+                });
+            }
+        };
+        Ok(Self::for_algorithm(algorithm))
+    }
+
+    fn from_capabilities(capabilities: &[u8], default: Self) -> Result<Self> {
+        let mut negotiated = None;
+        for token in ascii_tokens(capabilities) {
+            let Some(value) = token.strip_prefix(b"object-format=") else {
+                continue;
+            };
+            if negotiated.is_none() {
+                negotiated =
+                    Some(Self::from_object_format(value)?.with_pack_policy(default.pack_policy));
+            }
+        }
+        Ok(negotiated.unwrap_or(default))
+    }
+
+    fn from_capabilities_strict(capabilities: &[u8], default: Self) -> Result<Self> {
+        let mut negotiated: Option<Self> = None;
+        for token in ascii_tokens(capabilities) {
+            let Some(value) = token.strip_prefix(b"object-format=") else {
+                continue;
+            };
+            let candidate = Self::from_object_format(value)?.with_pack_policy(default.pack_policy);
+            if let Some(previous) = negotiated
+                && previous.algorithm != candidate.algorithm
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "conflicting object formats advertised by server".into(),
+                });
+            }
+            negotiated = Some(candidate);
+        }
+        Ok(negotiated.unwrap_or(default))
+    }
+}
+
+fn validate_smart_object_format(value: &[u8], expected: SmartTransportHash) -> Result<()> {
+    let actual = SmartTransportHash::from_object_format(value)?;
+    if actual != expected {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "smart HTTP object format mismatch: expected {}, got {}",
+                expected.name(),
+                actual.name()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_smart_transport_hash_match(
+    local: SmartTransportHash,
+    remote: SmartTransportHash,
+) -> Result<()> {
+    if local == remote {
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!(
+            "mismatched algorithms: client {}; server {}",
+            local.name(),
+            remote.name()
+        ),
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FetchRecurseSubmodulesMode {
@@ -75,9 +565,9 @@ pub(crate) struct DaemonOptions {
     pub(crate) verbose: bool,
     pub(crate) syslog: bool,
     pub(crate) export_all: bool,
-    pub(crate) timeout: Option<u64>,
-    pub(crate) init_timeout: Option<u64>,
-    pub(crate) max_connections: Option<usize>,
+    pub(crate) timeout: Option<String>,
+    pub(crate) init_timeout: Option<String>,
+    pub(crate) max_connections: Option<String>,
     pub(crate) strict_paths: bool,
     pub(crate) base_path: Option<PathBuf>,
     pub(crate) base_path_relaxed: bool,
@@ -100,6 +590,13 @@ pub(crate) struct DaemonOptions {
     pub(crate) user: Option<String>,
     pub(crate) user_path: bool,
     pub(crate) directories: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParsedDaemonNumericOptions {
+    timeout: Option<u32>,
+    init_timeout: Option<u32>,
+    max_connections: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,19 +671,43 @@ fn primitive_runtime_for_repo(repo: &GitRepo) -> CliPrimitiveRuntime {
     CliPrimitiveRuntime::new_from_repo(repo, GitHashAlgorithm::Sha1)
 }
 
+fn primitive_runtime_for_repo_with_hash(
+    repo: &GitRepo,
+    hash: SmartTransportHash,
+) -> CliPrimitiveRuntime {
+    CliPrimitiveRuntime::new_from_repo(repo, hash.algorithm)
+}
+
 fn refs_adapter_from_git_dir(path: impl AsRef<std::path::Path>) -> OwnedCliRefsStoreAdapter {
     OwnedCliRefsStoreAdapter::from_path(path, GitHashAlgorithm::Sha1)
 }
 
-fn refs_adapter_from_clone_source(path: impl AsRef<std::path::Path>) -> OwnedCliRefsStoreAdapter {
+fn refs_adapter_from_git_dir_with_hash(
+    path: impl AsRef<std::path::Path>,
+    hash: SmartTransportHash,
+) -> OwnedCliRefsStoreAdapter {
+    OwnedCliRefsStoreAdapter::from_path(path, hash.algorithm)
+}
+
+fn refs_adapter_from_clone_source(
+    path: impl AsRef<std::path::Path>,
+    hash: SmartTransportHash,
+) -> OwnedCliRefsStoreAdapter {
     OwnedCliRefsStoreAdapter::new(RefStore::new_without_environment(
         path.as_ref(),
-        GitHashAlgorithm::Sha1,
+        hash.algorithm,
     ))
 }
 
 fn object_adapter_from_objects_dir(path: impl AsRef<std::path::Path>) -> LooseObjectStore {
     LooseObjectStore::new(path.as_ref(), GitHashAlgorithm::Sha1)
+}
+
+fn object_adapter_from_objects_dir_with_hash(
+    path: impl AsRef<std::path::Path>,
+    hash: SmartTransportHash,
+) -> LooseObjectStore {
+    LooseObjectStore::new(path.as_ref(), hash.algorithm)
 }
 
 pub(crate) fn upload_pack(options: UploadPackOptions) -> Result<()> {
@@ -208,19 +729,28 @@ pub(crate) fn upload_pack(options: UploadPackOptions) -> Result<()> {
     // can otherwise trigger a configured promisor helper from an untrusted
     // repository before the client sees the dubious-ownership failure.
     enforce_safe_directory_access(&repo, &options.directory)?;
+    let hash = SmartTransportHash::for_repo(&repo)?;
+    let server_policy = UploadPackServerPolicy::from_repo(&repo)?;
     if upload_pack_protocol_v2_requested() {
-        return upload_pack_v2(&repo);
+        return upload_pack_v2_with_hash_and_server_policy_with_advertisement(
+            &repo,
+            hash,
+            server_policy,
+            options.advertise_refs || !options.stateless_rpc,
+        );
     }
-    let runtime = primitive_runtime_for_repo(&repo);
+    let runtime = primitive_runtime_for_repo_with_hash(&repo, hash);
     if options.advertise_refs {
         let stdout = io::stdout();
         let stdout = stdout.lock();
         let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
-        write_upload_pack_advertisement_for_repo(
+        write_upload_pack_advertisement_for_repo_with_hash(
             &repo,
             runtime.refs_store_adapter(),
             &mut stdout,
             true,
+            hash,
+            server_policy.filter.clone(),
         )?;
         stdout.flush()?;
         return Ok(());
@@ -229,22 +759,34 @@ pub(crate) fn upload_pack(options: UploadPackOptions) -> Result<()> {
         let stdout = io::stdout();
         let stdout = stdout.lock();
         let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
-        write_upload_pack_advertisement_for_repo(
+        write_upload_pack_advertisement_for_repo_with_hash(
             &repo,
             runtime.refs_store_adapter(),
             &mut stdout,
             false,
+            hash,
+            server_policy.filter.clone(),
         )?;
         stdout.flush()?;
     }
 
     let stdin = io::stdin();
     let mut stdin = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdin.lock());
-    let request = read_upload_pack_request_from_stdin(&mut stdin)?;
+    let request = read_upload_pack_request_from_stdin_with_hash_and_policy(
+        &mut stdin,
+        hash,
+        server_policy.filter.clone(),
+    )?;
     if request.wants.is_empty() {
         return Ok(());
     }
-    upload_pack_respond_with_pack(&repo, request, options.stateless_rpc)
+    upload_pack_respond_with_pack_with_hash_and_server_policy(
+        &repo,
+        request,
+        options.stateless_rpc,
+        hash,
+        server_policy,
+    )
 }
 
 pub(crate) fn http_fetch(options: HttpFetchOptions) -> Result<()> {
@@ -362,12 +904,12 @@ fn http_fetch_packfile(
     index_pack_args: &[String],
     args: &[String],
 ) -> Result<()> {
-    if packfile_hash.len() != 40 || !packfile_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!("argument to --packfile must be a valid hash (got '{packfile_hash}')"),
-        });
-    }
+    let repo = find_repo_or_bare()?;
+    let algorithm = repo_hash_algorithm_from_config(&repo).map_err(CliError::Io)?;
+    ObjectId::from_hex(algorithm, packfile_hash).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("argument to --packfile must be a valid hash (got '{packfile_hash}')"),
+    })?;
     if index_pack_args.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -382,7 +924,6 @@ fn http_fetch_packfile(
                 .into(),
         });
     };
-    let repo = find_repo_or_bare()?;
     let url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
     let (head, mut body) = http_request_reader(&url, "GET", "", &[])?;
     if head.status_code != 200 {
@@ -394,6 +935,7 @@ fn http_fetch_packfile(
     let pack_dir = repo.objects_dir.join("pack");
     fs::create_dir_all(&pack_dir)?;
     let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
     {
         let mut file = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, file);
         copy_http_response_body_to_writer(
@@ -412,15 +954,71 @@ fn http_fetch_packfile(
             message: "downloaded packfile is not a Git pack".into(),
         });
     }
-    let indexed = if index_pack_args.no_rev_index {
-        let indexed = index_pack_file_index_only(GitHashAlgorithm::Sha1, &temp_pack)?;
+    let mut install_temp_pack = temp_pack.clone();
+    let mut repaired_temp_guard = None;
+    let indexed = if index_pack_args.fix_thin {
+        let repaired_pack = unique_temp_sibling(&pack_dir.join("http-fetch-thin-repaired.pack"));
+        let repaired_guard = OwnedHttpTempPack::new(repaired_pack.clone());
+        let store = LooseObjectStore::new(&repo.objects_dir, algorithm);
+        let repair_result = match index_pack_args.validation_mode {
+            Some(mode) => zmin_git_core::pack::repair_thin_pack_file_to_path_with_validation(
+                algorithm,
+                &temp_pack,
+                &store,
+                &repaired_pack,
+                PackIndexVersion::V2,
+                mode,
+            )
+            .map_err(map_pack_validation_error),
+            None => zmin_git_core::pack::repair_thin_pack_file_to_path(
+                algorithm,
+                &temp_pack,
+                &store,
+                &repaired_pack,
+                PackIndexVersion::V2,
+            )
+            .map_err(CliError::Io),
+        }?;
+        install_temp_pack = repaired_pack;
+        repaired_temp_guard = Some(repaired_guard);
+        HttpFetchIndexedPack {
+            pack_id: repair_result.indexed.pack_id,
+            index: repair_result.indexed.index,
+            reverse_index: if index_pack_args.no_rev_index {
+                None
+            } else {
+                Some(repair_result.indexed.reverse_index)
+            },
+        }
+    } else if index_pack_args.no_rev_index {
+        let indexed = match index_pack_args.validation_mode {
+            Some(mode) => zmin_git_core::pack::index_pack_file_with_store_and_validation(
+                algorithm,
+                &temp_pack,
+                &LooseObjectStore::new(&repo.objects_dir, algorithm),
+                mode,
+                PackIndexVersion::V2,
+            )
+            .map_err(map_pack_validation_error)?,
+            None => index_pack_file_index_only(algorithm, &temp_pack)?,
+        };
         HttpFetchIndexedPack {
             pack_id: indexed.pack_id,
             index: indexed.index,
             reverse_index: None,
         }
     } else {
-        let indexed = index_pack_file(GitHashAlgorithm::Sha1, &temp_pack)?;
+        let indexed = match index_pack_args.validation_mode {
+            Some(mode) => zmin_git_core::pack::index_pack_file_with_store_and_validation_full(
+                algorithm,
+                &temp_pack,
+                &LooseObjectStore::new(&repo.objects_dir, algorithm),
+                mode,
+                PackIndexVersion::V2,
+            )
+            .map_err(map_pack_validation_error)?,
+            None => index_pack_file(algorithm, &temp_pack)?,
+        };
         HttpFetchIndexedPack {
             pack_id: indexed.pack_id,
             index: indexed.index,
@@ -428,41 +1026,43 @@ fn http_fetch_packfile(
         }
     };
     let _ = index_pack_args.verbose;
-    if !object_id_hex_eq(&indexed.pack_id, packfile_hash) {
-        let _ = fs::remove_file(&temp_pack);
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!(
-                "downloaded packfile hash mismatch: expected {packfile_hash}, got {}",
-                indexed.pack_id.to_hex()
-            ),
-        });
-    }
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+    let persistent_keep = index_pack_args
+        .keep
+        .as_deref()
+        .map(|message| {
+            let content = pack_keep_message_content(message);
+            OwnedPackKeep::create_with_content_locked(&pack_dir, &indexed.pack_id, &content)
+        })
+        .transpose()
+        .map_err(CliError::Io)?
+        .flatten();
     install_temp_pack_file(
         &pack_file_path(&pack_dir, &indexed.pack_id, ".pack"),
-        &temp_pack,
+        &install_temp_pack,
         &indexed.pack_id,
     )?;
     let index_path = index_pack_args
         .index_output
         .clone()
         .unwrap_or_else(|| pack_file_path(&pack_dir, &indexed.pack_id, ".idx"));
-    write_content_addressed_file(&index_path, &indexed.index)?;
+    write_pack_content_addressed_file(&index_path, &indexed.index)?;
     if let Some(reverse_index) = indexed.reverse_index.as_ref() {
-        write_content_addressed_file(
+        write_pack_content_addressed_file(
             &pack_file_path(&pack_dir, &indexed.pack_id, ".rev"),
             reverse_index,
         )?;
     }
-    if let Some(keep_message) = index_pack_args.keep {
-        fs::write(
-            pack_file_path(&pack_dir, &indexed.pack_id, ".keep"),
-            keep_message,
-        )?;
+    if let Some(persistent_keep) = persistent_keep {
+        persistent_keep.disarm();
         println!("keep\t{}", indexed.pack_id.to_hex());
     } else {
         println!("pack\t{}", indexed.pack_id.to_hex());
     }
+    if let Some(repaired_temp_guard) = repaired_temp_guard {
+        repaired_temp_guard.cleanup().map_err(CliError::Io)?;
+    }
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
     Ok(())
 }
 
@@ -473,6 +1073,17 @@ struct HttpFetchIndexPackArgs {
     index_output: Option<PathBuf>,
     stdin: bool,
     verbose: bool,
+    fix_thin: bool,
+    validation_mode: Option<zmin_git_core::pack::PackValidationMode>,
+}
+
+fn pack_keep_message_content(message: &str) -> Vec<u8> {
+    if message.is_empty() {
+        return Vec::new();
+    }
+    let mut content = message.as_bytes().to_vec();
+    content.push(b'\n');
+    content
 }
 
 struct HttpFetchIndexedPack {
@@ -500,7 +1111,7 @@ fn parse_http_fetch_index_pack_args(args: &[String]) -> Result<HttpFetchIndexPac
         match arg {
             "--stdin" => parsed.stdin = true,
             "-v" => parsed.verbose = true,
-            "--rev-index" => {}
+            "--rev-index" => parsed.no_rev_index = false,
             "--no-rev-index" => parsed.no_rev_index = true,
             "--keep" => parsed.keep = Some(String::new()),
             _ if arg.starts_with("--keep=") => {
@@ -523,12 +1134,39 @@ fn parse_http_fetch_index_pack_args(args: &[String]) -> Result<HttpFetchIndexPac
             value if value.starts_with("--index-output=") => {
                 parsed.index_output = value.strip_prefix("--index-output=").map(PathBuf::from);
             }
-            value
-                if value == "--fix-thin"
-                    || value == "--strict"
-                    || value.starts_with("--strict=")
-                    || value == "--fsck-objects"
-                    || value.starts_with("--fsck-objects=") => {}
+            "--fix-thin" => parsed.fix_thin = true,
+            "--strict" => set_http_fetch_validation_mode(
+                &mut parsed.validation_mode,
+                zmin_git_core::pack::PackValidationMode::Strict,
+            ),
+            "--fsck-objects" => set_http_fetch_validation_mode(
+                &mut parsed.validation_mode,
+                zmin_git_core::pack::PackValidationMode::FsckObjects,
+            ),
+            value if value.starts_with("--strict=") => {
+                let policy = value
+                    .strip_prefix("--strict=")
+                    .expect("checked strict policy prefix");
+                if !policy.is_empty() {
+                    return Err(http_fetch_index_pack_policy_error("--strict"));
+                }
+                set_http_fetch_validation_mode(
+                    &mut parsed.validation_mode,
+                    zmin_git_core::pack::PackValidationMode::Strict,
+                );
+            }
+            value if value.starts_with("--fsck-objects=") => {
+                let policy = value
+                    .strip_prefix("--fsck-objects=")
+                    .expect("checked fsck policy prefix");
+                if !policy.is_empty() {
+                    return Err(http_fetch_index_pack_policy_error("--fsck-objects"));
+                }
+                set_http_fetch_validation_mode(
+                    &mut parsed.validation_mode,
+                    zmin_git_core::pack::PackValidationMode::FsckObjects,
+                );
+            }
             _ => {
                 return Err(http_fetch_index_pack_usage_error());
             }
@@ -541,10 +1179,90 @@ fn parse_http_fetch_index_pack_args(args: &[String]) -> Result<HttpFetchIndexPac
     Ok(parsed)
 }
 
+fn set_http_fetch_validation_mode(
+    mode: &mut Option<zmin_git_core::pack::PackValidationMode>,
+    requested: zmin_git_core::pack::PackValidationMode,
+) {
+    if requested == zmin_git_core::pack::PackValidationMode::Strict || mode.is_none() {
+        *mode = Some(requested);
+    }
+}
+
+fn http_fetch_index_pack_policy_error(option: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "http-fetch --packfile does not support {option}=<msg-id>=<severity> policies"
+        ),
+    }
+}
+
 fn http_fetch_index_pack_usage_error() -> CliError {
     CliError::Stderr {
         code: 128,
         text: "usage: git index-pack [-v] [-o <index-file>] [--keep | --keep=<msg>] [--[no-]rev-index] [--verify] [--strict[=<msg-id>=<severity>...]] [--fsck-objects[=<msg-id>=<severity>...]] (<pack-file> | --stdin [--fix-thin] [<pack-file>])\nfatal: finish_http_pack_request gave result -1\n".into(),
+    }
+}
+
+#[cfg(test)]
+mod http_fetch_index_pack_tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<HttpFetchIndexPackArgs> {
+        parse_http_fetch_index_pack_args(
+            &args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn validation_flags_are_typed_and_strict_wins() {
+        let parsed = parse(&[
+            "index-pack",
+            "--stdin",
+            "--fsck-objects",
+            "--fix-thin",
+            "--no-rev-index",
+            "--rev-index",
+        ])
+        .expect("parse fsck direct helper args");
+        assert_eq!(
+            parsed.validation_mode,
+            Some(zmin_git_core::pack::PackValidationMode::FsckObjects)
+        );
+        assert!(parsed.fix_thin);
+        assert!(!parsed.no_rev_index);
+
+        for args in [
+            ["index-pack", "--stdin", "--fsck-objects", "--strict"],
+            ["index-pack", "--stdin", "--strict", "--fsck-objects"],
+        ] {
+            let parsed = parse(&args).expect("parse strict direct helper args");
+            assert_eq!(
+                parsed.validation_mode,
+                Some(zmin_git_core::pack::PackValidationMode::Strict)
+            );
+        }
+    }
+
+    #[test]
+    fn nonempty_validation_policies_are_rejected_without_silent_downgrade() {
+        for option in [
+            "--strict=fsck.missingEmail=warn",
+            "--fsck-objects=foo=error",
+        ] {
+            let error = match parse(&["index-pack", "--stdin", option]) {
+                Ok(_) => panic!("nonempty direct helper policy must be rejected"),
+                Err(error) => error,
+            };
+            match error {
+                CliError::Fatal { code, message } => {
+                    assert_eq!(code, 128);
+                    assert!(message.contains("does not support"));
+                    assert!(message.contains(option.split('=').next().unwrap()));
+                }
+                other => panic!("unexpected direct helper policy error: {other:?}"),
+            }
+        }
     }
 }
 
@@ -939,7 +1657,7 @@ pub(crate) fn http_fetch_object_recursive(
             }
         }
         GitObjectKind::Tag => {
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            let tag = decode_tag(context.store.algorithm(), &object.content)?;
             http_fetch_object_recursive(context, &tag.target)?;
         }
         GitObjectKind::Blob => {}
@@ -994,17 +1712,99 @@ fn write_loose_object_http_suffix_from_hex(out: &mut String, hex: &str) {
     out.push_str(&hex[2..]);
 }
 
-pub(crate) fn http_fetch_smart_pack_with_helper(
+pub(crate) fn http_fetch_smart_pack_with_helper_with_hash(
     url: &ParsedHttpUrl,
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<bool> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_helper_with_hash_and_receipt(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+pub(crate) fn http_fetch_smart_pack_with_helper_with_hash_for_promisor(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<bool> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_helper_with_hash_and_receipt_with_filter(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        Some("blob:none"),
+        hash,
+        &mut receive,
+    )?;
+    if result {
+        receive
+            .publish_promisor_markers_and_release_owned(b"")
+            .map_err(CliError::Io)?;
+    } else {
+        receive.release_owned();
+    }
+    Ok(result)
+}
+
+fn http_fetch_smart_pack_with_helper_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<bool> {
+    http_fetch_smart_pack_with_helper_with_hash_and_receipt_with_filter(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        None,
+        hash,
+        receive,
+    )
+}
+
+fn http_fetch_smart_pack_with_helper_with_hash_and_receipt_with_filter(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    filter: Option<&str>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_request(roots, haves, None)?;
+    let request = build_upload_pack_request_from_shallow_options_with_hash(
+        roots,
+        haves,
+        UploadPackShallowOptions::depth(None).with_filter(filter),
+        hash,
+    )?;
 
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
@@ -1024,34 +1824,66 @@ pub(crate) fn http_fetch_smart_pack_with_helper(
         }
         let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
         let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+        let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
         let pack_path = {
             let _trace = phase_trace("http_fetch_smart_pack.sideband_to_pack");
             parse_upload_pack_sideband_pack_to_open_file(&mut body, &temp_pack, file)?
         };
         let Some(pack_path) = pack_path else {
-            let _ = fs::remove_file(&temp_pack);
+            temp_pack_guard.cleanup().map_err(CliError::Io)?;
             return Ok(false);
         };
         {
             let _trace = phase_trace("http_fetch_smart_pack.index_pack");
-            write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+            write_received_pack_file_with_hash(
+                objects_dir,
+                &pack_path,
+                !haves.is_empty(),
+                hash,
+                receive,
+            )?;
         }
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         Ok(true)
     })();
     let _ = fs::remove_file(response_path);
     result
 }
 
-fn http_fetch_smart_pack_direct(
+fn http_fetch_smart_pack_direct_with_hash(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<bool> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_direct_with_hash_and_receipt(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_direct_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_request(roots, haves, None)?;
+    let request = build_upload_pack_request_with_hash(roots, haves, None, hash)?;
     let (head, mut body) = {
         let _trace = phase_trace("http_fetch_smart_pack.direct_request");
         http_request_reader(url, "POST", "git-upload-pack", &request)?
@@ -1060,33 +1892,69 @@ fn http_fetch_smart_pack_direct(
         return Ok(false);
     }
     let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
     let pack_path = {
         let _trace = phase_trace("http_fetch_smart_pack.sideband_to_pack");
         parse_upload_pack_sideband_pack_to_open_file(&mut body, &temp_pack, file)?
     };
     let Some(pack_path) = pack_path else {
-        let _ = fs::remove_file(&temp_pack);
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         return Ok(false);
     };
     {
         let _trace = phase_trace("http_fetch_smart_pack.index_pack");
-        write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+        write_received_pack_file_with_hash(
+            objects_dir,
+            &pack_path,
+            !haves.is_empty(),
+            hash,
+            receive,
+        )?;
     }
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
     Ok(true)
 }
 
-fn http_fetch_smart_pack_v2_with_helper(
+fn http_fetch_smart_pack_v2_with_helper_with_hash(
     url: &ParsedHttpUrl,
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<bool> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        server_options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    let request = build_upload_pack_v2_fetch_request_with_hash(roots, haves, server_options, hash)?;
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
         let head = helper.request_to_file(
@@ -1102,41 +1970,486 @@ fn http_fetch_smart_pack_v2_with_helper(
         }
         let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
         let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
-        let pack_path = parse_upload_pack_v2_pack_to_open_file(&mut body, &temp_pack, file)?;
-        let Some(pack_path) = pack_path else {
-            let _ = fs::remove_file(&temp_pack);
+        let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+        let pack_result =
+            parse_upload_pack_v2_pack_to_open_file_with_hash(&mut body, &temp_pack, file, hash)?;
+        let Some((pack_path, _shallow_boundaries)) = pack_result else {
+            temp_pack_guard.cleanup().map_err(CliError::Io)?;
             return Ok(false);
         };
-        write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+        write_received_pack_file_with_hash(
+            objects_dir,
+            &pack_path,
+            !haves.is_empty(),
+            hash,
+            receive,
+        )?;
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         Ok(true)
     })();
     let _ = fs::remove_file(response_path);
     result
 }
 
-fn http_fetch_smart_pack_v2_direct(
+fn index_http_packfile_uri_pack(
+    objects_dir: &std::path::Path,
+    pack_path: &Path,
+    fix_thin: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+    uri_pack: bool,
+) -> Result<ObjectId> {
+    let raw_count = if hash.pack_policy.unpack_limit == Some(0) {
+        None
+    } else {
+        Some(zmin_git_core::pack::pack_object_count_from_file(pack_path).map_err(CliError::Io)?)
+    };
+    let decision = hash.pack_policy.receive_decision(raw_count);
+    if decision.storage != PackStorageMode::Indexed {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "packfile-URI download must use indexed storage".into(),
+        });
+    }
+    receive.record_promisor_marker_decision(
+        hash.pack_policy.should_rewrite_promisor_marker(raw_count),
+    );
+    let keep_policy = if uri_pack {
+        PackKeepPolicy::Persistent
+    } else if hash.pack_policy.force_index.packfile_uri && !hash.pack_policy.force_index.keep_pack {
+        PackKeepPolicy::Persistent
+    } else {
+        decision.keep
+    };
+    write_indexed_pack_file_with_policy(
+        objects_dir,
+        pack_path,
+        fix_thin,
+        hash,
+        PackInstallProtection::for_decision(hash.pack_policy, decision.storage)
+            .keep_policy(keep_policy),
+        receive,
+    )
+}
+
+fn download_packfile_uri_to_temp(
+    repo: &GitRepo,
+    objects_dir: &std::path::Path,
+    packfile_uri: &PackfileUri,
+) -> Result<PathBuf> {
+    let parsed_url = parsed_http_url_with_extra_headers(Some(repo), &packfile_uri.uri)?;
+    let pack_dir = objects_dir.join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let temp_pack = pack_file_path(&pack_dir, &packfile_uri.advertised_hash, ".pack.temp");
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&temp_pack)?;
+    set_packfile_uri_temp_mode(&temp_pack)?;
+    let result = (|| {
+        let (head, mut body) = http_request_reader(&parsed_url, "GET", "", &[])?;
+        if head.status_code != 200 {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("HTTP packfile URI request failed: {}", head.status_line),
+            });
+        }
+        let mut file = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, file);
+        copy_http_response_body_to_writer(
+            &mut body,
+            &mut file,
+            head.content_length,
+            head.chunked,
+            "HTTP packfile URI response ended early",
+        )?;
+        file.flush()?;
+        Ok(temp_pack.clone())
+    })();
+    result
+}
+
+fn set_packfile_uri_temp_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
+    }
+    Ok(())
+}
+
+fn set_packfile_uri_artifact_modes(pack_dir: &Path, pack_id: &ObjectId) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for suffix in [".pack", ".idx", ".rev"] {
+            fs::set_permissions(
+                pack_file_path(pack_dir, pack_id, suffix),
+                fs::Permissions::from_mode(0o444),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: Option<&mut RemoteHttpHelperSession>,
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    uri_config: &FetchPackUriConfig,
+    sideband_all: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<Vec<ObjectId>> {
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+        &uri_config.protocols,
+        sideband_all,
+    )?;
+    let response_path = temp_http_helper_output_path()?;
+    let response_result = (|| {
+        if let Some(helper) = helper {
+            let head = helper.request_to_file(
+                url,
+                "POST",
+                "git-upload-pack",
+                &request,
+                &PackBody::Empty,
+                &response_path,
+            )?;
+            if head.status_code != 200 {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("HTTP ref request failed: {}", head.status_line),
+                });
+            }
+            let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
+            let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
+            let temp_guard = OwnedHttpTempPack::new(temp_pack.clone());
+            let parsed = parse_upload_pack_v2_uri_response_to_open_file(
+                &mut body,
+                &temp_pack,
+                file,
+                hash,
+                sideband_all,
+            )?;
+            index_http_packfile_uri_pack(
+                &repo.objects_dir,
+                &parsed.pack_path,
+                !haves.is_empty(),
+                hash,
+                receive,
+                false,
+            )?;
+            temp_guard.cleanup().map_err(CliError::Io)?;
+            for packfile_uri in parsed.packfile_uris {
+                let temp_uri_pack =
+                    download_packfile_uri_to_temp(repo, &repo.objects_dir, &packfile_uri)?;
+                let temp_uri_guard = OwnedHttpTempPack::new(temp_uri_pack.clone());
+                let pack_id = index_http_packfile_uri_pack(
+                    &repo.objects_dir,
+                    &temp_uri_pack,
+                    !haves.is_empty(),
+                    hash,
+                    receive,
+                    true,
+                )?;
+                receive.record_uri_pack(&pack_id);
+                temp_uri_guard.cleanup().map_err(CliError::Io)?;
+                if pack_id != packfile_uri.advertised_hash {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "pack downloaded from {} does not match expected hash {}",
+                            packfile_uri.uri,
+                            packfile_uri.advertised_hash.to_hex()
+                        ),
+                    });
+                }
+                receive.record_uri_keep(&repo.objects_dir, pack_id);
+            }
+            return Ok((parsed.shallow_boundaries, ()));
+        }
+        let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+        if head.status_code != 200 {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("HTTP ref request failed: {}", head.status_line),
+            });
+        }
+        let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
+        let temp_guard = OwnedHttpTempPack::new(temp_pack.clone());
+        let parsed = parse_upload_pack_v2_uri_response_to_open_file(
+            &mut body,
+            &temp_pack,
+            file,
+            hash,
+            sideband_all,
+        )?;
+        index_http_packfile_uri_pack(
+            &repo.objects_dir,
+            &parsed.pack_path,
+            !haves.is_empty(),
+            hash,
+            receive,
+            false,
+        )?;
+        temp_guard.cleanup().map_err(CliError::Io)?;
+        for packfile_uri in parsed.packfile_uris {
+            let temp_uri_pack =
+                download_packfile_uri_to_temp(repo, &repo.objects_dir, &packfile_uri)?;
+            let temp_uri_guard = OwnedHttpTempPack::new(temp_uri_pack.clone());
+            let pack_id = index_http_packfile_uri_pack(
+                &repo.objects_dir,
+                &temp_uri_pack,
+                !haves.is_empty(),
+                hash,
+                receive,
+                true,
+            )?;
+            receive.record_uri_pack(&pack_id);
+            temp_uri_guard.cleanup().map_err(CliError::Io)?;
+            if pack_id != packfile_uri.advertised_hash {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "pack downloaded from {} does not match expected hash {}",
+                        packfile_uri.uri,
+                        packfile_uri.advertised_hash.to_hex()
+                    ),
+                });
+            }
+            receive.record_uri_keep(&repo.objects_dir, pack_id);
+        }
+        Ok((parsed.shallow_boundaries, ()))
+    })();
+    let _ = fs::remove_file(response_path);
+    response_result.map(|(shallow, _)| shallow)
+}
+
+fn http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<Vec<ObjectId>> {
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+    )?;
+    let response_path = temp_http_helper_output_path()?;
+    let result = (|| {
+        let head = helper.request_to_file(
+            url,
+            "POST",
+            "git-upload-pack",
+            &request,
+            &PackBody::Empty,
+            &response_path,
+        )?;
+        if head.status_code != 200 {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("HTTP ref request failed: {}", head.status_line),
+            });
+        }
+        let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
+        let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+        let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+        let Some((pack_path, shallow_boundaries)) =
+            parse_upload_pack_v2_pack_to_open_file_with_hash(&mut body, &temp_pack, file, hash)?
+        else {
+            temp_pack_guard.cleanup().map_err(CliError::Io)?;
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "remote upload-pack response did not contain a pack".into(),
+            });
+        };
+        write_received_pack_file_with_hash(
+            objects_dir,
+            &pack_path,
+            !haves.is_empty(),
+            hash,
+            receive,
+        )?;
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
+        Ok(shallow_boundaries)
+    })();
+    let _ = fs::remove_file(response_path);
+    result
+}
+
+fn http_fetch_smart_pack_v2_direct_with_hash(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<bool> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        server_options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    let request = build_upload_pack_v2_fetch_request_with_hash(roots, haves, server_options, hash)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Ok(false);
     }
     let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
-    let pack_path = parse_upload_pack_v2_pack_to_open_file(&mut body, &temp_pack, file)?;
-    let Some(pack_path) = pack_path else {
-        let _ = fs::remove_file(&temp_pack);
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+    let pack_result =
+        parse_upload_pack_v2_pack_to_open_file_with_hash(&mut body, &temp_pack, file, hash)?;
+    let Some((pack_path, _shallow_boundaries)) = pack_result else {
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         return Ok(false);
     };
-    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+    write_received_pack_file_with_hash(objects_dir, &pack_path, !haves.is_empty(), hash, receive)?;
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
     Ok(true)
+}
+
+fn http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<Vec<ObjectId>> {
+    if roots.is_empty() {
+        return Ok(Vec::new());
+    }
+    let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+    )?;
+    let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+    let Some((pack_path, shallow_boundaries)) =
+        parse_upload_pack_v2_pack_to_open_file_with_hash(&mut body, &temp_pack, file, hash)?
+    else {
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    };
+    write_received_pack_file_with_hash(objects_dir, &pack_path, !haves.is_empty(), hash, receive)?;
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
+    Ok(shallow_boundaries)
 }
 
 fn parse_upload_pack_sideband_pack_to_open_file<R: Read>(
@@ -1250,7 +2563,332 @@ fn parse_upload_pack_v2_pack_to_open_file<R: Read>(
     pack_path: &Path,
     file: fs::File,
 ) -> Result<Option<PathBuf>> {
+    Ok(parse_upload_pack_v2_pack_to_open_file_with_hash(
+        reader,
+        pack_path,
+        file,
+        SmartTransportHash::sha1(),
+    )?
+    .map(|(path, _)| path))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PackfileUri {
+    advertised_hash: ObjectId,
+    uri: String,
+}
+
+#[derive(Debug)]
+struct UploadPackV2UriResponse {
+    pack_path: PathBuf,
+    shallow_boundaries: Vec<ObjectId>,
+    packfile_uris: Vec<PackfileUri>,
+}
+
+fn sideband_all_control_payload<'a>(payload: &'a [u8]) -> Result<Option<&'a [u8]>> {
+    let Some((&band, body)) = payload.split_first() else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "sideband-all packet is empty".into(),
+        });
+    };
+    match band {
+        1 => Ok(Some(body)),
+        2 => {
+            io::stderr().write_all(body)?;
+            io::stderr().flush()?;
+            Ok(None)
+        }
+        3 => Err(CliError::Fatal {
+            code: 128,
+            message: String::from_utf8_lossy(body).trim().to_owned(),
+        }),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid sideband-all band {band}"),
+        }),
+    }
+}
+
+fn parse_packfile_uri_line(payload: &[u8], hash: SmartTransportHash) -> Result<PackfileUri> {
+    let payload = trim_lf_payload(payload);
+    let Some(separator) = payload.iter().position(|byte| *byte == b' ') else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "expected '<hash> <uri>', got: {}",
+                String::from_utf8_lossy(payload)
+            ),
+        });
+    };
+    let (hash_bytes, uri) = payload.split_at(separator);
+    let uri = &uri[1..];
+    if hash_bytes.len() != hash.algorithm.digest_len() * 2
+        || !hash_bytes.iter().all(u8::is_ascii_hexdigit)
+        || uri.is_empty()
+        || uri.iter().any(u8::is_ascii_whitespace)
+        || uri.iter().any(|byte| *byte < 0x20 || *byte == 0x7f)
+        || !is_http_transport_url(std::str::from_utf8(uri).unwrap_or_default())
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "invalid packfile URI line: {}",
+                String::from_utf8_lossy(payload)
+            ),
+        });
+    }
+    let advertised_hash = ObjectId::from_hex_bytes(hash.algorithm, hash_bytes)?;
+    let uri = std::str::from_utf8(uri).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: "packfile URI is not valid UTF-8".into(),
+    })?;
+    ParsedHttpUrl::parse(uri)?;
+    Ok(PackfileUri {
+        advertised_hash,
+        uri: uri.to_owned(),
+    })
+}
+
+fn parse_upload_pack_v2_uri_response_to_open_file<R: Read>(
+    reader: &mut R,
+    pack_path: &Path,
+    file: fs::File,
+    hash: SmartTransportHash,
+    sideband_all: bool,
+) -> Result<UploadPackV2UriResponse> {
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    let mut shallow_boundaries = Vec::new();
+    let mut packfile_uris = Vec::new();
+    let mut saw_shallow_info = false;
+    let mut saw_wanted_refs = false;
+    let mut saw_packfile_uris = false;
+    let mut saw_packfile = false;
+    let mut saw_any_section = false;
+
+    loop {
+        match read_pkt_line_frame_into(reader, &mut payload)? {
+            PktLineFrame::Eof => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "upload-pack response ended before packfile section".into(),
+                });
+            }
+            PktLineFrame::ResponseEnd | PktLineFrame::Flush => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "upload-pack response missing packfile section".into(),
+                });
+            }
+            PktLineFrame::Delim => {
+                if !saw_any_section {
+                    continue;
+                }
+                if saw_packfile_uris && !saw_packfile {
+                    continue;
+                }
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "unexpected DELIM in upload-pack response".into(),
+                });
+            }
+            PktLineFrame::Payload => {
+                let control = if sideband_all {
+                    let Some(control) = sideband_all_control_payload(&payload)? else {
+                        continue;
+                    };
+                    control
+                } else {
+                    payload.as_slice()
+                };
+                let control = trim_lf_payload(control);
+                if control == b"shallow-info" {
+                    if saw_shallow_info || saw_wanted_refs || saw_packfile_uris {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "misplaced shallow-info section".into(),
+                        });
+                    }
+                    saw_shallow_info = true;
+                    saw_any_section = true;
+                    loop {
+                        match read_pkt_line_frame_into(reader, &mut payload)? {
+                            PktLineFrame::Payload => {
+                                let line = if sideband_all {
+                                    let Some(line) = sideband_all_control_payload(&payload)? else {
+                                        continue;
+                                    };
+                                    line
+                                } else {
+                                    payload.as_slice()
+                                };
+                                let line = trim_lf_payload(line);
+                                if let Some(id) = line.strip_prefix(b"shallow ") {
+                                    shallow_boundaries
+                                        .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
+                                } else if let Some(id) = line.strip_prefix(b"unshallow ") {
+                                    ObjectId::from_hex_bytes(hash.algorithm, id)?;
+                                } else {
+                                    return Err(CliError::Fatal {
+                                        code: 128,
+                                        message: format!(
+                                            "invalid shallow-info line: {}",
+                                            String::from_utf8_lossy(line)
+                                        ),
+                                    });
+                                }
+                            }
+                            PktLineFrame::Delim => break,
+                            _ => {
+                                return Err(CliError::Fatal {
+                                    code: 128,
+                                    message: "shallow-info section must end with DELIM".into(),
+                                });
+                            }
+                        }
+                    }
+                } else if control == b"wanted-refs" {
+                    if saw_wanted_refs || saw_packfile_uris {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "misplaced wanted-refs section".into(),
+                        });
+                    }
+                    saw_wanted_refs = true;
+                    saw_any_section = true;
+                    loop {
+                        match read_pkt_line_frame_into(reader, &mut payload)? {
+                            PktLineFrame::Payload => {
+                                let line = if sideband_all {
+                                    let Some(line) = sideband_all_control_payload(&payload)? else {
+                                        continue;
+                                    };
+                                    line
+                                } else {
+                                    payload.as_slice()
+                                };
+                                let line = trim_lf_payload(line);
+                                let Some(separator) = line.iter().position(|byte| *byte == b' ')
+                                else {
+                                    return Err(CliError::Fatal {
+                                        code: 128,
+                                        message: "invalid wanted-refs line".into(),
+                                    });
+                                };
+                                let (id, ref_name) = line.split_at(separator);
+                                let ref_name = &ref_name[1..];
+                                ObjectId::from_hex_bytes(hash.algorithm, id)?;
+                                let ref_name =
+                                    std::str::from_utf8(ref_name).map_err(|_| CliError::Fatal {
+                                        code: 128,
+                                        message: "invalid wanted-refs name".into(),
+                                    })?;
+                                if ref_name.is_empty()
+                                    || ref_name.bytes().any(|byte| byte.is_ascii_whitespace())
+                                    || !zmin_git_core::check_ref_format(ref_name, false)
+                                {
+                                    return Err(CliError::Fatal {
+                                        code: 128,
+                                        message: "invalid wanted-refs name".into(),
+                                    });
+                                }
+                            }
+                            PktLineFrame::Delim => break,
+                            _ => {
+                                return Err(CliError::Fatal {
+                                    code: 128,
+                                    message: "wanted-refs section must end with DELIM".into(),
+                                });
+                            }
+                        }
+                    }
+                } else if control == b"packfile-uris" {
+                    if saw_packfile_uris || saw_packfile {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "duplicate or misplaced packfile-uris section".into(),
+                        });
+                    }
+                    saw_any_section = true;
+                    saw_packfile_uris = true;
+                    loop {
+                        match read_pkt_line_frame_into(reader, &mut payload)? {
+                            PktLineFrame::Payload => {
+                                let line = if sideband_all {
+                                    let Some(line) = sideband_all_control_payload(&payload)? else {
+                                        continue;
+                                    };
+                                    line
+                                } else {
+                                    payload.as_slice()
+                                };
+                                packfile_uris.push(parse_packfile_uri_line(line, hash)?);
+                            }
+                            PktLineFrame::Delim => break,
+                            _ => {
+                                return Err(CliError::Fatal {
+                                    code: 128,
+                                    message: "packfile-uris section must end with DELIM".into(),
+                                });
+                            }
+                        }
+                    }
+                } else if control == b"packfile" {
+                    if saw_packfile {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "duplicate packfile section".into(),
+                        });
+                    }
+                    saw_packfile = true;
+                    break;
+                } else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "unexpected upload-pack response section: {}",
+                            String::from_utf8_lossy(control)
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    if saw_packfile_uris && packfile_uris.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "packfile-uris section is empty".into(),
+        });
+    }
+    if !saw_packfile {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "upload-pack response did not contain a packfile".into(),
+        });
+    }
+    if !write_upload_pack_v2_sideband_pack_to_open_file(reader, file)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "upload-pack response did not contain a pack".into(),
+        });
+    }
+    sort_dedup_object_ids(&mut shallow_boundaries);
+    Ok(UploadPackV2UriResponse {
+        pack_path: pack_path.to_path_buf(),
+        shallow_boundaries,
+        packfile_uris,
+    })
+}
+
+fn parse_upload_pack_v2_pack_to_open_file_with_hash<R: Read>(
+    reader: &mut R,
+    pack_path: &Path,
+    file: fs::File,
+    hash: SmartTransportHash,
+) -> Result<Option<(PathBuf, Vec<ObjectId>)>> {
+    let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    let mut shallow_boundaries = Vec::new();
     loop {
         match read_pkt_line_frame_into(reader, &mut payload)? {
             PktLineFrame::Eof => return Ok(None),
@@ -1258,6 +2896,16 @@ fn parse_upload_pack_v2_pack_to_open_file<R: Read>(
             PktLineFrame::Payload => {
                 if payload == b"packfile\n" {
                     break;
+                }
+                if let Some(id) = trim_lf_payload(&payload).strip_prefix(b"shallow ") {
+                    shallow_boundaries.push(ObjectId::from_hex_bytes(
+                        hash.algorithm,
+                        trim_ascii_whitespace(id),
+                    )?);
+                    continue;
+                }
+                if payload == b"shallow-info\n" || payload.starts_with(b"unshallow ") {
+                    continue;
                 }
                 if let Some(message) = payload.strip_prefix(b"ERR ") {
                     return Err(CliError::Fatal {
@@ -1269,11 +2917,10 @@ fn parse_upload_pack_v2_pack_to_open_file<R: Read>(
         }
     }
     write_upload_pack_v2_sideband_pack_to_open_file(reader, file).map(|wrote_pack| {
-        if wrote_pack {
-            Some(pack_path.to_path_buf())
-        } else {
-            None
-        }
+        wrote_pack.then(|| {
+            sort_dedup_object_ids(&mut shallow_boundaries);
+            (pack_path.to_path_buf(), shallow_boundaries)
+        })
     })
 }
 
@@ -1590,48 +3237,222 @@ fn write_indexed_pack_file(
     objects_dir: &std::path::Path,
     temp_pack_path: &Path,
     fix_thin: bool,
-) -> Result<()> {
+) -> Result<ObjectId> {
+    let mut receive = PackReceiveResult::default();
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::resolve_for_objects_dir(objects_dir, ForceIndexReasons::default())?,
+    )?;
+    write_indexed_pack_file_with_policy(
+        objects_dir,
+        temp_pack_path,
+        fix_thin,
+        hash,
+        PackKeepPolicy::None,
+        &mut receive,
+    )
+}
+
+fn write_indexed_pack_file_with_policy(
+    objects_dir: &std::path::Path,
+    temp_pack_path: &Path,
+    fix_thin: bool,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<ObjectId> {
+    write_indexed_pack_file_with_hash(
+        objects_dir,
+        temp_pack_path,
+        fix_thin,
+        hash,
+        receive,
+        keep_policy,
+    )
+}
+
+fn write_indexed_pack_file_with_hash(
+    objects_dir: &std::path::Path,
+    temp_pack_path: &Path,
+    fix_thin: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+    keep_policy: PackKeepPolicy,
+) -> Result<ObjectId> {
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack_path.to_path_buf());
     let pack_dir = objects_dir.join("pack");
     fs::create_dir_all(&pack_dir)?;
     if fix_thin {
         let repaired_pack = unique_temp_sibling(&pack_dir.join("http-fetch-thin-repaired.pack"));
-        let store = LooseObjectStore::new(objects_dir, GitHashAlgorithm::Sha1);
-        let repair = match repair_thin_pack_file_to_path(
-            GitHashAlgorithm::Sha1,
-            temp_pack_path,
-            &store,
-            &repaired_pack,
-            PackIndexVersion::V2,
-        ) {
-            Ok(repair) => repair,
-            Err(error) => {
-                let _ = fs::remove_file(&repaired_pack);
-                return Err(CliError::Io(error));
-            }
+        let repaired_guard = OwnedHttpTempPack::new(repaired_pack.clone());
+        let store = LooseObjectStore::new(objects_dir, hash.algorithm);
+        let repair_result = match hash.pack_policy.validation_mode {
+            Some(mode) => zmin_git_core::pack::repair_thin_pack_file_to_path_with_validation(
+                hash.algorithm,
+                temp_pack_path,
+                &store,
+                &repaired_pack,
+                PackIndexVersion::V2,
+                mode,
+            )
+            .map_err(map_pack_validation_error),
+            None => repair_thin_pack_file_to_path(
+                hash.algorithm,
+                temp_pack_path,
+                &store,
+                &repaired_pack,
+                PackIndexVersion::V2,
+            )
+            .map_err(CliError::Io),
         };
-        let _ = fs::remove_file(temp_pack_path);
+        let repair = match repair_result {
+            Ok(repair) => repair,
+            Err(error) => return Err(error),
+        };
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+        let mut owned_keep = keep_policy
+            .create(&pack_dir, &repair.indexed.pack_id)
+            .map_err(CliError::Io)?;
+        let persistent_keep = matches!(keep_policy, PackKeepPolicy::Persistent);
+        if !persistent_keep {
+            receive.record(owned_keep.take());
+        }
         let pack_path = pack_file_path(&pack_dir, &repair.indexed.pack_id, ".pack");
-        install_temp_pack_file(&pack_path, &repaired_pack, &repair.indexed.pack_id)?;
-        write_content_addressed_file(
+        install_temp_pack_file_with_hash(
+            &pack_path,
+            &repaired_pack,
+            &repair.indexed.pack_id,
+            hash,
+        )?;
+        write_pack_content_addressed_file(
             &pack_file_path(&pack_dir, &repair.indexed.pack_id, ".idx"),
             &repair.indexed.index,
         )?;
-        write_content_addressed_file(
+        write_pack_content_addressed_file(
             &pack_file_path(&pack_dir, &repair.indexed.pack_id, ".rev"),
             &repair.indexed.reverse_index,
         )?;
+        if hash.pack_policy.force_index.packfile_uri {
+            set_packfile_uri_artifact_modes(&pack_dir, &repair.indexed.pack_id)?;
+        }
+        if persistent_keep {
+            if let Some(owned_keep) = owned_keep.take() {
+                owned_keep.disarm();
+            }
+        }
+        receive.record_installed(&pack_dir, repair.indexed.pack_id.clone());
+        repaired_guard.cleanup().map_err(CliError::Io)?;
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         let _ = repair.fixed_objects;
-        return Ok(());
+        return Ok(repair.indexed.pack_id);
     }
 
-    let indexed = index_pack_file_index_only(GitHashAlgorithm::Sha1, temp_pack_path)?;
+    let store = LooseObjectStore::new(objects_dir, hash.algorithm);
+    let indexed = match hash.pack_policy.validation_mode {
+        Some(mode) => zmin_git_core::pack::index_pack_file_with_store_and_validation_full(
+            hash.algorithm,
+            temp_pack_path,
+            &store,
+            mode,
+            PackIndexVersion::V2,
+        )
+        .map_err(map_pack_validation_error)?,
+        None => index_pack_file(hash.algorithm, temp_pack_path)?,
+    };
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+    let mut owned_keep = keep_policy
+        .create(&pack_dir, &indexed.pack_id)
+        .map_err(CliError::Io)?;
+    let persistent_keep = matches!(keep_policy, PackKeepPolicy::Persistent);
+    if !persistent_keep {
+        receive.record(owned_keep.take());
+    }
     let pack_path = pack_file_path(&pack_dir, &indexed.pack_id, ".pack");
-    install_temp_pack_file(&pack_path, temp_pack_path, &indexed.pack_id)?;
-    write_content_addressed_file(
+    install_temp_pack_file_with_hash(&pack_path, temp_pack_path, &indexed.pack_id, hash)?;
+    write_pack_content_addressed_file(
         &pack_file_path(&pack_dir, &indexed.pack_id, ".idx"),
         &indexed.index,
     )?;
-    Ok(())
+    write_pack_content_addressed_file(
+        &pack_file_path(&pack_dir, &indexed.pack_id, ".rev"),
+        &indexed.reverse_index,
+    )?;
+    if hash.pack_policy.force_index.packfile_uri {
+        set_packfile_uri_artifact_modes(&pack_dir, &indexed.pack_id)?;
+    }
+    if persistent_keep {
+        if let Some(owned_keep) = owned_keep.take() {
+            owned_keep.disarm();
+        }
+    }
+    receive.record_installed(&pack_dir, indexed.pack_id.clone());
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
+    Ok(indexed.pack_id)
+}
+
+fn map_pack_validation_error(error: io::Error) -> CliError {
+    let Some(validation) = error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<zmin_git_core::pack::PackObjectValidationError>())
+    else {
+        return CliError::Io(error);
+    };
+    if validation.kind != GitObjectKind::Commit {
+        return CliError::Io(error);
+    }
+    if validation.reason != zmin_git_core::pack::PackObjectValidationReason::CommitTreeHeader {
+        return CliError::Io(error);
+    }
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "error: bogus commit object {}\n",
+            validation.object_id.to_hex()
+        ),
+    }
+}
+
+fn write_received_pack_file_with_hash(
+    objects_dir: &std::path::Path,
+    temp_pack_path: &Path,
+    fix_thin: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<()> {
+    let raw_count = if hash.pack_policy.unpack_limit == Some(0) {
+        None
+    } else {
+        Some(
+            zmin_git_core::pack::pack_object_count_from_file(temp_pack_path)
+                .map_err(CliError::Io)?,
+        )
+    };
+    let decision = hash.pack_policy.receive_decision(raw_count);
+    receive.record_promisor_marker_decision(
+        hash.pack_policy.should_rewrite_promisor_marker(raw_count),
+    );
+    match decision.storage {
+        PackStorageMode::Indexed => write_indexed_pack_file_with_hash(
+            objects_dir,
+            temp_pack_path,
+            fix_thin,
+            hash,
+            receive,
+            PackInstallProtection::for_decision(hash.pack_policy, decision.storage)
+                .keep_policy(decision.keep),
+        )
+        .map(|_| ()),
+        PackStorageMode::Loose => {
+            let store = LooseObjectStore::new(objects_dir, hash.algorithm);
+            zmin_git_core::pack::unpack_pack_file_to_loose_streaming(
+                &store,
+                hash.algorithm,
+                temp_pack_path,
+            )
+            .map_err(CliError::Io)?;
+            Ok(())
+        }
+    }
 }
 
 fn pack_file_path(pack_dir: &Path, pack_id: &ObjectId, suffix: &str) -> PathBuf {
@@ -1834,9 +3655,92 @@ fn install_temp_pack_file(
     temp_pack_path: &Path,
     expected_pack_id: &ObjectId,
 ) -> Result<()> {
+    install_temp_pack_file_with_hash(
+        path,
+        temp_pack_path,
+        expected_pack_id,
+        SmartTransportHash::for_algorithm(expected_pack_id.algorithm()),
+    )
+}
+
+fn sync_published_file(path: &Path) -> io::Result<()> {
+    fs::OpenOptions::new().read(true).open(path)?.sync_all()
+}
+
+#[cfg(unix)]
+fn sync_pack_directory(pack_dir: &Path) -> io::Result<()> {
+    fs::File::open(pack_dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_pack_directory(_pack_dir: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn write_pack_content_addressed_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            if metadata.len() == bytes.len() as u64 && fs::read(path)? == bytes {
+                return Ok(());
+            }
+            return Err(CliError::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{} already exists with different contents", path.display()),
+            )));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(CliError::Io(error)),
+    }
+    let pack_dir = path.parent().ok_or_else(|| {
+        CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pack artifact has no parent directory",
+        ))
+    })?;
+    fs::create_dir_all(pack_dir)?;
+    let temporary = unique_temp_sibling(path);
+    let temporary_guard = OwnedHttpTempPack::new(temporary.clone());
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.flush()?;
+        file.sync_all()?;
+        match fs::hard_link(&temporary, path) {
+            Ok(()) => {
+                sync_pack_directory(pack_dir).map_err(CliError::Io)?;
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if fs::metadata(path).is_ok_and(|metadata| metadata.len() == bytes.len() as u64)
+                    && fs::read(path).is_ok_and(|existing| existing == bytes)
+                {
+                    Ok(())
+                } else {
+                    Err(CliError::Io(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!("{} already exists with different contents", path.display()),
+                    )))
+                }
+            }
+            Err(error) => Err(CliError::Io(error)),
+        }
+    })();
+    drop(temporary_guard);
+    result
+}
+
+fn install_temp_pack_file_with_hash(
+    path: &Path,
+    temp_pack_path: &Path,
+    expected_pack_id: &ObjectId,
+    hash: SmartTransportHash,
+) -> Result<()> {
     match fs::metadata(path) {
         Ok(_) => {
-            let existing = index_pack_file_index_only(GitHashAlgorithm::Sha1, path)?;
+            let existing = index_pack_file_index_only(hash.algorithm, path)?;
             if existing.pack_id == *expected_pack_id {
                 let _ = fs::remove_file(temp_pack_path);
                 return Ok(());
@@ -1849,14 +3753,20 @@ fn install_temp_pack_file(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(CliError::Io(error)),
     }
+    // The pack bytes must reach stable storage before the hard link becomes
+    // visible to readers.  The caller holds the pack operation lock here.
+    sync_published_file(temp_pack_path).map_err(CliError::Io)?;
     match fs::hard_link(temp_pack_path, path) {
         Ok(()) => {
             let _ = fs::remove_file(temp_pack_path);
+            if let Some(pack_dir) = path.parent() {
+                sync_pack_directory(pack_dir).map_err(CliError::Io)?;
+            }
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             let _ = fs::remove_file(temp_pack_path);
-            if index_pack_file_index_only(GitHashAlgorithm::Sha1, path)
+            if index_pack_file_index_only(hash.algorithm, path)
                 .is_ok_and(|existing| existing.pack_id == *expected_pack_id)
             {
                 Ok(())
@@ -1878,6 +3788,1149 @@ fn temp_http_pack_path(objects_dir: &std::path::Path) -> Result<PathBuf> {
     let (path, file) = temp_http_pack_file(objects_dir)?;
     drop(file);
     Ok(path)
+}
+
+struct OwnedPackKeep {
+    path: PathBuf,
+    created_under_lock: bool,
+}
+
+#[inline]
+fn acquire_owned_pack_keep_lock(pack_dir: &Path) -> io::Result<PackOperationLock> {
+    #[cfg(test)]
+    if FAIL_OWNED_PACK_KEEP_LOCK_ACQUIRE.with(std::cell::Cell::get) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "test-injected pack keep lock acquisition failure",
+        ));
+    }
+    PackOperationLock::acquire(pack_dir)
+}
+
+impl OwnedPackKeep {
+    fn create(pack_dir: &Path, pack_id: &ObjectId) -> io::Result<Option<Self>> {
+        let content = format!(
+            "fetch-pack {} on {}\n",
+            std::process::id(),
+            pack_keep_host_name()?
+        );
+        Self::create_with_content(pack_dir, pack_id, content.as_bytes())
+    }
+
+    fn create_with_content(
+        pack_dir: &Path,
+        pack_id: &ObjectId,
+        content: &[u8],
+    ) -> io::Result<Option<Self>> {
+        Self::create_with_content_mode(pack_dir, pack_id, content, false)
+    }
+
+    fn create_locked(pack_dir: &Path, pack_id: &ObjectId) -> io::Result<Option<Self>> {
+        let content = format!(
+            "fetch-pack {} on {}\n",
+            std::process::id(),
+            pack_keep_host_name()?
+        );
+        Self::create_with_content_locked(pack_dir, pack_id, content.as_bytes())
+    }
+
+    fn create_with_content_locked(
+        pack_dir: &Path,
+        pack_id: &ObjectId,
+        content: &[u8],
+    ) -> io::Result<Option<Self>> {
+        Self::create_with_content_mode(pack_dir, pack_id, content, true)
+    }
+
+    fn create_with_content_mode(
+        pack_dir: &Path,
+        pack_id: &ObjectId,
+        content: &[u8],
+        created_under_lock: bool,
+    ) -> io::Result<Option<Self>> {
+        let path = pack_file_path(pack_dir, pack_id, ".keep");
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let owner = Self {
+            path,
+            created_under_lock,
+        };
+        if let Err(error) = file.write_all(content) {
+            drop(file);
+            drop(owner);
+            return Err(error);
+        }
+        if let Err(error) = file.flush() {
+            drop(file);
+            drop(owner);
+            return Err(error);
+        }
+        drop(file);
+        set_pack_keep_mode(&owner.path)?;
+        Ok(Some(owner))
+    }
+
+    fn release(mut self) -> io::Result<()> {
+        let _pack_lock = match self
+            .path
+            .parent()
+            .map(acquire_owned_pack_keep_lock)
+            .transpose()
+        {
+            Ok(lock) => lock,
+            Err(error) => {
+                self.created_under_lock = false;
+                return Err(error);
+            }
+        };
+        self.created_under_lock = false;
+        let result = self.release_locked();
+        drop(_pack_lock);
+        result
+    }
+
+    fn release_locked(&mut self) -> io::Result<()> {
+        let result = match fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        };
+        if result.is_ok() {
+            self.path.clear();
+        }
+        result
+    }
+
+    fn disarm(mut self) {
+        self.path.clear();
+    }
+}
+
+impl Drop for OwnedPackKeep {
+    fn drop(&mut self) {
+        if self.path.as_os_str().is_empty() {
+            return;
+        }
+        if self.created_under_lock {
+            // This owner is still a lock-scoped installation local. Consuming
+            // release() clears this marker before any fallible return, so a
+            // published receipt never reaches this unlocked branch.
+            let _ = fs::remove_file(&self.path);
+            return;
+        }
+        if let Some(pack_dir) = self.path.parent() {
+            match acquire_owned_pack_keep_lock(pack_dir) {
+                Ok(_pack_lock) => {
+                    let _ = fs::remove_file(&self.path);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "warning: retaining owned pack keep {} because pack-operation lock acquisition failed: {error}",
+                        self.path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn set_pack_keep_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+impl PackKeepPolicy {
+    fn create(self, pack_dir: &Path, pack_id: &ObjectId) -> io::Result<Option<OwnedPackKeep>> {
+        match self {
+            Self::None => Ok(None),
+            Self::Transient | Self::Persistent => OwnedPackKeep::create_locked(pack_dir, pack_id),
+        }
+    }
+}
+
+#[derive(Default)]
+struct PackInstallReceipt {
+    owned_keep: Option<OwnedPackKeep>,
+}
+
+impl PackInstallReceipt {
+    fn new(owned_keep: Option<OwnedPackKeep>) -> Option<Self> {
+        owned_keep.map(|owned_keep| Self {
+            owned_keep: Some(owned_keep),
+        })
+    }
+
+    fn release(mut self) -> io::Result<()> {
+        self.owned_keep
+            .take()
+            .map_or(Ok(()), OwnedPackKeep::release)
+    }
+
+    fn release_locked(mut self) -> io::Result<()> {
+        self.owned_keep
+            .take()
+            .map_or(Ok(()), |mut keep| keep.release_locked())
+    }
+}
+
+#[derive(Default)]
+struct PackReceiveResult {
+    receipts: Vec<PackInstallReceipt>,
+    installed_packs: Vec<(PathBuf, ObjectId)>,
+    uri_pack_ids: HashSet<ObjectId>,
+    uri_keep_paths: Vec<PathBuf>,
+    rewrite_promisor_markers: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct PackFetchResult {
+    shallow_boundaries: Vec<ObjectId>,
+    installed_pack_ids: Vec<ObjectId>,
+}
+
+struct PackReachableResult {
+    installed_pack_ids: Vec<ObjectId>,
+}
+
+impl PackFetchResult {
+    fn into_shallow_boundaries(self) -> Vec<ObjectId> {
+        self.shallow_boundaries
+    }
+
+    pub(crate) fn installed_pack_ids(&self) -> &[ObjectId] {
+        &self.installed_pack_ids
+    }
+}
+
+impl PackReceiveResult {
+    fn record(&mut self, owned_keep: Option<OwnedPackKeep>) {
+        if let Some(receipt) = PackInstallReceipt::new(owned_keep) {
+            self.receipts.push(receipt);
+        }
+    }
+
+    fn record_installed(&mut self, pack_dir: &Path, pack_id: ObjectId) {
+        self.installed_packs.push((pack_dir.to_path_buf(), pack_id));
+    }
+
+    fn record_uri_pack(&mut self, pack_id: &ObjectId) {
+        self.uri_pack_ids.insert(pack_id.clone());
+    }
+
+    fn record_uri_keep(&mut self, objects_dir: &Path, pack_id: ObjectId) {
+        self.uri_keep_paths
+            .push(pack_file_path(&objects_dir.join("pack"), &pack_id, ".keep"));
+    }
+
+    fn record_promisor_marker_decision(&mut self, rewrite: bool) {
+        self.rewrite_promisor_markers |= rewrite;
+    }
+
+    fn should_rewrite_promisor_markers(&self) -> bool {
+        self.rewrite_promisor_markers
+    }
+
+    fn publish_filtered_promisor_markers(&self, content: &[u8]) -> io::Result<()> {
+        let content = if self.should_rewrite_promisor_markers() {
+            content
+        } else {
+            &[]
+        };
+        self.publish_promisor_markers(content)
+    }
+
+    fn publish_filtered_failure_promisor_markers(&self, content: &[u8]) -> io::Result<()> {
+        let Some((pack_dir, _)) = self.installed_packs.first() else {
+            return Ok(());
+        };
+        let _pack_lock = PackOperationLock::acquire(pack_dir)?;
+        for (current_pack_dir, _) in &self.installed_packs {
+            if current_pack_dir != pack_dir {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "received packs span multiple object stores",
+                ));
+            }
+        }
+        for (_, pack_id) in &self.installed_packs {
+            let marker_content = if self.uri_pack_ids.contains(pack_id) {
+                &[][..]
+            } else if !self.uri_pack_ids.is_empty() {
+                &[][..]
+            } else {
+                content
+            };
+            let marker = pack_file_path(pack_dir, pack_id, ".promisor");
+            match fs::remove_file(&marker) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            write_promisor_markers_for_pack_ids_locked(
+                pack_dir,
+                std::iter::once(pack_id),
+                marker_content,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn publish_promisor_markers(&self, content: &[u8]) -> io::Result<()> {
+        let Some((pack_dir, _)) = self.installed_packs.first() else {
+            return Ok(());
+        };
+        let _pack_lock = PackOperationLock::acquire(pack_dir)?;
+        for (current_pack_dir, _) in &self.installed_packs {
+            if current_pack_dir != pack_dir {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "received packs span multiple object stores",
+                ));
+            }
+        }
+        write_promisor_markers_for_pack_ids_locked(
+            pack_dir,
+            self.installed_packs.iter().map(|(_, pack_id)| pack_id),
+            content,
+        )
+    }
+
+    fn finalize_refetch_promisor_markers(&self, refetch: bool) -> io::Result<()> {
+        if !refetch {
+            return Ok(());
+        }
+        let Some((pack_dir, _)) = self.installed_packs.first() else {
+            return Ok(());
+        };
+        let _pack_lock = PackOperationLock::acquire(pack_dir)?;
+        for (current_pack_dir, _) in &self.installed_packs {
+            if current_pack_dir != pack_dir {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "received packs span multiple object stores",
+                ));
+            }
+        }
+        let installed_markers = self
+            .installed_packs
+            .iter()
+            .map(|(_, pack_id)| pack_file_path(pack_dir, pack_id, ".promisor"))
+            .collect::<HashSet<_>>();
+        for entry in fs::read_dir(pack_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|extension| extension.to_str()) == Some("promisor")
+                && !installed_markers.contains(&path)
+            {
+                fs::remove_file(path)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn publish_promisor_markers_and_release_owned(&mut self, content: &[u8]) -> io::Result<()> {
+        let pack_dir = self
+            .installed_packs
+            .first()
+            .map(|(pack_dir, _)| pack_dir.as_path())
+            .or_else(|| {
+                self.receipts
+                    .first()
+                    .and_then(|receipt| receipt.owned_keep.as_ref())
+                    .and_then(|keep| keep.path.parent())
+            });
+        let Some(pack_dir) = pack_dir else {
+            return Ok(());
+        };
+        let _pack_lock = PackOperationLock::acquire(pack_dir)?;
+        for (current_pack_dir, _) in &self.installed_packs {
+            if current_pack_dir != pack_dir {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "received packs span multiple object stores",
+                ));
+            }
+        }
+        let marker_result = write_promisor_markers_for_pack_ids_locked(
+            pack_dir,
+            self.installed_packs.iter().map(|(_, pack_id)| pack_id),
+            content,
+        );
+        if let Err(error) = marker_result {
+            return Err(error);
+        }
+        let mut release_error = None;
+        for receipt in self.receipts.drain(..) {
+            if let Err(error) = receipt.release_locked() {
+                release_error.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.release_uri_keeps_locked() {
+            release_error.get_or_insert(error);
+        }
+        match release_error {
+            Some(release) => Err(release),
+            None => Ok(()),
+        }
+    }
+
+    fn release_owned(&mut self) {
+        for receipt in self.receipts.drain(..) {
+            if let Err(error) = receipt.release() {
+                eprintln!("warning: could not remove temporary pack keep: {error}");
+            }
+        }
+        if let Err(error) = self.release_uri_keeps() {
+            eprintln!("warning: could not remove packfile URI keep: {error}");
+        }
+    }
+
+    fn release_uri_keeps(&mut self) -> io::Result<()> {
+        if self.uri_keep_paths.is_empty() {
+            return Ok(());
+        }
+        let pack_dir = self.uri_keep_paths[0]
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "URI keep has no parent"))?
+            .to_path_buf();
+        let _pack_lock = PackOperationLock::acquire(&pack_dir)?;
+        self.release_uri_keeps_locked()
+    }
+
+    fn release_uri_keeps_locked(&mut self) -> io::Result<()> {
+        let mut release_error = None;
+        for path in self.uri_keep_paths.drain(..) {
+            if let Err(error) = fs::remove_file(&path)
+                && error.kind() != io::ErrorKind::NotFound
+            {
+                release_error.get_or_insert(error);
+            }
+        }
+        match release_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn release_owned_on_drop(&mut self) {
+        for receipt in self.receipts.drain(..) {
+            if let Err(error) = receipt.release() {
+                eprintln!("warning: could not remove temporary pack keep: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for PackReceiveResult {
+    fn drop(&mut self) {
+        self.release_owned_on_drop();
+    }
+}
+
+#[cfg(test)]
+mod checkout_hydration_tests {
+    use super::*;
+    use zmin_git_core::{GitObjectSink, InMemoryObjectStore};
+
+    fn commit_bytes(tree_id: &ObjectId) -> Vec<u8> {
+        format!(
+            "tree {}\nauthor Test <test@example.com> 0 +0000\ncommitter Test <test@example.com> 0 +0000\n\ncheckout\n",
+            tree_id.to_hex()
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn checkout_batch_deduplicates_missing_blobs_and_skips_gitlinks_dual_hash() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let store = InMemoryObjectStore::new(algorithm);
+            let present_blob = store
+                .write_object(GitObjectKind::Blob, b"present")
+                .expect("present blob");
+            let missing_blob = ObjectId::new(algorithm, &[0x11; 32][..algorithm.digest_len()]);
+            let gitlink = ObjectId::new(algorithm, &[0x22; 32][..algorithm.digest_len()]);
+            let nested_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[
+                        TreeEntry::new(TreeMode::File, b"missing-nested", missing_blob.clone())
+                            .expect("nested missing entry"),
+                        TreeEntry::new(TreeMode::Gitlink, b"submodule", gitlink)
+                            .expect("gitlink entry"),
+                    ])
+                    .expect("nested tree"),
+                )
+                .expect("nested tree object");
+            let root_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[
+                        TreeEntry::new(TreeMode::File, b"present", present_blob)
+                            .expect("present entry"),
+                        TreeEntry::new(TreeMode::File, b"missing-a", missing_blob.clone())
+                            .expect("missing entry a"),
+                        TreeEntry::new(TreeMode::File, b"missing-b", missing_blob.clone())
+                            .expect("missing entry b"),
+                        TreeEntry::new(TreeMode::Tree, b"nested", nested_tree)
+                            .expect("nested entry"),
+                    ])
+                    .expect("root tree"),
+                )
+                .expect("root tree object");
+            let head = store
+                .write_object(GitObjectKind::Commit, &commit_bytes(&root_tree))
+                .expect("commit");
+
+            let batch = CheckoutMissingObjectBatch::collect(&store, &head).expect("collect");
+            assert_eq!(batch.blob_ids(), &[missing_blob]);
+        }
+    }
+
+    #[test]
+    fn checkout_batch_reports_missing_tree_dual_hash() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let store = InMemoryObjectStore::new(algorithm);
+            let missing_tree = ObjectId::new(algorithm, &[0x33; 32][..algorithm.digest_len()]);
+            let root_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[TreeEntry::new(
+                        TreeMode::Tree,
+                        b"missing",
+                        missing_tree.clone(),
+                    )
+                    .expect("missing tree entry")])
+                    .expect("root tree"),
+                )
+                .expect("root tree object");
+            let head = store
+                .write_object(GitObjectKind::Commit, &commit_bytes(&root_tree))
+                .expect("commit");
+
+            let error = CheckoutMissingObjectBatch::collect(&store, &head)
+                .expect_err("missing tree must fail closed");
+            assert_eq!(error.kind(), io::ErrorKind::NotFound);
+            assert!(error.to_string().contains("missing tree object"));
+            assert!(error.to_string().contains(&missing_tree.to_hex()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod pack_keep_tests {
+    use super::*;
+    use zmin_git_core::{GitObjectSink, InMemoryObjectStore};
+
+    fn set_owned_pack_keep_lock_acquire_failure_for_tests(fail: bool) {
+        FAIL_OWNED_PACK_KEEP_LOCK_ACQUIRE.with(|value| value.set(fail));
+    }
+
+    #[test]
+    fn owned_pack_keep_lifecycle_is_create_only_for_sha1_and_sha256() {
+        for (algorithm, hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "0123456789012345678901234567890123456789",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "0123456789012345678901234567890123456789012345678901234567890123",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let pack_dir = temp.path().join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let id = ObjectId::from_hex(algorithm, hex).expect("pack id");
+            let keep_path = pack_file_path(&pack_dir, &id, ".keep");
+            let owned = OwnedPackKeep::create(&pack_dir, &id)
+                .expect("create keep")
+                .expect("new keep is owned");
+            let body = fs::read(&keep_path).expect("keep body");
+            let body = String::from_utf8(body).expect("keep utf8");
+            assert!(body.starts_with("fetch-pack "));
+            assert!(body.ends_with("\n"));
+            owned.release().expect("release owned keep");
+            assert!(!keep_path.exists());
+
+            fs::write(&keep_path, b"pre-existing sentinel\n").expect("sentinel");
+            assert!(
+                OwnedPackKeep::create(&pack_dir, &id)
+                    .expect("existing keep probe")
+                    .is_none()
+            );
+            assert_eq!(
+                fs::read(&keep_path).expect("sentinel body"),
+                b"pre-existing sentinel\n"
+            );
+        }
+    }
+
+    #[test]
+    fn owned_pack_keep_failed_release_retains_keep_until_normal_cleanup() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        fs::create_dir_all(&pack_dir).expect("pack dir");
+        let id = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "0123456789012345678901234567890123456789",
+        )
+        .expect("pack id");
+        let keep_path = pack_file_path(&pack_dir, &id, ".keep");
+        let owned = {
+            let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("pack lock");
+            OwnedPackKeep::create_locked(&pack_dir, &id)
+                .expect("keep create")
+                .expect("keep ownership")
+        };
+        let mut receive = PackReceiveResult::default();
+        receive.record(Some(owned));
+
+        set_owned_pack_keep_lock_acquire_failure_for_tests(true);
+        receive.release_owned();
+        set_owned_pack_keep_lock_acquire_failure_for_tests(false);
+
+        assert!(
+            keep_path.exists(),
+            "failed release must retain the owned keep"
+        );
+
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("cleanup lock");
+        fs::remove_file(&keep_path).expect("remove retained keep");
+        drop(_pack_lock);
+
+        let owned = OwnedPackKeep::create(&pack_dir, &id)
+            .expect("normal keep create")
+            .expect("normal keep ownership");
+        owned.release().expect("normal keep release");
+        assert!(!keep_path.exists(), "normal cleanup must remove the keep");
+    }
+
+    #[test]
+    fn loose_receive_has_no_pack_keep_receipt() {
+        let receive = PackReceiveResult::default();
+        assert!(receive.receipts.is_empty());
+    }
+
+    #[test]
+    fn index_pack_keep_message_matches_git_bytes() {
+        assert_eq!(pack_keep_message_content(""), b"");
+        assert_eq!(
+            pack_keep_message_content("custom-message"),
+            b"custom-message\n"
+        );
+    }
+
+    #[test]
+    fn filtered_promisor_marker_content_is_sorted_and_dual_hash() {
+        for (algorithm, old_hex, zero_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "1111111111111111111111111111111111111111",
+                "0000000000000000000000000000000000000000",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        ] {
+            let old_id = ObjectId::from_hex(algorithm, old_hex).expect("old id");
+            let content = render_promisor_marker_content(
+                vec![
+                    PromisorMarkerRef {
+                        source_ref: "refs/heads/z".to_owned(),
+                        old_id: Some(old_id),
+                    },
+                    PromisorMarkerRef {
+                        source_ref: "refs/heads/a".to_owned(),
+                        old_id: None,
+                    },
+                ],
+                algorithm,
+            );
+            assert_eq!(
+                content,
+                format!("{zero_hex} refs/heads/a\n{old_hex} refs/heads/z\n").into_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_local_promisor_marker_deduplicates_tag_refspecs_dual_hash() {
+        for (algorithm, new_hex, first_old_hex, second_old_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "1111111111111111111111111111111111111111",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+        ] {
+            let source = tempfile::tempdir().expect("source tempdir");
+            let destination = tempfile::tempdir().expect("destination tempdir");
+            let source_git_dir = source.path().join(".git");
+            let destination_git_dir = destination.path().join(".git");
+            fs::create_dir_all(&source_git_dir).expect("source git dir");
+            fs::create_dir_all(&destination_git_dir).expect("destination git dir");
+            let source_refs = RefStore::new(&source_git_dir, algorithm);
+            let destination_refs = RefStore::new(&destination_git_dir, algorithm);
+            let new_id = ObjectId::from_hex(algorithm, new_hex).expect("new id");
+            let first_old_id = ObjectId::from_hex(algorithm, first_old_hex).expect("first old id");
+            let second_old_id =
+                ObjectId::from_hex(algorithm, second_old_hex).expect("second old id");
+            source_refs
+                .write_ref("refs/tags/v1", &new_id)
+                .expect("source tag");
+            destination_refs
+                .write_ref("refs/remotes/origin/v1", &first_old_id)
+                .expect("first destination tag");
+            destination_refs
+                .write_ref("refs/tags/v1", &second_old_id)
+                .expect("second destination tag");
+
+            let explicit_tag_content = local_filtered_promisor_marker_content(
+                &source_refs,
+                &destination_refs,
+                &["+refs/tags/*:refs/tags/*".to_owned()],
+            )
+            .expect("explicit tag marker content");
+            assert_eq!(
+                explicit_tag_content,
+                format!("{second_old_hex} refs/tags/v1\n").into_bytes()
+            );
+
+            let overlapping_content = local_filtered_promisor_marker_content(
+                &source_refs,
+                &destination_refs,
+                &[
+                    "+refs/tags/*:refs/remotes/origin/*".to_owned(),
+                    "+refs/tags/*:refs/tags/*".to_owned(),
+                ],
+            )
+            .expect("overlapping marker content");
+            assert_eq!(
+                overlapping_content,
+                format!("{first_old_hex} refs/tags/v1\n").into_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_network_promisor_marker_uses_destination_old_ids() {
+        for (algorithm, _old_a_hex, old_z_hex, old_tag_hex, new_a_hex, new_z_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cccccccccccccccccccccccccccccccccccccccc",
+                "1111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let git_dir = temp.path().join(".git");
+            fs::create_dir_all(&git_dir).expect("git dir");
+            let refs = OwnedCliRefsStoreAdapter::from_path(&git_dir, algorithm);
+            let old_z = ObjectId::from_hex(algorithm, old_z_hex).expect("old z");
+            let old_tag = ObjectId::from_hex(algorithm, old_tag_hex).expect("old tag");
+            refs.write_ref("refs/remotes/origin/z", &old_z)
+                .expect("old z ref");
+            refs.write_ref("refs/tags/v1", &old_tag)
+                .expect("old tag ref");
+            let rows = vec![
+                LsRemoteRow {
+                    id: ObjectId::from_hex(algorithm, new_z_hex).expect("new z"),
+                    name: "refs/heads/z".to_owned(),
+                },
+                LsRemoteRow {
+                    id: ObjectId::from_hex(algorithm, new_a_hex).expect("new a"),
+                    name: "refs/heads/a".to_owned(),
+                },
+                LsRemoteRow {
+                    id: old_tag.clone(),
+                    name: "refs/tags/v1^{}".to_owned(),
+                },
+                LsRemoteRow {
+                    id: old_tag,
+                    name: "refs/tags/v1".to_owned(),
+                },
+            ];
+            let content = filtered_network_promisor_marker_content(&refs, "origin", &rows, None)
+                .expect("marker content");
+            assert_eq!(
+                content,
+                format!(
+                    "{zero} refs/heads/a\n{old_z_hex} refs/heads/z\n{old_tag_hex} refs/tags/v1\n",
+                    zero = "0".repeat(algorithm.digest_len() * 2),
+                )
+                .into_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_promisor_marker_preserves_unrelated_marker_bytes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        fs::create_dir_all(&pack_dir).expect("pack dir");
+        let installed = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "0123456789012345678901234567890123456789",
+        )
+        .expect("installed id");
+        let unrelated = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )
+        .expect("unrelated id");
+        let unrelated_marker = pack_file_path(&pack_dir, &unrelated, ".promisor");
+        fs::write(&unrelated_marker, b"unrelated sentinel\n").expect("unrelated marker");
+        let owned_keep = {
+            let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("pack lock");
+            OwnedPackKeep::create_locked(&pack_dir, &installed)
+                .expect("keep create")
+                .expect("keep ownership")
+        };
+        let mut receive = PackReceiveResult::default();
+        receive.record_installed(&pack_dir, installed.clone());
+        receive.record(Some(owned_keep));
+        receive
+            .publish_promisor_markers_and_release_owned(b"old refs/heads/main\n")
+            .expect("publish marker");
+        assert_eq!(
+            fs::read(pack_file_path(&pack_dir, &installed, ".promisor")).expect("installed"),
+            b"old refs/heads/main\n"
+        );
+        assert_eq!(
+            fs::read(unrelated_marker).expect("unrelated"),
+            b"unrelated sentinel\n"
+        );
+    }
+
+    #[test]
+    fn install_temp_pack_file_checks_existing_sha1_and_sha256_packs() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let store = zmin_git_core::InMemoryObjectStore::new(algorithm);
+            let object_id = store
+                .write_object(GitObjectKind::Blob, b"existing collision pack")
+                .expect("object");
+            let mut pack = Vec::new();
+            write_pack_from_store_with_options(
+                &store,
+                algorithm,
+                &[object_id],
+                PackEncodeOptions::UNDELTIFIED,
+                &mut pack,
+            )
+            .expect("pack");
+            let indexed = index_pack_bytes(algorithm, &pack).expect("index");
+            let existing = temp.path().join("existing.pack");
+            let incoming = temp.path().join("incoming.pack");
+            fs::write(&existing, &pack).expect("existing pack");
+            fs::write(&incoming, &pack).expect("incoming pack");
+
+            install_temp_pack_file(&existing, &incoming, &indexed.pack_id)
+                .expect("same pack is idempotent");
+            assert!(!incoming.exists());
+
+            let mut wrong_bytes = indexed.pack_id.as_bytes().to_vec();
+            wrong_bytes[0] ^= 1;
+            let wrong_id = ObjectId::new(algorithm, &wrong_bytes);
+            fs::write(&incoming, &pack).expect("incoming collision pack");
+            let result = install_temp_pack_file(&existing, &incoming, &wrong_id);
+            assert!(matches!(
+                result,
+                Err(CliError::Io(error)) if error.kind() == io::ErrorKind::AlreadyExists
+            ));
+        }
+    }
+
+    #[test]
+    fn indexed_pack_publication_reuses_precomputed_reverse_index() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let objects_dir = temp.path().join("objects");
+            let pack_dir = objects_dir.join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let store = zmin_git_core::InMemoryObjectStore::new(algorithm);
+            let object_id = store
+                .write_object(GitObjectKind::Blob, b"reverse-index publication")
+                .expect("object");
+            let mut pack = Vec::new();
+            write_pack_from_store_with_options(
+                &store,
+                algorithm,
+                std::slice::from_ref(&object_id),
+                PackEncodeOptions::UNDELTIFIED,
+                &mut pack,
+            )
+            .expect("pack");
+            let expected = index_pack_bytes(algorithm, &pack).expect("indexed pack");
+            let hash = SmartTransportHash::for_algorithm(algorithm);
+            let installed_pack = pack_file_path(&pack_dir, &expected.pack_id, ".pack");
+            let reverse_path = pack_file_path(&pack_dir, &expected.pack_id, ".rev");
+
+            for attempt in 0..2 {
+                let incoming = temp.path().join(format!("incoming-{attempt}.pack"));
+                fs::write(&incoming, &pack).expect("incoming pack");
+                let mut receive = PackReceiveResult::default();
+                let pack_id = write_indexed_pack_file_with_hash(
+                    &objects_dir,
+                    &incoming,
+                    false,
+                    hash,
+                    &mut receive,
+                    PackKeepPolicy::None,
+                )
+                .expect("publish indexed pack");
+                assert_eq!(pack_id, expected.pack_id);
+                assert!(installed_pack.is_file());
+                assert_eq!(
+                    fs::read(&reverse_path).expect("reverse index"),
+                    expected.reverse_index
+                );
+                zmin_git_core::pack::validate_pack_reverse_index_file(
+                    algorithm,
+                    &reverse_path,
+                    expected.objects,
+                )
+                .expect("valid reverse index");
+            }
+        }
+    }
+
+    #[test]
+    fn promisor_receipt_uses_only_exact_installed_pack_ids() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        fs::create_dir_all(&pack_dir).expect("pack dir");
+        let installed = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "0123456789012345678901234567890123456789",
+        )
+        .expect("installed id");
+        let unrelated = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )
+        .expect("unrelated id");
+        let mut receive = PackReceiveResult::default();
+        receive.record_installed(&pack_dir, installed.clone());
+        let owned_keep = {
+            let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("pack lock");
+            OwnedPackKeep::create_locked(&pack_dir, &installed)
+                .expect("keep create")
+                .expect("keep ownership")
+        };
+        receive.record(Some(owned_keep));
+        receive
+            .publish_promisor_markers_and_release_owned(b"")
+            .expect("marker and release");
+        assert!(pack_file_path(&pack_dir, &installed, ".promisor").is_file());
+        assert!(!pack_file_path(&pack_dir, &unrelated, ".promisor").exists());
+        assert!(!pack_file_path(&pack_dir, &installed, ".keep").exists());
+    }
+
+    #[test]
+    fn promisor_receipt_marker_release_is_dual_hash() {
+        for (algorithm, hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "0123456789012345678901234567890123456789",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "0123456789012345678901234567890123456789012345678901234567890123",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let pack_dir = temp.path().join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let installed = ObjectId::from_hex(algorithm, hex).expect("installed id");
+            let keep = {
+                let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("pack lock");
+                OwnedPackKeep::create_locked(&pack_dir, &installed)
+                    .expect("keep create")
+                    .expect("keep ownership")
+            };
+            let keep_path = pack_file_path(&pack_dir, &installed, ".keep");
+            let marker_path = pack_file_path(&pack_dir, &installed, ".promisor");
+            let mut receive = PackReceiveResult::default();
+            receive.record_installed(&pack_dir, installed);
+            receive.record(Some(keep));
+            assert!(keep_path.exists());
+            receive
+                .publish_promisor_markers_and_release_owned(b"")
+                .expect("marker and release");
+            assert!(marker_path.is_file());
+            assert!(!keep_path.exists());
+        }
+    }
+
+    #[test]
+    fn pack_receive_error_cleanup_waits_for_pack_lock() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let pack_dir = temp.path().join("pack");
+        let other_pack_dir = temp.path().join("other-pack");
+        fs::create_dir_all(&pack_dir).expect("pack dir");
+        fs::create_dir_all(&other_pack_dir).expect("other pack dir");
+        let installed = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "0123456789012345678901234567890123456789",
+        )
+        .expect("installed id");
+        let unrelated = ObjectId::from_hex(
+            GitHashAlgorithm::Sha1,
+            "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )
+        .expect("unrelated id");
+        let owned_keep = {
+            let _pack_lock = PackOperationLock::acquire(&pack_dir).expect("pack lock");
+            OwnedPackKeep::create_locked(&pack_dir, &installed)
+                .expect("keep create")
+                .expect("keep ownership")
+        };
+        let keep_path = pack_file_path(&pack_dir, &installed, ".keep");
+        let other_owned_keep = {
+            let _pack_lock = PackOperationLock::acquire(&other_pack_dir).expect("other pack lock");
+            OwnedPackKeep::create_locked(&other_pack_dir, &unrelated)
+                .expect("other keep create")
+                .expect("other keep ownership")
+        };
+        let other_keep_path = pack_file_path(&other_pack_dir, &unrelated, ".keep");
+        let mut receive = PackReceiveResult::default();
+        receive.record_installed(&pack_dir, installed.clone());
+        receive.record_installed(&other_pack_dir, unrelated.clone());
+        receive.record(Some(owned_keep));
+        receive.record(Some(other_owned_keep));
+        let error = receive
+            .publish_promisor_markers_and_release_owned(b"")
+            .expect_err("mixed object stores must fail");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!pack_file_path(&pack_dir, &installed, ".promisor").exists());
+        assert!(!pack_file_path(&pack_dir, &unrelated, ".promisor").exists());
+
+        let held_lock = PackOperationLock::acquire(&pack_dir).expect("held pack lock");
+        let held_other_lock =
+            PackOperationLock::acquire(&other_pack_dir).expect("held other pack lock");
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let drop_thread = std::thread::spawn(move || {
+            drop(receive);
+            done_tx.send(()).expect("drop completion");
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "error cleanup must wait for the pack lock"
+        );
+        assert!(keep_path.exists(), "locked cleanup must not remove early");
+        assert!(
+            other_keep_path.exists(),
+            "cleanup for another object store must also wait for its lock"
+        );
+        drop(held_lock);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "cleanup must wait for every object-store lock"
+        );
+        assert!(!keep_path.exists(), "first locked keep should be released");
+        assert!(other_keep_path.exists(), "second locked keep must remain");
+        drop(held_other_lock);
+        drop_thread.join().expect("drop thread");
+        assert!(
+            !keep_path.exists(),
+            "error cleanup must remove the owned keep"
+        );
+        assert!(
+            !other_keep_path.exists(),
+            "error cleanup must remove the other owned keep"
+        );
+    }
+}
+
+fn pack_keep_host_name() -> io::Result<String> {
+    #[cfg(unix)]
+    {
+        let mut uts = std::mem::MaybeUninit::<libc::utsname>::uninit();
+        let rc = unsafe { libc::uname(uts.as_mut_ptr()) };
+        if rc == 0 {
+            let uts = unsafe { uts.assume_init() };
+            let host = unsafe { std::ffi::CStr::from_ptr(uts.nodename.as_ptr()) }
+                .to_string_lossy()
+                .trim()
+                .to_owned();
+            if !host.is_empty() {
+                return Ok(host);
+            }
+        }
+    }
+    #[cfg(windows)]
+    if let Ok(host) = std::env::var("COMPUTERNAME")
+        && !host.trim().is_empty()
+    {
+        return Ok(host.trim().to_owned());
+    }
+    Ok("localhost".to_owned())
+}
+
+struct OwnedHttpTempPack {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl OwnedHttpTempPack {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn cleanup(mut self) -> io::Result<()> {
+        match fs::remove_file(&self.path) {
+            Ok(()) => {
+                self.armed = false;
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.armed = false;
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl Drop for OwnedHttpTempPack {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn temp_http_pack_file(objects_dir: &std::path::Path) -> Result<(PathBuf, fs::File)> {
@@ -1905,7 +4958,7 @@ fn temp_http_pack_file(objects_dir: &std::path::Path) -> Result<(PathBuf, fs::Fi
 }
 
 fn loose_object_path(objects_dir: &std::path::Path, hex: &str) -> Result<PathBuf> {
-    if hex.len() != 40 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if !matches!(hex.len(), 40 | 64) || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(CliError::Fatal {
             code: 128,
             message: format!("invalid object id: {hex}"),
@@ -1927,12 +4980,27 @@ pub(crate) struct ParsedHttpUrl {
     client_cert_file: Option<PathBuf>,
     client_key_file: Option<PathBuf>,
     proxy: Option<String>,
+    follow_redirects: HttpFollowRedirects,
+    http_version: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HttpScheme {
     Http,
     Https,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HttpFollowRedirects {
+    All,
+    None,
+    Initial,
+}
+
+impl Default for HttpFollowRedirects {
+    fn default() -> Self {
+        Self::Initial
+    }
 }
 
 impl HttpScheme {
@@ -1953,6 +5021,8 @@ struct HttpUrlConfig {
     client_cert_file: Option<PathBuf>,
     client_key_file: Option<PathBuf>,
     proxy: Option<String>,
+    follow_redirects: HttpFollowRedirects,
+    http_version: Option<&'static str>,
 }
 
 #[derive(Debug, Default)]
@@ -2053,6 +5123,8 @@ impl ParsedHttpUrl {
             client_cert_file: None,
             client_key_file: None,
             proxy: None,
+            follow_redirects: HttpFollowRedirects::default(),
+            http_version: None,
         })
     }
 
@@ -2066,6 +5138,8 @@ impl ParsedHttpUrl {
         self.client_cert_file = config.client_cert_file;
         self.client_key_file = config.client_key_file;
         self.proxy = config.proxy;
+        self.follow_redirects = config.follow_redirects;
+        self.http_version = config.http_version;
         self
     }
 
@@ -2200,6 +5274,8 @@ fn http_config_for_url(repo: Option<&GitRepo>, url: &ParsedHttpUrl) -> Result<Ht
     let mut client_cert_file = None;
     let mut client_key_file = None;
     let mut proxy = None;
+    let mut follow_redirects = HttpFollowRedirects::default();
+    let mut http_version = None;
     let mut credential_config = HttpCredentialConfig {
         helpers: Vec::with_capacity(HTTP_CREDENTIAL_HELPER_CAPACITY_HINT),
         username: None,
@@ -2240,6 +5316,10 @@ fn http_config_for_url(repo: Option<&GitRepo>, url: &ParsedHttpUrl) -> Result<Ht
                 client_key_file = http_config_path_value(&entry.value);
             } else if entry.key == "proxy" {
                 proxy = http_config_string_value(&entry.value);
+            } else if entry.key == "followredirects" {
+                follow_redirects = parse_http_follow_redirects(entry)?;
+            } else if entry.key == "version" {
+                http_version = parse_http_version_config(entry)?;
             }
         }
         credential_config = http_credential_config_for_url(&entries, url);
@@ -2261,7 +5341,50 @@ fn http_config_for_url(repo: Option<&GitRepo>, url: &ParsedHttpUrl) -> Result<Ht
         client_cert_file,
         client_key_file,
         proxy,
+        follow_redirects,
+        http_version,
     })
+}
+
+fn parse_http_follow_redirects(entry: &ConfigEntry) -> Result<HttpFollowRedirects> {
+    let value = entry.value.trim();
+    if value.eq_ignore_ascii_case("initial") {
+        return Ok(HttpFollowRedirects::Initial);
+    }
+    let Some(value) = entry.bool_value() else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "invalid http.followRedirects value '{}' from {}",
+                entry.value, entry.origin
+            ),
+        });
+    };
+    Ok(if value {
+        HttpFollowRedirects::All
+    } else {
+        HttpFollowRedirects::None
+    })
+}
+
+fn parse_http_version_config(entry: &ConfigEntry) -> Result<Option<&'static str>> {
+    let value = entry.value.trim().to_ascii_lowercase();
+    let version = match value.as_str() {
+        "" | "auto" => None,
+        "http/1.1" | "http1" | "http1.1" | "1" | "1.1" => Some("http1"),
+        "http/2" | "http2" | "h2" | "2" => Some("http2"),
+        "http/3" | "http3" | "h3" | "3" => Some("http3"),
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "unsupported http.version '{}' from {}; expected auto, HTTP/1.1, HTTP/2, or HTTP/3",
+                    entry.value, entry.origin
+                ),
+            });
+        }
+    };
+    Ok(version)
 }
 
 fn http_config_path_value(value: &str) -> Option<PathBuf> {
@@ -3056,6 +6179,8 @@ impl ParsedHttpUrl {
         self.client_cert_file = previous.client_cert_file.clone();
         self.client_key_file = previous.client_key_file.clone();
         self.proxy = previous.proxy.clone();
+        self.follow_redirects = previous.follow_redirects;
+        self.http_version = previous.http_version;
         self
     }
 }
@@ -3065,12 +6190,12 @@ fn http_extra_header_is_credential(header: &str) -> bool {
         return false;
     };
     let name = name.trim();
-    name.eq_ignore_ascii_case("authorization") || name.eq_ignore_ascii_case("proxy-authorization")
+    name.eq_ignore_ascii_case("authorization") || name.eq_ignore_ascii_case("cookie")
 }
 
 pub(crate) struct RemoteHttpHelperSession {
     child: std::process::Child,
-    stdin: io::BufWriter<std::process::ChildStdin>,
+    stdin: Option<io::BufWriter<std::process::ChildStdin>>,
     stdout: io::BufReader<std::process::ChildStdout>,
     line: String,
     request_frame: Vec<u8>,
@@ -3236,12 +6361,47 @@ impl RemoteHttpHelperSession {
         Self::spawn(&parsed_url)
     }
 
+    fn spawn_for_bundle(url: &ParsedHttpUrl) -> Result<Self> {
+        Self::spawn_with_options(url, Some(BUNDLE_HTTP_MAX_BYTES), Some(BUNDLE_HTTP_TIMEOUT))
+    }
+
     fn spawn(url: &ParsedHttpUrl) -> Result<Self> {
+        Self::spawn_with_options(url, None, None)
+    }
+
+    fn spawn_with_options(
+        url: &ParsedHttpUrl,
+        max_response_bytes: Option<u64>,
+        request_timeout: Option<Duration>,
+    ) -> Result<Self> {
         let helper = remote_http_helper_path()?;
         let mut command = ProcessCommand::new(helper);
         command.arg("--batch");
-        if let Some(version) = remote_http_helper_version_arg_for_url(url.scheme, Some(url))? {
+        let configured_version = remote_http_helper_version_arg_for_url(url.scheme, Some(url))?;
+        if (max_response_bytes.is_some() || request_timeout.is_some())
+            && configured_version == Some("http3")
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "HTTP bundle download cannot enforce its response limit and timeout with configured HTTP/3; falling back to origin".into(),
+            });
+        }
+        if max_response_bytes.is_some() || request_timeout.is_some() {
+            command
+                .arg("--http-version")
+                .arg(configured_version.unwrap_or("http1"));
+        } else if let Some(version) = configured_version {
             command.arg("--http-version").arg(version);
+        }
+        if let Some(max_response_bytes) = max_response_bytes {
+            command
+                .arg("--max-response-bytes")
+                .arg(max_response_bytes.to_string());
+        }
+        if let Some(request_timeout) = request_timeout {
+            command
+                .arg("--request-timeout-ms")
+                .arg(request_timeout.as_millis().to_string());
         }
         if let Some(ca_file) = remote_http_helper_ca_file_arg_for_url(url)? {
             command.arg("--ca-file").arg(ca_file);
@@ -3273,7 +6433,10 @@ impl RemoteHttpHelperSession {
         })?;
         Ok(Self {
             child,
-            stdin: io::BufWriter::with_capacity(HTTP_HELPER_PIPE_BUF_CAPACITY, stdin),
+            stdin: Some(io::BufWriter::with_capacity(
+                HTTP_HELPER_PIPE_BUF_CAPACITY,
+                stdin,
+            )),
             stdout: io::BufReader::with_capacity(HTTP_HELPER_PIPE_BUF_CAPACITY, stdout),
             line: String::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT),
             request_frame: Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT),
@@ -3365,6 +6528,95 @@ impl RemoteHttpHelperSession {
         Ok(head)
     }
 
+    fn request_to_file_redirects(
+        &mut self,
+        url: &ParsedHttpUrl,
+        method: &str,
+        suffix: &str,
+        first_body: &[u8],
+        second_body: &PackBody,
+        output_file: &Path,
+    ) -> Result<HttpResponseHead> {
+        self.request_to_file_redirects_at(
+            url,
+            method,
+            suffix,
+            first_body,
+            second_body,
+            output_file,
+            0,
+        )
+    }
+
+    fn request_to_file_redirects_at(
+        &mut self,
+        url: &ParsedHttpUrl,
+        method: &str,
+        suffix: &str,
+        first_body: &[u8],
+        second_body: &PackBody,
+        output_file: &Path,
+        redirect_count: usize,
+    ) -> Result<HttpResponseHead> {
+        if redirect_count > HTTP_REDIRECT_LIMIT {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "HTTP redirect limit exceeded".into(),
+            });
+        }
+        self.write_request(
+            url,
+            method,
+            suffix,
+            first_body,
+            second_body,
+            Some(output_file),
+        )?;
+        let response = self.read_response(Some(output_file))?;
+        let head = HttpResponseHead {
+            status_code: response.status_code,
+            status_line: response.status_line,
+            chunked: false,
+            content_length: Some(response.body_len),
+            location: response.location,
+        };
+        let follows_redirect = match url.follow_redirects {
+            HttpFollowRedirects::All => true,
+            HttpFollowRedirects::Initial => redirect_count == 0,
+            HttpFollowRedirects::None => false,
+        };
+        if is_http_redirect_status(head.status_code) && follows_redirect {
+            let Some(location) = head.location.as_deref() else {
+                let _ = fs::remove_file(output_file);
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "HTTP redirect missing Location header: {}",
+                        head.status_line
+                    ),
+                });
+            };
+            let target = http_redirect_target_url(url, suffix, location)?;
+            let _ = fs::remove_file(output_file);
+            return self.request_to_file_redirects_at(
+                &target,
+                method,
+                "",
+                first_body,
+                second_body,
+                output_file,
+                redirect_count + 1,
+            );
+        }
+        if response.body.is_inline() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "HTTP helper returned an inline body for a file response".into(),
+            });
+        }
+        Ok(head)
+    }
+
     fn write_request(
         &mut self,
         url: &ParsedHttpUrl,
@@ -3383,11 +6635,15 @@ impl RemoteHttpHelperSession {
             second_body,
             output_file,
         )?;
-        self.stdin.write_all(&self.request_frame)?;
+        let stdin = self.stdin.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "HTTP helper request stream is closed".into(),
+        })?;
+        stdin.write_all(&self.request_frame)?;
         if write_first_body {
-            self.stdin.write_all(first_body)?;
+            stdin.write_all(first_body)?;
         }
-        self.stdin.flush()?;
+        stdin.flush()?;
         Ok(())
     }
 
@@ -3642,8 +6898,11 @@ fn parse_helper_status_code(status: &str) -> Result<u16> {
 
 impl Drop for RemoteHttpHelperSession {
     fn drop(&mut self) {
-        let _ = writeln!(self.stdin, "DONE");
-        let _ = self.stdin.flush();
+        // Closing stdin is the helper's normal end-of-batch signal. Do not
+        // race a child that has already rejected a response by writing a
+        // final DONE frame: a SIGPIPE here would terminate the caller before
+        // it can fall back to the origin.
+        let _ = self.stdin.take();
         let _ = self.child.wait();
     }
 }
@@ -3796,6 +7055,9 @@ fn remote_http_helper_version_arg_for_url(
     scheme: HttpScheme,
     url: Option<&ParsedHttpUrl>,
 ) -> Result<Option<&'static str>> {
+    if let Some(configured) = url.and_then(|url| url.http_version) {
+        return Ok(Some(configured));
+    }
     let Ok(raw) = std::env::var("ZMIN_GIT_HTTP_VERSION") else {
         if should_force_http1_for_auto(scheme, url) {
             return Ok(Some("http1"));
@@ -4327,43 +7589,107 @@ fn write_upload_pack_advertisement_for_repo<W: Write>(
     out: &mut W,
     include_no_done: bool,
 ) -> Result<()> {
+    write_upload_pack_advertisement_for_repo_with_hash(
+        repo,
+        refs,
+        out,
+        include_no_done,
+        SmartTransportHash::sha1(),
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn write_upload_pack_advertisement_for_repo_with_hash<W: Write>(
+    repo: &GitRepo,
+    refs: &OwnedCliRefsStoreAdapter,
+    out: &mut W,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    write_upload_pack_advertisement_for_repo_with_hash_and_server_policy(
+        repo,
+        refs,
+        out,
+        include_no_done,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn write_upload_pack_advertisement_for_repo_with_hash_and_server_policy<W: Write>(
+    repo: &GitRepo,
+    refs: &OwnedCliRefsStoreAdapter,
+    out: &mut W,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
     let common_dir = read_common_git_dir(&repo.git_dir)?;
     if common_dir == repo.git_dir {
-        return write_upload_pack_advertisement_from_adapter(&refs, out, include_no_done);
+        return write_upload_pack_advertisement_from_hash_and_policy(
+            refs,
+            out,
+            include_no_done,
+            hash,
+            server_policy.filter,
+        );
     }
 
-    let common_refs = refs_adapter_from_git_dir(&common_dir);
-    let store = object_adapter_from_objects_dir(common_refs.objects_dir());
-    let capabilities = upload_pack_capabilities_from_adapter(&refs, include_no_done)?;
+    let common_refs = refs_adapter_from_git_dir_with_hash(&common_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(common_refs.objects_dir(), hash);
+    let capabilities = upload_pack_capabilities_from_hash_and_policy(
+        refs,
+        include_no_done,
+        hash,
+        server_policy.filter,
+    )?;
     let mut wrote = false;
     if let Some(head) = refs.resolve_ref("HEAD")? {
-        write_ref_advertisement_pkt_line(out, Some(&head), "HEAD", Some(&capabilities))?;
+        write_ref_advertisement_pkt_line_with_hash(
+            out,
+            Some(&head),
+            "HEAD",
+            Some(&capabilities),
+            hash,
+        )?;
         wrote = true;
     }
     common_refs.for_each_server_info_ref(|id, name| {
-        write_upload_pack_ref_advertisement(
+        if name.ends_with("^{}") {
+            return Ok::<(), CliError>(());
+        }
+        write_upload_pack_ref_advertisement_with_hash(
             out,
             &store,
             id,
             name,
             (!wrote).then_some(capabilities.as_str()),
+            hash,
         )?;
         wrote = true;
         Ok::<(), CliError>(())
     })?;
     if !wrote {
-        write_ref_advertisement_pkt_line(out, None, "capabilities^{}", Some(&capabilities))?;
+        write_ref_advertisement_pkt_line_with_hash(
+            out,
+            None,
+            "capabilities^{}",
+            Some(&capabilities),
+            hash,
+        )?;
     }
     out.write_all(b"0000")?;
     Ok(())
 }
 
 pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
+    let numeric_options = parse_daemon_numeric_options(&options)?;
     let _ = (
         options.syslog,
-        options.timeout,
-        options.init_timeout,
-        options.max_connections,
+        numeric_options.timeout,
+        numeric_options.init_timeout,
+        numeric_options.max_connections,
         options.strict_paths,
         options.base_path_relaxed,
         options.reuseaddr,
@@ -4374,8 +7700,6 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
         &options.disable,
         &options.allow_override,
         &options.forbid_override,
-        options.informative_errors,
-        options.no_informative_errors,
         options.log_destination.as_deref(),
         options.interpolated_path.as_deref(),
         options.user_path,
@@ -4395,7 +7719,7 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
     if options.inetd {
         let mut input = io::stdin().lock();
         let mut output = io::stdout();
-        return daemon_serve_connection(&options, &mut input, &mut output);
+        return daemon_serve_connection(&options, &mut input, &mut output, None);
     }
 
     let host = options
@@ -4408,10 +7732,14 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
     if let Some(path) = options.pid_file.as_deref() {
         fs::write(path, std::process::id().to_string())?;
     }
+    if options.verbose {
+        eprintln!("[{}] Ready to rumble", std::process::id());
+    }
     for stream in listener.incoming() {
         let mut stream = stream.map_err(CliError::Io)?;
         let mut reader = daemon_transport_reader(stream.try_clone().map_err(CliError::Io)?);
-        if let Err(err) = daemon_serve_connection(&options, &mut reader, &mut stream)
+        let socket = stream.try_clone().map_err(CliError::Io)?;
+        if let Err(err) = daemon_serve_connection(&options, &mut reader, &mut stream, Some(socket))
             && options.verbose
         {
             eprintln!("daemon: {err:?}");
@@ -4420,60 +7748,274 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
     Ok(())
 }
 
+fn parse_daemon_numeric_options(options: &DaemonOptions) -> Result<ParsedDaemonNumericOptions> {
+    let timeout = options
+        .timeout
+        .as_deref()
+        .map(|value| parse_daemon_non_negative_integer("timeout", value))
+        .transpose()?;
+    let init_timeout = options
+        .init_timeout
+        .as_deref()
+        .map(|value| parse_daemon_non_negative_integer("init-timeout", value))
+        .transpose()?;
+    let max_connections = options
+        .max_connections
+        .as_deref()
+        .map(|value| {
+            value.parse::<i32>().map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid max-connections '{value}', expecting an integer"),
+            })
+        })
+        .transpose()?;
+    Ok(ParsedDaemonNumericOptions {
+        timeout,
+        init_timeout,
+        max_connections,
+    })
+}
+
+fn parse_daemon_non_negative_integer(name: &str, value: &str) -> Result<u32> {
+    value.parse::<u32>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid {name} '{value}', expecting a non-negative integer"),
+    })
+}
+
 fn daemon_serve_connection<R: BufRead, W: Write>(
     options: &DaemonOptions,
     input: &mut R,
     output: &mut W,
+    socket: Option<std::net::TcpStream>,
 ) -> Result<()> {
     let Some(request) = read_pkt_line_payload_from_reader(input)? else {
         return Ok(());
     };
     let request = parse_daemon_request(&request)?;
-    if options.interpolated_path.is_some() {
-        write_daemon_access_denied(output, &request.path)?;
-        output.flush()?;
-        return Ok(());
-    }
+    let informative_errors = options.informative_errors && !options.no_informative_errors;
     if request.service != "git-upload-pack" {
+        if informative_errors
+            && matches!(
+                request.service.as_str(),
+                "git-receive-pack" | "git-upload-archive"
+            )
+        {
+            write_daemon_informative_error(output, &request.path, "service not enabled")?;
+            output.flush()?;
+            return Err(daemon_protocol_failure());
+        }
         return Err(CliError::Stderr {
             code: 255,
             text: String::new(),
         });
     }
-    let repo_path = match resolve_daemon_repo_path(options, &request.path) {
+    let repo_path = match resolve_daemon_repo_path(
+        options,
+        &request.path,
+        request.host.as_deref(),
+        request.has_extended_args,
+    ) {
         Ok(path) => path,
-        Err(CliError::Fatal { message, .. })
-            if message == "repository path is outside daemon export directories" =>
-        {
-            write_daemon_access_denied(output, &request.path)?;
-            output.flush()?;
+        Err(DaemonRepoPathError::Rejected) => {
+            return write_daemon_repository_error(
+                output,
+                &request.path,
+                informative_errors,
+                DaemonRepositoryErrorKind::NoSuchRepository,
+            );
+        }
+        Err(DaemonRepoPathError::Other(error)) => return Err(error),
+    };
+    let repo = match upload_pack_repo_from_path(&repo_path, true) {
+        Ok(repo) => repo,
+        Err(error) => {
+            let _ = error;
+            return write_daemon_repository_error(
+                output,
+                &request.path,
+                informative_errors,
+                DaemonRepositoryErrorKind::NoSuchRepository,
+            );
+        }
+    };
+    if !options.export_all && !repo.git_dir.join("git-daemon-export-ok").is_file() {
+        return write_daemon_repository_error(
+            output,
+            &request.path,
+            informative_errors,
+            DaemonRepositoryErrorKind::NotExported,
+        );
+    }
+    if let Some(socket) = socket {
+        if daemon_spawn_upload_pack_helper(&socket, &repo_path, request.protocol_version)? {
             return Ok(());
         }
-        Err(err) => return Err(err),
-    };
-    let repo = upload_pack_repo_from_path(&repo_path, true)?;
-    if !options.export_all && !repo.git_dir.join("git-daemon-export-ok").is_file() {
-        write_daemon_access_denied(output, &request.path)?;
-        output.flush()?;
-        return Ok(());
     }
-    let runtime = primitive_runtime_for_repo(&repo);
+    let hash = SmartTransportHash::for_repo(&repo)?;
+    let server_policy = UploadPackServerPolicy::from_repo(&repo)?;
+    if request.protocol_version == DaemonProtocolVersion::V2 {
+        return upload_pack_v2_with_io_with_hash_and_server_policy(
+            &repo,
+            input,
+            output,
+            hash,
+            server_policy,
+        );
+    }
+    let runtime = primitive_runtime_for_repo_with_hash(&repo, hash);
     let refs = runtime.refs_store_adapter();
-    write_upload_pack_advertisement_from_adapter(&refs, output, true)?;
+    if request.protocol_version == DaemonProtocolVersion::V1 {
+        write_upload_pack_v1_advertisement_from_adapter_with_hash_and_policy(
+            &refs,
+            output,
+            hash,
+            server_policy.filter.clone(),
+        )?;
+    } else {
+        write_upload_pack_advertisement_from_hash_and_policy(
+            &refs,
+            output,
+            true,
+            hash,
+            server_policy.filter.clone(),
+        )?;
+    }
     output.flush()?;
 
-    let request = read_upload_pack_request_from_stdin(input)?;
+    let request = read_upload_pack_request_from_stdin_with_hash_and_policy(
+        input,
+        hash,
+        server_policy.filter.clone(),
+    )?;
     if request.wants.is_empty() {
         return Ok(());
     }
-    upload_pack_respond_with_pack_to_writer(&repo, request, false, output)
+    upload_pack_respond_with_pack_to_writer_with_hash_and_server_policy(
+        &repo,
+        request,
+        false,
+        output,
+        hash,
+        server_policy,
+    )
+}
+
+fn daemon_spawn_upload_pack_helper(
+    socket: &std::net::TcpStream,
+    repo_path: &Path,
+    protocol_version: DaemonProtocolVersion,
+) -> Result<bool> {
+    let Some(exec_path) = std::env::var_os("GIT_EXEC_PATH") else {
+        return Ok(false);
+    };
+    let helper = PathBuf::from(exec_path).join("git-upload-pack");
+    if !helper.is_file() {
+        return Ok(false);
+    }
+    let mut command = ProcessCommand::new(helper);
+    match protocol_version {
+        DaemonProtocolVersion::V0 => {
+            command.env_remove("GIT_PROTOCOL");
+        }
+        DaemonProtocolVersion::V1 => {
+            command.env("GIT_PROTOCOL", "version=1");
+        }
+        DaemonProtocolVersion::V2 => {
+            command.env("GIT_PROTOCOL", "version=2");
+        }
+    }
+    let (stdin, stdout) = daemon_socket_stdio(socket)?;
+    command
+        .arg(repo_path)
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(Stdio::null());
+    let status = command.status().map_err(CliError::Io)?;
+    if status.success() {
+        Ok(true)
+    } else {
+        Err(CliError::Fatal {
+            code: status.code().unwrap_or(128),
+            message: format!("git-upload-pack helper exited with {status}"),
+        })
+    }
+}
+
+#[cfg(unix)]
+fn daemon_socket_stdio(socket: &std::net::TcpStream) -> Result<(Stdio, Stdio)> {
+    use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
+
+    let stdin =
+        unsafe { OwnedFd::from_raw_fd(socket.try_clone().map_err(CliError::Io)?.into_raw_fd()) };
+    let stdout =
+        unsafe { OwnedFd::from_raw_fd(socket.try_clone().map_err(CliError::Io)?.into_raw_fd()) };
+    Ok((Stdio::from(stdin), Stdio::from(stdout)))
+}
+
+#[cfg(not(unix))]
+fn daemon_socket_stdio(_socket: &std::net::TcpStream) -> Result<(Stdio, Stdio)> {
+    Err(CliError::Fatal {
+        code: 128,
+        message: "git daemon upload-pack helper requires Unix socket handles".into(),
+    })
 }
 
 fn write_daemon_access_denied<W: Write>(output: &mut W, request_path: &str) -> Result<()> {
     write_pkt_line(
         output,
-        format!("ERR access denied or repository not exported: {request_path}\n").as_bytes(),
+        format!("ERR access denied or repository not exported: {request_path}").as_bytes(),
     )
+}
+
+fn write_daemon_repository_error<W: Write>(
+    output: &mut W,
+    request_path: &str,
+    informative_errors: bool,
+    kind: DaemonRepositoryErrorKind,
+) -> Result<()> {
+    if informative_errors {
+        let message = match kind {
+            DaemonRepositoryErrorKind::NoSuchRepository => "no such repository",
+            DaemonRepositoryErrorKind::NotExported => "repository not exported",
+        };
+        write_daemon_informative_error(output, request_path, message)?;
+    } else {
+        write_daemon_access_denied(output, request_path)?;
+    }
+    output.flush()?;
+    Err(daemon_protocol_failure())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DaemonRepositoryErrorKind {
+    NoSuchRepository,
+    NotExported,
+}
+
+fn write_daemon_informative_error<W: Write>(
+    output: &mut W,
+    request_path: &str,
+    message: &str,
+) -> Result<()> {
+    write_pkt_line(output, format!("ERR {message}: {request_path}").as_bytes())
+}
+
+fn daemon_protocol_failure() -> CliError {
+    CliError::Stderr {
+        code: 255,
+        text: String::new(),
+    }
+}
+
+fn daemon_remote_error(message: &[u8]) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "fatal: remote error: {}\n",
+            String::from_utf8_lossy(message).trim()
+        ),
+    }
 }
 
 fn unsupported_remote_helper_error(url: &str, prefix: String) -> CliError {
@@ -4511,10 +8053,27 @@ fn unsupported_clone_destination_label(
 struct DaemonRequest {
     service: String,
     path: String,
+    host: Option<String>,
+    has_extended_args: bool,
+    protocol_version: DaemonProtocolVersion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DaemonProtocolVersion {
+    V0,
+    V1,
+    V2,
+}
+
+#[derive(Debug)]
+enum DaemonRepoPathError {
+    Rejected,
+    Other(CliError),
 }
 
 fn parse_daemon_request(payload: &[u8]) -> Result<DaemonRequest> {
-    let command = payload.split(|byte| *byte == 0).next().unwrap_or(payload);
+    let mut sections = payload.split(|byte| *byte == 0);
+    let command = sections.next().unwrap_or(payload);
     let command = std::str::from_utf8(command)
         .map_err(|_| CliError::Fatal {
             code: 1,
@@ -4536,50 +8095,174 @@ fn parse_daemon_request(payload: &[u8]) -> Result<DaemonRequest> {
             message: "daemon request has extra command fields".into(),
         });
     }
+    let first_extra = sections.next().unwrap_or_default();
+    let mut host = None;
+    let mut has_extended_args = !first_extra.is_empty();
+    if !first_extra.is_empty() {
+        if first_extra.len() < 5 || !first_extra[..5].eq_ignore_ascii_case(b"host=") {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: "daemon request first extra field is not host".into(),
+            });
+        }
+        let value = &first_extra[5..];
+        let value = std::str::from_utf8(value).map_err(|_| CliError::Fatal {
+            code: 1,
+            message: "daemon request contains non-utf8 host".into(),
+        })?;
+        host = Some(daemon_request_host_name(value)?);
+    }
+    let mut protocol_version = DaemonProtocolVersion::V0;
+    for section in sections {
+        if section.is_empty() {
+            continue;
+        }
+        has_extended_args = true;
+        let version = match section {
+            b"version=1" => Some(DaemonProtocolVersion::V1),
+            b"version=2" => Some(DaemonProtocolVersion::V2),
+            _ => None,
+        };
+        if let Some(version) = version {
+            protocol_version = protocol_version.max(version);
+        }
+    }
     Ok(DaemonRequest {
         service: service.to_owned(),
         path: path.to_owned(),
+        host,
+        has_extended_args,
+        protocol_version,
     })
 }
 
-fn resolve_daemon_repo_path(options: &DaemonOptions, request_path: &str) -> Result<PathBuf> {
+fn daemon_request_host_name(value: &str) -> Result<String> {
+    let host = if let Some(value) = value.strip_prefix('[') {
+        let end = value.find(']').ok_or_else(|| CliError::Fatal {
+            code: 1,
+            message: "daemon request has an invalid bracketed host".into(),
+        })?;
+        let suffix = &value[end + 1..];
+        if !suffix.is_empty() && !suffix.starts_with(':') {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: "daemon request has garbage after bracketed host".into(),
+            });
+        }
+        &value[..end]
+    } else {
+        value.rsplit_once(':').map_or(value, |(host, _)| host)
+    };
+    Ok(sanitize_daemon_client(host))
+}
+
+fn sanitize_daemon_client(value: &str) -> String {
+    let mut sanitized = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '/' | '\\') {
+            continue;
+        }
+        if character == '.' && (sanitized.is_empty() || sanitized.ends_with('.')) {
+            continue;
+        }
+        sanitized.push(character);
+    }
+    while sanitized.ends_with('.') {
+        sanitized.pop();
+    }
+    sanitized.make_ascii_lowercase();
+    sanitized
+}
+
+fn expand_daemon_interpolated_path(template: &str, host: &str, request_path: &str) -> String {
+    let mut expanded = String::with_capacity(template.len() + host.len() + request_path.len());
+    let mut chars = template.chars();
+    while let Some(character) = chars.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match chars.next() {
+            Some('%') => expanded.push('%'),
+            Some('H') => expanded.push_str(host),
+            Some('D') => expanded.push_str(request_path),
+            Some(character) => {
+                expanded.push('%');
+                expanded.push(character);
+            }
+            None => expanded.push('%'),
+        }
+    }
+    expanded
+}
+
+fn resolve_daemon_repo_path(
+    options: &DaemonOptions,
+    request_path: &str,
+    request_host: Option<&str>,
+    has_extended_args: bool,
+) -> std::result::Result<PathBuf, DaemonRepoPathError> {
     if request_path
         .split('/')
         .any(|component| component == ".." || component == ".")
     {
-        return Err(CliError::Fatal {
-            code: 1,
-            message: "daemon repository path is not normalized".into(),
-        });
+        return Err(DaemonRepoPathError::Rejected);
     }
     let relative = request_path.trim_start_matches('/');
-    let path = if let Some(base_path) = options.base_path.as_deref() {
-        absolute_path_from_arg(base_path)?.join(relative)
+    let path = if let Some(template) = options
+        .interpolated_path
+        .as_deref()
+        .filter(|_| has_extended_args)
+    {
+        let Some(request_host) = request_host else {
+            return Err(DaemonRepoPathError::Rejected);
+        };
+        if !request_path.starts_with('/') {
+            return Err(DaemonRepoPathError::Rejected);
+        }
+        let expanded_path = expand_daemon_interpolated_path(template, request_host, request_path);
+        if !daemon_interpolated_path_is_safe(&expanded_path) {
+            return Err(DaemonRepoPathError::Rejected);
+        }
+        PathBuf::from(expanded_path)
+    } else if let Some(base_path) = options.base_path.as_deref() {
+        absolute_path_from_arg(base_path)
+            .map_err(DaemonRepoPathError::Other)?
+            .join(relative)
     } else {
-        absolute_path_from_arg(std::path::Path::new(request_path))?
+        absolute_path_from_arg(std::path::Path::new(request_path))
+            .map_err(DaemonRepoPathError::Other)?
     };
     if !options.directories.is_empty() {
         let allowed = options
             .directories
             .iter()
-            .map(|directory| absolute_path_from_arg(directory))
-            .collect::<Result<Vec<_>>>()?;
-        let checked_path = if options.strict_paths && options.base_path.is_some() {
-            absolute_path_from_arg(std::path::Path::new(request_path))?
-        } else {
-            path.clone()
-        };
+            .map(|directory| absolute_path_from_arg(directory).map_err(DaemonRepoPathError::Other))
+            .collect::<std::result::Result<Vec<_>, DaemonRepoPathError>>()?;
         if !allowed
             .iter()
-            .any(|directory| checked_path.starts_with(directory))
+            .any(|directory| daemon_export_path_matches(directory, &path, options.strict_paths))
         {
-            return Err(CliError::Fatal {
-                code: 1,
-                message: "repository path is outside daemon export directories".into(),
-            });
+            return Err(DaemonRepoPathError::Rejected);
         }
     }
     Ok(path)
+}
+
+fn daemon_export_path_matches(allowed: &Path, path: &Path, strict_paths: bool) -> bool {
+    if strict_paths {
+        path == allowed
+    } else {
+        path.starts_with(allowed)
+    }
+}
+
+fn daemon_interpolated_path_is_safe(path: &str) -> bool {
+    path.starts_with('/')
+        && !path
+            .split('/')
+            .skip(1)
+            .any(|component| component.is_empty() || component == "." || component == "..")
 }
 
 pub(crate) fn upload_pack_repo_from_path(path: &std::path::Path, strict: bool) -> Result<GitRepo> {
@@ -4683,9 +8366,25 @@ fn write_ref_advertisement_pkt_line<W: Write>(
     name: &str,
     capabilities: Option<&str>,
 ) -> Result<()> {
+    write_ref_advertisement_pkt_line_with_hash(
+        out,
+        id,
+        name,
+        capabilities,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn write_ref_advertisement_pkt_line_with_hash<W: Write>(
+    out: &mut W,
+    id: Option<&ObjectId>,
+    name: &str,
+    capabilities: Option<&str>,
+    hash: SmartTransportHash,
+) -> Result<()> {
     let id_len = id
         .map(ObjectId::hex_len)
-        .unwrap_or_else(|| GitHashAlgorithm::Sha1.digest_len() * 2);
+        .unwrap_or_else(|| hash.algorithm.digest_len() * 2);
     let capability_len = capabilities
         .map(|capabilities| 1 + capabilities.len())
         .unwrap_or(0);
@@ -4699,7 +8398,7 @@ fn write_ref_advertisement_pkt_line<W: Write>(
             message: "pkt-line length overflow".into(),
         })?;
     write_pkt_line_header(out, payload_len)?;
-    write_object_id_or_zero(out, id, GitHashAlgorithm::Sha1)?;
+    write_object_id_or_zero(out, id, hash.algorithm)?;
     out.write_all(b" ")?;
     out.write_all(name.as_bytes())?;
     if let Some(capabilities) = capabilities {
@@ -4791,6 +8490,9 @@ pub(crate) struct UploadPackRequest {
     deepen_relative: bool,
     filter: Option<UploadPackFilter>,
     side_band: bool,
+    packfile_uri_protocols: Vec<String>,
+    promisor_remote: Option<Vec<String>>,
+    sideband_all: bool,
     done: bool,
 }
 
@@ -4799,6 +8501,12 @@ enum UploadPackV2Request {
     LsRefs { prefixes: Vec<String>, peel: bool },
     Fetch(UploadPackRequest),
     Unknown,
+}
+
+enum UploadPackV2RequestRead {
+    Eof,
+    Empty,
+    Request(UploadPackV2Request),
 }
 
 impl Default for UploadPackRequest {
@@ -4813,6 +8521,9 @@ impl Default for UploadPackRequest {
             deepen_relative: false,
             filter: None,
             side_band: false,
+            packfile_uri_protocols: Vec::new(),
+            promisor_remote: None,
+            sideband_all: false,
             done: false,
         }
     }
@@ -4828,15 +8539,1058 @@ enum UploadPackFilter {
     Combine(Vec<UploadPackFilter>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UploadPackFilterKind {
+    BlobNone,
+    BlobLimit,
+    ObjectType,
+    Tree,
+    SparseOid,
+    Combine,
+}
+
+impl UploadPackFilterKind {
+    fn index(self) -> usize {
+        match self {
+            Self::BlobNone => 0,
+            Self::BlobLimit => 1,
+            Self::ObjectType => 2,
+            Self::Tree => 3,
+            Self::SparseOid => 4,
+            Self::Combine => 5,
+        }
+    }
+
+    fn config_name(self) -> &'static str {
+        match self {
+            Self::BlobNone => "blob:none",
+            Self::BlobLimit => "blob:limit",
+            Self::ObjectType => "object:type",
+            Self::Tree => "tree",
+            Self::SparseOid => "sparse:oid",
+            Self::Combine => "combine",
+        }
+    }
+}
+
+impl UploadPackFilter {
+    fn kind(&self) -> UploadPackFilterKind {
+        match self {
+            Self::BlobNone => UploadPackFilterKind::BlobNone,
+            Self::BlobLimit(_) => UploadPackFilterKind::BlobLimit,
+            Self::ObjectType(_) => UploadPackFilterKind::ObjectType,
+            Self::TreeDepth(_) => UploadPackFilterKind::Tree,
+            Self::SparseOid(_) => UploadPackFilterKind::SparseOid,
+            Self::Combine(_) => UploadPackFilterKind::Combine,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UploadPackFilterPolicy {
+    allow_filter: bool,
+    fallback_allow: bool,
+    explicit_allow: [Option<bool>; 6],
+    tree_max_depth: Option<usize>,
+}
+
+impl Default for UploadPackFilterPolicy {
+    fn default() -> Self {
+        Self {
+            allow_filter: false,
+            fallback_allow: true,
+            explicit_allow: [None; 6],
+            tree_max_depth: None,
+        }
+    }
+}
+
+impl UploadPackFilterPolicy {
+    fn from_repo(repo: &GitRepo) -> Result<Self> {
+        let entries = read_config_entries(repo)?;
+        let mut policy = Self::default();
+        for entry in entries {
+            if entry.section == "uploadpack" && entry.subsection.is_empty() {
+                if entry.key == "allowfilter" {
+                    policy.allow_filter = parse_upload_pack_bool_config(&entry)?;
+                }
+                continue;
+            }
+            if entry.section != "uploadpackfilter" {
+                continue;
+            }
+            if entry.subsection.is_empty() {
+                if entry.key == "allow" {
+                    policy.fallback_allow = parse_upload_pack_bool_config(&entry)?;
+                }
+                continue;
+            }
+            if entry.key == "allow" {
+                let value = parse_upload_pack_bool_config(&entry)?;
+                if let Some(kind) = upload_pack_filter_kind_from_name(&entry.subsection) {
+                    policy.explicit_allow[kind.index()] = Some(value);
+                }
+                continue;
+            }
+            if entry.subsection == "tree" && entry.key == "maxdepth" {
+                if entry.implicit_bool || entry.value.is_empty() {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!("missing value for '{}'", entry.name()),
+                    });
+                }
+                let depth = parse_git_unsigned(&entry.value).map_err(|reason| CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "bad numeric config value '{}' for '{}': {}",
+                        entry.value,
+                        entry.name(),
+                        reason
+                    ),
+                })?;
+                let depth = usize::try_from(depth).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "bad numeric config value '{}' for '{}': out of range",
+                        entry.value,
+                        entry.name()
+                    ),
+                })?;
+                policy.tree_max_depth = Some(depth);
+                policy.explicit_allow[UploadPackFilterKind::Tree.index()] = Some(true);
+            }
+        }
+        Ok(policy)
+    }
+
+    fn advertised(&self) -> bool {
+        self.allow_filter
+    }
+
+    fn allows_kind(&self, kind: UploadPackFilterKind) -> bool {
+        self.explicit_allow[kind.index()].unwrap_or(self.fallback_allow)
+    }
+
+    fn validate(&self, filter: &UploadPackFilter) -> Result<()> {
+        if !self.allow_filter {
+            return Err(upload_pack_filter_not_negotiated());
+        }
+        self.validate_kind(filter)
+    }
+
+    fn validate_kind(&self, filter: &UploadPackFilter) -> Result<()> {
+        let kind = filter.kind();
+        if !self.allows_kind(kind) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("filter '{}' not supported", kind.config_name()),
+            });
+        }
+        if let UploadPackFilter::TreeDepth(depth) = filter
+            && let Some(max_depth) = self.tree_max_depth
+            && *depth > max_depth
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "tree filter allows max depth {}, but got {}",
+                    max_depth, depth
+                ),
+            });
+        }
+        if let UploadPackFilter::Combine(filters) = filter {
+            for nested in filters {
+                self.validate_kind(nested)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UploadPackBlobPackfileUriConfig {
+    value: String,
+}
+
+impl UploadPackBlobPackfileUriConfig {
+    fn parse(&self, hash: SmartTransportHash) -> Result<UploadPackBlobPackfileUri> {
+        parse_upload_pack_blob_packfile_uri(&self.value, hash)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UploadPackBlobPackfileUri {
+    object_hash: ObjectId,
+    pack_hash: ObjectId,
+    uri: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UploadPackBlobPackfileUriPolicy {
+    values: Vec<UploadPackBlobPackfileUriConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UploadPackPromisorRemote {
+    name: String,
+    url: String,
+    partial_clone_filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UploadPackPromisorRemotePolicy {
+    advertise: bool,
+    send_partial_clone_filter: bool,
+    remotes: Vec<UploadPackPromisorRemote>,
+}
+
+impl UploadPackPromisorRemotePolicy {
+    fn from_entries(entries: &[ConfigEntry]) -> Result<Self> {
+        let advertise = entries
+            .iter()
+            .filter(|entry| {
+                entry.section == "promisor"
+                    && entry.subsection.is_empty()
+                    && entry.key == "advertise"
+            })
+            .map(|entry| parse_upload_pack_bool_config(entry))
+            .next_back()
+            .transpose()?
+            .unwrap_or(false);
+        let send_partial_clone_filter = entries
+            .iter()
+            .filter(|entry| {
+                entry.section == "promisor"
+                    && entry.subsection.is_empty()
+                    && entry.key == "sendfields"
+            })
+            .next_back()
+            .is_some_and(|entry| {
+                entry
+                    .value
+                    .split(|byte: char| byte == ',' || byte.is_ascii_whitespace())
+                    .any(|field| field.eq_ignore_ascii_case("partialclonefilter"))
+            });
+
+        let mut names = Vec::new();
+        for entry in entries {
+            if entry.section != "remote"
+                || entry.subsection.is_empty()
+                || entry.key != "promisor"
+                || names.iter().any(|name| name == &entry.subsection)
+            {
+                continue;
+            }
+            if names.len() >= UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "too many promisor remotes (limit {UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT})"
+                    ),
+                });
+            }
+            names.push(entry.subsection.clone());
+        }
+
+        // Git always treats the remote named by extensions.partialClone as a
+        // promisor remote, even when the corresponding remote.<name>.promisor
+        // key is absent.  Keep that remote last, matching Git's
+        // repo_promisor_remote_init ordering after a partial clone.
+        let partial_clone_remote = entries
+            .iter()
+            .rev()
+            .find(|entry| {
+                entry.section == "extensions"
+                    && entry.subsection.is_empty()
+                    && entry.key == "partialclone"
+                    && !entry.implicit_bool
+                    && !entry.value.is_empty()
+            })
+            .map(|entry| entry.value.clone());
+        if let Some(partial_clone_remote) = partial_clone_remote {
+            if let Some(index) = names.iter().position(|name| name == &partial_clone_remote) {
+                let name = names.remove(index);
+                names.push(name);
+            } else {
+                if names.len() >= UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "too many promisor remotes (limit {UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT})"
+                        ),
+                    });
+                }
+                names.push(partial_clone_remote);
+            }
+        }
+
+        let mut remotes = Vec::with_capacity(names.len());
+        for name in names {
+            let enabled = entries.iter().rev().any(|entry| {
+                entry.section == "extensions"
+                    && entry.subsection.is_empty()
+                    && entry.key == "partialclone"
+                    && !entry.implicit_bool
+                    && entry.value == name
+            }) || entries
+                .iter()
+                .rev()
+                .find(|entry| {
+                    entry.section == "remote" && entry.subsection == name && entry.key == "promisor"
+                })
+                .map(parse_upload_pack_bool_config)
+                .transpose()?
+                .unwrap_or(false);
+            if !enabled {
+                continue;
+            }
+            let value_for = |key: &str| {
+                entries
+                    .iter()
+                    .rev()
+                    .find(|entry| {
+                        entry.section == "remote" && entry.subsection == name && entry.key == key
+                    })
+                    .filter(|entry| !entry.implicit_bool)
+                    .map(|entry| entry.value.clone())
+            };
+            let Some(url) = value_for("url").filter(|value| !value.is_empty()) else {
+                continue;
+            };
+            let partial_clone_filter =
+                value_for("partialclonefilter").filter(|value| !value.is_empty());
+            for value in [&name, &url]
+                .into_iter()
+                .chain(partial_clone_filter.as_ref())
+            {
+                validate_upload_pack_promisor_remote_value(value, "promisor-remote")?;
+            }
+            remotes.push(UploadPackPromisorRemote {
+                name,
+                url,
+                partial_clone_filter,
+            });
+        }
+        Ok(Self {
+            advertise,
+            send_partial_clone_filter,
+            remotes,
+        })
+    }
+
+    fn advertised(&self) -> bool {
+        self.advertise && !self.remotes.is_empty()
+    }
+
+    fn capability_value(&self) -> Result<Option<String>> {
+        if !self.advertised() {
+            return Ok(None);
+        }
+        let mut value = String::new();
+        for remote in &self.remotes {
+            if !value.is_empty() {
+                value.push(';');
+            }
+            value.push_str("name=");
+            append_upload_pack_promisor_remote_encoded(&mut value, &remote.name);
+            value.push_str(",url=");
+            append_upload_pack_promisor_remote_encoded(&mut value, &remote.url);
+            if self.send_partial_clone_filter
+                && let Some(filter) = remote.partial_clone_filter.as_deref()
+            {
+                value.push_str(",partialCloneFilter=");
+                append_upload_pack_promisor_remote_encoded(&mut value, filter);
+            }
+        }
+        validate_upload_pack_promisor_remote_value(&value, "promisor-remote")?;
+        Ok(Some(value))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AdvertisedPromisorRemote {
+    name: String,
+    url: String,
+    partial_clone_filter: Option<String>,
+}
+
+fn parse_upload_pack_promisor_remote_capability(
+    value: Option<&str>,
+) -> Result<Vec<AdvertisedPromisorRemote>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    validate_upload_pack_promisor_remote_value(value, "promisor-remote")?;
+    let mut remotes = Vec::new();
+    for encoded_remote in value.split(';') {
+        if encoded_remote.is_empty() || remotes.len() >= UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "invalid promisor-remote capability".into(),
+            });
+        }
+        let mut name = None;
+        let mut url = None;
+        let mut partial_clone_filter = None;
+        let mut mandatory_field_position = 0_u8;
+        for encoded_field in encoded_remote.split(',') {
+            let Some((field, encoded)) = encoded_field.split_once('=') else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "invalid promisor-remote capability".into(),
+                });
+            };
+            let decoded = percent_decode_upload_pack_promisor_remote(encoded.as_bytes())
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "invalid promisor-remote capability".into(),
+                })?;
+            validate_upload_pack_promisor_remote_value(&decoded, "promisor-remote")?;
+            match field {
+                "name" if name.is_none() && mandatory_field_position == 0 => {
+                    name = Some(decoded);
+                    mandatory_field_position = 1;
+                }
+                "url" if url.is_none() && mandatory_field_position == 1 => {
+                    url = Some(decoded);
+                    mandatory_field_position = 2;
+                }
+                "partialCloneFilter"
+                    if name.is_some() && url.is_some() && partial_clone_filter.is_none() =>
+                {
+                    partial_clone_filter = Some(decoded)
+                }
+                "name" | "url" | "partialCloneFilter"
+                    if (field == "name" && name.is_some())
+                        || (field == "url" && url.is_some())
+                        || (field == "partialCloneFilter" && partial_clone_filter.is_some()) =>
+                {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "duplicate promisor-remote field".into(),
+                    });
+                }
+                "name" | "url" | "partialCloneFilter" => {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "invalid promisor-remote capability".into(),
+                    });
+                }
+                _ => {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "invalid promisor-remote capability".into(),
+                    });
+                }
+            }
+        }
+        let (Some(name), Some(url)) = (name, url) else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "promisor-remote capability is missing name or url".into(),
+            });
+        };
+        if remotes
+            .iter()
+            .any(|remote: &AdvertisedPromisorRemote| remote.name == name)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "duplicate promisor-remote name".into(),
+            });
+        }
+        remotes.push(AdvertisedPromisorRemote {
+            name,
+            url,
+            partial_clone_filter,
+        });
+    }
+    Ok(remotes)
+}
+
+fn upload_pack_promisor_acceptance(entries: &[ConfigEntry]) -> String {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.section == "promisor"
+                && entry.subsection.is_empty()
+                && entry.key == "acceptfromserver"
+        })
+        .next_back()
+        .map(|entry| entry.value.clone())
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+fn upload_pack_promisor_checked_fields(entries: &[ConfigEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.section == "promisor" && entry.subsection.is_empty() && entry.key == "checkfields"
+        })
+        .next_back()
+        .map(|entry| {
+            entry
+                .value
+                .split(|byte: char| byte == ',' || byte.is_ascii_whitespace())
+                .filter(|field| field.eq_ignore_ascii_case("partialclonefilter"))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn upload_pack_promisor_fields_match(
+    advertised: &AdvertisedPromisorRemote,
+    configured: Option<&UploadPackPromisorRemote>,
+    configured_remotes: &[UploadPackPromisorRemote],
+    checked_fields: &[String],
+) -> bool {
+    checked_fields.iter().all(|field| {
+        if !field.eq_ignore_ascii_case("partialclonefilter") {
+            return false;
+        }
+        let Some(advertised_filter) = advertised.partial_clone_filter.as_deref() else {
+            return false;
+        };
+        if let Some(configured) = configured {
+            configured.partial_clone_filter.as_deref() == Some(advertised_filter)
+        } else {
+            configured_remotes
+                .iter()
+                .any(|remote| remote.partial_clone_filter.as_deref() == Some(advertised_filter))
+        }
+    })
+}
+
+fn append_upload_pack_combine_filter_encoded(output: &mut String, raw: &str) {
+    const RESERVED_NON_WHITESPACE: &[u8] = b"~`!@#$^&*()[]{}\\;'\",<>?";
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in raw.as_bytes() {
+        if byte.is_ascii()
+            && *byte > b' '
+            && *byte != b'%'
+            && *byte != b'+'
+            && !RESERVED_NON_WHITESPACE.contains(byte)
+        {
+            output.push(*byte as char);
+        } else {
+            output.push('%');
+            output.push(HEX[(byte >> 4) as usize] as char);
+            output.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+}
+
+fn resolve_upload_pack_auto_filter(
+    repo: &GitRepo,
+    advertised_value: Option<&str>,
+) -> Result<Option<String>> {
+    resolve_upload_pack_auto_filter_with_remotes(repo, advertised_value)
+        .map(|resolution| resolution.filter)
+}
+
+fn local_clone_promisor_remote_capability(source_repo: &GitRepo) -> Result<Option<String>> {
+    UploadPackServerPolicy::from_repo(source_repo)?
+        .promisor_remote
+        .capability_value()
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UploadPackAutoFilterResolution {
+    filter: Option<String>,
+    accepted_remotes: Option<String>,
+}
+
+fn resolve_upload_pack_auto_filter_with_remotes(
+    repo: &GitRepo,
+    advertised_value: Option<&str>,
+) -> Result<UploadPackAutoFilterResolution> {
+    let entries = read_config_entries(repo)?;
+    let acceptance = upload_pack_promisor_acceptance(&entries);
+    if acceptance.is_empty() || acceptance.eq_ignore_ascii_case("none") {
+        return Ok(UploadPackAutoFilterResolution::default());
+    }
+    let acceptance = if acceptance.eq_ignore_ascii_case("all") {
+        "all".to_owned()
+    } else if acceptance.eq_ignore_ascii_case("knownname") {
+        "knownname".to_owned()
+    } else if acceptance.eq_ignore_ascii_case("knownurl") {
+        "knownurl".to_owned()
+    } else {
+        return Ok(UploadPackAutoFilterResolution::default());
+    };
+    let advertised = parse_upload_pack_promisor_remote_capability(advertised_value)?;
+    if advertised.is_empty() {
+        return Ok(UploadPackAutoFilterResolution::default());
+    }
+    let configured = UploadPackPromisorRemotePolicy::from_entries(&entries)?.remotes;
+    let checked_fields = upload_pack_promisor_checked_fields(&entries);
+    let mut filters = Vec::new();
+    let mut accepted_remotes = Vec::new();
+    for remote in advertised {
+        let configured_remote = configured
+            .iter()
+            .find(|candidate| candidate.name == remote.name);
+        let accepted = match acceptance.as_str() {
+            "all" => upload_pack_promisor_fields_match(&remote, None, &configured, &checked_fields),
+            "knownname" => configured_remote.is_some_and(|candidate| {
+                upload_pack_promisor_fields_match(
+                    &remote,
+                    Some(candidate),
+                    &configured,
+                    &checked_fields,
+                )
+            }),
+            "knownurl" => configured_remote.is_some_and(|candidate| {
+                candidate.url == remote.url
+                    && upload_pack_promisor_fields_match(
+                        &remote,
+                        Some(candidate),
+                        &configured,
+                        &checked_fields,
+                    )
+            }),
+            _ => false,
+        };
+        if !accepted {
+            continue;
+        }
+        accepted_remotes.push(remote.name.clone());
+        let Some(filter) = remote.partial_clone_filter else {
+            continue;
+        };
+        if parse_upload_pack_filter(&filter).is_ok() {
+            filters.push(filter);
+        }
+    }
+    let filter = upload_pack_auto_filter_spec(&filters);
+    let accepted_remotes = if accepted_remotes.is_empty() {
+        None
+    } else {
+        let mut encoded = String::new();
+        for (index, name) in accepted_remotes.iter().enumerate() {
+            if index > 0 {
+                encoded.push(';');
+            }
+            append_upload_pack_promisor_remote_encoded(&mut encoded, name);
+        }
+        Some(encoded)
+    };
+    Ok(UploadPackAutoFilterResolution {
+        filter,
+        accepted_remotes,
+    })
+}
+
+fn upload_pack_auto_filter_spec(filters: &[String]) -> Option<String> {
+    let first = filters.first()?;
+    if filters.len() == 1 {
+        return Some(first.clone());
+    }
+    let mut combined = String::from("combine:");
+    for (index, filter) in filters.iter().enumerate() {
+        if index > 0 {
+            combined.push('+');
+        }
+        append_upload_pack_combine_filter_encoded(&mut combined, filter);
+    }
+    Some(combined)
+}
+
+fn validate_upload_pack_promisor_remote_value(value: &str, name: &str) -> Result<()> {
+    if value.is_empty() || value.len() > UPLOAD_PACK_PROMISOR_REMOTE_VALUE_LENGTH_LIMIT {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "value for '{name}' is empty or exceeds {UPLOAD_PACK_PROMISOR_REMOTE_VALUE_LENGTH_LIMIT} bytes"
+            ),
+        });
+    }
+    if value.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("control character in value for '{name}'"),
+        });
+    }
+    Ok(())
+}
+
+fn append_upload_pack_promisor_remote_encoded(output: &mut String, value: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in value.as_bytes() {
+        if (*byte > 32 && *byte < 127) && !matches!(*byte, b',' | b';' | b'%') {
+            output.push(*byte as char);
+        } else {
+            output.push('%');
+            output.push(HEX[(byte >> 4) as usize] as char);
+            output.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+}
+
+fn parse_upload_pack_promisor_remote_response(value: &[u8], line: &[u8]) -> Result<Vec<String>> {
+    let mut remotes = Vec::new();
+    for encoded in value.split(|byte| *byte == b';') {
+        if encoded.is_empty() || remotes.len() >= UPLOAD_PACK_PROMISOR_REMOTE_COUNT_LIMIT {
+            return Err(upload_pack_unexpected_request_line(line)?);
+        }
+        let decoded = percent_decode_upload_pack_promisor_remote(encoded)
+            .ok_or_else(|| upload_pack_unexpected_request_line(line).expect("static error"))?;
+        validate_upload_pack_promisor_remote_value(&decoded, "promisor-remote")?;
+        if remotes.iter().any(|remote| remote == &decoded) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "duplicate promisor-remote response".into(),
+            });
+        }
+        remotes.push(decoded);
+    }
+    Ok(remotes)
+}
+
+fn percent_decode_upload_pack_promisor_remote(value: &[u8]) -> Option<String> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let mut index = 0;
+    while index < value.len() {
+        if value[index] == b'%' {
+            let high = *value.get(index + 1)?;
+            let low = *value.get(index + 2)?;
+            decoded.push(decode_percent_hex_byte(high, low)?);
+            index += 3;
+        } else {
+            decoded.push(value[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+impl UploadPackBlobPackfileUriPolicy {
+    fn from_entries(entries: &[ConfigEntry]) -> Result<Self> {
+        let mut values = Vec::new();
+        for entry in entries {
+            if entry.section != "uploadpack"
+                || !entry.subsection.is_empty()
+                || entry.key != "blobpackfileuri"
+            {
+                continue;
+            }
+            // Git treats an implicit boolean as a non-value here.  Explicit
+            // empty values are retained: the malformed value is deliberately
+            // diagnosed only if a later pack-generation phase consumes it.
+            if entry.implicit_bool {
+                continue;
+            }
+            if values.len() >= UPLOAD_PACK_BLOB_PACKFILE_URI_CONFIG_COUNT_LIMIT {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("too many '{}' configuration values", entry.name()),
+                });
+            }
+            validate_upload_pack_blob_packfile_uri_value(&entry.value, &entry.name())?;
+            values.push(UploadPackBlobPackfileUriConfig {
+                value: entry.value.clone(),
+            });
+        }
+        Ok(Self { values })
+    }
+
+    fn advertised(&self) -> bool {
+        !self.values.is_empty()
+    }
+
+    fn resolve(&self, hash: SmartTransportHash) -> Result<Vec<UploadPackBlobPackfileUri>> {
+        let mut resolved = Vec::with_capacity(self.values.len());
+        let mut seen_objects = HashSet::with_capacity(self.values.len());
+        for value in &self.values {
+            let mapping = value.parse(hash)?;
+            if !seen_objects.insert(mapping.object_hash.clone()) {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "duplicate object hash '{}' in uploadpack.blobpackfileuri",
+                        mapping.object_hash.to_hex()
+                    ),
+                });
+            }
+            resolved.push(mapping);
+        }
+        Ok(resolved)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UploadPackServerPolicy {
+    filter: UploadPackFilterPolicy,
+    blob_packfile_uri: UploadPackBlobPackfileUriPolicy,
+    promisor_remote: UploadPackPromisorRemotePolicy,
+    allow_sideband_all: bool,
+}
+
+impl Default for UploadPackServerPolicy {
+    fn default() -> Self {
+        Self {
+            filter: UploadPackFilterPolicy::default(),
+            blob_packfile_uri: UploadPackBlobPackfileUriPolicy::default(),
+            promisor_remote: UploadPackPromisorRemotePolicy::default(),
+            allow_sideband_all: false,
+        }
+    }
+}
+
+impl UploadPackServerPolicy {
+    fn from_filter(filter: UploadPackFilterPolicy) -> Self {
+        Self {
+            filter,
+            ..Self::default()
+        }
+    }
+
+    fn from_repo(repo: &GitRepo) -> Result<Self> {
+        let filter = UploadPackFilterPolicy::from_repo(repo)?;
+        let entries = read_config_entries(repo)?;
+        let blob_packfile_uri = UploadPackBlobPackfileUriPolicy::from_entries(&entries)?;
+        let promisor_remote = UploadPackPromisorRemotePolicy::from_entries(&entries)?;
+        let allow_sideband_all = entries
+            .iter()
+            .filter(|entry| {
+                entry.section == "uploadpack"
+                    && entry.subsection.is_empty()
+                    && entry.key == "allowsidebandall"
+            })
+            .map(|entry| parse_upload_pack_bool_config(entry))
+            .next_back()
+            .transpose()?
+            .unwrap_or(false);
+        Ok(Self {
+            filter,
+            blob_packfile_uri,
+            promisor_remote,
+            allow_sideband_all,
+        })
+    }
+}
+
+fn parse_upload_pack_blob_packfile_uri(
+    value: &str,
+    hash: SmartTransportHash,
+) -> Result<UploadPackBlobPackfileUri> {
+    let mut fields = value.split(' ');
+    let object_hash = fields.next().filter(|field| !field.is_empty());
+    let pack_hash = fields.next().filter(|field| !field.is_empty());
+    let uri = fields.next().filter(|field| !field.is_empty());
+    if object_hash.is_none() || pack_hash.is_none() || uri.is_none() || fields.next().is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "value of uploadpack.blobpackfileuri must be of the form '<object-hash> <pack-hash> <uri>' (got '{value}')"
+            ),
+        });
+    }
+    let object_hash = ObjectId::from_hex(hash.algorithm, object_hash.expect("checked above"))
+        .map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "value of uploadpack.blobpackfileuri must be of the form '<object-hash> <pack-hash> <uri>' (got '{value}')"
+            ),
+        })?;
+    let pack_hash = ObjectId::from_hex(hash.algorithm, pack_hash.expect("checked above")).map_err(
+        |_| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "value of uploadpack.blobpackfileuri must be of the form '<object-hash> <pack-hash> <uri>' (got '{value}')"
+            ),
+        },
+    )?;
+    Ok(UploadPackBlobPackfileUri {
+        object_hash,
+        pack_hash,
+        uri: uri.expect("checked above").to_owned(),
+    })
+}
+
+fn validate_upload_pack_blob_packfile_uri_value(value: &str, name: &str) -> Result<()> {
+    if value.len() > UPLOAD_PACK_BLOB_PACKFILE_URI_VALUE_LENGTH_LIMIT {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "value for '{name}' exceeds {UPLOAD_PACK_BLOB_PACKFILE_URI_VALUE_LENGTH_LIMIT} bytes"
+            ),
+        });
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() || (character.is_whitespace() && character != ' '))
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsafe whitespace in value for '{name}'"),
+        });
+    }
+    Ok(())
+}
+
+fn upload_pack_blob_packfile_uri_scheme(uri: &str) -> Option<&str> {
+    let (scheme, _) = uri.split_once(':')?;
+    if scheme.is_empty()
+        || !scheme.bytes().next()?.is_ascii_alphabetic()
+        || !scheme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        return None;
+    }
+    Some(scheme)
+}
+
+fn upload_pack_blob_packfile_uri_matches_protocols(
+    mapping: &UploadPackBlobPackfileUri,
+    protocols: &[String],
+) -> bool {
+    let Some(scheme) = upload_pack_blob_packfile_uri_scheme(&mapping.uri) else {
+        return false;
+    };
+    protocols.iter().any(|protocol| protocol == scheme)
+}
+
+fn select_upload_pack_blob_packfile_uris(
+    ids: &mut Vec<ObjectId>,
+    mappings: &[UploadPackBlobPackfileUri],
+    protocols: &[String],
+) -> Result<Vec<UploadPackBlobPackfileUri>> {
+    if protocols.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut selected = Vec::new();
+    let mut selected_ids = HashSet::new();
+    for mapping in mappings {
+        if !upload_pack_blob_packfile_uri_matches_protocols(mapping, protocols)
+            || !ids.iter().any(|id| id == &mapping.object_hash)
+        {
+            continue;
+        }
+        if selected.len() >= UPLOAD_PACK_BLOB_PACKFILE_URI_SELECTED_COUNT_LIMIT {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "too many selected uploadpack.blobpackfileuri values (limit {})",
+                    UPLOAD_PACK_BLOB_PACKFILE_URI_SELECTED_COUNT_LIMIT
+                ),
+            });
+        }
+        let metadata_length = mapping.pack_hash.hex_len() + 1 + mapping.uri.len() + 1;
+        if metadata_length > UPLOAD_PACK_BLOB_PACKFILE_URI_METADATA_LENGTH_LIMIT {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "selected uploadpack.blobpackfileuri metadata exceeds {} bytes",
+                    UPLOAD_PACK_BLOB_PACKFILE_URI_METADATA_LENGTH_LIMIT
+                ),
+            });
+        }
+        selected_ids.insert(mapping.object_hash.clone());
+        selected.push(mapping.clone());
+    }
+    if selected_ids.is_empty() {
+        return Ok(selected);
+    }
+    ids.retain(|id| !selected_ids.contains(id));
+    Ok(selected)
+}
+
+fn upload_pack_filter_kind_from_name(name: &str) -> Option<UploadPackFilterKind> {
+    Some(match name {
+        "blob:none" => UploadPackFilterKind::BlobNone,
+        "blob:limit" => UploadPackFilterKind::BlobLimit,
+        "object:type" => UploadPackFilterKind::ObjectType,
+        "tree" => UploadPackFilterKind::Tree,
+        "sparse:oid" => UploadPackFilterKind::SparseOid,
+        "combine" => UploadPackFilterKind::Combine,
+        _ => return None,
+    })
+}
+
+fn parse_upload_pack_bool_config(entry: &ConfigEntry) -> Result<bool> {
+    if entry.implicit_bool {
+        return Ok(true);
+    }
+    parse_git_bool(&entry.value).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!(
+            "bad boolean config value '{}' for '{}'",
+            entry.value,
+            entry.name()
+        ),
+    })
+}
+
+fn upload_pack_filter_not_negotiated() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "git upload-pack: filtering capability not negotiated".into(),
+    }
+}
+
+fn upload_pack_multiple_filter_specs() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "multiple filter-specs cannot be combined".into(),
+    }
+}
+
+fn upload_pack_unexpected_request_line(line: &[u8]) -> Result<CliError> {
+    Ok(CliError::Fatal {
+        code: 128,
+        message: format!("unexpected line: '{}'", ascii_line_as_str(line)?),
+    })
+}
+
 fn upload_pack_respond_with_pack(
     repo: &GitRepo,
     request: UploadPackRequest,
     stateless_rpc: bool,
 ) -> Result<()> {
+    upload_pack_respond_with_pack_with_hash(
+        repo,
+        request,
+        stateless_rpc,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn upload_pack_respond_with_pack_with_hash(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stateless_rpc: bool,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    upload_pack_respond_with_pack_with_hash_and_server_policy(
+        repo,
+        request,
+        stateless_rpc,
+        hash,
+        UploadPackServerPolicy::default(),
+    )
+}
+
+fn upload_pack_respond_with_pack_with_hash_and_server_policy(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stateless_rpc: bool,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
     let stdout = io::stdout();
     let stdout = stdout.lock();
     let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
-    upload_pack_respond_with_pack_to_writer(repo, request, stateless_rpc, &mut stdout)
+    upload_pack_respond_with_pack_to_writer_with_hash_and_server_policy(
+        repo,
+        request,
+        stateless_rpc,
+        &mut stdout,
+        hash,
+        server_policy,
+    )
 }
 
 fn upload_pack_respond_with_pack_to_writer<W: Write>(
@@ -4845,7 +9599,41 @@ fn upload_pack_respond_with_pack_to_writer<W: Write>(
     stateless_rpc: bool,
     output: &mut W,
 ) -> Result<()> {
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    upload_pack_respond_with_pack_to_writer_with_hash(
+        repo,
+        request,
+        stateless_rpc,
+        output,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn upload_pack_respond_with_pack_to_writer_with_hash<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stateless_rpc: bool,
+    output: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    upload_pack_respond_with_pack_to_writer_with_hash_and_server_policy(
+        repo,
+        request,
+        stateless_rpc,
+        output,
+        hash,
+        UploadPackServerPolicy::default(),
+    )
+}
+
+fn upload_pack_respond_with_pack_to_writer_with_hash_and_server_policy<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stateless_rpc: bool,
+    output: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let simple_single_round = request.haves.is_empty()
         && request.shallows.is_empty()
         && request.deepen.is_none()
@@ -4857,7 +9645,7 @@ fn upload_pack_respond_with_pack_to_writer<W: Write>(
         upload_pack_write_stateless_negotiation_response(output, &store, &request, false)?;
         return Ok(());
     }
-    if let Some(invalid_want) = upload_pack_invalid_want(repo, &request)? {
+    if let Some(invalid_want) = upload_pack_invalid_want_with_hash(repo, &request, hash)? {
         write_pkt_line(
             output,
             format!("ERR upload-pack: not our ref {}", invalid_want.to_hex()).as_bytes(),
@@ -4879,7 +9667,13 @@ fn upload_pack_respond_with_pack_to_writer<W: Write>(
             return Err(upload_pack_server_error(repo, &store, &request, error));
         }
     };
-    let pack = match upload_pack_build_pack_file(repo, &store, &request) {
+    let pack = match upload_pack_build_pack_file_with_hash_and_server_policy(
+        repo,
+        &store,
+        &request,
+        hash,
+        server_policy,
+    ) {
         Ok(pack) => pack,
         Err(error) => {
             upload_pack_write_error_ack(output, common_have.as_ref())?;
@@ -4929,6 +9723,14 @@ fn upload_pack_invalid_want(
     repo: &GitRepo,
     request: &UploadPackRequest,
 ) -> Result<Option<ObjectId>> {
+    upload_pack_invalid_want_with_hash(repo, request, SmartTransportHash::sha1())
+}
+
+fn upload_pack_invalid_want_with_hash(
+    repo: &GitRepo,
+    request: &UploadPackRequest,
+    hash: SmartTransportHash,
+) -> Result<Option<ObjectId>> {
     if request.wants.is_empty() {
         return Ok(None);
     }
@@ -4939,7 +9741,7 @@ fn upload_pack_invalid_want(
     {
         return Ok(None);
     }
-    let advertised = upload_pack_advertised_tips(repo)?;
+    let advertised = upload_pack_advertised_tips_with_hash(repo, hash)?;
     Ok(request
         .wants
         .iter()
@@ -4948,9 +9750,17 @@ fn upload_pack_invalid_want(
 }
 
 fn upload_pack_advertised_tips(repo: &GitRepo) -> Result<HashSet<ObjectId>> {
-    let refs = refs_adapter_from_git_dir(&repo.git_dir);
+    upload_pack_advertised_tips_with_hash(repo, SmartTransportHash::sha1())
+}
+
+fn upload_pack_advertised_tips_with_hash(
+    repo: &GitRepo,
+    hash: SmartTransportHash,
+) -> Result<HashSet<ObjectId>> {
+    let refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
     let common_dir = read_common_git_dir(&repo.git_dir)?;
-    let common_refs = (common_dir != repo.git_dir).then(|| refs_adapter_from_git_dir(&common_dir));
+    let common_refs = (common_dir != repo.git_dir)
+        .then(|| refs_adapter_from_git_dir_with_hash(&common_dir, hash));
     let mut advertised = HashSet::new();
     if let Some(head) = refs.resolve_ref("HEAD")? {
         advertised.insert(head);
@@ -4988,6 +9798,20 @@ fn upload_pack_server_error(
                     code: 128,
                     text: format!(
                         "fatal: {trimmed}\nerror: git upload-pack: pack-objects died with error.\nfatal: git upload-pack: aborting due to possible repository corruption on the remote side.\n"
+                    ),
+                };
+            }
+            if trimmed.contains("duplicate object hash") {
+                return CliError::Stderr {
+                    code: 128,
+                    text: "fatal: git upload-pack: pack-objects died with error.\n".into(),
+                };
+            }
+            if trimmed.contains("uploadpack.blobpackfileuri") {
+                return CliError::Stderr {
+                    code: 128,
+                    text: format!(
+                        "fatal: {trimmed}\nerror: git upload-pack: pack-objects died with error.\n"
                     ),
                 };
             }
@@ -5056,7 +9880,7 @@ fn upload_pack_diagnose_corruption(
             match kind {
                 GitObjectKind::Tag => {
                     let object = store.read_object(&current).ok()?;
-                    let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content).ok()?;
+                    let tag = decode_tag(store.algorithm(), &object.content).ok()?;
                     current = tag.target;
                 }
                 GitObjectKind::Commit => {
@@ -5121,7 +9945,10 @@ pub(crate) fn process_upload_pack_request_from_reader(
     stateless_rpc: bool,
 ) -> Result<Vec<u8>> {
     let mut input = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, input);
-    let request = read_upload_pack_request_from_stdin(&mut input)?;
+    let hash = SmartTransportHash::for_repo(repo)?;
+    let filter_policy = UploadPackFilterPolicy::from_repo(repo)?;
+    let request =
+        read_upload_pack_request_from_stdin_with_hash_and_policy(&mut input, hash, filter_policy)?;
     if request.wants.is_empty() {
         return Ok(Vec::new());
     }
@@ -5129,7 +9956,13 @@ pub(crate) fn process_upload_pack_request_from_reader(
     let mut output = Vec::new();
     {
         let mut writer = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, &mut output);
-        upload_pack_respond_with_pack_to_writer(repo, request, stateless_rpc, &mut writer)?;
+        upload_pack_respond_with_pack_to_writer_with_hash(
+            repo,
+            request,
+            stateless_rpc,
+            &mut writer,
+            hash,
+        )?;
         writer.flush()?;
     }
     Ok(output)
@@ -5137,6 +9970,7 @@ pub(crate) fn process_upload_pack_request_from_reader(
 
 struct TempUploadPack {
     path: PathBuf,
+    packfile_uris: Vec<UploadPackBlobPackfileUri>,
 }
 
 impl TempUploadPack {
@@ -5154,7 +9988,39 @@ impl Drop for TempUploadPack {
 pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
     input: &mut R,
 ) -> Result<UploadPackRequest> {
+    read_upload_pack_request_from_stdin_with_hash(input, SmartTransportHash::sha1())
+}
+
+fn read_upload_pack_request_from_stdin_with_hash<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+) -> Result<UploadPackRequest> {
+    read_upload_pack_request_from_stdin_with_hash_and_policy(
+        input,
+        hash,
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn read_upload_pack_request_from_stdin_with_hash_and_policy<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<UploadPackRequest> {
+    read_upload_pack_request_from_stdin_with_hash_and_server_policy(
+        input,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn read_upload_pack_request_from_stdin_with_hash_and_server_policy<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<UploadPackRequest> {
     let mut request = UploadPackRequest::default();
+    let mut filter_capability_requested = false;
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     loop {
         match read_pkt_line_payload_state_into(input, &mut payload)? {
@@ -5168,6 +10034,14 @@ pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
             PktLinePayloadState::Payload => {}
         }
         let line = trim_lf_payload(&payload);
+        if line.len() > UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "upload-pack request line exceeds {UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT} bytes"
+                ),
+            });
+        }
         if let Some(rest) = line.strip_prefix(b"want ") {
             let id = first_ascii_token(rest).ok_or_else(|| CliError::Fatal {
                 code: 128,
@@ -5175,11 +10049,20 @@ pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
             })?;
             request
                 .wants
-                .push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+                .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
+            for token in ascii_tokens(rest) {
+                if let Some(value) = token.strip_prefix(b"object-format=") {
+                    validate_smart_object_format(value, hash)?;
+                }
+                if token == b"filter" && server_policy.filter.advertised() {
+                    filter_capability_requested = true;
+                }
+            }
             if ascii_tokens(rest).any(|part| part == b"side-band" || part == b"side-band-64k") {
                 request.side_band = true;
             }
         } else if line == b"done" {
+            request.done = true;
             break;
         } else if let Some(rest) = line.strip_prefix(b"have ") {
             let id = first_ascii_token(rest).ok_or_else(|| CliError::Fatal {
@@ -5188,7 +10071,7 @@ pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
             })?;
             request
                 .haves
-                .push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+                .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
         } else if let Some(depth) = line.strip_prefix(b"deepen ") {
             let depth = parse_ascii_usize(depth).map_err(|_| CliError::Fatal {
                 code: 128,
@@ -5206,14 +10089,22 @@ pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
             request.deepen = Some(depth);
         } else if let Some(id) = line.strip_prefix(b"shallow ") {
             request.shallows.push(ObjectId::from_hex_bytes(
-                GitHashAlgorithm::Sha1,
+                hash.algorithm,
                 first_ascii_token(id).ok_or_else(|| CliError::Fatal {
                     code: 128,
                     message: "upload-pack shallow line is missing object id".into(),
                 })?,
             )?);
         } else if let Some(filter) = line.strip_prefix(b"filter ") {
-            request.filter = Some(parse_upload_pack_filter(ascii_line_as_str(filter)?)?);
+            if !filter_capability_requested {
+                return Err(upload_pack_filter_not_negotiated());
+            }
+            if request.filter.is_some() {
+                return Err(upload_pack_multiple_filter_specs());
+            }
+            let filter = parse_upload_pack_filter(ascii_line_as_str(filter)?)?;
+            server_policy.filter.validate(&filter)?;
+            request.filter = Some(filter);
         } else if let Some(timestamp) = line.strip_prefix(b"deepen-since ") {
             request.deepen_since =
                 Some(parse_ascii_i64(timestamp).map_err(|_| CliError::Fatal {
@@ -5237,11 +10128,47 @@ pub(crate) fn read_upload_pack_request_from_stdin<R: BufRead>(
             request.deepen_not.push(ascii_line_as_str(rev)?.to_owned());
         } else if line == b"deepen-relative" {
             request.deepen_relative = true;
+        } else if line == b"sideband-all" {
+            if !server_policy.allow_sideband_all {
+                return Err(upload_pack_unexpected_request_line(&line)?);
+            }
+            request.sideband_all = true;
+        } else if let Some(protocols) = line.strip_prefix(b"packfile-uris ") {
+            if !server_policy.blob_packfile_uri.advertised() {
+                return Err(upload_pack_unexpected_request_line(&line)?);
+            }
+            if !request.packfile_uri_protocols.is_empty() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "multiple packfile-uris lines forbidden".into(),
+                });
+            }
+            request.packfile_uri_protocols = parse_upload_pack_uri_protocols(protocols, &line)?;
+        } else if line == b"packfile-uris" {
+            return Err(upload_pack_unexpected_request_line(&line)?);
         }
     }
-    sort_dedup_object_ids(&mut request.wants);
+    if !request.sideband_all {
+        request.packfile_uri_protocols.clear();
+    }
     sort_dedup_object_ids(&mut request.shallows);
     Ok(request)
+}
+
+fn parse_upload_pack_uri_protocols(protocols: &[u8], line: &[u8]) -> Result<Vec<String>> {
+    let mut parsed = Vec::new();
+    for protocol in protocols.split(|byte| *byte == b',') {
+        if parsed.len() >= UPLOAD_PACK_URI_PROTOCOL_COUNT_LIMIT
+            || protocol.is_empty()
+            || protocol
+                .iter()
+                .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        {
+            return Err(upload_pack_unexpected_request_line(line)?);
+        }
+        parsed.push(ascii_line_as_str(protocol)?.to_owned());
+    }
+    Ok(parsed)
 }
 
 fn upload_pack_protocol_v2_requested() -> bool {
@@ -5252,26 +10179,214 @@ fn upload_pack_protocol_v2_requested() -> bool {
 }
 
 fn upload_pack_v2(repo: &GitRepo) -> Result<()> {
+    upload_pack_v2_with_hash(repo, SmartTransportHash::sha1())
+}
+
+fn upload_pack_v2_with_hash(repo: &GitRepo, hash: SmartTransportHash) -> Result<()> {
+    let filter_policy = UploadPackFilterPolicy::from_repo(repo)?;
+    upload_pack_v2_with_hash_and_policy(repo, hash, filter_policy)
+}
+
+fn upload_pack_v2_with_hash_and_policy(
+    repo: &GitRepo,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    upload_pack_v2_with_hash_and_server_policy(
+        repo,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn upload_pack_v2_with_hash_and_server_policy(
+    repo: &GitRepo,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
+    upload_pack_v2_with_hash_and_server_policy_with_advertisement(repo, hash, server_policy, true)
+}
+
+fn upload_pack_v2_with_hash_and_server_policy_with_advertisement(
+    repo: &GitRepo,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+    advertise_capabilities: bool,
+) -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout.lock());
-    write_upload_pack_v2_capabilities(&mut stdout)?;
-    stdout.flush()?;
-
     let stdin = io::stdin();
     let mut stdin = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdin.lock());
-    let request = read_upload_pack_v2_request_from_stdin(&mut stdin)?;
-    upload_pack_v2_respond_to_writer(repo, request, &mut stdout)
+    upload_pack_v2_with_io_with_hash_and_server_policy_with_advertisement(
+        repo,
+        &mut stdin,
+        &mut stdout,
+        hash,
+        server_policy,
+        advertise_capabilities,
+    )
+}
+
+fn upload_pack_v2_with_io<R: BufRead, W: Write>(
+    repo: &GitRepo,
+    input: &mut R,
+    output: &mut W,
+) -> Result<()> {
+    upload_pack_v2_with_io_with_hash(repo, input, output, SmartTransportHash::sha1())
+}
+
+fn upload_pack_v2_with_io_with_hash<R: BufRead, W: Write>(
+    repo: &GitRepo,
+    input: &mut R,
+    output: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    let filter_policy = UploadPackFilterPolicy::from_repo(repo)?;
+    upload_pack_v2_with_io_with_hash_and_policy(repo, input, output, hash, filter_policy)
+}
+
+fn upload_pack_v2_with_io_with_hash_and_policy<R: BufRead, W: Write>(
+    repo: &GitRepo,
+    input: &mut R,
+    output: &mut W,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    upload_pack_v2_with_io_with_hash_and_server_policy(
+        repo,
+        input,
+        output,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn upload_pack_v2_with_io_with_hash_and_server_policy<R: BufRead, W: Write>(
+    repo: &GitRepo,
+    input: &mut R,
+    output: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
+    upload_pack_v2_with_io_with_hash_and_server_policy_with_advertisement(
+        repo,
+        input,
+        output,
+        hash,
+        server_policy,
+        true,
+    )
+}
+
+fn upload_pack_v2_with_io_with_hash_and_server_policy_with_advertisement<R: BufRead, W: Write>(
+    repo: &GitRepo,
+    input: &mut R,
+    output: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+    advertise_capabilities: bool,
+) -> Result<()> {
+    if advertise_capabilities {
+        write_upload_pack_v2_capabilities_with_server_policy(output, hash, server_policy.clone())?;
+        output.flush()?;
+    }
+    loop {
+        match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            input,
+            hash,
+            server_policy.clone(),
+        )? {
+            UploadPackV2RequestRead::Eof | UploadPackV2RequestRead::Empty => return Ok(()),
+            UploadPackV2RequestRead::Request(UploadPackV2Request::Unknown) => continue,
+            UploadPackV2RequestRead::Request(request) => {
+                upload_pack_v2_respond_to_writer_with_hash_and_server_policy(
+                    repo,
+                    request,
+                    output,
+                    hash,
+                    server_policy.clone(),
+                )?;
+                output.flush()?;
+            }
+        }
+    }
 }
 
 fn write_upload_pack_v2_capabilities<W: Write>(stdout: &mut W) -> Result<()> {
+    write_upload_pack_v2_capabilities_with_hash(stdout, SmartTransportHash::sha1())
+}
+
+fn write_upload_pack_v2_capabilities_with_hash<W: Write>(
+    stdout: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    write_upload_pack_v2_capabilities_with_policy(stdout, hash, UploadPackFilterPolicy::default())
+}
+
+fn write_upload_pack_v2_capabilities_with_policy<W: Write>(
+    stdout: &mut W,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    write_upload_pack_v2_capabilities_with_server_policy(
+        stdout,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn write_upload_pack_v2_capabilities_with_server_policy<W: Write>(
+    stdout: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
     write_pkt_line(stdout, b"version 2\n")?;
     write_pkt_line(stdout, b"agent=zmin/0.1.0\n")?;
     write_pkt_line(stdout, b"ls-refs=unborn\n")?;
-    write_pkt_line(stdout, b"fetch=shallow wait-for-done\n")?;
+    let mut fetch_capabilities = String::from("fetch=shallow wait-for-done");
+    if server_policy.filter.advertised() {
+        fetch_capabilities.push_str(" filter");
+    }
+    if server_policy.allow_sideband_all {
+        fetch_capabilities.push_str(" sideband-all");
+    }
+    if server_policy.blob_packfile_uri.advertised() {
+        fetch_capabilities.push_str(" packfile-uris");
+    }
+    fetch_capabilities.push('\n');
+    write_pkt_line(stdout, fetch_capabilities.as_bytes())?;
     write_pkt_line(stdout, b"server-option\n")?;
-    write_pkt_line(stdout, b"object-format=sha1\n")?;
+    write_pkt_line(
+        stdout,
+        format!("object-format={}\n", hash.name()).as_bytes(),
+    )?;
+    if let Some(value) = server_policy.promisor_remote.capability_value()? {
+        write_pkt_line(stdout, format!("promisor-remote={value}\n").as_bytes())?;
+    }
     stdout.write_all(b"0000")?;
     Ok(())
+}
+
+fn write_upload_pack_v1_advertisement_from_adapter<W: Write>(
+    refs: &OwnedCliRefsStoreAdapter,
+    output: &mut W,
+) -> Result<()> {
+    write_upload_pack_v1_advertisement_from_adapter_with_hash_and_policy(
+        refs,
+        output,
+        SmartTransportHash::sha1(),
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn write_upload_pack_v1_advertisement_from_adapter_with_hash_and_policy<W: Write>(
+    refs: &OwnedCliRefsStoreAdapter,
+    output: &mut W,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    write_pkt_line(output, b"version 1\n")?;
+    write_upload_pack_advertisement_from_hash_and_policy(refs, output, false, hash, filter_policy)
 }
 
 fn upload_pack_v2_respond_to_writer<W: Write>(
@@ -5279,12 +10394,43 @@ fn upload_pack_v2_respond_to_writer<W: Write>(
     request: UploadPackV2Request,
     stdout: &mut W,
 ) -> Result<()> {
+    upload_pack_v2_respond_to_writer_with_hash(repo, request, stdout, SmartTransportHash::sha1())
+}
+
+fn upload_pack_v2_respond_to_writer_with_hash<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackV2Request,
+    stdout: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    upload_pack_v2_respond_to_writer_with_hash_and_server_policy(
+        repo,
+        request,
+        stdout,
+        hash,
+        UploadPackServerPolicy::default(),
+    )
+}
+
+fn upload_pack_v2_respond_to_writer_with_hash_and_server_policy<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackV2Request,
+    stdout: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
     match request {
         UploadPackV2Request::LsRefs { prefixes, peel } => {
-            write_upload_pack_v2_ls_refs(repo, &prefixes, peel, stdout)
+            write_upload_pack_v2_ls_refs_with_hash(repo, &prefixes, peel, stdout, hash)
         }
         UploadPackV2Request::Fetch(request) => {
-            upload_pack_v2_fetch_respond_to_writer(repo, request, stdout)
+            upload_pack_v2_fetch_respond_to_writer_with_hash_and_server_policy(
+                repo,
+                request,
+                stdout,
+                hash,
+                server_policy,
+            )
         }
         UploadPackV2Request::Unknown => Ok(()),
     }
@@ -5295,10 +10441,40 @@ fn upload_pack_v2_fetch_respond_to_writer<W: Write>(
     request: UploadPackRequest,
     stdout: &mut W,
 ) -> Result<()> {
+    upload_pack_v2_fetch_respond_to_writer_with_hash(
+        repo,
+        request,
+        stdout,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn upload_pack_v2_fetch_respond_to_writer_with_hash<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stdout: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    upload_pack_v2_fetch_respond_to_writer_with_hash_and_server_policy(
+        repo,
+        request,
+        stdout,
+        hash,
+        UploadPackServerPolicy::default(),
+    )
+}
+
+fn upload_pack_v2_fetch_respond_to_writer_with_hash_and_server_policy<W: Write>(
+    repo: &GitRepo,
+    request: UploadPackRequest,
+    stdout: &mut W,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<()> {
     if request.wants.is_empty() {
         return Ok(());
     }
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     if !request.done {
         write_pkt_line(stdout, b"acknowledgments\n")?;
         upload_pack_write_stateless_negotiation_response(stdout, &store, &request, true)?;
@@ -5306,7 +10482,7 @@ fn upload_pack_v2_fetch_respond_to_writer<W: Write>(
         stdout.flush()?;
         return Ok(());
     }
-    if let Some(invalid_want) = upload_pack_invalid_want(repo, &request)? {
+    if let Some(invalid_want) = upload_pack_invalid_want_with_hash(repo, &request, hash)? {
         write_pkt_line(
             stdout,
             format!("ERR upload-pack: not our ref {}", invalid_want.to_hex()).as_bytes(),
@@ -5320,28 +10496,53 @@ fn upload_pack_v2_fetch_respond_to_writer<W: Write>(
             ),
         });
     }
-    let common_have = upload_pack_common_have(&store, &request.haves);
     let shallow_boundaries = upload_pack_shallow_boundaries(repo, &store, &request)?;
-    let pack = upload_pack_build_pack_file(repo, &store, &request)?;
+    let pack = match upload_pack_build_pack_file_with_hash_and_server_policy(
+        repo,
+        &store,
+        &request,
+        hash,
+        server_policy,
+    ) {
+        Ok(pack) => pack,
+        Err(error) => return Err(upload_pack_server_error(repo, &store, &request, error)),
+    };
     if !shallow_boundaries.is_empty() {
-        write_pkt_line(stdout, b"shallow-info\n")?;
+        write_upload_pack_v2_response_line(stdout, request.sideband_all, b"shallow-info\n")?;
         for boundary in &shallow_boundaries {
-            write_shallow_pkt_line(stdout, boundary)?;
+            let mut line = Vec::with_capacity(b"shallow ".len() + boundary.hex_len() + 1);
+            line.extend_from_slice(b"shallow ");
+            boundary.write_hex_bytes(&mut line);
+            line.push(b'\n');
+            write_upload_pack_v2_response_line(stdout, request.sideband_all, &line)?;
         }
         stdout.write_all(b"0001")?;
     }
-    write_pkt_line(stdout, b"acknowledgments\n")?;
-    if let Some(have) = common_have {
-        write_ack_pkt_line(stdout, &have)?;
-    } else {
-        write_pkt_line(stdout, b"NAK\n")?;
+    if !pack.packfile_uris.is_empty() {
+        write_upload_pack_v2_response_line(stdout, true, b"packfile-uris\n")?;
+        for mapping in &pack.packfile_uris {
+            let line = format!("{} {}\n", mapping.pack_hash.to_hex(), mapping.uri);
+            write_upload_pack_v2_response_line(stdout, true, line.as_bytes())?;
+        }
+        stdout.write_all(b"0001")?;
     }
-    stdout.write_all(b"0001")?;
-    write_pkt_line(stdout, b"packfile\n")?;
+    write_upload_pack_v2_response_line(stdout, request.sideband_all, b"packfile\n")?;
     let mut file = fs::File::open(pack.path())?;
     write_sideband_pack_from_reader(stdout, &mut file)?;
     stdout.flush()?;
     Ok(())
+}
+
+fn write_upload_pack_v2_response_line<W: Write>(
+    output: &mut W,
+    sideband_all: bool,
+    payload: &[u8],
+) -> Result<()> {
+    if sideband_all {
+        write_sideband_pack_chunk(output, payload)?;
+        return Ok(());
+    }
+    write_pkt_line(output, payload)
 }
 
 fn write_upload_pack_v2_ls_refs<W: Write>(
@@ -5350,8 +10551,18 @@ fn write_upload_pack_v2_ls_refs<W: Write>(
     peel: bool,
     output: &mut W,
 ) -> Result<()> {
-    let refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    write_upload_pack_v2_ls_refs_with_hash(repo, prefixes, peel, output, SmartTransportHash::sha1())
+}
+
+fn write_upload_pack_v2_ls_refs_with_hash<W: Write>(
+    repo: &GitRepo,
+    prefixes: &[String],
+    peel: bool,
+    output: &mut W,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    let refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let selected = |name: &str| prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p));
     if selected("HEAD")
         && let Some(id) = refs.resolve_ref("HEAD")?
@@ -5387,28 +10598,147 @@ fn write_upload_pack_v2_ls_refs<W: Write>(
 fn read_upload_pack_v2_request_from_stdin<R: BufRead>(
     input: &mut R,
 ) -> Result<UploadPackV2Request> {
+    match read_upload_pack_v2_request_state_from_stdin(input)? {
+        UploadPackV2RequestRead::Request(request) => Ok(request),
+        UploadPackV2RequestRead::Eof | UploadPackV2RequestRead::Empty => {
+            Ok(UploadPackV2Request::Unknown)
+        }
+    }
+}
+
+fn read_upload_pack_v2_request_state_from_stdin<R: BufRead>(
+    input: &mut R,
+) -> Result<UploadPackV2RequestRead> {
+    read_upload_pack_v2_request_state_from_stdin_with_hash(input, SmartTransportHash::sha1())
+}
+
+fn read_upload_pack_v2_request_state_from_stdin_with_hash<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+) -> Result<UploadPackV2RequestRead> {
+    read_upload_pack_v2_request_state_from_stdin_with_hash_and_policy(
+        input,
+        hash,
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn read_upload_pack_v2_request_state_from_stdin_with_hash_and_policy<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<UploadPackV2RequestRead> {
+    read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+        input,
+        hash,
+        UploadPackServerPolicy::from_filter(filter_policy),
+    )
+}
+
+fn read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy<R: BufRead>(
+    input: &mut R,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<UploadPackV2RequestRead> {
     let mut request = UploadPackRequest::default();
     let mut command = None::<String>;
     let mut prefixes = Vec::new();
     let mut peel = false;
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     let mut saw_delim = false;
+    let mut object_format_seen = false;
     loop {
         match read_pkt_line_frame_into(input, &mut payload)? {
-            PktLineFrame::Eof | PktLineFrame::ResponseEnd => break,
-            PktLineFrame::Flush => break,
+            PktLineFrame::Eof => {
+                if command.is_none()
+                    && !saw_delim
+                    && prefixes.is_empty()
+                    && !peel
+                    && request.wants.is_empty()
+                    && request.haves.is_empty()
+                {
+                    return Ok(UploadPackV2RequestRead::Eof);
+                }
+                break;
+            }
+            PktLineFrame::ResponseEnd => {
+                if command.is_none()
+                    && !saw_delim
+                    && prefixes.is_empty()
+                    && !peel
+                    && request.wants.is_empty()
+                    && request.haves.is_empty()
+                {
+                    return Ok(UploadPackV2RequestRead::Empty);
+                }
+                break;
+            }
+            PktLineFrame::Flush => {
+                if command.is_none()
+                    && !saw_delim
+                    && prefixes.is_empty()
+                    && !peel
+                    && request.wants.is_empty()
+                    && request.haves.is_empty()
+                {
+                    return Ok(UploadPackV2RequestRead::Empty);
+                }
+                break;
+            }
             PktLineFrame::Delim => {
                 saw_delim = true;
             }
             PktLineFrame::Payload => {
                 if !saw_delim {
                     let line = trim_lf_payload(&payload);
+                    if line.len() > UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: format!(
+                                "upload-pack request line exceeds {UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT} bytes"
+                            ),
+                        });
+                    }
                     if let Some(value) = line.strip_prefix(b"command=") {
+                        if let Some(previous) = command.as_deref() {
+                            let requested = ascii_line_as_str(value)?;
+                            return Err(CliError::Fatal {
+                                code: 128,
+                                message: format!(
+                                    "command '{requested}' requested after already requesting command '{previous}'"
+                                ),
+                            });
+                        }
                         command = Some(ascii_line_as_str(value)?.to_owned());
+                    } else if let Some(value) = line.strip_prefix(b"object-format=") {
+                        if !object_format_seen {
+                            validate_smart_object_format(value, hash)?;
+                            object_format_seen = true;
+                        }
+                    } else if let Some(value) = line.strip_prefix(b"promisor-remote=") {
+                        if !server_policy.promisor_remote.advertised() {
+                            return Err(upload_pack_unexpected_request_line(&line)?);
+                        }
+                        if request.promisor_remote.is_some() {
+                            return Err(CliError::Fatal {
+                                code: 128,
+                                message: "multiple promisor-remote responses forbidden".into(),
+                            });
+                        }
+                        request.promisor_remote =
+                            Some(parse_upload_pack_promisor_remote_response(value, &line)?);
                     }
                     continue;
                 }
                 let line = trim_lf_payload(&payload);
+                if line.len() > UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "upload-pack request line exceeds {UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT} bytes"
+                        ),
+                    });
+                }
                 if let Some(prefix) = line.strip_prefix(b"ref-prefix ") {
                     prefixes.push(ascii_line_as_str(prefix)?.to_owned());
                 } else if line == b"peel" {
@@ -5420,7 +10750,7 @@ fn read_upload_pack_v2_request_from_stdin<R: BufRead>(
                     })?;
                     request
                         .wants
-                        .push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+                        .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
                 } else if let Some(rest) = line.strip_prefix(b"have ") {
                     let id = first_ascii_token(rest).ok_or_else(|| CliError::Fatal {
                         code: 128,
@@ -5428,19 +10758,97 @@ fn read_upload_pack_v2_request_from_stdin<R: BufRead>(
                     })?;
                     request
                         .haves
-                        .push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+                        .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
+                } else if let Some(rest) = line.strip_prefix(b"shallow ") {
+                    let id = first_ascii_token(rest).ok_or_else(|| CliError::Fatal {
+                        code: 128,
+                        message: "upload-pack shallow line is missing object id".into(),
+                    })?;
+                    request
+                        .shallows
+                        .push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
+                } else if let Some(depth) = line.strip_prefix(b"deepen ") {
+                    request.deepen =
+                        Some(parse_ascii_usize(depth).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: "upload-pack deepen line is invalid".into(),
+                        })?);
+                } else if let Some(timestamp) = line.strip_prefix(b"deepen-since ") {
+                    request.deepen_since =
+                        Some(parse_ascii_i64(timestamp).map_err(|_| CliError::Fatal {
+                            code: 128,
+                            message: "upload-pack deepen-since line is invalid".into(),
+                        })?);
+                } else if let Some(rev) = line.strip_prefix(b"deepen-not ") {
+                    request
+                        .deepen_not
+                        .push(ascii_line_as_str(trim_ascii_whitespace(rev))?.to_owned());
+                } else if line == b"deepen-relative" {
+                    request.deepen_relative = true;
+                } else if let Some(filter) = line.strip_prefix(b"filter ") {
+                    if command.as_deref() != Some("fetch") || !server_policy.filter.advertised() {
+                        return Err(upload_pack_unexpected_request_line(&line)?);
+                    }
+                    if request.filter.is_some() {
+                        return Err(upload_pack_multiple_filter_specs());
+                    }
+                    let filter = parse_upload_pack_filter(ascii_line_as_str(filter)?)?;
+                    server_policy.filter.validate(&filter)?;
+                    request.filter = Some(filter);
+                } else if line == b"sideband-all" {
+                    if command.as_deref() != Some("fetch") || !server_policy.allow_sideband_all {
+                        return Err(upload_pack_unexpected_request_line(&line)?);
+                    }
+                    request.sideband_all = true;
+                } else if let Some(protocols) = line.strip_prefix(b"packfile-uris ") {
+                    if command.as_deref() != Some("fetch")
+                        || !server_policy.blob_packfile_uri.advertised()
+                    {
+                        return Err(upload_pack_unexpected_request_line(&line)?);
+                    }
+                    if !request.packfile_uri_protocols.is_empty() {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "multiple packfile-uris lines forbidden".into(),
+                        });
+                    }
+                    request.packfile_uri_protocols =
+                        parse_upload_pack_uri_protocols(protocols, &line)?;
+                } else if line == b"packfile-uris" {
+                    return Err(upload_pack_unexpected_request_line(&line)?);
                 } else if line == b"done" {
                     request.done = true;
                 }
             }
         }
     }
-    sort_dedup_object_ids(&mut request.wants);
-    match command.as_deref() {
-        Some("ls-refs") => Ok(UploadPackV2Request::LsRefs { prefixes, peel }),
-        Some("fetch") => Ok(UploadPackV2Request::Fetch(request)),
-        _ => Ok(UploadPackV2Request::Unknown),
+    if !request.sideband_all {
+        request.packfile_uri_protocols.clear();
     }
+    let Some(command) = command.as_deref().filter(|command| !command.is_empty()) else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "no command requested".into(),
+        });
+    };
+    if !matches!(command, "ls-refs" | "fetch") {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid command '{command}'"),
+        });
+    }
+    if !saw_delim {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "missing section delimiter".into(),
+        });
+    }
+    let request = match command {
+        "ls-refs" => UploadPackV2Request::LsRefs { prefixes, peel },
+        "fetch" => UploadPackV2Request::Fetch(request),
+        _ => unreachable!("validated upload-pack v2 command"),
+    };
+    Ok(UploadPackV2RequestRead::Request(request))
 }
 
 fn upload_pack_write_stateless_negotiation_response<W: Write>(
@@ -5565,7 +10973,11 @@ fn parse_upload_pack_filter(raw: &str) -> Result<UploadPackFilter> {
         return Ok(UploadPackFilter::ObjectType(kind));
     }
     if let Some(depth) = raw.strip_prefix("tree:") {
-        let depth = depth.parse::<usize>().map_err(|_| CliError::Fatal {
+        let depth = parse_git_unsigned(depth).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: "expected 'tree:<depth>'".into(),
+        })?;
+        let depth = usize::try_from(depth).map_err(|_| CliError::Fatal {
             code: 128,
             message: "expected 'tree:<depth>'".into(),
         })?;
@@ -5664,16 +11076,7 @@ fn parse_pkt_line_len(header: &[u8; 4], invalid_header_message: &'static str) ->
 }
 
 fn parse_upload_pack_filter_size(value: &str) -> Option<u64> {
-    let (number, multiplier) = match value.as_bytes().last().copied() {
-        Some(b'k' | b'K') => (&value[..value.len() - 1], 1024_u64),
-        Some(b'm' | b'M') => (&value[..value.len() - 1], 1024_u64 * 1024),
-        Some(b'g' | b'G') => (&value[..value.len() - 1], 1024_u64 * 1024 * 1024),
-        _ => (value, 1),
-    };
-    if number.is_empty() {
-        return None;
-    }
-    number.parse::<u64>().ok()?.checked_mul(multiplier)
+    parse_git_unsigned(value).ok()
 }
 
 fn upload_pack_common_have(store: &LooseObjectStore, haves: &[ObjectId]) -> Option<ObjectId> {
@@ -5733,38 +11136,83 @@ fn upload_pack_build_pack_file(
     store: &LooseObjectStore,
     request: &UploadPackRequest,
 ) -> Result<TempUploadPack> {
+    upload_pack_build_pack_file_with_hash(repo, store, request, SmartTransportHash::sha1())
+}
+
+fn upload_pack_build_pack_file_with_hash(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    request: &UploadPackRequest,
+    hash: SmartTransportHash,
+) -> Result<TempUploadPack> {
+    upload_pack_build_pack_file_with_hash_and_server_policy(
+        repo,
+        store,
+        request,
+        hash,
+        UploadPackServerPolicy::default(),
+    )
+}
+
+fn upload_pack_build_pack_file_with_hash_and_server_policy(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    request: &UploadPackRequest,
+    hash: SmartTransportHash,
+    server_policy: UploadPackServerPolicy,
+) -> Result<TempUploadPack> {
     let promisor_remotes = admin_commands::promisor_remote_names(repo)?;
     let has_promisor_remote = !promisor_remotes.is_empty();
     let lazy_fetch_allowed = lazy_fetch_allowed();
 
-    let mut ids = upload_pack_collect_pack_ids(repo, store, request).or_else(|error| {
-        upload_pack_retry_or_warn_missing_objects(
-            repo,
-            request,
-            has_promisor_remote,
-            lazy_fetch_allowed,
-            error,
-            || upload_pack_collect_pack_ids(repo, store, request),
-        )
-    })?;
+    let mut ids =
+        upload_pack_collect_pack_ids_with_hash(repo, store, request, hash).or_else(|error| {
+            upload_pack_retry_or_warn_missing_objects(
+                repo,
+                request,
+                has_promisor_remote,
+                lazy_fetch_allowed,
+                error,
+                || upload_pack_collect_pack_ids_with_hash(repo, store, request, hash),
+            )
+        })?;
 
     if lazy_fetch_allowed
         && has_promisor_remote
         && admin_commands::backfill_promisor_objects(repo, &ids)?
     {
-        ids = upload_pack_collect_pack_ids(repo, store, request)?;
+        ids = upload_pack_collect_pack_ids_with_hash(repo, store, request, hash)?;
     }
 
-    upload_pack_write_pack_file(repo, store, &ids).or_else(|error| {
-        upload_pack_retry_or_warn_missing_objects(
-            repo,
-            request,
-            has_promisor_remote,
-            lazy_fetch_allowed,
-            error,
-            || upload_pack_write_pack_file(repo, store, &ids),
-        )
-    })
+    let mappings = server_policy.blob_packfile_uri.resolve(hash)?;
+    let selected_mappings = if request.sideband_all {
+        select_upload_pack_blob_packfile_uris(&mut ids, &mappings, &request.packfile_uri_protocols)?
+    } else {
+        Vec::new()
+    };
+    let selected_for_retry = selected_mappings.clone();
+    upload_pack_write_pack_file_with_hash(repo, store, &ids, hash)
+        .map(|mut pack| {
+            pack.packfile_uris = selected_mappings;
+            pack
+        })
+        .or_else(|error| {
+            upload_pack_retry_or_warn_missing_objects(
+                repo,
+                request,
+                has_promisor_remote,
+                lazy_fetch_allowed,
+                error,
+                || {
+                    upload_pack_write_pack_file_with_hash(repo, store, &ids, hash).map(
+                        |mut pack| {
+                            pack.packfile_uris = selected_for_retry;
+                            pack
+                        },
+                    )
+                },
+            )
+        })
 }
 
 fn upload_pack_write_pack_file(
@@ -5772,13 +11220,22 @@ fn upload_pack_write_pack_file(
     store: &LooseObjectStore,
     ids: &[ObjectId],
 ) -> Result<TempUploadPack> {
+    upload_pack_write_pack_file_with_hash(repo, store, ids, SmartTransportHash::sha1())
+}
+
+fn upload_pack_write_pack_file_with_hash(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<TempUploadPack> {
     let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
     let result = (|| {
         let mut file = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, file);
         let packed_first_store = store.packed_first();
         write_pack_from_store_with_options(
             &packed_first_store,
-            GitHashAlgorithm::Sha1,
+            hash.algorithm,
             ids,
             pack_encode_options(None, None, None),
             &mut file,
@@ -5786,6 +11243,7 @@ fn upload_pack_write_pack_file(
         file.flush()?;
         Ok(TempUploadPack {
             path: temp_pack.clone(),
+            packfile_uris: Vec::new(),
         })
     })();
     if result.is_err() {
@@ -5860,6 +11318,15 @@ fn upload_pack_collect_pack_ids(
     store: &LooseObjectStore,
     request: &UploadPackRequest,
 ) -> Result<Vec<ObjectId>> {
+    upload_pack_collect_pack_ids_with_hash(repo, store, request, SmartTransportHash::sha1())
+}
+
+fn upload_pack_collect_pack_ids_with_hash(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    request: &UploadPackRequest,
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
     let exclude_ids = upload_pack_exclude_ids(request, !request.deepen_relative);
     let exclude_revs = request.deepen_not.as_slice();
     let commit_cache = CommitObjectCache::new(store);
@@ -5874,16 +11341,20 @@ fn upload_pack_collect_pack_ids(
         Vec::with_capacity(transport_ref_collection_capacity(request.wants.len()));
     let mut extra_objects =
         Vec::with_capacity(transport_ref_collection_capacity(request.wants.len()));
+    let mut wanted_root_trees = HashSet::new();
     for want in &request.wants {
         let mut current = want.clone();
         loop {
             match object_kind_hint_or_read(store, &current)? {
                 GitObjectKind::Tag => {
                     let object = store.read_object(&current)?;
-                    let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                    let tag = decode_tag(hash.algorithm, &object.content)?;
                     current = tag.target;
                 }
                 GitObjectKind::Commit => {
+                    if request.filter.is_some() {
+                        wanted_root_trees.insert(commit_cache.read_commit(&current)?.tree.clone());
+                    }
                     traversal_roots.push(current);
                     break;
                 }
@@ -5942,7 +11413,9 @@ fn upload_pack_collect_pack_ids(
                 &excluded_commits,
                 |id, kind, path| {
                     let size = upload_pack_filter_object_size(store, filter, id, kind)?;
-                    if upload_pack_filter_excludes_object(
+                    let is_wanted_root_tree =
+                        kind == GitObjectKind::Tree && wanted_root_trees.contains(id);
+                    if !upload_pack_filter_includes_graph_object(
                         repo,
                         store,
                         filter,
@@ -5950,6 +11423,7 @@ fn upload_pack_collect_pack_ids(
                         kind,
                         size,
                         path,
+                        is_wanted_root_tree,
                     )? {
                         return Ok(());
                     }
@@ -5970,7 +11444,9 @@ fn upload_pack_collect_pack_ids(
                 |id| {
                     let kind = object_kind_hint_or_read(store, id)?;
                     let size = upload_pack_filter_object_size(store, filter, id, kind)?;
-                    if !upload_pack_filter_excludes_object(
+                    let is_wanted_root_tree =
+                        kind == GitObjectKind::Tree && wanted_root_trees.contains(id);
+                    if upload_pack_filter_includes_graph_object(
                         repo,
                         store,
                         filter,
@@ -5978,6 +11454,7 @@ fn upload_pack_collect_pack_ids(
                         kind,
                         size,
                         None,
+                        is_wanted_root_tree,
                     )? {
                         ids.push(id.clone());
                     }
@@ -6073,6 +11550,34 @@ fn upload_pack_filter_needs_path(filter: &UploadPackFilter) -> bool {
         | UploadPackFilter::BlobLimit(_)
         | UploadPackFilter::ObjectType(_) => false,
     }
+}
+
+fn upload_pack_filter_includes_graph_object(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    filter: &UploadPackFilter,
+    sparse_patterns_cache: &mut HashMap<String, Vec<Vec<u8>>>,
+    kind: GitObjectKind,
+    size: u64,
+    path: Option<&[u8]>,
+    is_wanted_root_tree: bool,
+) -> Result<bool> {
+    // A commit's root tree is the graph boundary needed to materialize the
+    // commit.  Git's filtered upload-pack keeps that tree even when every
+    // subfilter would otherwise omit it (tree:0, object:type=blob, and
+    // combine filters all rely on this boundary).
+    if is_wanted_root_tree && kind == GitObjectKind::Tree {
+        return Ok(true);
+    }
+    Ok(!upload_pack_filter_excludes_object(
+        repo,
+        store,
+        filter,
+        sparse_patterns_cache,
+        kind,
+        size,
+        path,
+    )?)
 }
 
 fn upload_pack_sparse_filter_cache_capacity(filter: &UploadPackFilter) -> usize {
@@ -6586,7 +12091,18 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
         objects_dir: source.common_dir.join("objects"),
         git_dir: source.git_dir,
     };
-    let source_refs = refs_adapter_from_git_dir(&source_repo.git_dir);
+    let source_algorithm = repo_hash_algorithm_from_config(&source_repo).map_err(CliError::Io)?;
+    let destination_algorithm =
+        repo_hash_algorithm_from_config(&destination).map_err(CliError::Io)?;
+    if source_algorithm != destination_algorithm {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch-pack source and destination object formats differ".into(),
+        });
+    }
+    let source_hash = SmartTransportHash::for_algorithm(source_algorithm);
+    let destination_hash = SmartTransportHash::for_algorithm(destination_algorithm);
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source_repo.git_dir, source_hash);
     let mut requested = options.refs;
     if options.stdin {
         let stdin = io::stdin();
@@ -6609,9 +12125,14 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     requested.sort();
     requested.dedup();
 
-    let source_store = object_adapter_from_objects_dir(&source_repo.objects_dir);
-    let destination_store = object_adapter_from_objects_dir(&destination.objects_dir);
-    let destination_refs = refs_adapter_from_git_dir(&destination.git_dir);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source_repo.objects_dir.clone(), source_hash);
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination.objects_dir.clone(),
+        destination_hash,
+    );
+    let destination_refs =
+        refs_adapter_from_git_dir_with_hash(&destination.git_dir, destination_hash);
     let requested_capacity = transport_ref_collection_capacity(requested.len());
     let mut fetched_objects = HashSet::with_capacity(requested_capacity);
     let mut output_rows = Vec::with_capacity(requested_capacity);
@@ -6727,7 +12248,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     if upload_pack_command.is_none() && !options.no_progress {
         write_fetch_pack_local_progress(fetched_objects.len());
     }
-    if options.keep {
+    if options.keep && upload_pack_command.is_none() {
         let pack_id = write_fetch_pack_keep_pack(&source_store, &destination, &fetched_objects)?;
         println!("keep\t{}", pack_id.to_hex());
         write_fetch_pack_receiving_progress(fetched_objects.len());
@@ -6783,27 +12304,35 @@ fn write_fetch_pack_keep_pack(
     }
     let mut ids = fetched_objects.iter().cloned().collect::<Vec<_>>();
     ids.sort_by_key(|id| id.to_hex());
+    let algorithm = repo_hash_algorithm_from_config(destination).map_err(CliError::Io)?;
     let pack = encode_pack_from_store_with_options(
         source_store,
-        GitHashAlgorithm::Sha1,
+        algorithm,
         &ids,
         PackEncodeOptions::delta(10, 50),
     )
     .map_err(CliError::Io)?;
-    let indexed = index_pack_bytes(GitHashAlgorithm::Sha1, &pack).map_err(CliError::Io)?;
+    let indexed = index_pack_bytes(algorithm, &pack).map_err(CliError::Io)?;
     let pack_dir = destination.objects_dir.join("pack");
     fs::create_dir_all(&pack_dir)?;
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
     let pack_path = pack_dir.join(format!("{pack_name}.pack"));
     let temp_pack = unique_temp_sibling(&pack_path);
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
     fs::write(&temp_pack, &pack)?;
+    let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
+    let persistent_keep =
+        OwnedPackKeep::create_locked(&pack_dir, &indexed.pack_id).map_err(CliError::Io)?;
     install_temp_pack_file(&pack_path, &temp_pack, &indexed.pack_id)?;
-    write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
-    write_content_addressed_file(
+    write_pack_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+    write_pack_content_addressed_file(
         &pack_dir.join(format!("{pack_name}.rev")),
         &indexed.reverse_index,
     )?;
-    fs::write(pack_dir.join(format!("{pack_name}.keep")), [])?;
+    if let Some(persistent_keep) = persistent_keep {
+        persistent_keep.disarm();
+    }
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
     Ok(indexed.pack_id)
 }
 
@@ -6852,14 +12381,32 @@ fn finalize_fetch_pack_temp_pack(
     temp_pack: &std::path::Path,
     keep: bool,
     has_haves: bool,
-) -> Result<()> {
+) -> Result<Option<ObjectId>> {
     if keep {
-        return write_indexed_pack_file(objects_dir, temp_pack, has_haves);
+        let hash = SmartTransportHash::for_objects_dir_with_policy(
+            objects_dir,
+            FetchPackPolicy::threshold_default(),
+        )?;
+        let mut receive = PackReceiveResult::default();
+        let pack_id = write_indexed_pack_file_with_hash(
+            objects_dir,
+            temp_pack,
+            has_haves,
+            hash,
+            &mut receive,
+            PackKeepPolicy::Persistent,
+        )?;
+        println!("keep\t{}", pack_id.to_hex());
+        return Ok(Some(pack_id));
     }
-    let store = object_adapter_from_objects_dir(objects_dir.to_path_buf());
-    let result = unpack_pack_file_to_loose(&store, GitHashAlgorithm::Sha1, temp_pack);
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
+    let store = object_adapter_from_objects_dir_with_hash(objects_dir.to_path_buf(), hash);
+    let result = unpack_pack_file_to_loose(&store, hash.algorithm, temp_pack);
     let _ = fs::remove_file(temp_pack);
-    result.map(|_| ()).map_err(CliError::Io)
+    result.map(|_| None).map_err(CliError::Io)
 }
 
 fn emit_local_upload_pack_progress_from_stderr(stderr: &[u8], no_progress: bool) {
@@ -6931,28 +12478,37 @@ pub(crate) fn copy_local_promisor_objects(
 ) -> Result<()> {
     let source = local_clone_source(source_path)?;
     let source_repo = local_clone_source_repo(&source);
-    let source_store =
-        LooseObjectStore::new(source_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let source_algorithm = repo_hash_algorithm_from_config(&source_repo).map_err(CliError::Io)?;
+    let destination_algorithm =
+        repo_hash_algorithm_from_config(destination_repo).map_err(CliError::Io)?;
+    if source_algorithm != destination_algorithm {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "local promisor source and destination object formats differ".into(),
+        });
+    }
+    let source_store = LooseObjectStore::new(source_repo.objects_dir.clone(), source_algorithm);
     let destination_store =
-        LooseObjectStore::new(destination_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        LooseObjectStore::new(destination_repo.objects_dir.clone(), destination_algorithm);
     for root in roots {
         copy_reachable_objects(&source_repo, &source_store, &destination_store, root)?;
     }
     Ok(())
 }
 
-pub(crate) fn pack_reachable_objects(
+fn pack_reachable_objects(
     repo: &GitRepo,
     source: &LooseObjectStore,
     destination: &LooseObjectStore,
     roots: &[ObjectId],
     excluded_roots: &[ObjectId],
-) -> Result<HashSet<ObjectId>> {
+    receive: &mut PackReceiveResult,
+) -> Result<PackReachableResult> {
     let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
         source.object_id_capacity_hint()?,
         roots.len(),
     ));
-    copy_reachable_objects_into_many(
+    let installed_pack_id = copy_reachable_objects_into_many_with_policy(
         repo,
         source,
         destination,
@@ -6961,8 +12517,12 @@ pub(crate) fn pack_reachable_objects(
         &mut seen,
         PackEncodeOptions::delta(10, 50),
         0,
+        PackKeepPolicy::Transient,
+        receive,
     )?;
-    Ok(seen)
+    Ok(PackReachableResult {
+        installed_pack_ids: installed_pack_id.into_iter().collect(),
+    })
 }
 
 fn copy_reachable_seen_initial_capacity(store_hint: usize, roots_len: usize) -> usize {
@@ -6988,6 +12548,7 @@ fn copy_reachable_objects_into(
         PackEncodeOptions::delta(10, 50),
         PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
     )
+    .map(|_| ())
 }
 
 fn copy_reachable_objects_into_undeltified_pack(
@@ -7006,6 +12567,7 @@ fn copy_reachable_objects_into_undeltified_pack(
         PackEncodeOptions::UNDELTIFIED,
         PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
     )
+    .map(|_| ())
 }
 
 fn copy_reachable_objects_into_many(
@@ -7017,7 +12579,34 @@ fn copy_reachable_objects_into_many(
     seen: &mut HashSet<ObjectId>,
     pack_options: PackEncodeOptions,
     pack_missing_threshold: usize,
-) -> Result<()> {
+) -> Result<Option<ObjectId>> {
+    let mut receive = PackReceiveResult::default();
+    copy_reachable_objects_into_many_with_policy(
+        repo,
+        source,
+        destination,
+        roots,
+        excluded_roots,
+        seen,
+        pack_options,
+        pack_missing_threshold,
+        PackKeepPolicy::None,
+        &mut receive,
+    )
+}
+
+fn copy_reachable_objects_into_many_with_policy(
+    repo: &GitRepo,
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    roots: &[ObjectId],
+    excluded_roots: &[ObjectId],
+    seen: &mut HashSet<ObjectId>,
+    pack_options: PackEncodeOptions,
+    pack_missing_threshold: usize,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<Option<ObjectId>> {
     let mut missing = Vec::new();
     let mut commit_roots = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
     {
@@ -7031,7 +12620,7 @@ fn copy_reachable_objects_into_many(
                 let kind = object_kind_hint_or_read(source, &current)?;
                 if kind == GitObjectKind::Tag {
                     let object = source.read_object(&current)?;
-                    let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                    let tag = decode_tag(source.algorithm(), &object.content)?;
                     current = tag.target;
                     continue;
                 }
@@ -7108,12 +12697,14 @@ fn copy_reachable_objects_into_many(
     );
     {
         let _trace = phase_trace("fetch.local.copy.write_missing_objects");
-        copy_or_pack_missing_objects_with_threshold(
+        copy_or_pack_missing_objects_with_threshold_with_policy(
             source,
             destination,
             &missing,
             pack_options,
             pack_missing_threshold,
+            keep_policy,
+            receive,
         )
     }
 }
@@ -7139,36 +12730,34 @@ fn copy_reachable_objects_inner(
     seen: &mut HashSet<ObjectId>,
     pack_options: PackEncodeOptions,
     pack_missing_threshold: usize,
-) -> Result<()> {
+) -> Result<Option<ObjectId>> {
     let mut missing = Vec::new();
     let mut current = id.clone();
     loop {
         if !record_object_if_missing(destination, &current, seen, &mut missing)? {
-            copy_or_pack_missing_objects_with_threshold(
+            return copy_or_pack_missing_objects_with_threshold(
                 source,
                 destination,
                 &missing,
                 pack_options,
                 pack_missing_threshold,
-            )?;
-            return Ok(());
+            );
         }
         let kind = object_kind_hint_or_read(source, &current)?;
         if kind == GitObjectKind::Tag {
             let object = source.read_object(&current)?;
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            let tag = decode_tag(source.algorithm(), &object.content)?;
             current = tag.target;
             continue;
         }
         if kind != GitObjectKind::Commit {
-            copy_or_pack_missing_objects_with_threshold(
+            return copy_or_pack_missing_objects_with_threshold(
                 source,
                 destination,
                 &missing,
                 pack_options,
                 pack_missing_threshold,
-            )?;
-            return Ok(());
+            );
         }
         break;
     }
@@ -7201,8 +12790,7 @@ fn copy_reachable_objects_inner(
         &missing,
         pack_options,
         pack_missing_threshold,
-    )?;
-    Ok(())
+    )
 }
 
 fn copy_reachable_objects_for_depth_into(
@@ -7257,7 +12845,7 @@ fn copy_reachable_objects_from_shallow_source_into(
         let kind = object_kind_hint_or_read(source, &id)?;
         if kind == GitObjectKind::Tag {
             let object = source.read_object(&id)?;
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            let tag = decode_tag(source.algorithm(), &object.content)?;
             pending.push(tag.target);
             continue;
         }
@@ -7360,6 +12948,7 @@ fn copy_or_pack_missing_objects(
         pack_options,
         PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
     )
+    .map(|_| ())
 }
 
 fn copy_or_pack_missing_objects_with_threshold(
@@ -7368,14 +12957,40 @@ fn copy_or_pack_missing_objects_with_threshold(
     ids: &[ObjectId],
     pack_options: PackEncodeOptions,
     pack_missing_threshold: usize,
-) -> Result<()> {
+) -> Result<Option<ObjectId>> {
     if ids.len() < pack_missing_threshold {
         for id in ids {
             copy_object_payload_to_known_missing_destination(source, destination, id)?;
         }
-        return Ok(());
+        return Ok(None);
     }
-    write_missing_objects_pack(source, destination, ids, pack_options)
+    write_missing_objects_pack(source, destination, ids, pack_options).map(Some)
+}
+
+fn copy_or_pack_missing_objects_with_threshold_with_policy(
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    pack_options: PackEncodeOptions,
+    pack_missing_threshold: usize,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<Option<ObjectId>> {
+    if ids.len() < pack_missing_threshold {
+        for id in ids {
+            copy_object_payload_to_known_missing_destination(source, destination, id)?;
+        }
+        return Ok(None);
+    }
+    write_missing_objects_pack_with_policy(
+        source,
+        destination,
+        ids,
+        pack_options,
+        keep_policy,
+        receive,
+    )
+    .map(Some)
 }
 
 fn write_missing_objects_pack(
@@ -7383,8 +12998,28 @@ fn write_missing_objects_pack(
     destination: &LooseObjectStore,
     ids: &[ObjectId],
     pack_options: PackEncodeOptions,
-) -> Result<()> {
+) -> Result<ObjectId> {
+    let mut receive = PackReceiveResult::default();
+    write_missing_objects_pack_with_policy(
+        source,
+        destination,
+        ids,
+        pack_options,
+        PackKeepPolicy::None,
+        &mut receive,
+    )
+}
+
+fn write_missing_objects_pack_with_policy(
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    pack_options: PackEncodeOptions,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<ObjectId> {
     validate_existing_loose_objects(destination, ids)?;
+    let algorithm = destination.algorithm();
     let pack_dir = destination.objects_dir().join("pack");
     fs::create_dir_all(&pack_dir)?;
     let temp_pack = unique_temp_sibling(&pack_dir.join("local-fetch.pack"));
@@ -7394,13 +13029,7 @@ fn write_missing_objects_pack(
             .create_new(true)
             .open(&temp_pack)?;
         let packed_first = source.packed_first();
-        write_pack_from_store_with_options(
-            &packed_first,
-            GitHashAlgorithm::Sha1,
-            ids,
-            pack_options,
-            &mut file,
-        )?;
+        write_pack_from_store_with_options(&packed_first, algorithm, ids, pack_options, &mut file)?;
         file.flush()?;
         Ok::<_, CliError>(())
     })();
@@ -7408,7 +13037,14 @@ fn write_missing_objects_pack(
         let _ = fs::remove_file(&temp_pack);
     }
     result?;
-    let result = write_indexed_pack_file(destination.objects_dir(), &temp_pack, false);
+    let result = write_indexed_pack_file_with_hash(
+        destination.objects_dir(),
+        &temp_pack,
+        false,
+        SmartTransportHash::for_algorithm(algorithm),
+        receive,
+        keep_policy,
+    );
     if result.is_err() {
         let _ = fs::remove_file(&temp_pack);
     }
@@ -7545,7 +13181,7 @@ fn fetch_pack_tag_peels_into(
         if object.kind != GitObjectKind::Tag {
             return Ok(fetched_objects.contains(&current));
         }
-        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+        let tag = decode_tag(source.algorithm(), &object.content)?;
         if fetched_objects.contains(&tag.target) {
             return Ok(true);
         }
@@ -7781,10 +13417,62 @@ fn send_pack_mirror_refspecs(
 }
 
 #[derive(Debug, Clone)]
+struct DaemonVirtualHost {
+    bytes: Vec<u8>,
+}
+
+impl DaemonVirtualHost {
+    fn from_environment() -> Result<Option<Self>> {
+        let Some(value) = std::env::var_os("GIT_OVERRIDE_VIRTUAL_HOST") else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            bytes: daemon_os_string_bytes(value)?,
+        }))
+    }
+
+    fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self { bytes }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    fn contains_newline(&self) -> bool {
+        self.bytes.contains(&b'\n')
+    }
+
+    fn len(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+fn daemon_os_string_bytes(value: OsString) -> Result<Vec<u8>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+
+        Ok(value.into_vec())
+    }
+    #[cfg(not(unix))]
+    {
+        value
+            .into_string()
+            .map(String::into_bytes)
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "GIT_OVERRIDE_VIRTUAL_HOST must be valid Unicode".into(),
+            })
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ParsedDaemonUrl {
     host: String,
     port: u16,
     path: String,
+    virtual_host: Option<DaemonVirtualHost>,
 }
 
 #[derive(Debug, Clone)]
@@ -7806,9 +13494,15 @@ struct SshAdvertisedUploadPack {
     session: Option<RemoteCommandSession>,
     rows: Vec<LsRemoteRow>,
     head_branch: Option<String>,
+    capabilities: Vec<String>,
+    hash: SmartTransportHash,
 }
 
 impl SshAdvertisedUploadPack {
+    fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|value| value == capability)
+    }
+
     fn take_session(&mut self) -> Result<RemoteCommandSession> {
         self.session.take().ok_or_else(|| CliError::Fatal {
             code: 128,
@@ -7830,6 +13524,15 @@ struct DaemonAdvertisedUploadPack {
     reader: io::BufReader<std::net::TcpStream>,
     rows: Vec<LsRemoteRow>,
     head_branch: Option<String>,
+    terminated_with_flush: bool,
+    capabilities: Vec<String>,
+    hash: SmartTransportHash,
+}
+
+impl DaemonAdvertisedUploadPack {
+    fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|value| value == capability)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -7896,6 +13599,10 @@ pub(crate) struct CloneCommandInput {
 }
 
 pub(crate) fn clone(options: CloneOptions) -> Result<()> {
+    clone_with_verbose(options, false)
+}
+
+fn clone_with_verbose(options: CloneOptions, verbose: bool) -> Result<()> {
     let CloneOptions {
         quiet,
         configs,
@@ -7926,7 +13633,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         shallow_since,
         shallow_exclude,
         branch,
-        server_options: _server_options,
+        server_options,
         upload_pack,
         filter,
         also_filter_submodules,
@@ -7939,24 +13646,35 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     let original_repository = repository;
     let repository = effective_transport_url(None, &original_repository, false)?;
     let depth = depth.as_deref().map(validate_positive_depth).transpose()?;
+    validate_clone_bundle_uri_options(
+        bundle_uri.as_deref(),
+        depth,
+        shallow_since.as_deref(),
+        &shallow_exclude,
+    )?;
     let plan = ClonePlanner::plan(&repository, worktree_first);
     let effective_bare = bare || mirror;
-    if effective_bare && separate_git_dir.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '--bare' and '--separate-git-dir' cannot be used together".into(),
-        });
-    }
     validate_clone_plan_for_options(
         plan,
         effective_bare,
         no_checkout,
         background_fetch,
         demand_hydrate,
+        &configs,
+        &recurse_submodules,
+        also_filter_submodules,
+        filter.as_deref(),
     )?;
+    if effective_bare && separate_git_dir.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--bare' and '--separate-git-dir' cannot be used together".into(),
+        });
+    }
     if plan.transport == CloneTransportPlan::SmartHttp {
         return clone_dumb_http(CloneHttpOptions {
             quiet,
+            verbose,
             configs,
             template,
             reject_shallow,
@@ -7977,6 +13695,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            filter: filter.clone(),
+            bundle_uri: bundle_uri.clone(),
+            server_options: server_options.clone(),
             ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
@@ -7988,8 +13709,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         });
     }
     if plan.transport == CloneTransportPlan::GitDaemon {
-        return clone_git_daemon(CloneHttpOptions {
+        let options = CloneHttpOptions {
             quiet,
+            verbose,
             configs,
             template,
             reject_shallow,
@@ -8010,6 +13732,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            filter: filter.clone(),
+            bundle_uri: bundle_uri.clone(),
+            server_options: server_options.clone(),
             ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
@@ -8018,11 +13743,20 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             repository,
             original_repository,
             directory,
-        });
+        };
+        if clone_http_protocol_version(&options.configs) == HttpProtocolVersion::V2
+            || filter.as_deref() == Some("auto")
+        {
+            return clone_v2_remote(options, CloneTransportPlan::GitDaemon);
+        }
+        return clone_git_daemon(options);
     }
     if plan.transport == CloneTransportPlan::Ssh {
-        return clone_ssh(CloneHttpOptions {
+        let use_protocol_v2 =
+            clone_http_protocol_version(&configs) == HttpProtocolVersion::V2 || filter.is_some();
+        let options = CloneHttpOptions {
             quiet,
+            verbose,
             configs,
             template,
             reject_shallow,
@@ -8043,6 +13777,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            filter,
+            bundle_uri,
+            server_options,
             ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
@@ -8051,7 +13788,11 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             repository,
             original_repository,
             directory,
-        });
+        };
+        if use_protocol_v2 {
+            return clone_v2_remote(options, CloneTransportPlan::Ssh);
+        }
+        return clone_ssh(options);
     }
     let Some(source_path) = local_repository_path_from_location(&repository)? else {
         let destination_label =
@@ -8068,6 +13809,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     };
     let _trace = phase_trace("clone_local");
     let source = local_clone_source(&source_path)?;
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
     let destination = match &directory {
         Some(path) => absolute_path_from_arg(path)?,
         None => default_clone_directory(&source_path, effective_bare)?,
@@ -8108,7 +13850,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         });
     }
     let source_is_shallow = has_shallow_marker(&source.git_dir);
-    if source_is_shallow || no_local || repository.starts_with("file://") || filter.is_some() {
+    if source_is_shallow || no_local || repository.starts_with("file://") {
         return clone_local_via_upload_pack(LocalCloneUploadPackOptions {
             quiet,
             configs,
@@ -8152,11 +13894,12 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     reference_object_dirs.extend(reference_if_able_object_dirs(&reference_if_able));
     let effective_single_branch = !no_single_branch && (single_branch || depth.is_some());
 
-    let source_refs = refs_adapter_from_clone_source(&source.git_dir);
+    let source_refs = refs_adapter_from_clone_source(&source.git_dir, source_hash);
     if shared {
         reference_object_dirs.push(canonical_or_absolute(source.common_dir.join("objects")));
     }
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let head_branch = source_head_branch(&source_refs)?;
     let target = clone_target(
         &source_refs,
@@ -8199,7 +13942,11 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
-    apply_clone_ref_format(&repo, ref_format.as_deref())?;
+    if source_hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", source_hash.name())?;
+    }
+    apply_clone_ref_format(&repo, ref_format.as_deref(), source_hash.algorithm)?;
     let apply_configs_result = {
         let _trace = phase_trace("clone_local.apply_configs");
         apply_clone_configs(&repo, &configs)
@@ -8246,7 +13993,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         }
     }
 
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, source_hash);
     {
         let _trace = phase_trace("clone_local.write_refs");
         if mirror {
@@ -8300,6 +14047,14 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     if no_tags || mirror {
         clone_config_values.push((format!("remote.{remote_name}.tagOpt"), "--no-tags".into()));
     }
+    if let Some(filter) = filter.as_deref() {
+        clone_config_values.push((format!("remote.{remote_name}.promisor"), "true".into()));
+        clone_config_values.push((
+            format!("remote.{remote_name}.partialclonefilter"),
+            filter.to_owned(),
+        ));
+        clone_config_values.push(("extensions.partialClone".to_owned(), remote_name.clone()));
+    }
     if plan.mode == CloneModePlan::WorktreeFirst {
         clone_config_values.push(("zmin.worktreeFirst".to_owned(), "true".to_owned()));
     }
@@ -8334,7 +14089,6 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             return Ok(());
         }
     };
-
     if effective_bare {
         match &target {
             CloneTarget::Branch { name, .. } => {
@@ -8363,7 +14117,14 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         destination_refs.write_head_direct(&head_id)?;
     }
     if !effective_bare {
-        record_clone_reflogs(&repo, &destination_refs, &remote_name, &target, &remote_url)?;
+        record_clone_reflogs(
+            &repo,
+            &destination_refs,
+            &remote_name,
+            &target,
+            &remote_url,
+            source_hash,
+        )?;
     }
     if let Some(depth) = depth.filter(|_| shallow_file_clone) {
         let roots = if no_single_branch {
@@ -8380,16 +14141,10 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         return Ok(());
     }
 
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), source_hash);
     {
         let _trace = phase_trace("clone_local.checkout");
-        if matches!(filter.as_deref(), Some("blob:none")) {
-            hydrate_filtered_clone_checkout_objects(&repo, &store, &head_id, &source_path)?;
-            let checkout_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-            checkout_fresh_worktree_plain(&repo, &checkout_store, &head_id)?;
-        } else {
-            checkout_fresh_worktree(&repo, &store, &head_id)?;
-        }
+        checkout_fresh_worktree(&repo, &store, &head_id)?;
     }
     if sparse {
         super::worktree_commands::enable_clone_sparse_checkout(&repo)?;
@@ -8415,6 +14170,7 @@ fn hydrate_filtered_clone_checkout_objects(
     store: &LooseObjectStore,
     head_id: &ObjectId,
     source_path: &Path,
+    hash: SmartTransportHash,
 ) -> Result<()> {
     let commit_cache = CommitObjectCache::new(store);
     let tree_cache = TreeObjectCache::new(store);
@@ -8434,13 +14190,11 @@ fn hydrate_filtered_clone_checkout_objects(
     if checkout_blobs.is_empty() {
         return Ok(());
     }
-    let source_objects_dir = if source_path.join(".git/objects").is_dir() {
-        source_path.join(".git/objects")
-    } else {
-        source_path.join("objects")
-    };
-    let source_store = object_adapter_from_objects_dir(source_objects_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source = local_clone_source(source_path)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     for id in checkout_blobs {
         let object = source_store.read_object(&id).map_err(CliError::Io)?;
         let written = destination_store
@@ -8466,6 +14220,361 @@ fn hydrate_filtered_clone_checkout_objects(
             })?;
     }
     Ok(())
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CheckoutMissingObjectBatch {
+    blob_ids: Vec<ObjectId>,
+}
+
+impl CheckoutMissingObjectBatch {
+    fn collect<S: GitObjectStore + ?Sized>(store: &S, head_id: &ObjectId) -> io::Result<Self> {
+        let commit = store.read_object(head_id)?;
+        if commit.kind != GitObjectKind::Commit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "checkout head is not a commit",
+            ));
+        }
+        let root_tree = decode_commit_links(commit.id.algorithm(), &commit.content)?.tree;
+        drop(commit);
+
+        let mut pending_trees = vec![root_tree];
+        let mut visited_trees = HashSet::new();
+        let mut blob_ids = Vec::new();
+        while let Some(tree_id) = pending_trees.pop() {
+            if !visited_trees.insert(tree_id.clone()) {
+                continue;
+            }
+            let tree = store.read_object(&tree_id).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!(
+                            "filtered clone checkout missing tree object {}",
+                            tree_id.to_hex()
+                        ),
+                    )
+                } else {
+                    error
+                }
+            })?;
+            if tree.kind != GitObjectKind::Tree {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("checkout tree {} is not a tree", tree_id.to_hex()),
+                ));
+            }
+            for_each_tree_object_ref(tree.id.algorithm(), &tree.content, |mode, id| {
+                match mode {
+                    TreeMode::Tree => pending_trees.push(id),
+                    TreeMode::Gitlink => {}
+                    _ if !store.contains_object(&id)? => blob_ids.push(id),
+                    _ => {}
+                }
+                Ok(())
+            })?;
+        }
+        sort_dedup_object_ids(&mut blob_ids);
+        Ok(Self { blob_ids })
+    }
+
+    fn blob_ids(&self) -> &[ObjectId] {
+        &self.blob_ids
+    }
+}
+
+fn hydrate_filtered_http_clone_checkout_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    head_id: &ObjectId,
+    url: &ParsedHttpUrl,
+    helper: &mut Option<RemoteHttpHelperSession>,
+    protocol_v2: bool,
+    server_options: &[String],
+    hash: SmartTransportHash,
+    uri_config: &FetchPackUriConfig,
+    sideband_all: bool,
+    receive: &mut PackReceiveResult,
+) -> Result<()> {
+    let checkout_blobs = CheckoutMissingObjectBatch::collect(store, head_id)?.blob_ids;
+    if checkout_blobs.is_empty() {
+        return Ok(());
+    }
+
+    let fetched = if protocol_v2 {
+        if hash.pack_policy.force_index.packfile_uri {
+            http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                url,
+                helper.as_mut(),
+                repo,
+                &checkout_blobs,
+                &[],
+                server_options,
+                UploadPackShallowOptions::depth(None),
+                uri_config,
+                sideband_all,
+                hash,
+                receive,
+            )
+            .map(|_| true)?
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
+                url,
+                helper,
+                &repo.objects_dir,
+                &checkout_blobs,
+                &[],
+                server_options,
+                hash,
+                receive,
+            )?
+        } else {
+            http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
+                url,
+                &repo.objects_dir,
+                &checkout_blobs,
+                &[],
+                server_options,
+                hash,
+                receive,
+            )?
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_with_helper_with_hash_and_receipt(
+            url,
+            helper,
+            &repo.objects_dir,
+            &checkout_blobs,
+            &[],
+            hash,
+            receive,
+        )?
+    } else {
+        http_fetch_smart_pack_direct_with_hash_and_receipt(
+            url,
+            &repo.objects_dir,
+            &checkout_blobs,
+            &[],
+            hash,
+            receive,
+        )?
+    };
+    if !fetched {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "filtered clone checkout could not fetch missing objects".into(),
+        });
+    }
+    receive
+        .publish_promisor_markers(b"")
+        .map_err(CliError::Io)?;
+    Ok(())
+}
+
+fn hydrate_filtered_http_clone_root_tree(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    head_id: &ObjectId,
+    url: &ParsedHttpUrl,
+    helper: &mut Option<RemoteHttpHelperSession>,
+    server_options: &[String],
+    uri_config: &FetchPackUriConfig,
+    sideband_all: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<()> {
+    let root_tree = CommitObjectCache::new(store)
+        .read_commit_links(head_id)
+        .map_err(CliError::Io)?
+        .tree
+        .clone();
+    if store.contains_object(&root_tree).map_err(CliError::Io)? {
+        return Ok(());
+    }
+
+    let roots = [root_tree.clone()];
+    let options = UploadPackShallowOptions::filter("blob:none");
+    if hash.pack_policy.force_index.packfile_uri {
+        http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+            url,
+            helper.as_mut(),
+            repo,
+            &roots,
+            &[],
+            server_options,
+            options,
+            uri_config,
+            sideband_all,
+            hash,
+            receive,
+        )?;
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+            url,
+            helper,
+            &repo.objects_dir,
+            &roots,
+            &[],
+            server_options,
+            options,
+            hash,
+            receive,
+        )?;
+    } else {
+        http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+            url,
+            &repo.objects_dir,
+            &roots,
+            &[],
+            server_options,
+            options,
+            hash,
+            receive,
+        )?;
+    }
+    if !store.contains_object(&root_tree).map_err(CliError::Io)? {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "filtered clone root tree {} was not fetched",
+                root_tree.to_hex()
+            ),
+        )));
+    }
+    receive
+        .publish_promisor_markers(b"")
+        .map_err(CliError::Io)?;
+    Ok(())
+}
+
+fn hydrate_filtered_remote_clone_checkout_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    head_id: &ObjectId,
+    repository: &str,
+    transport: CloneTransportPlan,
+    protocol_v2: bool,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<PackReceiveResult> {
+    let batch = CheckoutMissingObjectBatch::collect(store, head_id)?;
+    if batch.blob_ids().is_empty() {
+        return Ok(PackReceiveResult::default());
+    }
+    let mut receive = PackReceiveResult::default();
+    let roots = batch.blob_ids();
+    if protocol_v2 {
+        match transport {
+            CloneTransportPlan::Ssh => {
+                let (session, capabilities) =
+                    ssh_open_upload_pack_v2_with_capabilities(repository, server_options)?;
+                if capabilities.hash.algorithm != hash.algorithm {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "filtered clone checkout negotiated a different object format"
+                            .into(),
+                    });
+                }
+                ssh_fetch_pack_v2_from_session_with_policy(
+                    session,
+                    &repo.objects_dir,
+                    roots,
+                    &[],
+                    server_options,
+                    UploadPackShallowOptions::depth(None),
+                    hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+            }
+            CloneTransportPlan::GitDaemon => {
+                let (mut stream, mut reader, capabilities) =
+                    daemon_open_upload_pack_v2_with_capabilities(repository, server_options)?;
+                if capabilities.hash.algorithm != hash.algorithm {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "filtered clone checkout negotiated a different object format"
+                            .into(),
+                    });
+                }
+                daemon_fetch_smart_pack_v2_on_connection_with_options_and_policy(
+                    &mut stream,
+                    &mut reader,
+                    &repo.objects_dir,
+                    roots,
+                    &[],
+                    server_options,
+                    UploadPackShallowOptions::depth(None),
+                    hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+            }
+            CloneTransportPlan::SmartHttp | CloneTransportPlan::LocalOrUnsupported => {
+                unreachable!("filtered remote checkout hydration requires SSH or git daemon")
+            }
+        }
+    } else {
+        match transport {
+            CloneTransportPlan::Ssh => {
+                let mut advertised =
+                    ssh_open_advertised_upload_pack(repository, false, false, false, &[])?;
+                if advertised.hash.algorithm != hash.algorithm {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "filtered clone checkout negotiated a different object format"
+                            .into(),
+                    });
+                }
+                ssh_fetch_pack_from_advertised_session_with_policy(
+                    advertised.take_session()?,
+                    &repo.objects_dir,
+                    roots,
+                    &[],
+                    UploadPackShallowOptions::depth(None),
+                    hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+            }
+            CloneTransportPlan::GitDaemon => {
+                let advertised = daemon_open_advertised_upload_pack_with_verbose(
+                    repository,
+                    false,
+                    false,
+                    false,
+                    &[],
+                    false,
+                )?;
+                if advertised.hash.algorithm != hash.algorithm {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "filtered clone checkout negotiated a different object format"
+                            .into(),
+                    });
+                }
+                daemon_fetch_pack_from_advertised_stream_with_policy(
+                    advertised.stream,
+                    advertised.reader,
+                    &repo.objects_dir,
+                    roots,
+                    &[],
+                    UploadPackShallowOptions::depth(None),
+                    hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+            }
+            CloneTransportPlan::SmartHttp | CloneTransportPlan::LocalOrUnsupported => {
+                unreachable!("filtered remote checkout hydration requires SSH or git daemon")
+            }
+        }
+    }
+    receive
+        .publish_promisor_markers(b"")
+        .map_err(CliError::Io)?;
+    Ok(receive)
 }
 
 struct LocalCloneUploadPackOptions {
@@ -8553,8 +14662,10 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
         reference_object_dirs.push(canonical_or_absolute(source.common_dir.join("objects")));
     }
     let source_repo = local_clone_source_repo(&source);
-    let source_refs = refs_adapter_from_clone_source(&source.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let source_refs = refs_adapter_from_clone_source(&source.git_dir, source_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let head_branch = source_head_branch(&source_refs)?;
     let target = clone_target(
         &source_refs,
@@ -8596,7 +14707,11 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
-    apply_clone_ref_format(&repo, ref_format.as_deref())?;
+    if source_hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", source_hash.name())?;
+    }
+    apply_clone_ref_format(&repo, ref_format.as_deref(), source_hash.algorithm)?;
     if let Err(error) = apply_clone_configs(&repo, &configs) {
         cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
         return Err(error);
@@ -8604,57 +14719,94 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
     if !dissociate {
         write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let configured_filter = filter.clone();
+    let mut effective_filter = filter;
+    let mut resolved_auto_filter = None;
+    if effective_filter.as_deref() == Some("auto") {
+        let advertised = local_clone_promisor_remote_capability(&source_repo)?;
+        resolved_auto_filter = resolve_upload_pack_auto_filter(&repo, advertised.as_deref())?;
+        effective_filter = None;
+    }
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), source_hash);
     let effective_single_branch = !no_single_branch && (single_branch || depth.is_some());
     let builtin_upload_pack = builtin_local_upload_pack_command()?;
     let upload_pack_command = upload_pack.as_deref().unwrap_or(&builtin_upload_pack);
     let source_path = source_path.to_string_lossy().to_string();
-    let fetch_result = if let Some(filter) = filter.as_deref() {
-        clone_local_upload_pack_fetch_filtered(
+    let mut pack_receipts = if let Some(filter) = effective_filter.as_deref() {
+        match clone_local_upload_pack_fetch_filtered(
             &repo,
             &source_repo,
             &source_refs,
             &destination_refs,
             &destination_store,
-            &remote_name,
             &target,
             effective_single_branch,
             no_tags,
             upload_pack_command,
             &source_path,
             filter,
-        )
-    } else if let Some(depth) = depth {
-        clone_local_upload_pack_fetch_depth(
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &destination_store,
-            &target,
-            effective_single_branch,
-            no_tags,
-            upload_pack_command,
-            &source_path,
-            depth,
-        )
+        ) {
+            Ok(receipts) => receipts,
+            Err(error) => {
+                cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
+                return Err(error);
+            }
+        }
     } else {
-        clone_local_upload_pack_fetch_full(
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &destination_store,
-            &remote_name,
-            &target,
-            effective_single_branch,
-            no_tags,
-            upload_pack_command,
-            &source_path,
-        )
+        let fetch_result = if let Some(depth) = depth {
+            clone_local_upload_pack_fetch_depth(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                &target,
+                effective_single_branch,
+                no_tags,
+                upload_pack_command,
+                &source_path,
+                depth,
+            )
+            .map(|_| Vec::new())
+        } else {
+            clone_local_upload_pack_fetch_full(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                &remote_name,
+                &target,
+                effective_single_branch,
+                no_tags,
+                upload_pack_command,
+                &source_path,
+            )
+        };
+        let installed_pack_ids = match fetch_result {
+            Ok(installed_pack_ids) => installed_pack_ids,
+            Err(error) => {
+                cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
+                return Err(error);
+            }
+        };
+        let mut receive = PackReceiveResult::default();
+        for pack_id in installed_pack_ids {
+            receive.record_installed(&repo.objects_dir.join("pack"), pack_id);
+        }
+        receive
     };
-    if let Err(error) = fetch_result {
-        cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
-        return Err(error);
+
+    if effective_filter.is_some() || resolved_auto_filter.is_some() {
+        let promisor_content = local_clone_promisor_marker_content(
+            &source_refs,
+            &target,
+            no_tags,
+            effective_single_branch,
+        )?;
+        pack_receipts
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
     }
 
     {
@@ -8705,6 +14857,7 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
             no_tags,
             worktree_first,
             demand_hydrate,
+            configured_filter.as_deref(),
         ),
     )?;
 
@@ -8768,15 +14921,24 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
             &remote_name,
             &target,
             &clone_remote_url,
+            source_hash,
         )?;
     }
     if effective_bare || no_checkout {
+        pack_receipts.release_owned();
         return Ok(());
     }
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    if matches!(filter.as_deref(), Some("blob:none")) {
-        hydrate_filtered_clone_checkout_objects(&repo, &store, &head_id, Path::new(&source_path))?;
-        let checkout_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), source_hash);
+    if effective_filter.is_some() {
+        hydrate_filtered_clone_checkout_objects(
+            &repo,
+            &store,
+            &head_id,
+            Path::new(&source_path),
+            source_hash,
+        )?;
+        let checkout_store =
+            object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), source_hash);
         checkout_fresh_worktree_plain(&repo, &checkout_store, &head_id)?;
     } else {
         checkout_fresh_worktree(&repo, &store, &head_id)?;
@@ -8796,6 +14958,7 @@ fn clone_local_via_upload_pack(options: LocalCloneUploadPackOptions) -> Result<(
     if background_fetch {
         spawn_worktree_first_background_fetch(&repo, &remote_name)?;
     }
+    pack_receipts.release_owned();
     Ok(())
 }
 
@@ -8810,12 +14973,12 @@ fn clone_local_upload_pack_fetch_full(
     no_tags: bool,
     upload_pack_command: &str,
     source_path: &str,
-) -> Result<()> {
+) -> Result<Vec<ObjectId>> {
     if matches!(
         target,
         CloneTarget::Empty | CloneTarget::MissingBranch { .. }
     ) {
-        return Ok(());
+        return Ok(Vec::new());
     }
     if effective_single_branch {
         if let Some(branch) = target.branch_name() {
@@ -8971,21 +15134,14 @@ fn clone_local_upload_pack_fetch_filtered(
     source_refs: &RefStore,
     destination_refs: &RefStore,
     destination_store: &LooseObjectStore,
-    remote_name: &str,
     target: &CloneTarget,
     effective_single_branch: bool,
     no_tags: bool,
     upload_pack_command: &str,
     source_path: &str,
     filter: &str,
-) -> Result<()> {
-    if filter != "blob:none" {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "clone --filter currently supports blob:none for local transport clones"
-                .into(),
-        });
-    }
+) -> Result<PackReceiveResult> {
+    let filter = parse_upload_pack_filter(filter)?;
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(32));
     if effective_single_branch {
         match target {
@@ -9011,8 +15167,18 @@ fn clone_local_upload_pack_fetch_filtered(
     let haves = collect_upload_pack_haves(destination_store, destination_refs)?;
     let _ = upload_pack_command;
     let _ = source_path;
-    copy_local_filtered_objects(source_repo, &repo.objects_dir, &request_roots, &haves)?;
-    record_fetch_filter_promisor_config(repo, remote_name, filter)
+    let mut receive = PackReceiveResult::default();
+    if let Some(pack_id) = copy_local_filtered_objects(
+        source_repo,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+        filter,
+        &mut receive,
+    )? {
+        let _ = pack_id;
+    }
+    Ok(receive)
 }
 
 fn copy_local_filtered_objects(
@@ -9020,29 +15186,34 @@ fn copy_local_filtered_objects(
     destination_objects_dir: &Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
-) -> Result<()> {
-    let source_store = object_adapter_from_objects_dir(&source_repo.objects_dir);
-    let destination_store = object_adapter_from_objects_dir(destination_objects_dir);
+    filter: UploadPackFilter,
+    receive: &mut PackReceiveResult,
+) -> Result<Option<ObjectId>> {
+    let hash = SmartTransportHash::for_repo(source_repo)?;
+    let source_store = object_adapter_from_objects_dir_with_hash(&source_repo.objects_dir, hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(destination_objects_dir, hash);
     let request = UploadPackRequest {
         wants: roots.to_vec(),
         haves: haves.to_vec(),
-        filter: Some(UploadPackFilter::BlobNone),
+        filter: Some(filter),
         ..UploadPackRequest::default()
     };
-    let ids = upload_pack_collect_pack_ids(source_repo, &source_store, &request)?;
+    let ids = upload_pack_collect_pack_ids_with_hash(source_repo, &source_store, &request, hash)?;
     let mut missing = Vec::with_capacity(ids.len());
     record_missing_objects(&destination_store, &ids, &mut missing)?;
     if missing.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-    let existing_packs = transport_pack_names(destination_objects_dir)?;
-    write_missing_objects_pack(
+    let pack_id = write_missing_objects_pack_with_policy(
         &source_store,
         &destination_store,
         &missing,
         PackEncodeOptions::delta(10, 50),
+        PackKeepPolicy::Transient,
+        receive,
     )?;
-    write_promisor_markers_for_new_transport_packs(destination_objects_dir, &existing_packs)
+    Ok(Some(pack_id))
 }
 
 pub(crate) fn builtin_local_upload_pack_command() -> Result<String> {
@@ -9072,6 +15243,7 @@ impl CloneTarget {
 
 struct CloneHttpOptions {
     quiet: bool,
+    verbose: bool,
     configs: Vec<String>,
     template: Option<PathBuf>,
     reject_shallow: bool,
@@ -9092,6 +15264,9 @@ struct CloneHttpOptions {
     dissociate: bool,
     depth: Option<usize>,
     branch: Option<String>,
+    filter: Option<String>,
+    bundle_uri: Option<String>,
+    server_options: Vec<String>,
     ref_format: Option<String>,
     keep_partial_on_missing_branch: bool,
     worktree_first: bool,
@@ -9150,7 +15325,33 @@ fn validate_clone_plan_for_options(
     no_checkout: bool,
     background_fetch: bool,
     demand_hydrate: bool,
+    configs: &[String],
+    _recurse_submodules: &[String],
+    _also_filter_submodules: bool,
+    filter: Option<&str>,
 ) -> Result<()> {
+    if filter.is_some()
+        && matches!(
+            plan.transport,
+            CloneTransportPlan::GitDaemon | CloneTransportPlan::Ssh
+        )
+    {
+        if plan.mode == CloneModePlan::WorktreeFirst {
+            return Err(CliError::Fatal {
+                code: 129,
+                message:
+                    "clone --filter checkout over SSH and git daemon does not support --instant"
+                        .into(),
+            });
+        }
+        if clone_http_protocol_version(configs) == HttpProtocolVersion::V1 {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "clone --filter over SSH and git daemon does not support protocol v1"
+                    .into(),
+            });
+        }
+    }
     if background_fetch && plan.mode != CloneModePlan::WorktreeFirst {
         return Err(CliError::Fatal {
             code: 129,
@@ -9198,6 +15399,239 @@ fn validate_clone_plan_for_options(
     }
 }
 
+fn validate_clone_bundle_uri_options(
+    bundle_uri: Option<&str>,
+    depth: Option<usize>,
+    shallow_since: Option<&str>,
+    shallow_exclude: &[String],
+) -> Result<()> {
+    if bundle_uri.is_none() {
+        return Ok(());
+    }
+    let conflict = if depth.is_some() {
+        Some("--depth")
+    } else if shallow_since.is_some() {
+        Some("--shallow-since")
+    } else if !shallow_exclude.is_empty() {
+        Some("--shallow-exclude")
+    } else {
+        None
+    };
+    if let Some(option) = conflict {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("--bundle-uri is incompatible with {option}"),
+        });
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HttpProtocolVersion {
+    V0,
+    V1,
+    V2,
+}
+
+fn configured_http_protocol_version(value: Option<&str>) -> HttpProtocolVersion {
+    match value.map(str::trim) {
+        Some("2") => HttpProtocolVersion::V2,
+        Some("1") => HttpProtocolVersion::V1,
+        _ => HttpProtocolVersion::V0,
+    }
+}
+
+fn clone_http_protocol_version(configs: &[String]) -> HttpProtocolVersion {
+    configs
+        .iter()
+        .rev()
+        .find_map(|config| {
+            let (name, value) = config.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("protocol.version")
+                .then(|| configured_http_protocol_version(Some(value)))
+        })
+        .unwrap_or(HttpProtocolVersion::V0)
+}
+
+fn clone_configs_with_global_overrides(
+    raw_args: &[String],
+    command_configs: &[String],
+) -> Vec<String> {
+    let mut configs = command_configs.to_vec();
+    let mut raw_iter = raw_args.iter();
+    while let Some(argument) = raw_iter.next() {
+        let value = if argument == "-c" {
+            raw_iter.next().map(String::as_str)
+        } else {
+            argument.strip_prefix("--config=")
+        };
+        let Some(value) = value else {
+            continue;
+        };
+        let Some((name, _)) = value.split_once('=') else {
+            continue;
+        };
+        if !command_configs.iter().any(|config| {
+            config.split_once('=').is_some_and(|(configured_name, _)| {
+                configured_name.trim().eq_ignore_ascii_case(name.trim())
+            })
+        }) {
+            configs.push(value.to_owned());
+        }
+    }
+    configs
+}
+
+fn repo_http_protocol_version(repo: &GitRepo) -> Result<HttpProtocolVersion> {
+    Ok(configured_http_protocol_version(
+        read_config_value(repo, "protocol.version")?.as_deref(),
+    ))
+}
+
+struct PendingCloneBundle {
+    uri: String,
+    path: PathBuf,
+    installed: bool,
+}
+
+struct CloneBundleProgress<'a> {
+    repo: &'a GitRepo,
+    roots: &'a [ObjectId],
+    object_store: LooseObjectStore,
+    pending: Vec<PendingCloneBundle>,
+    imported_haves: Vec<ObjectId>,
+    bundle_filter: Option<String>,
+    bundle_pack_ids: Vec<ObjectId>,
+}
+
+impl<'a> CloneBundleProgress<'a> {
+    fn new(repo: &'a GitRepo, roots: &'a [ObjectId], hash_algorithm: GitHashAlgorithm) -> Self {
+        Self {
+            repo,
+            roots,
+            object_store: LooseObjectStore::new(repo.objects_dir.clone(), hash_algorithm),
+            pending: Vec::new(),
+            imported_haves: Vec::new(),
+            bundle_filter: None,
+            bundle_pack_ids: Vec::new(),
+        }
+    }
+
+    fn accept(
+        &mut self,
+        source: &BundleAcquisitionSource,
+        mode: BundleListMode,
+        heuristic: BundleListHeuristic,
+    ) -> bool {
+        let Some(path) = source.storage.path() else {
+            eprintln!(
+                "warning: bundle URI '{}' produced a non-file-backed bundle source",
+                source.uri
+            );
+            self.pending.push(PendingCloneBundle {
+                uri: source.uri.clone(),
+                path: PathBuf::new(),
+                installed: false,
+            });
+            return mode == BundleListMode::Any;
+        };
+        self.pending.push(PendingCloneBundle {
+            uri: source.uri.clone(),
+            path: path.to_owned(),
+            installed: false,
+        });
+        let newest = self.pending.len() - 1;
+        let mut made_progress = self.install_pending(newest);
+        if made_progress {
+            for index in (0..newest).rev() {
+                if self.pending[index].installed {
+                    continue;
+                }
+                if self.install_pending(index) {
+                    made_progress = true;
+                }
+            }
+        }
+        mode == BundleListMode::Any
+            || (mode == BundleListMode::All
+                && heuristic == BundleListHeuristic::CreationToken
+                && made_progress
+                && self.required_roots_are_installed())
+    }
+
+    fn install_pending(&mut self, index: usize) -> bool {
+        if self.pending[index].installed {
+            return true;
+        }
+        let (uri, path) = {
+            let source = &self.pending[index];
+            (source.uri.clone(), source.path.clone())
+        };
+        match pack_commands::install_clone_bundle(self.repo, &path) {
+            Ok(result) => {
+                self.pending[index].installed = true;
+                if self.bundle_filter.is_none() {
+                    self.bundle_filter = result.filter;
+                }
+                self.bundle_pack_ids.push(result.pack_id);
+                self.imported_haves.extend(result.haves);
+                true
+            }
+            Err(error) => {
+                if !emit_clone_bundle_install_error(&error) {
+                    eprintln!("warning: failed to install bundle '{uri}': {error:?}");
+                }
+                false
+            }
+        }
+    }
+
+    fn required_roots_are_installed(&self) -> bool {
+        !self.roots.is_empty()
+            && self.roots.iter().all(|root| {
+                self.imported_haves.iter().any(|have| have == root)
+                    || self.object_store.read_object(root).is_ok()
+            })
+    }
+
+    fn config_creation_token(&self, plan: &BundleAcquisitionPlan) -> Option<u64> {
+        let mut events = Vec::with_capacity(plan.sources.len() + plan.failures.len());
+        for (index, source) in plan.sources.iter().enumerate() {
+            let token = source.metadata.creation_token;
+            let success = self
+                .pending
+                .get(index)
+                .is_some_and(|pending| pending.installed);
+            events.push((token, success));
+        }
+        events.extend(
+            plan.failures
+                .iter()
+                .map(|failure| (failure.metadata.creation_token, false)),
+        );
+        events.sort_by(|left, right| right.0.unwrap_or_default().cmp(&left.0.unwrap_or_default()));
+
+        let mut saw_success = false;
+        let mut saw_failure_after_success = false;
+        let mut max_token = None::<u64>;
+        for (token, success) in events {
+            if success {
+                if saw_failure_after_success {
+                    return None;
+                }
+                saw_success = true;
+                if let Some(token) = token {
+                    max_token = Some(max_token.map_or(token, |current| current.max(token)));
+                }
+            } else if saw_success {
+                saw_failure_after_success = true;
+            }
+        }
+        max_token
+    }
+}
+
 fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     let _trace = phase_trace("clone_http");
     let _ = (
@@ -9217,6 +15651,11 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     let destination_existed = destination.exists();
     let destination_label = clone_destination_label(options.directory.as_deref(), &destination);
     ensure_clone_destination(&destination, &destination_label)?;
+    let mut cleanup_guard =
+        CloneCleanupGuard::new(&destination, destination_existed, options.effective_bare);
+    if let Some(path) = options.separate_git_dir.as_ref() {
+        cleanup_guard.track_separate_git_dir(path)?;
+    }
     if !options.quiet {
         if options.effective_bare {
             eprintln!("Cloning into bare repository '{destination_label}'...");
@@ -9225,23 +15664,82 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
         }
     }
 
-    let url = parsed_http_url_with_extra_headers(None, &options.repository)?;
+    let protocol_version = clone_http_protocol_version(&options.configs);
+    let protocol_v2 = protocol_version == HttpProtocolVersion::V2 || options.filter.is_some();
+    if !options.server_options.is_empty() && !protocol_v2 {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: server options require protocol version 2 or later\n".into(),
+        });
+    }
+    let base_url = parsed_http_url_with_extra_headers(None, &options.repository)?;
+    let url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&base_url)
+    } else {
+        match protocol_version {
+            HttpProtocolVersion::V0 => base_url,
+            HttpProtocolVersion::V1 => http_url_with_git_protocol_v1(&base_url),
+            HttpProtocolVersion::V2 => unreachable!(),
+        }
+    };
     let mut helper = if url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&url)?)
     } else {
         None
     };
-    let (refs, head_branch) = {
+    let mut v2_capabilities = None;
+    let (refs, head_branch, hash, filter_supported) = {
         let _trace = phase_trace("clone_http.discovery");
-        discover_http_refs_with_helper(
-            &url,
-            helper.as_mut().map(std::convert::identity),
-            false,
-            false,
-            false,
-            &[],
-        )?
+        if protocol_v2 {
+            let capabilities = if let Some(helper) = helper.as_mut() {
+                http_upload_pack_v2_capabilities_with_helper_with_hash_and_features(
+                    &url,
+                    helper,
+                    !options.server_options.is_empty(),
+                )?
+            } else {
+                http_upload_pack_v2_capabilities_direct_with_hash_and_features(
+                    &url,
+                    !options.server_options.is_empty(),
+                )?
+            };
+            v2_capabilities = Some(capabilities.clone());
+            let refs = if let Some(helper) = helper.as_mut() {
+                http_upload_pack_v2_ls_refs_configured_with_helper_with_hash_and_head(
+                    &url,
+                    helper,
+                    &options.server_options,
+                    capabilities.hash,
+                )?
+            } else {
+                http_upload_pack_v2_ls_refs_configured_direct_with_hash_and_head(
+                    &url,
+                    &options.server_options,
+                    capabilities.hash,
+                )?
+            };
+            let (refs, head_branch) = refs;
+            (refs, head_branch, capabilities.hash, capabilities.filter)
+        } else {
+            let discovery = discover_http_filter_with_helper(
+                &url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+            (
+                discovery.rows,
+                discovery.head_branch,
+                discovery.hash,
+                discovery.filter_supported,
+            )
+        }
     };
+    if options.filter.as_deref() != Some("auto") && options.filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
     let target = http_clone_target(&refs, options.branch.as_deref(), head_branch.as_deref())?;
     let initial_branch = target
         .branch_name()
@@ -9264,10 +15762,12 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             },
         )?
     };
+    cleanup_guard.mark_initialized();
     let git_dir = match options.separate_git_dir {
         Some(path) => relocate_separate_git_dir(&destination, &result.git_dir, &path)?,
         None => result.git_dir.clone(),
     };
+    cleanup_guard.update_git_dir(&git_dir);
     let repo = GitRepo {
         root: result.worktree,
         git_dir: git_dir.clone(),
@@ -9277,16 +15777,16 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     if let Some(template) = options.template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
-    apply_clone_ref_format(&repo, options.ref_format.as_deref())?;
-    if let Err(error) = apply_clone_configs(&repo, &options.configs) {
-        cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
-        return Err(error);
+    if hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", hash.name())?;
     }
+    apply_clone_ref_format(&repo, options.ref_format.as_deref(), hash.algorithm)?;
+    apply_clone_configs(&repo, &options.configs)?;
     if !options.dissociate {
         write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
     }
 
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let roots = http_clone_fetch_roots(
         &refs,
         &target,
@@ -9294,34 +15794,344 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
         options.single_branch || options.worktree_first,
         options.no_single_branch && !options.worktree_first,
     );
+    let mut bundle_filter = None;
+    let mut bundle_pack_ids = Vec::new();
+    let mut bundle_config = None;
+    let bundle_haves = if let Some(bundle_uri) = options.bundle_uri.as_deref() {
+        let mut progress = CloneBundleProgress::new(&repo, &roots, hash.algorithm);
+        let mut loader = |uri: &str| {
+            if is_http_transport_url(uri) {
+                load_bundle_source_from_http(&repo, uri)
+            } else {
+                load_bundle_source_from_filesystem(uri)
+            }
+        };
+        let mut callback = |source: &BundleAcquisitionSource, mode, heuristic| {
+            progress.accept(source, mode, heuristic)
+        };
+        match acquire_bundle_uri_with_callback(bundle_uri, &mut loader, &mut callback) {
+            Ok(plan) => {
+                drop(callback);
+                for warning in &plan.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                let mut imported_haves = std::mem::take(&mut progress.imported_haves);
+                sort_dedup_object_ids(&mut imported_haves);
+                bundle_filter = progress.bundle_filter.take();
+                bundle_pack_ids = std::mem::take(&mut progress.bundle_pack_ids);
+                if plan.heuristic() == BundleListHeuristic::CreationToken {
+                    let creation_token = progress.config_creation_token(&plan);
+                    if let Some(creation_token) = creation_token {
+                        bundle_config = Some((bundle_uri.to_owned(), creation_token));
+                    }
+                }
+                imported_haves
+            }
+            Err(error) => {
+                if is_http_transport_url(bundle_uri) {
+                    eprintln!(
+                        "warning: bundle URI '{bundle_uri}' could not be acquired: {error:?}"
+                    );
+                }
+                emit_clone_bundle_uri_warning(Some(bundle_uri));
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut promisor_remote_response = None;
+    let mut effective_filter = options.filter.clone().or_else(|| bundle_filter.clone());
+    if effective_filter.as_deref() == Some("auto") {
+        let advertised = v2_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.promisor_remote.as_deref());
+        let resolution = resolve_upload_pack_auto_filter_with_remotes(&repo, advertised)?;
+        effective_filter = resolution.filter;
+        promisor_remote_response = resolution.accepted_remotes;
+    }
+    if effective_filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let effective_filter = effective_filter.as_deref();
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = protocol_v2
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.packfile_uris)
+        && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.sideband_all);
+
+    let fetch_pack_policy = FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            // Protocol-v2 stateless-connect takes ownership of the clone
+            // receive path and preserves clone's keep/lock request.  The
+            // protocol-v0 remote helper consumes that request as unsupported
+            // and still applies unpackLimit.
+            keep_pack: protocol_v2,
+            promisor: effective_filter.is_some(),
+            packfile_uri: use_packfile_uris,
+            ..ForceIndexReasons::default()
+        },
+    )?;
+    let hash = hash.with_pack_policy(fetch_pack_policy);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let skip_origin_fetch = effective_filter.is_none()
+        && options.depth.is_none()
+        && roots.iter().all(|id| store.read_object(id).is_ok());
+    let mut pack_receipts = PackReceiveResult::default();
+    for pack_id in bundle_pack_ids {
+        pack_receipts.record_installed(&repo.objects_dir.join("pack"), pack_id);
+    }
+    let filtered_failure_promisor_content = effective_filter.map(|_| {
+        clone_promisor_marker_content(
+            &refs,
+            &target,
+            options.no_tags,
+            options.single_branch || options.worktree_first,
+            options.no_single_branch && !options.worktree_first,
+        )
+    });
     let shallow_boundaries = {
         let _trace = phase_trace("clone_http.fetch_objects");
-        if let Some(depth) = options.depth {
-            if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_with_depth_with_helper(
+        if skip_origin_fetch {
+            Vec::new()
+        } else if let Some(depth) = options.depth {
+            let shallow_options = UploadPackShallowOptions::depth(Some(depth))
+                .with_filter(effective_filter)
+                .with_filter_support(filter_supported)
+                .with_promisor_remote(promisor_remote_response.as_deref());
+            if protocol_v2 {
+                if use_packfile_uris {
+                    match http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                        &url,
+                        helper.as_mut(),
+                        &repo,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        shallow_options,
+                        &uri_config,
+                        sideband_all,
+                        hash,
+                        &mut pack_receipts,
+                    ) {
+                        Ok(boundaries) => boundaries,
+                        Err(error) => {
+                            let marker_result = filtered_failure_promisor_content
+                                .as_deref()
+                                .map_or(Ok(()), |content| {
+                                    pack_receipts.publish_filtered_failure_promisor_markers(content)
+                                });
+                            pack_receipts.release_owned();
+                            if let Err(marker_error) = marker_result {
+                                return Err(CliError::Io(marker_error));
+                            }
+                            return Err(error);
+                        }
+                    }
+                } else if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                        &url,
+                        helper,
+                        &repo.objects_dir,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        shallow_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                } else {
+                    http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                        &url,
+                        &repo.objects_dir,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        shallow_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                }
+            } else if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
                     &url,
                     helper,
                     &repo.objects_dir,
                     &roots,
-                    &[],
-                    Some(depth),
+                    &bundle_haves,
+                    shallow_options,
+                    hash,
+                    &mut pack_receipts,
                 )?
             } else {
-                http_fetch_smart_pack_with_depth_direct(
+                http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
                     &url,
                     &repo.objects_dir,
                     &roots,
-                    &[],
-                    Some(depth),
+                    &bundle_haves,
+                    shallow_options,
+                    hash,
+                    &mut pack_receipts,
                 )?
             }
         } else {
-            let pack_fetched = if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_with_helper(&url, helper, &repo.objects_dir, &roots, &[])?
+            let pack_fetched = if let Some(filter) = effective_filter {
+                if protocol_v2 {
+                    let shallow_options = UploadPackShallowOptions::filter(filter)
+                        .with_filter_support(filter_supported)
+                        .with_promisor_remote(promisor_remote_response.as_deref());
+                    if use_packfile_uris {
+                        match http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                            &url,
+                            helper.as_mut(),
+                            &repo,
+                            &roots,
+                            &bundle_haves,
+                            &options.server_options,
+                            shallow_options,
+                            &uri_config,
+                            sideband_all,
+                            hash,
+                            &mut pack_receipts,
+                        ) {
+                            Ok(_) => {}
+                            Err(error) => {
+                                let marker_result = filtered_failure_promisor_content
+                                    .as_deref()
+                                    .map_or(Ok(()), |content| {
+                                        pack_receipts
+                                            .publish_filtered_failure_promisor_markers(content)
+                                    });
+                                pack_receipts.release_owned();
+                                if let Err(marker_error) = marker_result {
+                                    return Err(CliError::Io(marker_error));
+                                }
+                                return Err(error);
+                            }
+                        }
+                    } else if let Some(helper) = helper.as_mut() {
+                        http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                            &url,
+                            helper,
+                            &repo.objects_dir,
+                            &roots,
+                            &bundle_haves,
+                            &options.server_options,
+                            shallow_options,
+                            hash,
+                            &mut pack_receipts,
+                        )?;
+                    } else {
+                        http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                            &url,
+                            &repo.objects_dir,
+                            &roots,
+                            &bundle_haves,
+                            &options.server_options,
+                            shallow_options,
+                            hash,
+                            &mut pack_receipts,
+                        )?;
+                    }
+                    true
+                } else {
+                    let shallow_options = UploadPackShallowOptions::filter(filter)
+                        .with_filter_support(filter_supported);
+                    if let Some(helper) = helper.as_mut() {
+                        http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
+                            &url,
+                            helper,
+                            &repo.objects_dir,
+                            &roots,
+                            &bundle_haves,
+                            shallow_options,
+                            hash,
+                            &mut pack_receipts,
+                        )?;
+                    } else {
+                        http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
+                            &url,
+                            &repo.objects_dir,
+                            &roots,
+                            &bundle_haves,
+                            shallow_options,
+                            hash,
+                            &mut pack_receipts,
+                        )?;
+                    }
+                    true
+                }
+            } else if protocol_v2 {
+                if use_packfile_uris {
+                    http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                        &url,
+                        helper.as_mut(),
+                        &repo,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        UploadPackShallowOptions::depth(None),
+                        &uri_config,
+                        sideband_all,
+                        hash,
+                        &mut pack_receipts,
+                    )
+                    .map(|_| true)?
+                } else if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
+                        &url,
+                        helper,
+                        &repo.objects_dir,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                } else {
+                    http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
+                        &url,
+                        &repo.objects_dir,
+                        &roots,
+                        &bundle_haves,
+                        &options.server_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                }
+            } else if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_with_helper_with_hash_and_receipt(
+                    &url,
+                    helper,
+                    &repo.objects_dir,
+                    &roots,
+                    &bundle_haves,
+                    hash,
+                    &mut pack_receipts,
+                )?
             } else {
-                http_fetch_smart_pack_direct(&url, &repo.objects_dir, &roots, &[])?
+                http_fetch_smart_pack_direct_with_hash_and_receipt(
+                    &url,
+                    &repo.objects_dir,
+                    &roots,
+                    &bundle_haves,
+                    hash,
+                    &mut pack_receipts,
+                )?
             };
             if !pack_fetched {
+                if effective_filter.is_some() {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "filtered clone requires a smart HTTP upload-pack response".into(),
+                    });
+                }
                 let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&url)?);
                 let commit_cache = CommitObjectCache::new(&store);
                 let tree_cache = TreeObjectCache::new(&store);
@@ -9356,8 +16166,20 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             Vec::new()
         }
     };
+    if effective_filter.is_some() {
+        let promisor_content = clone_promisor_marker_content(
+            &refs,
+            &target,
+            options.no_tags,
+            options.single_branch || options.worktree_first,
+            options.no_single_branch && !options.worktree_first,
+        );
+        pack_receipts
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+    }
     if let Some(depth) = options.depth {
-        let shallow_roots = clone_shallow_roots(
+        let shallow_roots = clone_shallow_roots_with_hash(
             &repo,
             &http_clone_fetch_roots(
                 &refs,
@@ -9366,6 +16188,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
                 options.single_branch || options.worktree_first,
                 options.no_single_branch && !options.worktree_first,
             ),
+            hash,
         )?;
         write_shallow_file(
             &repo,
@@ -9373,7 +16196,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
         )?;
     }
 
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
     {
         let _trace = phase_trace("clone_http.write_refs");
         http_write_clone_refs(
@@ -9408,8 +16231,21 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             options.no_tags,
             options.worktree_first,
             options.demand_hydrate,
+            effective_filter,
         ),
     )?;
+    if let Some((bundle_uri, creation_token)) = bundle_config {
+        set_config_values(
+            &repo,
+            &[
+                ("fetch.bundleURI".to_owned(), bundle_uri),
+                (
+                    "fetch.bundleCreationToken".to_owned(),
+                    creation_token.to_string(),
+                ),
+            ],
+        )?;
+    }
 
     let head_id = match target {
         CloneTarget::Branch { ref id, .. }
@@ -9419,6 +16255,8 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             unreachable!("HTTP clone does not keep missing branch")
         }
         CloneTarget::Empty => {
+            pack_receipts.release_owned();
+            cleanup_guard.disarm();
             eprintln!("warning: You appear to have cloned an empty repository.");
             return Ok(());
         }
@@ -9449,13 +16287,46 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             &options.remote_name,
             &target,
             &options.original_repository,
+            hash,
+        )?;
+    }
+    if effective_filter.is_some() && !options.effective_bare {
+        hydrate_filtered_http_clone_root_tree(
+            &repo,
+            &store,
+            &head_id,
+            &url,
+            &mut helper,
+            &options.server_options,
+            &uri_config,
+            sideband_all,
+            hash,
+            &mut pack_receipts,
         )?;
     }
     if options.effective_bare || options.no_checkout {
+        pack_receipts.release_owned();
+        cleanup_guard.disarm();
         return Ok(());
     }
     {
         let _trace = phase_trace("clone_http.checkout");
+        print_http_annotated_tag_notice(&refs, &target);
+        if effective_filter.is_some() {
+            hydrate_filtered_http_clone_checkout_objects(
+                &repo,
+                &store,
+                &head_id,
+                &url,
+                &mut helper,
+                protocol_v2,
+                &options.server_options,
+                hash,
+                &uri_config,
+                sideband_all,
+                &mut pack_receipts,
+            )?;
+        }
         checkout_fresh_worktree(&repo, &store, &head_id)?;
     }
     if !options.recurse_submodules.is_empty() {
@@ -9470,7 +16341,43 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     if options.background_fetch {
         spawn_worktree_first_background_fetch(&repo, &options.remote_name)?;
     }
+    pack_receipts.release_owned();
+    cleanup_guard.disarm();
     Ok(())
+}
+
+fn print_http_annotated_tag_notice(refs: &[LsRemoteRow], target: &CloneTarget) {
+    let CloneTarget::Tag { name, id } = target else {
+        return;
+    };
+    let tag_ref = format!("refs/tags/{name}");
+    let Some(tag_row) = refs.iter().find(|row| row.name == tag_ref) else {
+        return;
+    };
+    if tag_row.id == *id {
+        return;
+    }
+    eprintln!(
+        "warning: {tag_ref} {} is not a commit!",
+        tag_row.id.to_hex()
+    );
+    eprintln!("Note: switching to '{}'.", id.to_hex());
+    eprintln!();
+    eprintln!("You are in 'detached HEAD' state. You can look around, make experimental");
+    eprintln!("changes and commit them, and you can discard any commits you make in this");
+    eprintln!("state without impacting any branches by switching back to a branch.");
+    eprintln!();
+    eprintln!("If you want to create a new branch to retain commits you create, you may");
+    eprintln!("do so (now or later) by using -c with the switch command. Example:");
+    eprintln!();
+    eprintln!("  git switch -c <new-branch-name>");
+    eprintln!();
+    eprintln!("Or undo this operation with:");
+    eprintln!();
+    eprintln!("  git switch -");
+    eprintln!();
+    eprintln!("Turn off this advice by setting config variable advice.detachedHead to false");
+    eprintln!();
 }
 
 fn spawn_worktree_first_background_fetch(repo: &GitRepo, remote: &str) -> Result<()> {
@@ -9575,6 +16482,24 @@ struct SmartHttpDiscovery {
     rows: Vec<LsRemoteRow>,
     head_branch: Option<String>,
     shallow_boundaries: Vec<ObjectId>,
+    hash: SmartTransportHash,
+    filter_supported: bool,
+}
+
+#[derive(Debug, Clone)]
+struct UploadPackV0Advertisement {
+    rows: Vec<LsRemoteRow>,
+    head_branch: Option<String>,
+    shallow_boundaries: Vec<ObjectId>,
+    capabilities: Vec<String>,
+    hash: SmartTransportHash,
+    terminated_with_flush: bool,
+}
+
+impl UploadPackV0Advertisement {
+    fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|value| value == capability)
+    }
 }
 
 enum HttpDiscoveryTransport<'a> {
@@ -9651,6 +16576,100 @@ fn discover_http_refs_with_helper(
     discover_http_refs(url, transport, heads, tags, refs_only, patterns)
 }
 
+fn discover_http_refs_with_helper_and_hash(
+    url: &ParsedHttpUrl,
+    helper: Option<&mut RemoteHttpHelperSession>,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, SmartTransportHash)> {
+    let transport = match helper {
+        Some(helper) => HttpDiscoveryTransport::Helper(helper),
+        None => HttpDiscoveryTransport::Direct,
+    };
+    match transport {
+        HttpDiscoveryTransport::Direct => {
+            if let Some(discovery) =
+                http_smart_discovery_direct(url, heads, tags, refs_only, patterns)?
+            {
+                return Ok((discovery.rows, discovery.head_branch, discovery.hash));
+            }
+            let rows = http_ls_remote_rows_direct(url, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_direct(url)?;
+            let hash = smart_transport_hash_from_rows(&rows);
+            Ok((rows, head_branch, hash))
+        }
+        HttpDiscoveryTransport::Helper(helper) => {
+            if let Some(discovery) =
+                http_smart_discovery_with_helper(url, helper, heads, tags, refs_only, patterns)?
+            {
+                return Ok((discovery.rows, discovery.head_branch, discovery.hash));
+            }
+            let rows =
+                http_ls_remote_rows_with_helper(url, helper, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_with_helper(url, helper)?;
+            let hash = smart_transport_hash_from_rows(&rows);
+            Ok((rows, head_branch, hash))
+        }
+    }
+}
+
+fn discover_http_filter_with_helper(
+    url: &ParsedHttpUrl,
+    helper: Option<&mut RemoteHttpHelperSession>,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<SmartHttpDiscovery> {
+    let transport = match helper {
+        Some(helper) => HttpDiscoveryTransport::Helper(helper),
+        None => HttpDiscoveryTransport::Direct,
+    };
+    match transport {
+        HttpDiscoveryTransport::Direct => {
+            if let Some(discovery) =
+                http_smart_discovery_direct(url, heads, tags, refs_only, patterns)?
+            {
+                return Ok(discovery);
+            }
+            let rows = http_ls_remote_rows_direct(url, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_direct(url)?;
+            Ok(SmartHttpDiscovery {
+                hash: smart_transport_hash_from_rows(&rows),
+                rows,
+                head_branch,
+                shallow_boundaries: Vec::new(),
+                filter_supported: false,
+            })
+        }
+        HttpDiscoveryTransport::Helper(helper) => {
+            if let Some(discovery) =
+                http_smart_discovery_with_helper(url, helper, heads, tags, refs_only, patterns)?
+            {
+                return Ok(discovery);
+            }
+            let rows =
+                http_ls_remote_rows_with_helper(url, helper, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_with_helper(url, helper)?;
+            Ok(SmartHttpDiscovery {
+                hash: smart_transport_hash_from_rows(&rows),
+                rows,
+                head_branch,
+                shallow_boundaries: Vec::new(),
+                filter_supported: false,
+            })
+        }
+    }
+}
+
+fn smart_transport_hash_from_rows(rows: &[LsRemoteRow]) -> SmartTransportHash {
+    rows.first().map_or_else(SmartTransportHash::sha1, |row| {
+        SmartTransportHash::for_algorithm(row.id.algorithm())
+    })
+}
+
 fn discover_http_refs_with_helper_and_shallows(
     url: &ParsedHttpUrl,
     helper: Option<&mut RemoteHttpHelperSession>,
@@ -9664,6 +16683,60 @@ fn discover_http_refs_with_helper_and_shallows(
         None => HttpDiscoveryTransport::Direct,
     };
     discover_http_refs_with_shallows(url, transport, heads, tags, refs_only, patterns)
+}
+
+fn discover_http_refs_with_helper_and_shallows_with_hash(
+    url: &ParsedHttpUrl,
+    helper: Option<&mut RemoteHttpHelperSession>,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(
+    Vec<LsRemoteRow>,
+    Option<String>,
+    Vec<ObjectId>,
+    SmartTransportHash,
+)> {
+    let transport = match helper {
+        Some(helper) => HttpDiscoveryTransport::Helper(helper),
+        None => HttpDiscoveryTransport::Direct,
+    };
+    match transport {
+        HttpDiscoveryTransport::Direct => {
+            if let Some(discovery) =
+                http_smart_discovery_direct(url, heads, tags, refs_only, patterns)?
+            {
+                return Ok((
+                    discovery.rows,
+                    discovery.head_branch,
+                    discovery.shallow_boundaries,
+                    discovery.hash,
+                ));
+            }
+            let rows = http_ls_remote_rows_direct(url, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_direct(url)?;
+            let hash = smart_transport_hash_from_rows(&rows);
+            Ok((rows, head_branch, Vec::new(), hash))
+        }
+        HttpDiscoveryTransport::Helper(helper) => {
+            if let Some(discovery) =
+                http_smart_discovery_with_helper(url, helper, heads, tags, refs_only, patterns)?
+            {
+                return Ok((
+                    discovery.rows,
+                    discovery.head_branch,
+                    discovery.shallow_boundaries,
+                    discovery.hash,
+                ));
+            }
+            let rows =
+                http_ls_remote_rows_with_helper(url, helper, heads, tags, refs_only, patterns)?;
+            let head_branch = http_head_branch_with_helper(url, helper)?;
+            let hash = smart_transport_hash_from_rows(&rows);
+            Ok((rows, head_branch, Vec::new(), hash))
+        }
+    }
 }
 
 fn http_clone_target(
@@ -9757,7 +16830,11 @@ fn http_clone_fetch_roots(
         }
     } else {
         for row in refs {
-            if row.name == "HEAD" || row.name.ends_with("^{}") {
+            if row.name == "HEAD" {
+                roots.push(row.id.clone());
+                continue;
+            }
+            if row.name.ends_with("^{}") {
                 continue;
             }
             if no_tags && row.name.starts_with("refs/tags/") {
@@ -9768,7 +16845,6 @@ fn http_clone_fetch_roots(
             }
         }
     }
-    sort_dedup_object_ids(&mut roots);
     roots
 }
 
@@ -9880,6 +16956,7 @@ fn clone_remote_config_values(
     no_tags: bool,
     worktree_first: bool,
     demand_hydrate: bool,
+    partial_clone_filter: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut values = Vec::with_capacity(CLONE_CONFIG_VALUES_CAPACITY_HINT);
     values.push((format!("remote.{remote}.url"), url.to_owned()));
@@ -9908,6 +16985,16 @@ fn clone_remote_config_values(
             "zmin.worktreeFirstDemandHydrateRemote".to_owned(),
             remote.to_owned(),
         ));
+    }
+    if let Some(filter) = partial_clone_filter {
+        if !demand_hydrate {
+            values.push((format!("remote.{remote}.promisor"), "true".to_owned()));
+        }
+        values.push((
+            format!("remote.{remote}.partialclonefilter"),
+            filter.to_owned(),
+        ));
+        values.push(("extensions.partialClone".to_owned(), remote.to_owned()));
     }
     if !effective_bare {
         append_clone_branch_config_values(&mut values, remote, target);
@@ -9976,6 +17063,11 @@ fn clone_target(
 
 pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result<()> {
     let _trace = phase_trace("clone.total");
+    let process_args = std::env::args().collect::<Vec<_>>();
+    let configs = clone_configs_with_global_overrides(
+        &process_args,
+        &clone_configs_with_global_overrides(raw_args, &input.configs),
+    );
     let ref_format = core_commands::resolve_init_ref_format(input.ref_format.clone())?;
     validate_clone_jobs(input.jobs.as_deref(), raw_args)?;
     let (single_branch, no_single_branch) =
@@ -9990,76 +17082,79 @@ pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result
         input.no_recurse_submodules,
     );
     let filter = resolve_clone_filter(raw_args, input.filter);
-    clone(CloneOptions {
-        quiet: input.quiet,
-        configs: input.configs,
-        template,
-        reject_shallow: resolve_clone_last_bool(
-            raw_args,
-            "--reject-shallow",
-            input.reject_shallow,
-            "--no-reject-shallow",
-            input.no_reject_shallow,
-        ),
-        recurse_submodules,
-        remote_submodules: resolve_clone_last_bool(
-            raw_args,
-            "--remote-submodules",
-            input.remote_submodules,
-            "--no-remote-submodules",
-            input.no_remote_submodules,
-        ),
-        shallow_submodules: resolve_clone_last_bool(
-            raw_args,
-            "--shallow-submodules",
-            input.shallow_submodules,
-            "--no-shallow-submodules",
-            input.no_shallow_submodules,
-        ),
-        sparse: input.sparse,
-        bare: input.bare,
-        mirror: input.mirror,
-        no_checkout: resolve_clone_last_bool(
-            raw_args,
-            "--no-checkout",
-            input.no_checkout,
-            "--checkout",
-            input.checkout,
-        ),
-        worktree_first: input.worktree_first || input.instant,
-        background_fetch: input.background_fetch,
-        demand_hydrate: input.demand_hydrate,
-        remote_name: input.origin,
-        no_tags,
-        single_branch,
-        no_single_branch,
-        separate_git_dir: input.separate_git_dir,
-        references: input.references,
-        reference_if_able: input.reference_if_able,
-        shared: input.shared,
-        dissociate: input.dissociate,
-        no_hardlinks: resolve_clone_last_bool(
-            raw_args,
-            "--no-hardlinks",
-            input.no_hardlinks,
-            "--hardlinks",
-            input.hardlinks,
-        ),
-        no_local: input.no_local,
-        depth: input.depth,
-        shallow_since: input.shallow_since,
-        shallow_exclude: input.shallow_exclude,
-        branch: input.branch,
-        server_options: input.server_option,
-        upload_pack: input.upload_pack,
-        filter,
-        also_filter_submodules: input.also_filter_submodules,
-        bundle_uri: input.bundle_uri,
-        ref_format: Some(ref_format),
-        keep_partial_on_missing_branch: false,
-        repository: input.repository,
-        directory: input.directory,
-    })
+    clone_with_verbose(
+        CloneOptions {
+            quiet: input.quiet,
+            configs,
+            template,
+            reject_shallow: resolve_clone_last_bool(
+                raw_args,
+                "--reject-shallow",
+                input.reject_shallow,
+                "--no-reject-shallow",
+                input.no_reject_shallow,
+            ),
+            recurse_submodules,
+            remote_submodules: resolve_clone_last_bool(
+                raw_args,
+                "--remote-submodules",
+                input.remote_submodules,
+                "--no-remote-submodules",
+                input.no_remote_submodules,
+            ),
+            shallow_submodules: resolve_clone_last_bool(
+                raw_args,
+                "--shallow-submodules",
+                input.shallow_submodules,
+                "--no-shallow-submodules",
+                input.no_shallow_submodules,
+            ),
+            sparse: input.sparse,
+            bare: input.bare,
+            mirror: input.mirror,
+            no_checkout: resolve_clone_last_bool(
+                raw_args,
+                "--no-checkout",
+                input.no_checkout,
+                "--checkout",
+                input.checkout,
+            ),
+            worktree_first: input.worktree_first || input.instant,
+            background_fetch: input.background_fetch,
+            demand_hydrate: input.demand_hydrate,
+            remote_name: input.origin,
+            no_tags,
+            single_branch,
+            no_single_branch,
+            separate_git_dir: input.separate_git_dir,
+            references: input.references,
+            reference_if_able: input.reference_if_able,
+            shared: input.shared,
+            dissociate: input.dissociate,
+            no_hardlinks: resolve_clone_last_bool(
+                raw_args,
+                "--no-hardlinks",
+                input.no_hardlinks,
+                "--hardlinks",
+                input.hardlinks,
+            ),
+            no_local: input.no_local,
+            depth: input.depth,
+            shallow_since: input.shallow_since,
+            shallow_exclude: input.shallow_exclude,
+            branch: input.branch,
+            server_options: input.server_option,
+            upload_pack: input.upload_pack,
+            filter,
+            also_filter_submodules: input.also_filter_submodules,
+            bundle_uri: input.bundle_uri,
+            ref_format: Some(ref_format),
+            keep_partial_on_missing_branch: false,
+            repository: input.repository,
+            directory: input.directory,
+        },
+        raw_args.iter().any(|arg| arg == "-v" || arg == "--verbose"),
+    )
 }
 
 fn resolve_clone_last_bool(
@@ -10193,7 +17288,36 @@ fn emit_clone_bundle_uri_warning(bundle_uri: Option<&str>) {
     eprintln!("warning: failed to fetch objects from bundle URI '{bundle_uri}'");
 }
 
-fn apply_clone_ref_format(repo: &GitRepo, ref_format: Option<&str>) -> Result<()> {
+fn emit_clone_bundle_install_error(error: &CliError) -> bool {
+    let Some(text) = clone_bundle_install_error_text(error) else {
+        return false;
+    };
+    eprint!("{text}");
+    true
+}
+
+fn clone_bundle_install_error_text(error: &CliError) -> Option<String> {
+    let fatal = match error {
+        CliError::Fatal { message, .. } if message.starts_with("bundle uses hash algorithm") => {
+            format!("fatal: {message}")
+        }
+        CliError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            if error.to_string() == "pack checksum mismatch" {
+                "fatal: pack is corrupted (SHA1 mismatch)".to_owned()
+            } else {
+                format!("fatal: {error}")
+            }
+        }
+        _ => return None,
+    };
+    Some(format!("{fatal}\nerror: index-pack died\n"))
+}
+
+fn apply_clone_ref_format(
+    repo: &GitRepo,
+    ref_format: Option<&str>,
+    algorithm: GitHashAlgorithm,
+) -> Result<()> {
     if let Some(value) = std::env::var_os("GIT_REFERENCE_BACKEND")
         && !value.is_empty()
     {
@@ -10232,7 +17356,7 @@ fn apply_clone_ref_format(repo: &GitRepo, ref_format: Option<&str>) -> Result<()
         zmin_git_core::initialize_alternate_ref_store(
             &repo.git_dir,
             &storage_root,
-            GitHashAlgorithm::Sha1,
+            algorithm,
             kind,
             &head_target,
         )?;
@@ -10247,7 +17371,19 @@ fn apply_clone_ref_format(repo: &GitRepo, ref_format: Option<&str>) -> Result<()
             ("core.repositoryformatversion".to_owned(), "1".to_owned()),
             ("extensions.refStorage".to_owned(), "reftable".to_owned()),
         ],
-    )
+    )?;
+    let head_contents = fs::read_to_string(repo.git_dir.join("HEAD"))?;
+    let head_target = head_contents
+        .trim()
+        .strip_prefix("ref:")
+        .map(str::trim)
+        .filter(|target| target.starts_with("refs/"))
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "clone destination HEAD is not symbolic".into(),
+        })?;
+    zmin_git_core::refs::initialize_reftable_ref_store(&repo.git_dir, algorithm, head_target)?;
+    Ok(())
 }
 
 fn clone_invalid_reference_backend(value: &str) -> CliError {
@@ -10515,13 +17651,38 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
     let mut rows = Vec::with_capacity(rows_capacity);
     let mut shallow_boundaries = Vec::new();
     let mut head_branch = None;
+    let mut hash = SmartTransportHash::sha1();
+    let mut filter_supported = false;
     let mut first = true;
+    let mut protocol_v2 = false;
     let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     while read_pkt_line_payload_into(reader, &mut line)? {
+        if first {
+            match trim_lf_payload(&line) {
+                b"version 1" => continue,
+                b"version 2" => {
+                    protocol_v2 = true;
+                    first = false;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if protocol_v2 {
+            let payload = trim_lf_payload(&line);
+            if let Some(capabilities) = payload.strip_prefix(b"fetch=") {
+                filter_supported = ascii_tokens(capabilities).any(|token| token == b"filter");
+            } else if payload.starts_with(b"object-format=") {
+                hash = SmartTransportHash::from_capabilities(payload, hash)?;
+            }
+            continue;
+        }
         let payload = if let Some(nul_pos) = line.iter().position(|byte| *byte == 0) {
             if first {
                 let capabilities = &line[nul_pos + 1..];
                 head_branch = head_symref_branch_from_capabilities(capabilities);
+                hash = SmartTransportHash::from_capabilities(capabilities, hash)?;
+                filter_supported = ascii_tokens(capabilities).any(|token| token == b"filter");
             }
             &line[..nul_pos]
         } else {
@@ -10529,7 +17690,7 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
         };
         first = false;
         if let Some(id) = upload_pack_shallow_id_from_payload(payload) {
-            shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+            shallow_boundaries.push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
             continue;
         }
         let Some((id, name)) = split_ls_remote_space_payload(payload) else {
@@ -10538,7 +17699,7 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
         if !ls_remote_ref_name_selected(name, heads, tags, refs_only) {
             continue;
         }
-        let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
+        let id = ObjectId::from_hex_bytes(hash.algorithm, id)?;
         push_ls_remote_row_bytes(&mut rows, id, name, patterns);
     }
     sort_dedup_object_ids(&mut shallow_boundaries);
@@ -10546,6 +17707,8 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
         rows,
         head_branch,
         shallow_boundaries,
+        hash,
+        filter_supported,
     }))
 }
 
@@ -10661,7 +17824,7 @@ fn parse_dumb_http_info_refs_rows_from_reader<R: BufRead + ?Sized>(
         if !ls_remote_ref_name_selected(name, heads, tags, refs_only) {
             continue;
         }
-        let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
+        let id = ObjectId::from_hex_bytes(http_hash_algorithm_for_hex_bytes(id), id)?;
         push_ls_remote_row_bytes(rows, id, name, patterns);
     }
     Ok(())
@@ -10767,7 +17930,10 @@ fn http_resolve_ref_with_helper(
     if let Some(target) = value.strip_prefix("ref: ") {
         return http_resolve_ref_with_helper(url, helper, target.trim(), depth + 1);
     }
-    Ok(Some(ObjectId::from_hex(GitHashAlgorithm::Sha1, value)?))
+    Ok(Some(ObjectId::from_hex(
+        http_hash_algorithm_for_hex(value),
+        value,
+    )?))
 }
 
 fn http_get_optional_direct(url: &ParsedHttpUrl, suffix: &str) -> Result<Option<Vec<u8>>> {
@@ -10841,7 +18007,22 @@ fn http_resolve_ref_direct(
     if let Some(target) = value.strip_prefix("ref: ") {
         return http_resolve_ref_direct(url, target.trim(), depth + 1);
     }
-    Ok(Some(ObjectId::from_hex(GitHashAlgorithm::Sha1, value)?))
+    Ok(Some(ObjectId::from_hex(
+        http_hash_algorithm_for_hex(value),
+        value,
+    )?))
+}
+
+fn http_hash_algorithm_for_hex(value: &str) -> GitHashAlgorithm {
+    http_hash_algorithm_for_hex_bytes(value.as_bytes())
+}
+
+fn http_hash_algorithm_for_hex_bytes(value: &[u8]) -> GitHashAlgorithm {
+    if value.len() == GitHashAlgorithm::Sha256.digest_len() * 2 {
+        GitHashAlgorithm::Sha256
+    } else {
+        GitHashAlgorithm::Sha1
+    }
 }
 
 fn push_ls_remote_row(
@@ -10880,7 +18061,7 @@ fn peel_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<ObjectId>>
             return Ok(peeled_any.then_some(current));
         }
         peeled_any = true;
-        current = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+        current = decode_tag(store.algorithm(), &object.content)?.target;
     }
     Err(CliError::Fatal {
         code: 128,
@@ -11128,6 +18309,8 @@ pub(crate) fn run_fetch(
     negotiation_tips: Vec<String>,
     negotiate_only: bool,
     mut filter: Option<String>,
+    no_filter_requested: bool,
+    refetch: bool,
     stdin: bool,
     porcelain: bool,
     remote: Option<String>,
@@ -11213,12 +18396,11 @@ pub(crate) fn run_fetch(
     if negotiate_only {
         return fetch_negotiate_only(remote, &negotiation_tips);
     }
-    if filter.is_none() && !all && !multiple {
+    if filter.is_none() && !no_filter_requested && !all && !multiple {
         let repo = find_repo_or_bare()?;
         let remote_name = default_fetch_remote(&repo, remote.clone())?;
         if remote_exists(&repo, &remote_name)? {
-            filter =
-                read_config_section_value(&repo, "remote", &remote_name, "partialclonefilter")?;
+            filter = configured_promisor_filter(&repo, &remote_name)?;
         }
     }
     if let Some(filter) = filter.as_deref() {
@@ -11281,6 +18463,8 @@ pub(crate) fn run_fetch(
                 128,
                 append,
                 write_fetch_head,
+                verbose,
+                refetch,
             )?;
         }
         if !dry_run {
@@ -11289,6 +18473,14 @@ pub(crate) fn run_fetch(
             write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         }
         return Ok(());
+    }
+    if (all || multiple) && fetch_set_has_partial_clone_filter()? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "fetch --all/--multiple currently does not support configured partial clone filters"
+                    .into(),
+        });
     }
     if all {
         if remote.is_some() || !refspecs.is_empty() {
@@ -11310,6 +18502,7 @@ pub(crate) fn run_fetch(
                 &[],
                 128,
                 quiet,
+                verbose,
                 dry_run,
                 append || idx > 0,
                 set_upstream,
@@ -11351,6 +18544,7 @@ pub(crate) fn run_fetch(
                 &[],
                 128,
                 quiet,
+                verbose,
                 dry_run,
                 append || idx > 0,
                 set_upstream,
@@ -11384,6 +18578,7 @@ pub(crate) fn run_fetch(
             refspecs,
             depth.as_deref(),
             quiet,
+            verbose,
             prune,
             no_prune,
             dry_run,
@@ -11407,7 +18602,7 @@ pub(crate) fn run_fetch(
         return Ok(());
     }
     let branch = refspecs.into_iter().next();
-    fetch_with_depth(
+    fetch_with_depth_mode(
         remote,
         branch,
         depth.as_deref(),
@@ -11418,6 +18613,7 @@ pub(crate) fn run_fetch(
         &shallow_exclude,
         128,
         quiet,
+        verbose,
         dry_run,
         append,
         set_upstream,
@@ -11436,6 +18632,7 @@ pub(crate) fn run_fetch(
         recurse_submodules_mode,
         &server_options,
         upload_pack_command.as_deref(),
+        refetch,
     )?;
     if !dry_run {
         write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
@@ -11890,8 +19087,13 @@ fn fetch_negotiate_only(remote: Option<String>, negotiation_tips: &[String]) -> 
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let local_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let local_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let tip_ids = resolve_fetch_negotiation_tip_ids(&repo, negotiation_tips)?;
     let mut common = Vec::with_capacity(transport_ref_collection_capacity(tip_ids.len()));
     for tip in tip_ids {
@@ -12011,11 +19213,22 @@ fn write_split_commit_graph_chain_marker(repo: &GitRepo) -> Result<()> {
     fs::write(chain_dir.join("commit-graph-chain"), b"").map_err(CliError::Io)
 }
 
+fn fetch_set_has_partial_clone_filter() -> Result<bool> {
+    let repo = find_repo_or_bare()?;
+    for remote in configured_remotes(&repo)? {
+        if read_config_section_value(&repo, "remote", &remote, "partialclonefilter")?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn fetch_multiple_refspecs(
     remote: Option<String>,
     mut refspecs: Vec<String>,
     depth: Option<&str>,
     quiet: bool,
+    verbose: bool,
     prune: bool,
     no_prune: bool,
     dry_run: bool,
@@ -12089,6 +19302,8 @@ fn fetch_multiple_refspecs(
                 &refspecs,
                 depth,
                 quiet,
+                append,
+                write_fetch_head,
                 Some(UploadPackShallowOptions::unshallow(&shallows)),
             );
         }
@@ -12108,6 +19323,8 @@ fn fetch_multiple_refspecs(
                 &refspecs,
                 depth,
                 quiet,
+                append,
+                write_fetch_head,
                 Some(UploadPackShallowOptions::depth_with_shallows(
                     deepen, &shallows,
                 )),
@@ -12121,6 +19338,8 @@ fn fetch_multiple_refspecs(
                 &refspecs,
                 depth,
                 quiet,
+                append,
+                write_fetch_head,
                 Some(UploadPackShallowOptions::since(since)),
             );
         }
@@ -12132,6 +19351,8 @@ fn fetch_multiple_refspecs(
                 &refspecs,
                 depth,
                 quiet,
+                append,
+                write_fetch_head,
                 Some(UploadPackShallowOptions::deepen_not(shallow_exclude)),
             );
         }
@@ -12149,6 +19370,8 @@ fn fetch_multiple_refspecs(
             &refspecs,
             depth,
             quiet,
+            append,
+            write_fetch_head,
             update_shallow.then(|| UploadPackShallowOptions::depth(None)),
         );
     }
@@ -12169,6 +19392,7 @@ fn fetch_multiple_refspecs(
                 depth,
                 quiet,
                 prune,
+                verbose,
                 Some(UploadPackShallowOptions::unshallow(&shallows)),
             );
         }
@@ -12189,6 +19413,7 @@ fn fetch_multiple_refspecs(
                 depth,
                 quiet,
                 prune,
+                verbose,
                 Some(UploadPackShallowOptions::depth_with_shallows(
                     deepen, &shallows,
                 )),
@@ -12203,6 +19428,7 @@ fn fetch_multiple_refspecs(
                 depth,
                 quiet,
                 prune,
+                verbose,
                 Some(UploadPackShallowOptions::since(since)),
             );
         }
@@ -12215,6 +19441,7 @@ fn fetch_multiple_refspecs(
                 depth,
                 quiet,
                 prune,
+                verbose,
                 Some(UploadPackShallowOptions::deepen_not(shallow_exclude)),
             );
         }
@@ -12233,6 +19460,7 @@ fn fetch_multiple_refspecs(
             depth,
             quiet,
             prune,
+            verbose,
             update_shallow.then(|| UploadPackShallowOptions::depth(None)),
         );
     }
@@ -12341,12 +19569,15 @@ fn fetch_multiple_refspecs(
         let _trace = phase_trace("fetch.local.resolve_source");
         local_clone_source(&source_path)?
     };
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
     let (source_refs, destination_refs, destination_store) = {
         let _trace = phase_trace("fetch.local.setup_stores");
         (
-            refs_adapter_from_git_dir(&source.git_dir),
-            refs_adapter_from_git_dir(&repo.git_dir),
-            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+            refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash),
+            refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash),
+            object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash),
         )
     };
     {
@@ -12490,8 +19721,14 @@ fn fetch_multiple_refspecs_from_http_remote(
     refspecs: &[String],
     depth: Option<usize>,
     quiet: bool,
+    append: bool,
+    write_fetch_head: bool,
     shallow_options: Option<UploadPackShallowOptions<'_>>,
 ) -> Result<()> {
+    if write_fetch_head && !append {
+        fs::write(repo.git_dir.join("FETCH_HEAD"), b"")?;
+    }
+    let local_hash = SmartTransportHash::for_repo(repo)?;
     let protocol_v2 = read_config_value(repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(repo), url)?;
     let parsed_url = if protocol_v2 {
@@ -12504,32 +19741,71 @@ fn fetch_multiple_refspecs_from_http_remote(
     } else {
         None
     };
-    let (rows, advertised_shallow_boundaries) = if protocol_v2 {
-        let rows = if let Some(helper) = helper.as_mut() {
-            http_upload_pack_v2_capabilities_with_helper(&parsed_url, helper, false)?;
-            http_upload_pack_v2_ls_refs_configured_with_helper(&parsed_url, helper, &[])?
+    let mut v2_capabilities = None;
+    let (rows, advertised_shallow_boundaries, hash) = if protocol_v2 {
+        let capabilities = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+                &parsed_url,
+                helper,
+                false,
+                local_hash,
+            )?
         } else {
-            http_upload_pack_v2_capabilities_direct(&parsed_url, false)?;
-            http_upload_pack_v2_ls_refs_configured_direct(&parsed_url, &[])?
+            http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+                &parsed_url,
+                false,
+                local_hash,
+            )?
         };
-        (rows, Vec::new())
+        v2_capabilities = Some(capabilities.clone());
+        let hash = capabilities.hash;
+        let rows = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+                &parsed_url,
+                helper,
+                &[],
+                hash,
+            )?
+        } else {
+            http_upload_pack_v2_ls_refs_configured_direct_with_hash(&parsed_url, &[], hash)?
+        };
+        (rows, Vec::new(), hash)
     } else {
-        let (rows, _, shallow_boundaries) = discover_http_refs_with_helper_and_shallows(
-            &parsed_url,
-            helper.as_mut().map(std::convert::identity),
-            false,
-            false,
-            false,
-            &[],
-        )?;
-        (rows, shallow_boundaries)
+        let (rows, _, shallow_boundaries, hash) =
+            discover_http_refs_with_helper_and_shallows_with_hash(
+                &parsed_url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+        (rows, shallow_boundaries, hash)
     };
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let uri_config = FetchPackUriConfig::from_repo(repo)?;
+    let use_packfile_uris = v2_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.packfile_uris)
+        && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.sideband_all);
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(repo, remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
     let mut resolved = Vec::with_capacity(refspecs.len());
     for refspec in refspecs {
         resolved.extend(http_refspec_source_rows(&rows, refspec)?);
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let mut roots = resolved
         .iter()
@@ -12537,22 +19813,66 @@ fn fetch_multiple_refspecs_from_http_remote(
         .collect::<Vec<_>>();
     sort_dedup_object_ids(&mut roots);
     if let Some(depth) = depth {
-        let shallow_boundaries = if let Some(helper) = helper.as_mut() {
-            http_fetch_smart_pack_with_depth_with_helper(
+        let shallow_options = UploadPackShallowOptions::depth(Some(depth));
+        let shallow_boundaries = if protocol_v2 {
+            if use_packfile_uris {
+                http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                    &parsed_url,
+                    helper.as_mut(),
+                    repo,
+                    &roots,
+                    &haves,
+                    &[],
+                    shallow_options,
+                    &uri_config,
+                    sideband_all,
+                    hash,
+                    &mut pack_receipts,
+                )?
+            } else if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                    &parsed_url,
+                    helper,
+                    &repo.objects_dir,
+                    &roots,
+                    &haves,
+                    &[],
+                    shallow_options,
+                    hash,
+                    &mut pack_receipts,
+                )?
+            } else {
+                http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                    &parsed_url,
+                    &repo.objects_dir,
+                    &roots,
+                    &haves,
+                    &[],
+                    shallow_options,
+                    hash,
+                    &mut pack_receipts,
+                )?
+            }
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_with_depth_with_helper_with_hash_and_receipt(
                 &parsed_url,
                 helper,
                 &repo.objects_dir,
                 &roots,
                 &haves,
                 Some(depth),
+                hash,
+                &mut pack_receipts,
             )?
         } else {
-            http_fetch_smart_pack_with_depth_direct(
+            http_fetch_smart_pack_with_depth_direct_with_hash_and_receipt(
                 &parsed_url,
                 &repo.objects_dir,
                 &roots,
                 &haves,
                 Some(depth),
+                hash,
+                &mut pack_receipts,
             )?
         };
         let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
@@ -12567,22 +19887,65 @@ fn fetch_multiple_refspecs_from_http_remote(
             missing_fetch_roots(&store, &roots)?
         };
         {
-            let shallow_boundaries = if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_with_shallow_options_with_helper(
+            let shallow_boundaries = if protocol_v2 {
+                if use_packfile_uris {
+                    http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                        &parsed_url,
+                        helper.as_mut(),
+                        repo,
+                        &request_roots,
+                        &haves,
+                        &[],
+                        shallow_options,
+                        &uri_config,
+                        sideband_all,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                } else if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                        &parsed_url,
+                        helper,
+                        &repo.objects_dir,
+                        &request_roots,
+                        &haves,
+                        &[],
+                        shallow_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                } else {
+                    http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                        &parsed_url,
+                        &repo.objects_dir,
+                        &request_roots,
+                        &haves,
+                        &[],
+                        shallow_options,
+                        hash,
+                        &mut pack_receipts,
+                    )?
+                }
+            } else if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
                     &parsed_url,
                     helper,
                     &repo.objects_dir,
                     &request_roots,
                     &haves,
                     shallow_options,
+                    hash,
+                    &mut pack_receipts,
                 )?
             } else {
-                http_fetch_smart_pack_with_shallow_options_direct(
+                http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
                     &parsed_url,
                     &repo.objects_dir,
                     &request_roots,
                     &haves,
                     shallow_options,
+                    hash,
+                    &mut pack_receipts,
                 )?
             };
             let shallow_boundaries = upload_pack_response_or_advertised_shallows(
@@ -12609,34 +19972,62 @@ fn fetch_multiple_refspecs_from_http_remote(
     } else {
         let request_roots = missing_fetch_roots(&store, &roots)?;
         let pack_fetched = if protocol_v2 {
-            if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_v2_with_helper(
+            if use_packfile_uris {
+                http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                    &parsed_url,
+                    helper.as_mut(),
+                    repo,
+                    &request_roots,
+                    &haves,
+                    &[],
+                    UploadPackShallowOptions::depth(None),
+                    &uri_config,
+                    sideband_all,
+                    hash,
+                    &mut pack_receipts,
+                )
+                .map(|_| true)?
+            } else if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
                     &parsed_url,
                     helper,
                     &repo.objects_dir,
                     &request_roots,
                     &haves,
                     &[],
+                    hash,
+                    &mut pack_receipts,
                 )?
             } else {
-                http_fetch_smart_pack_v2_direct(
+                http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
                     &parsed_url,
                     &repo.objects_dir,
                     &request_roots,
                     &haves,
                     &[],
+                    hash,
+                    &mut pack_receipts,
                 )?
             }
         } else if let Some(helper) = helper.as_mut() {
-            http_fetch_smart_pack_with_helper(
+            http_fetch_smart_pack_with_helper_with_hash_and_receipt(
                 &parsed_url,
                 helper,
                 &repo.objects_dir,
                 &request_roots,
                 &haves,
+                hash,
+                &mut pack_receipts,
             )?
         } else {
-            http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
+            http_fetch_smart_pack_direct_with_hash_and_receipt(
+                &parsed_url,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                hash,
+                &mut pack_receipts,
+            )?
         };
         if protocol_v2 && !pack_fetched {
             return Err(CliError::Fatal {
@@ -12645,6 +20036,12 @@ fn fetch_multiple_refspecs_from_http_remote(
             });
         }
         if !pack_fetched {
+            if hash.pack_policy.validation_mode.is_some() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fsckObjects cannot validate the loose HTTP object fallback".into(),
+                });
+            }
             let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
             let fetch_options = HttpFetchOptions {
                 commit: false,
@@ -12677,6 +20074,12 @@ fn fetch_multiple_refspecs_from_http_remote(
         }
     }
 
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
+    }
+
     let mut update_rows = Vec::new();
     for (refspec, row) in &resolved {
         let Some(destination) = http_refspec_destination(refspec, &row.name)? else {
@@ -12688,7 +20091,11 @@ fn fetch_multiple_refspecs_from_http_remote(
         write_fetch_destination_ref(repo, &destination_refs, &destination, &row.id, Some(remote))?;
     }
     print_fetch_update_rows(url, &update_rows);
-    write_http_explicit_fetch_head_file(repo, url, &resolved)
+    if write_fetch_head {
+        write_http_explicit_fetch_head_file_with_append(repo, url, &resolved, append)?;
+    }
+    pack_receipts.release_owned();
+    Ok(())
 }
 
 fn fetch_multiple_refspecs_from_daemon_remote(
@@ -12699,10 +20106,11 @@ fn fetch_multiple_refspecs_from_daemon_remote(
     depth: Option<usize>,
     quiet: bool,
     prune: bool,
+    verbose: bool,
     shallow_options: Option<UploadPackShallowOptions<'_>>,
 ) -> Result<()> {
     let (rows, advertised_shallow_boundaries) =
-        daemon_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
+        daemon_ls_remote_rows_with_verbose(url, false, false, false, &[], verbose)?;
     let objects_dir = repo.objects_dir.clone();
     fetch_multiple_refspecs_from_advertised_remote(
         repo,
@@ -12716,12 +20124,13 @@ fn fetch_multiple_refspecs_from_daemon_remote(
         &advertised_shallow_boundaries,
         shallow_options,
         |request_roots, haves, options| {
-            daemon_fetch_pack_with_shallow_options_and_haves(
+            daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                 url,
                 &objects_dir,
                 request_roots,
                 haves,
                 options,
+                verbose,
             )
         },
     )
@@ -12972,6 +20381,15 @@ fn write_http_explicit_fetch_head_file(
     url: &str,
     resolved: &[(String, LsRemoteRow)],
 ) -> Result<()> {
+    write_http_explicit_fetch_head_file_with_append(repo, url, resolved, false)
+}
+
+fn write_http_explicit_fetch_head_file_with_append(
+    repo: &GitRepo,
+    url: &str,
+    resolved: &[(String, LsRemoteRow)],
+    append: bool,
+) -> Result<()> {
     let display_url = fetch_head_url_display(url);
     let mut rows = Vec::with_capacity(resolved.len());
     for (_, row) in resolved {
@@ -12996,7 +20414,17 @@ fn write_http_explicit_fetch_head_file(
             display_url
         ));
     }
-    fs::write(repo.git_dir.join("FETCH_HEAD"), rows.concat()).map_err(CliError::Io)
+    let bytes = rows.concat();
+    if append {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(repo.git_dir.join("FETCH_HEAD"))
+            .map_err(CliError::Io)?;
+        file.write_all(bytes.as_bytes()).map_err(CliError::Io)
+    } else {
+        fs::write(repo.git_dir.join("FETCH_HEAD"), bytes).map_err(CliError::Io)
+    }
 }
 
 fn fetch_multiple_refspecs_from_location(
@@ -13056,12 +20484,15 @@ fn fetch_multiple_refspecs_from_location(
         let _trace = phase_trace("fetch.local.resolve_source");
         local_clone_source(&source_path)?
     };
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
     let (source_refs, destination_refs, destination_store) = {
         let _trace = phase_trace("fetch.local.setup_stores");
         (
-            refs_adapter_from_git_dir(&source.git_dir),
-            refs_adapter_from_git_dir(&repo.git_dir),
-            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+            refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash),
+            refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash),
+            object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash),
         )
     };
     {
@@ -13321,6 +20752,7 @@ pub(crate) fn run_pull(
         no_verify_signatures,
     );
     let quiet = quiet || super::merge::resolve_merge_short_flag(raw_args, "-q");
+    let fetch_verbose = raw_args.iter().any(|arg| arg == "-v" || arg == "--verbose");
     let _ = super::merge::resolve_merge_count_mode(
         raw_args,
         "--progress",
@@ -13352,7 +20784,7 @@ pub(crate) fn run_pull(
                 false,
                 false,
                 false,
-                false,
+                fetch_verbose,
                 dry_run,
                 force,
                 set_upstream,
@@ -13372,6 +20804,8 @@ pub(crate) fn run_pull(
                 negotiation_tips.clone(),
                 false,
                 None,
+                false,
+                false,
                 false,
                 false,
                 Some(remote_name),
@@ -13495,6 +20929,7 @@ fatal: the remote end hung up unexpectedly\n"
                 &shallow_exclude,
                 1,
                 quiet,
+                fetch_verbose,
                 dry_run,
                 append,
                 set_upstream,
@@ -13533,6 +20968,7 @@ fatal: the remote end hung up unexpectedly\n"
                 &shallow_exclude,
                 1,
                 quiet,
+                fetch_verbose,
                 dry_run,
                 append,
                 set_upstream,
@@ -14080,9 +21516,11 @@ fn record_clone_reflogs(
     remote: &str,
     target: &CloneTarget,
     remote_url: &str,
+    hash: SmartTransportHash,
 ) -> Result<()> {
     let message = format!("clone: from {remote_url}");
-    let zero = zero_object_id();
+    let zero_bytes = [0_u8; 32];
+    let zero = ObjectId::new(hash.algorithm, &zero_bytes[..hash.algorithm.digest_len()]);
     let remote_head = format!("refs/remotes/{remote}/HEAD");
     if let Ok(RefTarget::Symbolic(target)) = refs.read_ref(&remote_head) {
         let new_id = refs.resolve(&target)?;
@@ -14431,7 +21869,7 @@ fn collect_push_pack_ids(
             out.push(current.clone());
             if kind == GitObjectKind::Tag {
                 let object = store.read_object(&current)?;
-                let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                let tag = decode_tag(store.algorithm(), &object.content)?;
                 current = tag.target;
                 continue;
             }
@@ -14540,7 +21978,7 @@ fn available_commit_walk_excluded_roots(
             match object_kind_hint_or_read(store, &current)? {
                 GitObjectKind::Tag => {
                     let object = store.read_object(&current)?;
-                    let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                    let tag = decode_tag(store.algorithm(), &object.content)?;
                     current = tag.target;
                 }
                 GitObjectKind::Commit => {
@@ -14573,6 +22011,7 @@ fn fetch_with_depth(
     shallow_exclude: &[String],
     missing_ref_code: i32,
     quiet: bool,
+    verbose: bool,
     dry_run: bool,
     append: bool,
     set_upstream: bool,
@@ -14591,6 +22030,72 @@ fn fetch_with_depth(
     recurse_submodules_mode: FetchRecurseSubmodulesMode,
     server_options: &[String],
     upload_pack_command: Option<&str>,
+) -> Result<()> {
+    fetch_with_depth_mode(
+        remote,
+        branch,
+        depth,
+        deepen,
+        unshallow,
+        update_shallow,
+        shallow_since,
+        shallow_exclude,
+        missing_ref_code,
+        quiet,
+        verbose,
+        dry_run,
+        append,
+        set_upstream,
+        prune,
+        no_prune,
+        prune_tags,
+        no_tags,
+        tags,
+        atomic,
+        update_head_ok,
+        write_fetch_head,
+        show_fetch_head_ref,
+        refmap,
+        prefetch,
+        porcelain,
+        recurse_submodules_mode,
+        server_options,
+        upload_pack_command,
+        false,
+    )
+}
+
+fn fetch_with_depth_mode(
+    remote: Option<String>,
+    branch: Option<String>,
+    depth: Option<&str>,
+    deepen: Option<usize>,
+    unshallow: bool,
+    update_shallow: bool,
+    shallow_since: Option<i64>,
+    shallow_exclude: &[String],
+    missing_ref_code: i32,
+    quiet: bool,
+    verbose: bool,
+    dry_run: bool,
+    append: bool,
+    set_upstream: bool,
+    prune: bool,
+    no_prune: bool,
+    prune_tags: bool,
+    no_tags: bool,
+    tags: bool,
+    atomic: bool,
+    update_head_ok: bool,
+    write_fetch_head: bool,
+    show_fetch_head_ref: bool,
+    refmap: &[String],
+    prefetch: bool,
+    porcelain: bool,
+    recurse_submodules_mode: FetchRecurseSubmodulesMode,
+    server_options: &[String],
+    upload_pack_command: Option<&str>,
+    refetch: bool,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let has_server_options = !server_options.is_empty();
@@ -14688,6 +22193,7 @@ fn fetch_with_depth(
             missing_ref_code,
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if unshallow {
@@ -14715,6 +22221,7 @@ fn fetch_with_depth(
             atomic,
             write_fetch_head,
             upload_pack_command,
+            verbose,
         );
     }
     if let Some(since) = shallow_since {
@@ -14737,6 +22244,7 @@ fn fetch_with_depth(
             append,
             write_fetch_head,
             upload_pack_command,
+            verbose,
         );
     }
     if !shallow_exclude.is_empty() {
@@ -14759,6 +22267,7 @@ fn fetch_with_depth(
             append,
             write_fetch_head,
             upload_pack_command,
+            verbose,
         );
     }
     if let Some(deepen) = deepen {
@@ -14787,6 +22296,7 @@ fn fetch_with_depth(
             atomic,
             write_fetch_head,
             upload_pack_command,
+            verbose,
         );
     }
     if let Some(depth) = depth.map(validate_positive_depth).transpose()? {
@@ -14803,9 +22313,10 @@ fn fetch_with_depth(
             &[],
             false,
             true,
+            verbose,
         );
     }
-    let result = fetch_with_repo_and_remote(
+    let result = fetch_with_repo_and_remote_mode(
         repo.clone(),
         remote.clone(),
         branch,
@@ -14828,6 +22339,8 @@ fn fetch_with_depth(
         porcelain,
         server_options,
         upload_pack_command,
+        verbose,
+        refetch,
     );
     if result.is_ok() && !dry_run && fetch_should_recurse_submodules(recurse_submodules_mode) {
         fetch_submodules_on_demand(&repo, &remote)?;
@@ -14870,6 +22383,7 @@ fn fetch_with_missing_ref_code(
         false,
         &[],
         upload_pack_command,
+        false,
     )
 }
 
@@ -14877,7 +22391,7 @@ fn default_fetch_remote(repo: &GitRepo, remote: Option<String>) -> Result<String
     if let Some(remote) = remote {
         return Ok(remote);
     }
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, SmartTransportHash::for_repo(repo)?.algorithm);
     if let Some(current) = current_branch_ref(&refs)? {
         let branch = branch_display_name(&current);
         if let Some(entry) = read_config_section_value(repo, "branch", &branch, "remote")?
@@ -14917,6 +22431,244 @@ pub(crate) fn fetch_with_repo_and_remote(
     porcelain: bool,
     server_options: &[String],
     upload_pack_command: Option<&str>,
+    verbose: bool,
+) -> Result<()> {
+    fetch_with_repo_and_remote_mode(
+        repo,
+        remote,
+        branch,
+        missing_ref_code,
+        quiet,
+        append,
+        set_upstream,
+        prune,
+        prune_tags,
+        no_tags,
+        tags,
+        atomic,
+        refmap,
+        prefetch,
+        update_shallow,
+        write_fetch_head,
+        show_fetch_head_ref,
+        dry_run,
+        dry_run_recurse_submodules,
+        porcelain,
+        server_options,
+        upload_pack_command,
+        verbose,
+        false,
+    )
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SubmoduleTargetFetchOptions {
+    pub(crate) effective_filter: Option<String>,
+    pub(crate) no_filter: bool,
+    pub(crate) refetch: bool,
+    pub(crate) hash: GitHashAlgorithm,
+    pub(crate) ref_format: Option<String>,
+}
+
+pub(crate) fn fetch_submodule_target_with_options(
+    repo: GitRepo,
+    remote: &str,
+    target: &ObjectId,
+    options: SubmoduleTargetFetchOptions,
+) -> Result<()> {
+    if target.algorithm() != options.hash {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "submodule target uses {} but repository uses {}",
+                SmartTransportHash::for_algorithm(target.algorithm()).name(),
+                SmartTransportHash::for_algorithm(options.hash).name()
+            ),
+        });
+    }
+    let filter = if options.no_filter {
+        None
+    } else {
+        options.effective_filter.as_deref()
+    };
+    if let Some(filter) = filter {
+        parse_upload_pack_filter(filter)?;
+    }
+    if let Some(ref_format) = options.ref_format.as_deref() {
+        apply_clone_ref_format(&repo, Some(ref_format), options.hash)?;
+    }
+    let url = fetch_remote_url(&repo, remote)?;
+    let expected_hash = SmartTransportHash::for_algorithm(options.hash);
+    let mut receive = PackReceiveResult::default();
+    let roots = std::slice::from_ref(target);
+    if is_http_transport_url(&url) {
+        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
+        let v2_url = http_url_with_git_protocol_v2(&parsed_url);
+        let mut helper = if v2_url.scheme == HttpScheme::Https {
+            Some(RemoteHttpHelperSession::spawn(&v2_url)?)
+        } else {
+            None
+        };
+        let capabilities = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+                &v2_url,
+                helper,
+                false,
+                expected_hash,
+            )?
+        } else {
+            http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+                &v2_url,
+                false,
+                expected_hash,
+            )?
+        };
+        if filter.is_some() && !capabilities.filter {
+            return Err(filter_capability_missing_error());
+        }
+        let hash = capabilities.hash.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            ForceIndexReasons {
+                promisor: filter.is_some(),
+                ..ForceIndexReasons::default()
+            },
+        )?);
+        let shallow_options = UploadPackShallowOptions::depth(None)
+            .with_filter(filter)
+            .with_filter_support(capabilities.filter);
+        if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                &v2_url,
+                helper,
+                &repo.objects_dir,
+                roots,
+                &[],
+                &[],
+                shallow_options,
+                hash,
+                &mut receive,
+            )?;
+        } else {
+            http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                &v2_url,
+                &repo.objects_dir,
+                roots,
+                &[],
+                &[],
+                shallow_options,
+                hash,
+                &mut receive,
+            )?;
+        }
+    } else if is_ssh_transport_url(&url) {
+        let (session, capabilities) = ssh_open_upload_pack_v2_with_capabilities(&url, &[])?;
+        validate_smart_transport_hash_match(expected_hash, capabilities.hash)?;
+        if filter.is_some() && !capabilities.filter {
+            return Err(filter_capability_missing_error());
+        }
+        let hash = capabilities.hash.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            ForceIndexReasons {
+                promisor: filter.is_some(),
+                ..ForceIndexReasons::default()
+            },
+        )?);
+        let shallow_options = UploadPackShallowOptions::depth(None)
+            .with_filter(filter)
+            .with_filter_support(capabilities.filter);
+        ssh_fetch_pack_v2_from_session_with_policy(
+            session,
+            &repo.objects_dir,
+            roots,
+            &[],
+            &[],
+            shallow_options,
+            hash,
+            if filter.is_some() {
+                PackKeepPolicy::Transient
+            } else {
+                PackKeepPolicy::None
+            },
+            &mut receive,
+        )?;
+    } else if is_git_daemon_transport_url(&url) {
+        let (mut stream, mut reader, capabilities) =
+            daemon_open_upload_pack_v2_with_capabilities(&url, &[])?;
+        validate_smart_transport_hash_match(expected_hash, capabilities.hash)?;
+        if filter.is_some() && !capabilities.filter {
+            return Err(filter_capability_missing_error());
+        }
+        let hash = capabilities.hash.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            ForceIndexReasons {
+                promisor: filter.is_some(),
+                ..ForceIndexReasons::default()
+            },
+        )?);
+        let shallow_options = UploadPackShallowOptions::depth(None)
+            .with_filter(filter)
+            .with_filter_support(capabilities.filter);
+        daemon_fetch_smart_pack_v2_on_connection_with_options_and_policy(
+            &mut stream,
+            &mut reader,
+            &repo.objects_dir,
+            roots,
+            &[],
+            &[],
+            shallow_options,
+            hash,
+            if filter.is_some() {
+                PackKeepPolicy::Transient
+            } else {
+                PackKeepPolicy::None
+            },
+            &mut receive,
+        )?;
+    } else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "fetch --recurse-submodules cannot fetch submodule remote '{url}' yet"
+            ),
+        });
+    }
+    if filter.is_some() {
+        receive
+            .publish_filtered_promisor_markers(b"")
+            .map_err(CliError::Io)?;
+    }
+    receive
+        .finalize_refetch_promisor_markers(options.refetch)
+        .map_err(CliError::Io)?;
+    receive.release_owned();
+    Ok(())
+}
+
+fn fetch_with_repo_and_remote_mode(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    quiet: bool,
+    append: bool,
+    set_upstream: bool,
+    prune: bool,
+    prune_tags: bool,
+    no_tags: bool,
+    tags: bool,
+    atomic: bool,
+    refmap: &[String],
+    prefetch: bool,
+    update_shallow: bool,
+    write_fetch_head: bool,
+    show_fetch_head_ref: bool,
+    dry_run: bool,
+    dry_run_recurse_submodules: bool,
+    porcelain: bool,
+    server_options: &[String],
+    upload_pack_command: Option<&str>,
+    verbose: bool,
+    refetch: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -14941,6 +22693,8 @@ pub(crate) fn fetch_with_repo_and_remote(
                     append,
                     write_fetch_head,
                     server_options,
+                    true,
+                    refetch,
                 );
             };
             if branch.contains(':')
@@ -14965,6 +22719,8 @@ pub(crate) fn fetch_with_repo_and_remote(
                 append,
                 write_fetch_head,
                 server_options,
+                true,
+                refetch,
             );
         }
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
@@ -14975,6 +22731,8 @@ pub(crate) fn fetch_with_repo_and_remote(
                 std::slice::from_ref(refspec),
                 None,
                 quiet,
+                append,
+                write_fetch_head,
                 update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
@@ -14987,11 +22745,25 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &refspecs,
                 None,
                 quiet,
+                append,
+                write_fetch_head,
                 update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_http_remote(
+        if read_config_value(&repo, "protocol.version")?.as_deref() == Some("2") {
+            return fetch_with_http_remote_v2_mode(
+                repo,
+                remote,
+                branch,
+                missing_ref_code,
+                &url,
+                append,
+                write_fetch_head,
+                refetch,
+            );
+        }
+        return fetch_with_http_remote_mode(
             repo,
             remote,
             branch,
@@ -15001,6 +22773,7 @@ pub(crate) fn fetch_with_repo_and_remote(
             write_fetch_head,
             dry_run,
             dry_run_recurse_submodules,
+            refetch,
         );
     }
     if is_git_daemon_transport_url(&url) {
@@ -15059,6 +22832,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
+                verbose,
                 update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
@@ -15072,11 +22846,12 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
+                verbose,
                 update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_daemon_remote(
+        return fetch_with_daemon_remote_mode(
             repo,
             remote,
             branch,
@@ -15084,6 +22859,8 @@ pub(crate) fn fetch_with_repo_and_remote(
             &url,
             append,
             write_fetch_head,
+            verbose,
+            refetch,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -15159,7 +22936,7 @@ pub(crate) fn fetch_with_repo_and_remote(
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_ssh_remote(
+        return fetch_with_ssh_remote_mode(
             repo,
             remote,
             branch,
@@ -15168,6 +22945,7 @@ pub(crate) fn fetch_with_repo_and_remote(
             append,
             write_fetch_head,
             upload_pack_command,
+            refetch,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -15178,12 +22956,15 @@ pub(crate) fn fetch_with_repo_and_remote(
         let _trace = phase_trace("fetch.local.resolve_source");
         local_clone_source(&source_path)?
     };
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
     let (source_refs, destination_refs, destination_store) = {
         let _trace = phase_trace("fetch.local.setup_stores");
         (
-            refs_adapter_from_git_dir(&source.git_dir),
-            refs_adapter_from_git_dir(&repo.git_dir),
-            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+            refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash),
+            refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash),
+            object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash),
         )
     };
     if let Some(branch) = branch
@@ -15423,13 +23204,22 @@ pub(crate) fn fetch_with_repo_and_remote(
         if set_upstream {
             set_fetch_upstream_config(&repo, &remote, branch)?;
         }
-        write_fetch_destination_ref(&repo, &destination_refs, &destination_ref, &id, Some(&remote))?;
+        write_fetch_destination_ref(
+            &repo,
+            &destination_refs,
+            &destination_ref,
+            &id,
+            Some(&remote),
+        )?;
         if atomic {
             run_reference_transaction_hook(&repo, "committed", &atomic_updates)?;
         }
         if tags {
             let source_repo = local_clone_source_repo(&source);
-            let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+            let source_store = object_adapter_from_objects_dir_with_hash(
+                source.common_dir.join("objects"),
+                source_hash,
+            );
             let mut tag_roots = Vec::new();
             source_refs.for_each_resolved_ref("refs/tags/", |_, tag_id| {
                 tag_roots.push(tag_id.clone());
@@ -15816,7 +23606,8 @@ fn fetch_with_repo_and_location(
             && !source_name.contains(':')
         {
             let source = local_clone_source(&source_path)?;
-            let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+            let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+            let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
             return fetch_branch_without_destination_ref(
                 &repo,
                 &source,
@@ -15872,7 +23663,8 @@ fn fetch_with_repo_and_location(
         }
         if !refspec_body.contains(':') {
             let source = local_clone_source(&source_path)?;
-            let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+            let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+            let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
             if let Some(since) = shallow_since {
                 return fetch_branch_without_destination_ref_since(
                     &repo,
@@ -16117,8 +23909,11 @@ fn fetch_with_repo_and_location(
     }
 
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
     copy_local_fetch_objects(
         &source,
         &repo,
@@ -16158,10 +23953,15 @@ fn fetch_direct_location_head_via_upload_pack(
     write_fetch_head: bool,
     upload_pack_command: &str,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
     let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
     let roots = if dry_run {
         Vec::new()
@@ -16199,9 +23999,13 @@ fn fetch_direct_location_prune_tags(
     missing_ref_code: i32,
     quiet: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let refspecs = vec!["refs/tags/*:refs/tags/*".to_owned()];
     copy_local_fetch_objects(
         source,
@@ -16247,7 +24051,11 @@ fn fetch_direct_location_head(
     dry_run: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
     if dry_run {
         if !quiet && write_fetch_head {
@@ -16256,10 +24064,11 @@ fn fetch_direct_location_head(
         }
         return Ok(());
     }
-    let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let pack_missing_threshold = fetch_unpack_pack_threshold(repo)?;
     let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
         source_store.object_id_capacity_hint()?,
@@ -16294,7 +24103,10 @@ fn fetch_direct_location_head_depth(
     no_tags: bool,
     depth: usize,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
     if dry_run {
         if !quiet && write_fetch_head {
@@ -16350,9 +24162,12 @@ fn fetch_direct_location_head_update_shallow(
     dry_run: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let head = source_refs.resolve("HEAD")?;
     let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let head = source_refs.resolve("HEAD")?;
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(&source_repo)? else {
         return fetch_direct_location_head(
             repo,
@@ -16370,9 +24185,11 @@ fn fetch_direct_location_head_update_shallow(
         }
         return Ok(());
     }
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
         source_store.object_id_capacity_hint()?,
         1,
@@ -16405,7 +24222,11 @@ fn fetch_direct_location_head_since(
     no_tags: bool,
     since: i64,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
     if dry_run {
         if !quiet && write_fetch_head {
@@ -16414,10 +24235,11 @@ fn fetch_direct_location_head_since(
         }
         return Ok(());
     }
-    let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let excluded = HashSet::new();
     let limited_commits = upload_pack_since_limited_commits(
         &source_store,
@@ -16480,7 +24302,11 @@ fn fetch_direct_location_head_shallow_exclude(
     no_tags: bool,
     exclude_revs: &[String],
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
     if dry_run {
         if !quiet && write_fetch_head {
@@ -16489,9 +24315,10 @@ fn fetch_direct_location_head_shallow_exclude(
         }
         return Ok(());
     }
-    let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
     let commit_cache = CommitObjectCache::new(&source_store);
     let exclude_roots = Vec::new();
@@ -16564,9 +24391,14 @@ fn fetch_direct_location_head_deepen(
             write_fetch_head,
         );
     };
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_repo = local_clone_source_repo(source);
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let head = source_refs.resolve("HEAD")?;
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let Some(current_depth) =
         shallow_depth_from_source_tip(&source_store, &head, &shallow_boundaries)?
     else {
@@ -16597,13 +24429,18 @@ fn fetch_direct_location_head_to_ref(
     update_head_ok: bool,
     no_tags: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let head = source_refs.resolve("HEAD")?;
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let head = source_refs.resolve("HEAD")?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(2));
     roots.push(head.clone());
     source_refs.for_each_resolved_ref("refs/tags/", |_, id| {
@@ -16655,8 +24492,11 @@ fn fetch_direct_location_head_to_ref_depth(
     no_tags: bool,
     depth: usize,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
     let head = source_refs.resolve("HEAD")?;
     copy_local_fetch_objects_for_depth_roots(
         source,
@@ -16692,9 +24532,13 @@ fn fetch_direct_location_wildcard_refspec(
     prune: bool,
     no_tags: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let refspecs = vec![refspec.to_owned()];
     copy_local_fetch_objects(
         source,
@@ -16757,9 +24601,14 @@ fn fetch_branch_without_destination_ref(
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(branch, 128))?;
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let pack_missing_threshold = fetch_unpack_pack_threshold(repo)?;
     let mut roots = Vec::with_capacity(if include_tags {
         transport_ref_collection_capacity(2)
@@ -16809,7 +24658,9 @@ fn fetch_branch_without_destination_ref(
         )?;
     }
     if include_tags {
-        copy_configured_fetch_tags(source_refs, &refs_adapter_from_git_dir(&repo.git_dir))?;
+        let destination_hash = SmartTransportHash::for_repo(repo)?;
+        let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+        copy_configured_fetch_tags(source_refs, &destination_refs)?;
         write_branch_fetch_head_with_tags_file(repo, &id, &ref_name, source_refs, url)?;
         if !quiet {
             print_branch_fetch_with_tags(url, branch, source_refs, true)?;
@@ -16862,9 +24713,14 @@ fn fetch_branch_without_destination_ref_since(
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(branch, 128))?;
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let excluded = HashSet::new();
     let limited_commits = upload_pack_since_limited_commits(
         &source_store,
@@ -16924,8 +24780,13 @@ fn fetch_branch_without_destination_ref_shallow_exclude(
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(branch, 128))?;
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
     let commit_cache = CommitObjectCache::new(&source_store);
     let exclude_roots = Vec::new();
@@ -16996,7 +24857,11 @@ fn fetch_branch_without_destination_ref_deepen(
     let id = source_refs
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(branch, 128))?;
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let current_depth = shallow_depth_from_source_tip(&source_store, &id, &shallow_boundaries)?
         .ok_or_else(|| CliError::Fatal {
             code: 128,
@@ -17055,12 +24920,12 @@ fn fetch_unpack_pack_threshold(repo: &GitRepo) -> Result<usize> {
     };
     Ok(limit
         .as_deref()
-        .and_then(parse_unpack_limit)
+        .and_then(parse_local_unpack_limit)
         .map(|limit| limit.saturating_add(1))
         .unwrap_or(PACK_MISSING_REACHABLE_OBJECT_THRESHOLD))
 }
 
-fn parse_unpack_limit(value: &str) -> Option<usize> {
+fn parse_local_unpack_limit(value: &str) -> Option<usize> {
     let parsed = value.trim().parse::<i64>().ok()?;
     if parsed < 0 {
         return None;
@@ -17079,13 +24944,18 @@ fn fetch_direct_location_refspec_to_ref(
     update_head_ok: bool,
     no_tags: bool,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let resolved = resolve_direct_fetch_source_ref(&source_refs, source_name)?;
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let resolved = resolve_direct_fetch_source_ref(&source_refs, source_name)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(2));
     roots.push(resolved.id.clone());
     source_refs.for_each_resolved_ref("refs/tags/", |_, id| {
@@ -17160,8 +25030,11 @@ fn fetch_direct_location_refspec_to_ref_depth(
     no_tags: bool,
     depth: usize,
 ) -> Result<()> {
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(source))?;
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
     let resolved = resolve_direct_fetch_source_ref(&source_refs, source_name)?;
     copy_local_fetch_objects_for_depth_roots(
         source,
@@ -17171,13 +25044,15 @@ fn fetch_direct_location_refspec_to_ref_depth(
         depth,
         no_tags,
     )?;
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let destination_ref = destination_fetch_ref_name(destination)?;
     reject_non_commit_branch_destination(&source_store, &resolved.id, &destination_ref)?;
     if !update_head_ok {
         reject_fetch_into_current_branch(repo, &destination_refs, &destination_ref)?;
     }
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let previous_id = match destination_refs.read_ref(&destination_ref) {
         Ok(RefTarget::Direct(id)) => Some(id),
         Ok(RefTarget::Symbolic(_)) => None,
@@ -17973,12 +25848,15 @@ fn write_fetch_destination_ref_with_force(
     };
     match destination_refs.write_ref(destination, id) {
         Ok(()) => {
-            if automatic_reflog_enabled(repo)?
-                && old_id.as_ref().is_none_or(|old_id| old_id != id)
+            if automatic_reflog_enabled(repo)? && old_id.as_ref().is_none_or(|old_id| old_id != id)
             {
-                let action = if force { "forced-update" } else { "fast-forward" };
+                let action = if force {
+                    "forced-update"
+                } else {
+                    "fast-forward"
+                };
                 let remote = remote_hint.unwrap_or("remote");
-                let old_id = old_id.unwrap_or_else(zero_object_id);
+                let old_id = old_id.unwrap_or_else(|| zero_object_id_for_algorithm(id.algorithm()));
                 let message = format!("fetch {remote}: {action}");
                 append_reflog_if_identity_available(repo, destination, &old_id, id, &message)?;
             }
@@ -17999,6 +25877,11 @@ fn write_fetch_destination_ref_with_force(
         }
         Err(error) => Err(CliError::Io(error)),
     }
+}
+
+fn zero_object_id_for_algorithm(algorithm: GitHashAlgorithm) -> ObjectId {
+    let zero = [0_u8; 32];
+    ObjectId::new(algorithm, &zero[..algorithm.digest_len()])
 }
 
 fn fetch_lock_ref_error(
@@ -18793,19 +26676,22 @@ fn write_configured_fetch_head_file(
     include_tag_rows: bool,
     include_existing_tag_rows: bool,
 ) -> Result<()> {
-    let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
-        .and_then(|current| {
-            let branch = branch_display_name(&current);
-            read_config_section_value(repo, "branch", &branch, "remote")
-                .ok()
-                .flatten()
-                .filter(|configured_remote| configured_remote == remote)
-                .and_then(|_| {
-                    read_config_section_value(repo, "branch", &branch, "merge")
-                        .ok()
-                        .flatten()
-                })
-        });
+    let current_merge = current_branch_ref(&RefStore::new(
+        &repo.git_dir,
+        SmartTransportHash::for_repo(repo)?.algorithm,
+    ))?
+    .and_then(|current| {
+        let branch = branch_display_name(&current);
+        read_config_section_value(repo, "branch", &branch, "remote")
+            .ok()
+            .flatten()
+            .filter(|configured_remote| configured_remote == remote)
+            .and_then(|_| {
+                read_config_section_value(repo, "branch", &branch, "merge")
+                    .ok()
+                    .flatten()
+            })
+    });
     let mut rows = Vec::new();
     let mut merge_rows = Vec::new();
     for refspec in refspecs {
@@ -19170,12 +27056,19 @@ fn copy_local_fetch_objects(
     update_shallow: bool,
 ) -> Result<()> {
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     {
         let _trace = phase_trace("fetch.local.validate_destination_store");
         validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
     }
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
     let mut excluded_roots = Vec::with_capacity(transport_ref_collection_capacity(32));
     {
@@ -19299,12 +27192,14 @@ fn fetch_branch_without_destination_ref_via_upload_pack(
     repository_path: &str,
     upload_pack_command: &str,
 ) -> Result<()> {
+    let destination_hash = SmartTransportHash::for_repo(repo)?;
     let ref_name = branch_ref_name(branch)?;
     let id = source_refs
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(branch, 128))?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
     let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
     let request_roots = missing_fetch_roots(&destination_store, std::slice::from_ref(&id))?;
     fetch_pack_with_local_upload_pack_command(
@@ -19333,7 +27228,7 @@ fn fetch_local_objects_via_upload_pack(
     request: LocalFetchRootRequest<'_>,
     upload_pack_command: &str,
     repository_path: &str,
-) -> Result<()> {
+) -> Result<Vec<ObjectId>> {
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
     if let Some(branch) = request.branch {
         let ref_name = branch_ref_name(branch)?;
@@ -19382,7 +27277,7 @@ fn fetch_local_objects_via_upload_pack(
     sort_dedup_object_ids(&mut roots);
     let request_roots = missing_fetch_roots(destination_store, &roots)?;
     let haves = collect_upload_pack_haves(destination_store, destination_refs)?;
-    fetch_pack_with_local_upload_pack_command_with_options(
+    fetch_pack_with_local_upload_pack_command_with_options_and_result(
         upload_pack_command,
         repository_path,
         &destination_repo.objects_dir,
@@ -19391,7 +27286,7 @@ fn fetch_local_objects_via_upload_pack(
         UploadPackShallowOptions::depth(None),
         request.keep_pack,
     )
-    .map(|_| ())
+    .map(|result| result.installed_pack_ids)
 }
 
 fn copy_local_fetch_objects_for_depth_refspecs(
@@ -19426,7 +27321,9 @@ fn copy_local_fetch_objects_for_deepen_refspecs(
     no_tags: bool,
 ) -> Result<()> {
     let Some(existing_shallow_boundaries) = read_repo_shallow_boundaries(destination_repo)? else {
-        let destination_refs = refs_adapter_from_git_dir(&destination_repo.git_dir);
+        let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+        let destination_refs =
+            refs_adapter_from_git_dir_with_hash(&destination_repo.git_dir, destination_hash);
         return copy_local_fetch_objects(
             source,
             destination_repo,
@@ -19445,9 +27342,16 @@ fn copy_local_fetch_objects_for_deepen_refspecs(
         collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
     }
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     sort_dedup_object_ids(&mut roots);
     phase_trace_emit(
         "fetch.local.deepen_roots",
@@ -19511,9 +27415,16 @@ fn copy_local_fetch_objects_for_since_refspecs(
         collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
     }
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     sort_dedup_object_ids(&mut roots);
     phase_trace_emit(
         "fetch.local.since_roots",
@@ -19574,9 +27485,16 @@ fn copy_local_fetch_objects_for_shallow_exclude_refspecs(
         collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
     }
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     sort_dedup_object_ids(&mut roots);
     phase_trace_emit(
         "fetch.local.shallow_exclude_roots",
@@ -19635,12 +27553,19 @@ fn copy_local_fetch_objects_for_depth_roots(
     no_tags: bool,
 ) -> Result<()> {
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     {
         let _trace = phase_trace("fetch.local.validate_destination_store");
         validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
     }
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     let mut roots = roots.to_vec();
     sort_dedup_object_ids(&mut roots);
     phase_trace_emit(
@@ -19894,7 +27819,7 @@ fn upload_pack_have_commit(store: &LooseObjectStore, id: &ObjectId) -> Result<Op
         match object.kind {
             GitObjectKind::Commit => return Ok(Some(current)),
             GitObjectKind::Tag => {
-                current = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+                current = decode_tag(store.algorithm(), &object.content)?.target;
             }
             _ => return Ok(None),
         }
@@ -19913,23 +27838,92 @@ fn fetch_with_http_remote(
     dry_run: bool,
     dry_run_recurse_submodules: bool,
 ) -> Result<()> {
+    fetch_with_http_remote_mode(
+        repo,
+        remote,
+        branch,
+        missing_ref_code,
+        url,
+        append,
+        write_fetch_head,
+        dry_run,
+        dry_run_recurse_submodules,
+        false,
+    )
+}
+
+fn fetch_with_http_remote_mode(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    dry_run: bool,
+    dry_run_recurse_submodules: bool,
+    refetch: bool,
+) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
     } else {
         None
     };
-    let (rows, head_branch) = discover_http_refs_with_helper(
-        &parsed_url,
-        helper.as_mut().map(std::convert::identity),
-        false,
-        false,
-        false,
-        &[],
-    )?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (rows, head_branch, hash) = if protocol_v2 {
+        let hash = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash(
+                &parsed_url,
+                helper,
+                false,
+                local_hash,
+            )?
+        } else {
+            http_upload_pack_v2_capabilities_direct_for_local_hash(&parsed_url, false, local_hash)?
+        };
+        let rows = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+                &parsed_url,
+                helper,
+                &[],
+                hash,
+            )?
+        } else {
+            http_upload_pack_v2_ls_refs_configured_direct_with_hash(&parsed_url, &[], hash)?
+        };
+        let head_branch = unique_head_branch_from_rows(&rows);
+        (rows, head_branch, hash)
+    } else {
+        let (rows, head_branch, _, hash) = discover_http_refs_with_helper_and_shallows_with_hash(
+            &parsed_url,
+            helper.as_mut().map(std::convert::identity),
+            false,
+            false,
+            false,
+            &[],
+        )?;
+        (rows, head_branch, hash)
+    };
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        selected_remote_force_index_reasons(&repo, &remote, false)?,
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let fetch_options = HttpFetchOptions {
         commit: false,
         tags: false,
@@ -19982,19 +27976,38 @@ fn fetch_with_http_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let request_roots = if refetch {
+        roots.clone()
+    } else {
+        missing_fetch_roots(&store, &roots)?
+    };
     let pack_fetched = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_helper(
+        http_fetch_smart_pack_with_helper_with_hash_and_receipt(
             &parsed_url,
             helper,
             &repo.objects_dir,
             &request_roots,
             &haves,
+            hash,
+            &mut pack_receipts,
         )?
     } else {
-        http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
+        http_fetch_smart_pack_direct_with_hash_and_receipt(
+            &parsed_url,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            hash,
+            &mut pack_receipts,
+        )?
     };
     if !pack_fetched {
+        if hash.pack_policy.validation_mode.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fsckObjects cannot validate the loose HTTP object fallback".into(),
+            });
+        }
         let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
         let commit_cache = CommitObjectCache::new(&store);
         let tree_cache = TreeObjectCache::new(&store);
@@ -20018,6 +28031,11 @@ fn fetch_with_http_remote(
             fetch_submodules_for_commits_on_demand(&repo, &roots)?;
         }
         return Ok(());
+    }
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
     }
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
@@ -20046,7 +28064,67 @@ fn fetch_with_http_remote(
             }
         }
     }
+    pack_receipts.release_owned();
     Ok(())
+}
+
+fn fetch_with_http_remote_v2(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    fetch_with_http_remote_v2_mode(
+        repo,
+        remote,
+        branch,
+        missing_ref_code,
+        url,
+        append,
+        write_fetch_head,
+        false,
+    )
+}
+
+fn fetch_with_http_remote_v2_mode(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    refetch: bool,
+) -> Result<()> {
+    if let Some(branch) = branch.as_deref() {
+        fetch_with_http_remote_v2_server_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            url,
+            append,
+            write_fetch_head,
+            &[],
+            false,
+            refetch,
+        )
+    } else {
+        fetch_configured_http_remote_v2_server_options(
+            repo,
+            remote,
+            missing_ref_code,
+            url,
+            append,
+            write_fetch_head,
+            &[],
+            false,
+            refetch,
+        )
+    }
 }
 
 fn fetch_with_http_remote_v2_server_options(
@@ -20058,27 +28136,68 @@ fn fetch_with_http_remote_v2_server_options(
     append: bool,
     write_fetch_head: bool,
     server_options: &[String],
+    require_server_option: bool,
+    refetch: bool,
 ) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
     let v2_url = http_url_with_git_protocol_v2(&parsed_url);
     let mut helper = if v2_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&v2_url)?)
     } else {
         None
     };
-    if let Some(helper) = helper.as_mut() {
-        http_upload_pack_v2_capabilities_with_helper(&v2_url, helper, true)?;
+    let capabilities = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+            &v2_url,
+            helper,
+            require_server_option,
+            local_hash,
+        )?
     } else {
-        http_upload_pack_v2_capabilities_direct(&v2_url, true)?;
-    }
-    let rows = if let Some(helper) = helper.as_mut() {
-        http_upload_pack_v2_ls_refs_with_helper(&v2_url, helper, branch, server_options)?
-    } else {
-        http_upload_pack_v2_ls_refs_direct(&v2_url, branch, server_options)?
+        http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+            &v2_url,
+            require_server_option,
+            local_hash,
+        )?
     };
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = capabilities.packfile_uris && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris && capabilities.sideband_all;
+    let hash = capabilities.hash;
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(&repo, &remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
+    let rows = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_ls_refs_with_helper_with_hash(
+            &v2_url,
+            helper,
+            branch,
+            server_options,
+            hash,
+        )?
+    } else {
+        http_upload_pack_v2_ls_refs_direct_with_hash(&v2_url, branch, server_options, hash)?
+    };
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let ref_name = branch_ref_name(branch)?;
     let id = rows
         .iter()
@@ -20086,23 +28205,46 @@ fn fetch_with_http_remote_v2_server_options(
         .map(|row| row.id.clone())
         .ok_or_else(|| missing_remote_ref_error(branch, missing_ref_code))?;
     let roots = [id.clone()];
-    let request_roots = missing_fetch_roots(&store, &roots)?;
-    let pack_fetched = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_v2_with_helper(
+    let request_roots = if refetch {
+        roots.to_vec()
+    } else {
+        missing_fetch_roots(&store, &roots)?
+    };
+    let pack_fetched = if use_packfile_uris {
+        http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+            &v2_url,
+            helper.as_mut(),
+            &repo,
+            &request_roots,
+            &haves,
+            server_options,
+            UploadPackShallowOptions::depth(None),
+            &uri_config,
+            sideband_all,
+            hash,
+            &mut pack_receipts,
+        )
+        .map(|_| true)?
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
             &v2_url,
             helper,
             &repo.objects_dir,
             &request_roots,
             &haves,
             server_options,
+            hash,
+            &mut pack_receipts,
         )?
     } else {
-        http_fetch_smart_pack_v2_direct(
+        http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
             &v2_url,
             &repo.objects_dir,
             &request_roots,
             &haves,
             server_options,
+            hash,
+            &mut pack_receipts,
         )?
     };
     if !pack_fetched {
@@ -20111,10 +28253,16 @@ fn fetch_with_http_remote_v2_server_options(
             message: "remote upload-pack response did not contain a pack".into(),
         });
     }
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
+    }
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
+    pack_receipts.release_owned();
     Ok(())
 }
 
@@ -20126,49 +28274,112 @@ fn fetch_configured_http_remote_v2_server_options(
     append: bool,
     write_fetch_head: bool,
     server_options: &[String],
+    require_server_option: bool,
+    refetch: bool,
 ) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
     let v2_url = http_url_with_git_protocol_v2(&parsed_url);
     let mut helper = if v2_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&v2_url)?)
     } else {
         None
     };
-    if let Some(helper) = helper.as_mut() {
-        http_upload_pack_v2_capabilities_with_helper(&v2_url, helper, true)?;
+    let capabilities = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+            &v2_url,
+            helper,
+            require_server_option,
+            local_hash,
+        )?
     } else {
-        http_upload_pack_v2_capabilities_direct(&v2_url, true)?;
-    }
+        http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+            &v2_url,
+            require_server_option,
+            local_hash,
+        )?
+    };
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = capabilities.packfile_uris && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris && capabilities.sideband_all;
+    let hash = capabilities.hash;
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(&repo, &remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
     let rows = if let Some(helper) = helper.as_mut() {
-        http_upload_pack_v2_ls_refs_configured_with_helper(&v2_url, helper, server_options)?
+        http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+            &v2_url,
+            helper,
+            server_options,
+            hash,
+        )?
     } else {
-        http_upload_pack_v2_ls_refs_configured_direct(&v2_url, server_options)?
+        http_upload_pack_v2_ls_refs_configured_direct_with_hash(&v2_url, server_options, hash)?
     };
     if rows.is_empty() {
         return Err(missing_remote_ref_error(&remote, missing_ref_code));
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
     sort_dedup_object_ids(&mut roots);
-    let request_roots = missing_fetch_roots(&store, &roots)?;
-    let pack_fetched = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_v2_with_helper(
+    let request_roots = if refetch {
+        roots.clone()
+    } else {
+        missing_fetch_roots(&store, &roots)?
+    };
+    let pack_fetched = if use_packfile_uris {
+        http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+            &v2_url,
+            helper.as_mut(),
+            &repo,
+            &request_roots,
+            &haves,
+            server_options,
+            UploadPackShallowOptions::depth(None),
+            &uri_config,
+            sideband_all,
+            hash,
+            &mut pack_receipts,
+        )
+        .map(|_| true)?
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_helper_with_hash_and_receipt(
             &v2_url,
             helper,
             &repo.objects_dir,
             &request_roots,
             &haves,
             server_options,
+            hash,
+            &mut pack_receipts,
         )?
     } else {
-        http_fetch_smart_pack_v2_direct(
+        http_fetch_smart_pack_v2_direct_with_hash_and_receipt(
             &v2_url,
             &repo.objects_dir,
             &request_roots,
             &haves,
             server_options,
+            hash,
+            &mut pack_receipts,
         )?
     };
     if !pack_fetched && !request_roots.is_empty() {
@@ -20176,6 +28387,11 @@ fn fetch_configured_http_remote_v2_server_options(
             code: 128,
             message: "remote upload-pack response did not contain a pack".into(),
         });
+    }
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
     }
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
@@ -20198,6 +28414,7 @@ fn fetch_configured_http_remote_v2_server_options(
             false,
         )?;
     }
+    pack_receipts.release_owned();
     Ok(())
 }
 
@@ -20212,8 +28429,13 @@ fn fetch_with_ssh_remote_v2_server_options(
     server_options: &[String],
 ) -> Result<()> {
     let rows = ssh_upload_pack_v2_ls_refs(url, branch, server_options)?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let fetch_hash =
+        SmartTransportHash::for_repo(&repo)?.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, &remote, false)?,
+        )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let ref_name = branch_ref_name(branch)?;
     let id = rows
@@ -20229,6 +28451,7 @@ fn fetch_with_ssh_remote_v2_server_options(
         &request_roots,
         &haves,
         server_options,
+        fetch_hash,
     )?;
     if !pack_fetched {
         return Err(CliError::Fatal {
@@ -20256,8 +28479,13 @@ fn fetch_configured_ssh_remote_v2_server_options(
     if rows.is_empty() {
         return Err(missing_remote_ref_error(&remote, missing_ref_code));
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let fetch_hash =
+        SmartTransportHash::for_repo(&repo)?.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, &remote, false)?,
+        )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
     sort_dedup_object_ids(&mut roots);
@@ -20268,6 +28496,7 @@ fn fetch_configured_ssh_remote_v2_server_options(
         &request_roots,
         &haves,
         server_options,
+        fetch_hash,
     )?;
     if !pack_fetched && !request_roots.is_empty() {
         return Err(CliError::Fatal {
@@ -20309,13 +28538,18 @@ fn fetch_with_daemon_remote_v2_server_options(
     write_fetch_head: bool,
     server_options: &[String],
 ) -> Result<()> {
-    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url)?;
+    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url, server_options)?;
     let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
     stream.write_all(&request)?;
     stream.flush()?;
     let rows = parse_upload_pack_v2_ls_refs_response(&mut reader)?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let fetch_hash =
+        SmartTransportHash::for_repo(&repo)?.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, &remote, false)?,
+        )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let ref_name = branch_ref_name(branch)?;
     let id = rows
@@ -20332,6 +28566,7 @@ fn fetch_with_daemon_remote_v2_server_options(
         &request_roots,
         &haves,
         server_options,
+        fetch_hash,
     )?;
     if !pack_fetched {
         return Err(CliError::Fatal {
@@ -20355,7 +28590,7 @@ fn fetch_configured_daemon_remote_v2_server_options(
     write_fetch_head: bool,
     server_options: &[String],
 ) -> Result<()> {
-    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url)?;
+    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url, server_options)?;
     let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
     stream.write_all(&request)?;
     stream.flush()?;
@@ -20363,8 +28598,13 @@ fn fetch_configured_daemon_remote_v2_server_options(
     if rows.is_empty() {
         return Err(missing_remote_ref_error(&remote, missing_ref_code));
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let fetch_hash =
+        SmartTransportHash::for_repo(&repo)?.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, &remote, false)?,
+        )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
     sort_dedup_object_ids(&mut roots);
@@ -20376,6 +28616,7 @@ fn fetch_configured_daemon_remote_v2_server_options(
         &request_roots,
         &haves,
         server_options,
+        fetch_hash,
     )?;
     if !pack_fetched && !request_roots.is_empty() {
         return Err(CliError::Fatal {
@@ -20412,7 +28653,7 @@ fn ssh_upload_pack_v2_ls_refs(
     branch: &str,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let mut session = ssh_open_upload_pack_v2(url)?;
+    let mut session = ssh_open_upload_pack_v2(url, server_options)?;
     let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
     write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
     let rows = {
@@ -20430,7 +28671,7 @@ fn ssh_upload_pack_v2_ls_refs_configured(
     url: &str,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let mut session = ssh_open_upload_pack_v2(url)?;
+    let mut session = ssh_open_upload_pack_v2(url, server_options)?;
     let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
     write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
     let rows = {
@@ -20450,11 +28691,12 @@ fn ssh_fetch_smart_pack_v2(
     roots: &[ObjectId],
     haves: &[ObjectId],
     server_options: &[String],
+    hash: SmartTransportHash,
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let mut session = ssh_open_upload_pack_v2(url)?;
+    let mut session = ssh_open_upload_pack_v2(url, server_options)?;
     let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
     write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
     let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
@@ -20470,9 +28712,180 @@ fn ssh_fetch_smart_pack_v2(
         session.finish()?;
         return Ok(false);
     };
-    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+    let mut receive = PackReceiveResult::default();
+    write_indexed_pack_file_with_policy(
+        objects_dir,
+        &pack_path,
+        !haves.is_empty(),
+        hash,
+        PackKeepPolicy::None,
+        &mut receive,
+    )?;
     session.finish()?;
     Ok(true)
+}
+
+fn ssh_fetch_pack_v2_from_session_with_policy(
+    mut session: RemoteCommandSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
+    if roots.is_empty() {
+        session.finish()?;
+        return Ok(PackFetchResult::default());
+    }
+    let result = (|| {
+        let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+            roots,
+            haves,
+            server_options,
+            options,
+            hash,
+        )?;
+        write_ssh_v2_request(&mut session, &request)?;
+        drop(session.stdin.take());
+        let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+        let parsed = {
+            let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport stdout is unavailable".into(),
+            })?;
+            parse_upload_pack_v2_pack_to_open_file_with_hash(stdout, &temp_pack, file, hash)?
+        };
+        let Some((pack_path, shallow_boundaries)) = parsed else {
+            let _ = fs::remove_file(&temp_pack);
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "ssh upload-pack response did not contain a pack".into(),
+            });
+        };
+        let pack_id = write_indexed_pack_file_with_policy(
+            objects_dir,
+            &pack_path,
+            !haves.is_empty(),
+            hash,
+            keep_policy,
+            receive,
+        )?;
+        Ok(PackFetchResult {
+            shallow_boundaries,
+            installed_pack_ids: vec![pack_id],
+        })
+    })();
+    match result {
+        Ok(result) => {
+            session.finish()?;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = session.abandon();
+            Err(error)
+        }
+    }
+}
+
+fn ssh_fetch_pack_v2_from_session_with_uri_support(
+    mut session: RemoteCommandSession,
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    uri_config: &FetchPackUriConfig,
+    sideband_all: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
+    if roots.is_empty() {
+        session.finish()?;
+        return Ok(PackFetchResult::default());
+    }
+    let result = (|| {
+        let request =
+            build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+                roots,
+                haves,
+                server_options,
+                options,
+                hash,
+                &uri_config.protocols,
+                sideband_all,
+            )?;
+        write_ssh_v2_request(&mut session, &request)?;
+        drop(session.stdin.take());
+        let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
+        let temp_guard = OwnedHttpTempPack::new(temp_pack.clone());
+        let parsed = {
+            let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport stdout is unavailable".into(),
+            })?;
+            parse_upload_pack_v2_uri_response_to_open_file(
+                stdout,
+                &temp_pack,
+                file,
+                hash,
+                sideband_all,
+            )?
+        };
+        let inline_pack_id = index_http_packfile_uri_pack(
+            &repo.objects_dir,
+            &parsed.pack_path,
+            !haves.is_empty(),
+            hash,
+            receive,
+            false,
+        )?;
+        temp_guard.cleanup().map_err(CliError::Io)?;
+        let mut installed_pack_ids = vec![inline_pack_id];
+        for packfile_uri in parsed.packfile_uris {
+            let temp_uri_pack =
+                download_packfile_uri_to_temp(repo, &repo.objects_dir, &packfile_uri)?;
+            let temp_uri_guard = OwnedHttpTempPack::new(temp_uri_pack.clone());
+            let pack_id = index_http_packfile_uri_pack(
+                &repo.objects_dir,
+                &temp_uri_pack,
+                !haves.is_empty(),
+                hash,
+                receive,
+                true,
+            )?;
+            receive.record_uri_pack(&pack_id);
+            temp_uri_guard.cleanup().map_err(CliError::Io)?;
+            if pack_id != packfile_uri.advertised_hash {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "pack downloaded from {} does not match expected hash {}",
+                        packfile_uri.uri,
+                        packfile_uri.advertised_hash.to_hex()
+                    ),
+                });
+            }
+            receive.record_uri_keep(&repo.objects_dir, pack_id.clone());
+            installed_pack_ids.push(pack_id);
+        }
+        Ok(PackFetchResult {
+            shallow_boundaries: parsed.shallow_boundaries,
+            installed_pack_ids,
+        })
+    })();
+    match result {
+        Ok(result) => {
+            session.finish()?;
+            Ok(result)
+        }
+        Err(error) => {
+            let _ = session.abandon();
+            Err(error)
+        }
+    }
 }
 
 fn daemon_fetch_smart_pack_v2_on_connection(
@@ -20482,39 +28895,190 @@ fn daemon_fetch_smart_pack_v2_on_connection(
     roots: &[ObjectId],
     haves: &[ObjectId],
     server_options: &[String],
+    hash: SmartTransportHash,
 ) -> Result<bool> {
+    daemon_fetch_smart_pack_v2_on_connection_with_options_and_policy(
+        stream,
+        reader,
+        objects_dir,
+        roots,
+        haves,
+        server_options,
+        UploadPackShallowOptions::depth(None),
+        hash,
+        PackKeepPolicy::None,
+        &mut PackReceiveResult::default(),
+    )
+    .map(|result| !result.installed_pack_ids.is_empty())
+}
+
+fn daemon_fetch_smart_pack_v2_on_connection_with_options_and_policy(
+    stream: &mut std::net::TcpStream,
+    reader: &mut io::BufReader<std::net::TcpStream>,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
     if roots.is_empty() {
-        return Ok(true);
+        return Ok(PackFetchResult::default());
     }
-    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+    )?;
     stream.write_all(&request)?;
     stream.flush()?;
     let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
-    let Some(pack_path) = parse_upload_pack_v2_pack_to_open_file(reader, &temp_pack, file)? else {
+    let Some((pack_path, shallow_boundaries)) =
+        parse_upload_pack_v2_pack_to_open_file_with_hash(reader, &temp_pack, file, hash)?
+    else {
         let _ = fs::remove_file(&temp_pack);
-        return Ok(false);
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "git daemon upload-pack response did not contain a pack".into(),
+        });
     };
-    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
-    Ok(true)
+    let pack_id = write_indexed_pack_file_with_policy(
+        objects_dir,
+        &pack_path,
+        !haves.is_empty(),
+        hash,
+        keep_policy,
+        receive,
+    )?;
+    Ok(PackFetchResult {
+        shallow_boundaries,
+        installed_pack_ids: vec![pack_id],
+    })
 }
 
-fn ssh_open_upload_pack_v2(url: &str) -> Result<RemoteCommandSession> {
+fn daemon_fetch_smart_pack_v2_on_connection_with_uri_support(
+    stream: &mut std::net::TcpStream,
+    reader: &mut io::BufReader<std::net::TcpStream>,
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    uri_config: &FetchPackUriConfig,
+    sideband_all: bool,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
+    if roots.is_empty() {
+        return Ok(PackFetchResult::default());
+    }
+    let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+        &uri_config.protocols,
+        sideband_all,
+    )?;
+    stream.write_all(&request)?;
+    stream.flush()?;
+    let (temp_pack, file) = temp_http_pack_file(&repo.objects_dir)?;
+    let temp_guard = OwnedHttpTempPack::new(temp_pack.clone());
+    let parsed = parse_upload_pack_v2_uri_response_to_open_file(
+        reader,
+        &temp_pack,
+        file,
+        hash,
+        sideband_all,
+    )?;
+    let inline_pack_id = index_http_packfile_uri_pack(
+        &repo.objects_dir,
+        &parsed.pack_path,
+        !haves.is_empty(),
+        hash,
+        receive,
+        false,
+    )?;
+    temp_guard.cleanup().map_err(CliError::Io)?;
+    let mut installed_pack_ids = vec![inline_pack_id];
+    for packfile_uri in parsed.packfile_uris {
+        let temp_uri_pack = download_packfile_uri_to_temp(repo, &repo.objects_dir, &packfile_uri)?;
+        let temp_uri_guard = OwnedHttpTempPack::new(temp_uri_pack.clone());
+        let pack_id = index_http_packfile_uri_pack(
+            &repo.objects_dir,
+            &temp_uri_pack,
+            !haves.is_empty(),
+            hash,
+            receive,
+            true,
+        )?;
+        receive.record_uri_pack(&pack_id);
+        temp_uri_guard.cleanup().map_err(CliError::Io)?;
+        if pack_id != packfile_uri.advertised_hash {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "pack downloaded from {} does not match expected hash {}",
+                    packfile_uri.uri,
+                    packfile_uri.advertised_hash.to_hex()
+                ),
+            });
+        }
+        receive.record_uri_keep(&repo.objects_dir, pack_id.clone());
+        installed_pack_ids.push(pack_id);
+    }
+    Ok(PackFetchResult {
+        shallow_boundaries: parsed.shallow_boundaries,
+        installed_pack_ids,
+    })
+}
+
+fn ssh_open_upload_pack_v2(url: &str, server_options: &[String]) -> Result<RemoteCommandSession> {
+    ssh_open_upload_pack_v2_with_capabilities(url, server_options).map(|(session, _)| session)
+}
+
+fn ssh_open_upload_pack_v2_with_capabilities(
+    url: &str,
+    server_options: &[String],
+) -> Result<(RemoteCommandSession, UploadPackV2Capabilities)> {
     let parsed = ParsedSshUrl::parse(url)?;
     let mut session =
         spawn_ssh_remote_command_with_git_protocol(&parsed, "git-upload-pack", Some("version=2"))?;
-    {
+    let capabilities = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "ssh transport stdout is unavailable".into(),
         })?;
-        parse_upload_pack_v2_capabilities(stdout, true)?;
-    }
-    Ok(session)
+        parse_upload_pack_v2_capabilities_impl_with_features(
+            stdout,
+            !server_options.is_empty(),
+            None,
+        )?
+    };
+    Ok((session, capabilities))
 }
 
 fn daemon_open_upload_pack_v2(
     url: &str,
+    server_options: &[String],
 ) -> Result<(std::net::TcpStream, io::BufReader<std::net::TcpStream>)> {
+    daemon_open_upload_pack_v2_with_capabilities(url, server_options)
+        .map(|(stream, reader, _)| (stream, reader))
+}
+
+fn daemon_open_upload_pack_v2_with_capabilities(
+    url: &str,
+    server_options: &[String],
+) -> Result<(
+    std::net::TcpStream,
+    io::BufReader<std::net::TcpStream>,
+    UploadPackV2Capabilities,
+)> {
     let url = ParsedDaemonUrl::parse(url)?;
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_service_handshake_with_extra_params(
@@ -20524,20 +29088,30 @@ fn daemon_open_upload_pack_v2(
         &["version=2"],
     )?;
     let mut reader = daemon_transport_reader(stream.try_clone()?);
-    parse_upload_pack_v2_capabilities(&mut reader, true)?;
-    Ok((stream, reader))
+    let capabilities = parse_upload_pack_v2_capabilities_impl_with_features(
+        &mut reader,
+        !server_options.is_empty(),
+        None,
+    )?;
+    Ok((stream, reader, capabilities))
+}
+
+fn write_ssh_v2_request(session: &mut RemoteCommandSession, request: &[u8]) -> Result<()> {
+    let stdin = session.stdin.as_mut().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "ssh transport stdin is unavailable".into(),
+    })?;
+    stdin.write_all(request)?;
+    stdin.flush()?;
+    Ok(())
 }
 
 fn write_ssh_v2_request_and_close_stdin(
     session: &mut RemoteCommandSession,
     request: &[u8],
 ) -> Result<()> {
-    let mut stdin = session.stdin.take().ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: "ssh transport stdin is unavailable".into(),
-    })?;
-    stdin.write_all(request)?;
-    stdin.flush()?;
+    write_ssh_v2_request(session, request)?;
+    drop(session.stdin.take());
     Ok(())
 }
 
@@ -20552,10 +29126,28 @@ fn http_url_with_git_protocol_v2(url: &ParsedHttpUrl) -> ParsedHttpUrl {
     url
 }
 
+fn http_url_with_git_protocol_v1(url: &ParsedHttpUrl) -> ParsedHttpUrl {
+    let mut url = url.clone();
+    url.extra_headers.retain(|header| {
+        header
+            .split_once(':')
+            .is_none_or(|(name, _)| !name.trim().eq_ignore_ascii_case("git-protocol"))
+    });
+    url.extra_headers.push("Git-Protocol: version=1".to_owned());
+    url
+}
+
 fn http_upload_pack_v2_capabilities_direct(
     url: &ParsedHttpUrl,
     require_server_option: bool,
 ) -> Result<()> {
+    http_upload_pack_v2_capabilities_direct_with_hash(url, require_server_option).map(|_| ())
+}
+
+fn http_upload_pack_v2_capabilities_direct_with_hash(
+    url: &ParsedHttpUrl,
+    require_server_option: bool,
+) -> Result<SmartTransportHash> {
     let (head, mut body) =
         http_request_reader(url, "GET", "info/refs?service=git-upload-pack", &[])?;
     if head.status_code != 200 {
@@ -20567,11 +29159,71 @@ fn http_upload_pack_v2_capabilities_direct(
     parse_upload_pack_v2_capabilities(&mut body, require_server_option)
 }
 
+fn http_upload_pack_v2_capabilities_direct_with_hash_and_features(
+    url: &ParsedHttpUrl,
+    require_server_option: bool,
+) -> Result<UploadPackV2Capabilities> {
+    let (head, mut body) =
+        http_request_reader(url, "GET", "info/refs?service=git-upload-pack", &[])?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_capabilities_impl_with_features(&mut body, require_server_option, None)
+}
+
+fn http_upload_pack_v2_capabilities_direct_for_local_hash(
+    url: &ParsedHttpUrl,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<SmartTransportHash> {
+    let (head, mut body) =
+        http_request_reader(url, "GET", "info/refs?service=git-upload-pack", &[])?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_capabilities_for_local_hash(&mut body, require_server_option, local_hash)
+}
+
+fn http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+    url: &ParsedHttpUrl,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<UploadPackV2Capabilities> {
+    let (head, mut body) =
+        http_request_reader(url, "GET", "info/refs?service=git-upload-pack", &[])?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_capabilities_for_local_hash_with_features(
+        &mut body,
+        require_server_option,
+        local_hash,
+    )
+}
+
 fn http_upload_pack_v2_capabilities_with_helper(
     url: &ParsedHttpUrl,
     helper: &mut RemoteHttpHelperSession,
     require_server_option: bool,
 ) -> Result<()> {
+    http_upload_pack_v2_capabilities_with_helper_with_hash(url, helper, require_server_option)
+        .map(|_| ())
+}
+
+fn http_upload_pack_v2_capabilities_with_helper_with_hash(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    require_server_option: bool,
+) -> Result<SmartTransportHash> {
     let response = helper.request_to_body(
         url,
         "GET",
@@ -20590,12 +29242,101 @@ fn http_upload_pack_v2_capabilities_with_helper(
         .with_reader(|reader| parse_upload_pack_v2_capabilities(reader, require_server_option))
 }
 
+fn http_upload_pack_v2_capabilities_with_helper_with_hash_and_features(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    require_server_option: bool,
+) -> Result<UploadPackV2Capabilities> {
+    let response = helper.request_to_body(
+        url,
+        "GET",
+        "info/refs?service=git-upload-pack",
+        &[],
+        &PackBody::Empty,
+    )?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response.body.with_reader(|reader| {
+        parse_upload_pack_v2_capabilities_impl_with_features(reader, require_server_option, None)
+    })
+}
+
+fn http_upload_pack_v2_capabilities_with_helper_for_local_hash(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<SmartTransportHash> {
+    let response = helper.request_to_body(
+        url,
+        "GET",
+        "info/refs?service=git-upload-pack",
+        &[],
+        &PackBody::Empty,
+    )?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response.body.with_reader(|reader| {
+        parse_upload_pack_v2_capabilities_for_local_hash(reader, require_server_option, local_hash)
+    })
+}
+
+fn http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<UploadPackV2Capabilities> {
+    let response = helper.request_to_body(
+        url,
+        "GET",
+        "info/refs?service=git-upload-pack",
+        &[],
+        &PackBody::Empty,
+    )?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response.body.with_reader(|reader| {
+        parse_upload_pack_v2_capabilities_for_local_hash_with_features(
+            reader,
+            require_server_option,
+            local_hash,
+        )
+    })
+}
+
 fn http_upload_pack_v2_ls_refs_direct(
     url: &ParsedHttpUrl,
     branch: &str,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    http_upload_pack_v2_ls_refs_direct_with_hash(
+        url,
+        branch,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn http_upload_pack_v2_ls_refs_direct_with_hash(
+    url: &ParsedHttpUrl,
+    branch: &str,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_request_with_hash(branch, server_options, hash)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Err(CliError::Fatal {
@@ -20603,7 +29344,7 @@ fn http_upload_pack_v2_ls_refs_direct(
             message: format!("HTTP ref request failed: {}", head.status_line),
         });
     }
-    parse_upload_pack_v2_ls_refs_response(&mut body)
+    parse_upload_pack_v2_ls_refs_response_with_hash(&mut body, hash)
 }
 
 fn http_upload_pack_v2_ls_refs_with_helper(
@@ -20612,7 +29353,23 @@ fn http_upload_pack_v2_ls_refs_with_helper(
     branch: &str,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    http_upload_pack_v2_ls_refs_with_helper_with_hash(
+        url,
+        helper,
+        branch,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn http_upload_pack_v2_ls_refs_with_helper_with_hash(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    branch: &str,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_request_with_hash(branch, server_options, hash)?;
     let response =
         helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
     if response.status_code != 200 {
@@ -20623,14 +29380,27 @@ fn http_upload_pack_v2_ls_refs_with_helper(
     }
     response
         .body
-        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response(reader))
+        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response_with_hash(reader, hash))
 }
 
 fn http_upload_pack_v2_ls_refs_configured_direct(
     url: &ParsedHttpUrl,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
+    http_upload_pack_v2_ls_refs_configured_direct_with_hash(
+        url,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn http_upload_pack_v2_ls_refs_configured_direct_with_hash(
+    url: &ParsedHttpUrl,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<LsRemoteRow>> {
+    let request =
+        build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(server_options, hash)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Err(CliError::Fatal {
@@ -20638,7 +29408,24 @@ fn http_upload_pack_v2_ls_refs_configured_direct(
             message: format!("HTTP ref request failed: {}", head.status_line),
         });
     }
-    parse_upload_pack_v2_ls_refs_response(&mut body)
+    parse_upload_pack_v2_ls_refs_response_with_hash(&mut body, hash)
+}
+
+fn http_upload_pack_v2_ls_refs_configured_direct_with_hash_and_head(
+    url: &ParsedHttpUrl,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<(Vec<LsRemoteRow>, Option<String>)> {
+    let request =
+        build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(server_options, hash)?;
+    let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_ls_refs_response_with_hash_and_head(&mut body, hash)
 }
 
 fn http_upload_pack_v2_ls_refs_configured_with_helper(
@@ -20646,7 +29433,22 @@ fn http_upload_pack_v2_ls_refs_configured_with_helper(
     helper: &mut RemoteHttpHelperSession,
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
-    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
+    http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+        url,
+        helper,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<LsRemoteRow>> {
+    let request =
+        build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(server_options, hash)?;
     let response =
         helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
     if response.status_code != 200 {
@@ -20657,7 +29459,28 @@ fn http_upload_pack_v2_ls_refs_configured_with_helper(
     }
     response
         .body
-        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response(reader))
+        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response_with_hash(reader, hash))
+}
+
+fn http_upload_pack_v2_ls_refs_configured_with_helper_with_hash_and_head(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<(Vec<LsRemoteRow>, Option<String>)> {
+    let request =
+        build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(server_options, hash)?;
+    let response =
+        helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response.body.with_reader(|reader| {
+        parse_upload_pack_v2_ls_refs_response_with_hash_and_head(reader, hash)
+    })
 }
 
 fn fetch_with_http_remote_depth(
@@ -20668,25 +29491,85 @@ fn fetch_with_http_remote_depth(
     url: &str,
     depth: usize,
 ) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
     } else {
         None
     };
-    let (rows, head_branch) = discover_http_refs_with_helper(
-        &parsed_url,
-        helper.as_mut().map(std::convert::identity),
-        false,
-        false,
-        false,
-        &[],
-    )?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let mut v2_capabilities = None;
+    let (rows, head_branch, hash) = if protocol_v2 {
+        let capabilities = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+                &parsed_url,
+                helper,
+                false,
+                local_hash,
+            )?
+        } else {
+            http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+                &parsed_url,
+                false,
+                local_hash,
+            )?
+        };
+        v2_capabilities = Some(capabilities.clone());
+        let hash = capabilities.hash;
+        let rows = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+                &parsed_url,
+                helper,
+                &[],
+                hash,
+            )?
+        } else {
+            http_upload_pack_v2_ls_refs_configured_direct_with_hash(&parsed_url, &[], hash)?
+        };
+        let head_branch = unique_head_branch_from_rows(&rows);
+        (rows, head_branch, hash)
+    } else {
+        let (rows, head_branch, _, hash) = discover_http_refs_with_helper_and_shallows_with_hash(
+            &parsed_url,
+            helper.as_mut().map(std::convert::identity),
+            false,
+            false,
+            false,
+            &[],
+        )?;
+        (rows, head_branch, hash)
+    };
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = v2_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.packfile_uris)
+        && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.sideband_all);
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(&repo, &remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let mut request_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
+    let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
+    let mut symbolic_head = None::<String>;
     if let Some(branch) = branch {
         let ref_name = branch_ref_name(&branch)?;
         let id = rows
@@ -20694,7 +29577,7 @@ fn fetch_with_http_remote_depth(
             .find(|row| row.name == ref_name)
             .map(|row| row.id.clone())
             .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
-        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        ref_updates.push((format!("refs/remotes/{remote}/{branch}"), id.clone()));
         request_roots.push(id.clone());
         shallow_roots.push(id);
     } else {
@@ -20709,19 +29592,16 @@ fn fetch_with_http_remote_depth(
                     code: 128,
                     message: format!("invalid source branch ref '{}'", row.name),
                 })?;
-            destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &row.id)?;
+            ref_updates.push((format!("refs/remotes/{remote}/{branch}"), row.id.clone()));
             request_roots.push(row.id.clone());
             shallow_roots.push(row.id.clone());
         }
         if let Some(branch) = head_branch {
-            destination_refs.write_symbolic_ref(
-                &format!("refs/remotes/{remote}/HEAD"),
-                &format!("refs/remotes/{remote}/{branch}"),
-            )?;
+            symbolic_head = Some(branch);
         }
         for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
             if !row.name.ends_with("^{}") {
-                destination_refs.write_ref(&row.name, &row.id)?;
+                ref_updates.push((row.name.clone(), row.id.clone()));
                 request_roots.push(row.id.clone());
             }
         }
@@ -20729,25 +29609,85 @@ fn fetch_with_http_remote_depth(
     sort_dedup_object_ids(&mut request_roots);
     sort_dedup_object_ids(&mut shallow_roots);
 
-    let shallow_boundaries = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_depth_with_helper(
+    let shallow_boundaries = if protocol_v2 {
+        let options = UploadPackShallowOptions::depth(Some(depth));
+        if use_packfile_uris {
+            http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                &parsed_url,
+                helper.as_mut(),
+                &repo,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                &uri_config,
+                sideband_all,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else {
+            http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                &parsed_url,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_with_depth_with_helper_with_hash_and_receipt(
             &parsed_url,
             helper,
             &repo.objects_dir,
             &request_roots,
             &haves,
             Some(depth),
+            hash,
+            &mut pack_receipts,
         )?
     } else {
-        http_fetch_smart_pack_with_depth_direct(
+        http_fetch_smart_pack_with_depth_direct_with_hash_and_receipt(
             &parsed_url,
             &repo.objects_dir,
             &request_roots,
             &haves,
             Some(depth),
+            hash,
+            &mut pack_receipts,
         )?
     };
-    write_shallow_file(&repo, shallow_boundaries)
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
+    }
+    write_shallow_file(&repo, shallow_boundaries)?;
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = symbolic_head {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    pack_receipts.release_owned();
+    Ok(())
 }
 
 fn fetch_with_http_remote_shallow_options(
@@ -20760,22 +29700,80 @@ fn fetch_with_http_remote_shallow_options(
     append: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
     } else {
         None
     };
-    let (rows, _, advertised_shallow_boundaries) = discover_http_refs_with_helper_and_shallows(
-        &parsed_url,
-        helper.as_mut().map(std::convert::identity),
-        false,
-        false,
-        false,
-        &[],
-    )?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let mut v2_capabilities = None;
+    let (rows, advertised_shallow_boundaries, hash) = if protocol_v2 {
+        let capabilities = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+                &parsed_url,
+                helper,
+                false,
+                local_hash,
+            )?
+        } else {
+            http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+                &parsed_url,
+                false,
+                local_hash,
+            )?
+        };
+        v2_capabilities = Some(capabilities.clone());
+        let hash = capabilities.hash;
+        let rows = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+                &parsed_url,
+                helper,
+                &[],
+                hash,
+            )?
+        } else {
+            http_upload_pack_v2_ls_refs_configured_direct_with_hash(&parsed_url, &[], hash)?
+        };
+        (rows, Vec::new(), hash)
+    } else {
+        let (rows, _, shallow_boundaries, hash) =
+            discover_http_refs_with_helper_and_shallows_with_hash(
+                &parsed_url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+        (rows, shallow_boundaries, hash)
+    };
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = v2_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.packfile_uris)
+        && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.sideband_all);
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(&repo, &remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
@@ -20784,22 +29782,65 @@ fn fetch_with_http_remote_shallow_options(
         .map(|row| row.id.clone())
         .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
     let roots = [id.clone()];
-    let shallow_boundaries = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_shallow_options_with_helper(
+    let shallow_boundaries = if protocol_v2 {
+        if use_packfile_uris {
+            http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                &parsed_url,
+                helper.as_mut(),
+                &repo,
+                &roots,
+                &haves,
+                &[],
+                options,
+                &uri_config,
+                sideband_all,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else {
+            http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                &parsed_url,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
             &parsed_url,
             helper,
             &repo.objects_dir,
             &roots,
             &haves,
             options,
+            hash,
+            &mut pack_receipts,
         )?
     } else {
-        http_fetch_smart_pack_with_shallow_options_direct(
+        http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
             &parsed_url,
             &repo.objects_dir,
             &roots,
             &haves,
             options,
+            hash,
+            &mut pack_receipts,
         )?
     };
     let shallow_boundaries = upload_pack_response_or_advertised_shallows(
@@ -20807,11 +29848,18 @@ fn fetch_with_http_remote_shallow_options(
         shallow_boundaries,
         &advertised_shallow_boundaries,
     );
+    write_shallow_file(&repo, shallow_boundaries)?;
+    if hash.pack_policy.force_index.promisor {
+        pack_receipts
+            .publish_promisor_markers(b"")
+            .map_err(CliError::Io)?;
+    }
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
-    write_shallow_file(&repo, shallow_boundaries)
+    pack_receipts.release_owned();
+    Ok(())
 }
 
 fn fetch_with_http_remote_filter(
@@ -20821,16 +29869,42 @@ fn fetch_with_http_remote_filter(
     missing_ref_code: i32,
     url: &str,
     filter: &str,
+    depth: Option<usize>,
     append: bool,
     write_fetch_head: bool,
+    refetch: bool,
 ) -> Result<()> {
+    if write_fetch_head && !append {
+        fs::write(repo.git_dir.join("FETCH_HEAD"), b"")?;
+    }
+    let protocol_version = repo_http_protocol_version(&repo)?;
+    if protocol_version == HttpProtocolVersion::V2 {
+        return fetch_with_http_remote_filter_v2(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            url,
+            filter,
+            depth,
+            append,
+            write_fetch_head,
+            refetch,
+        );
+    }
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = match protocol_version {
+        HttpProtocolVersion::V0 => parsed_url,
+        HttpProtocolVersion::V1 => http_url_with_git_protocol_v1(&parsed_url),
+        HttpProtocolVersion::V2 => unreachable!("protocol v2 handled above"),
+    };
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
     } else {
         None
     };
-    let (rows, head_branch) = discover_http_refs_with_helper(
+    let discovery = discover_http_filter_with_helper(
         &parsed_url,
         helper.as_mut().map(std::convert::identity),
         false,
@@ -20838,12 +29912,44 @@ fn fetch_with_http_remote_filter(
         false,
         &[],
     )?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let SmartHttpDiscovery {
+        rows,
+        head_branch,
+        hash: remote_hash,
+        filter_supported,
+        ..
+    } = discovery;
+    validate_smart_transport_hash_match(local_hash, remote_hash)?;
+    if !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let filter_hash = remote_hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: true,
+            keep_pack: false,
+            ..ForceIndexReasons::default()
+        },
+    )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, filter_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), filter_hash);
+    let mut pack_receipts = PackReceiveResult::default();
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let Some(branch) = branch else {
         let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_filter(
+        let promisor_content =
+            filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+        let shallow_options = depth
+            .map_or_else(
+                || UploadPackShallowOptions::filter(filter),
+                |depth| UploadPackShallowOptions::depth(Some(depth)).with_filter(Some(filter)),
+            )
+            .with_filter_support(filter_supported);
+        let mutation_plan = fetch_configured_advertised_remote_filter_with_hash_and_options(
             repo,
             remote,
             url,
@@ -20853,27 +29959,41 @@ fn fetch_with_http_remote_filter(
             filter,
             append,
             write_fetch_head,
+            filter_hash,
+            &haves,
+            shallow_options,
             |roots, haves, options| {
                 if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
+                    http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
                         &parsed_url,
                         helper,
                         &objects_dir,
                         roots,
                         haves,
                         options,
+                        filter_hash,
+                        &mut pack_receipts,
                     )
                 } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
+                    http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
                         &parsed_url,
                         &objects_dir,
                         roots,
                         haves,
                         options,
+                        filter_hash,
+                        &mut pack_receipts,
                     )
                 }
             },
-        );
+        )?;
+        publish_configured_filtered_fetch(
+            &mut pack_receipts,
+            &promisor_content,
+            mutation_plan,
+            true,
+        )?;
+        return Ok(());
     };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
@@ -20881,24 +30001,317 @@ fn fetch_with_http_remote_filter(
         .find(|row| row.name == ref_name)
         .map(|row| row.id.clone())
         .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let promisor_content =
+        filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, Some(&branch))?;
     let roots = [id.clone()];
-    let options = UploadPackShallowOptions::filter(filter);
+    let options = depth
+        .map_or_else(
+            || UploadPackShallowOptions::filter(filter),
+            |depth| UploadPackShallowOptions::depth(Some(depth)).with_filter(Some(filter)),
+        )
+        .with_filter_support(filter_supported);
     if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_shallow_options_with_helper(
+        http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
             &parsed_url,
             helper,
             &repo.objects_dir,
             &roots,
             &haves,
             options,
+            filter_hash,
+            &mut pack_receipts,
         )?;
     } else {
-        http_fetch_smart_pack_with_shallow_options_direct(
+        http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
             &parsed_url,
             &repo.objects_dir,
             &roots,
             &haves,
             options,
+            filter_hash,
+            &mut pack_receipts,
+        )?;
+    }
+    pack_receipts
+        .publish_filtered_promisor_markers(&promisor_content)
+        .map_err(CliError::Io)?;
+    pack_receipts
+        .finalize_refetch_promisor_markers(refetch)
+        .map_err(CliError::Io)?;
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    pack_receipts.release_owned();
+    Ok(())
+}
+
+fn fetch_with_http_remote_filter_v2(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    filter: &str,
+    depth: Option<usize>,
+    append: bool,
+    write_fetch_head: bool,
+    refetch: bool,
+) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let parsed_url = http_url_with_git_protocol_v2(&parsed_url);
+    let mut helper = if parsed_url.scheme == HttpScheme::Https {
+        Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
+    } else {
+        None
+    };
+    let capabilities = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+            &parsed_url,
+            helper,
+            false,
+            local_hash,
+        )?
+    } else {
+        http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+            &parsed_url,
+            false,
+            local_hash,
+        )?
+    };
+    let filter_supported = capabilities.filter;
+    if !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = capabilities.packfile_uris && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris && capabilities.sideband_all;
+    let hash = capabilities.hash;
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: true,
+            packfile_uri: use_packfile_uris,
+            keep_pack: false,
+            ..ForceIndexReasons::default()
+        },
+    )?);
+    let (rows, advertised_head_branch) = if let Some(branch) = branch.as_deref() {
+        if let Some(helper) = helper.as_mut() {
+            (
+                http_upload_pack_v2_ls_refs_with_helper_with_hash(
+                    &parsed_url,
+                    helper,
+                    branch,
+                    &[],
+                    hash,
+                )?,
+                None,
+            )
+        } else {
+            (
+                http_upload_pack_v2_ls_refs_direct_with_hash(&parsed_url, branch, &[], hash)?,
+                None,
+            )
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_ls_refs_configured_with_helper_with_hash_and_head(
+            &parsed_url,
+            helper,
+            &[],
+            hash,
+        )?
+    } else {
+        http_upload_pack_v2_ls_refs_configured_direct_with_hash_and_head(&parsed_url, &[], hash)?
+    };
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
+    let mut pack_receipts = PackReceiveResult::default();
+    let Some(branch) = branch else {
+        let head_branch = advertised_head_branch;
+        let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
+        sort_dedup_object_ids(&mut roots);
+        let options = depth
+            .map_or_else(
+                || UploadPackShallowOptions::filter(filter),
+                |depth| UploadPackShallowOptions::depth(Some(depth)).with_filter(Some(filter)),
+            )
+            .with_filter_support(filter_supported);
+        let promisor_content =
+            filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+        let shallow_boundaries = if roots.is_empty() {
+            Vec::new()
+        } else if use_packfile_uris {
+            match http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                &parsed_url,
+                helper.as_mut(),
+                &repo,
+                &roots,
+                &haves,
+                &[],
+                options,
+                &uri_config,
+                sideband_all,
+                hash,
+                &mut pack_receipts,
+            ) {
+                Ok(boundaries) => boundaries,
+                Err(error) => {
+                    let marker_result =
+                        pack_receipts.publish_filtered_failure_promisor_markers(&promisor_content);
+                    pack_receipts.release_owned();
+                    if let Err(marker_error) = marker_result {
+                        return Err(CliError::Io(marker_error));
+                    }
+                    return Err(error);
+                }
+            }
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else {
+            http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                &parsed_url,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        };
+        pack_receipts
+            .publish_filtered_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+        pack_receipts
+            .finalize_refetch_promisor_markers(refetch)
+            .map_err(CliError::Io)?;
+        if let Some(depth) = depth {
+            write_shallow_file(
+                &repo,
+                boundaries_or_local_fallback(&repo, &roots, depth, shallow_boundaries)?,
+            )?;
+        }
+        for (name, id) in ref_updates {
+            destination_refs.write_ref(&name, &id)?;
+        }
+        if let Some(branch) = head_branch {
+            destination_refs.write_symbolic_ref(
+                &format!("refs/remotes/{remote}/HEAD"),
+                &format!("refs/remotes/{remote}/{branch}"),
+            )?;
+        }
+        record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+        let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+        if write_fetch_head && !fetch_refspecs.is_empty() {
+            write_network_configured_fetch_head_file(
+                &repo,
+                &rows,
+                &remote,
+                url,
+                &fetch_refspecs,
+                append,
+                false,
+            )?;
+        }
+        pack_receipts.release_owned();
+        return Ok(());
+    };
+    let ref_name = branch_ref_name(&branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let promisor_content =
+        filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, Some(&branch))?;
+    let roots = [id.clone()];
+    let options = depth
+        .map_or_else(
+            || UploadPackShallowOptions::filter(filter),
+            |depth| UploadPackShallowOptions::depth(Some(depth)).with_filter(Some(filter)),
+        )
+        .with_filter_support(filter_supported);
+    let shallow_boundaries = if use_packfile_uris {
+        match http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+            &parsed_url,
+            helper.as_mut(),
+            &repo,
+            &roots,
+            &haves,
+            &[],
+            options,
+            &uri_config,
+            sideband_all,
+            hash,
+            &mut pack_receipts,
+        ) {
+            Ok(boundaries) => boundaries,
+            Err(error) => {
+                let marker_result =
+                    pack_receipts.publish_filtered_failure_promisor_markers(&promisor_content);
+                pack_receipts.release_owned();
+                if let Err(marker_error) = marker_result {
+                    return Err(CliError::Io(marker_error));
+                }
+                return Err(error);
+            }
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+            &parsed_url,
+            helper,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            &[],
+            options,
+            hash,
+            &mut pack_receipts,
+        )?
+    } else {
+        http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+            &parsed_url,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            &[],
+            options,
+            hash,
+            &mut pack_receipts,
+        )?
+    };
+    pack_receipts
+        .publish_filtered_promisor_markers(&promisor_content)
+        .map_err(CliError::Io)?;
+    pack_receipts
+        .finalize_refetch_promisor_markers(refetch)
+        .map_err(CliError::Io)?;
+    if let Some(depth) = depth {
+        write_shallow_file(
+            &repo,
+            boundaries_or_local_fallback(&repo, &roots, depth, shallow_boundaries)?,
         )?;
     }
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
@@ -20906,6 +30319,7 @@ fn fetch_with_http_remote_filter(
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
+    pack_receipts.release_owned();
     Ok(())
 }
 
@@ -20917,11 +30331,51 @@ fn fetch_with_daemon_remote(
     url: &str,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
 ) -> Result<()> {
-    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    fetch_with_daemon_remote_mode(
+        repo,
+        remote,
+        branch,
+        missing_ref_code,
+        url,
+        append,
+        write_fetch_head,
+        verbose,
+        false,
+    )
+}
+
+fn fetch_with_daemon_remote_mode(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    verbose: bool,
+    refetch: bool,
+) -> Result<()> {
+    let DaemonAdvertisedUploadPack {
+        stream,
+        reader,
+        rows,
+        head_branch,
+        hash: advertised_hash,
+        ..
+    } = daemon_open_advertised_upload_pack_with_verbose(url, false, false, false, &[], verbose)?;
+    let fetch_hash = advertised_hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        selected_remote_force_index_reasons(&repo, &remote, false)?,
+    )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut symbolic_head = None::<String>;
@@ -20951,7 +30405,7 @@ fn fetch_with_daemon_remote(
             ref_updates.push((format!("refs/remotes/{remote}/{branch}"), row.id.clone()));
             roots.push(row.id.clone());
         }
-        if let Some(branch) = daemon_head_branch(url)? {
+        if let Some(branch) = head_branch {
             symbolic_head = Some(branch);
         }
         for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
@@ -20962,7 +30416,18 @@ fn fetch_with_daemon_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    daemon_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)?;
+    let mut receive = PackReceiveResult::default();
+    daemon_fetch_pack_from_advertised_stream_with_policy(
+        stream,
+        reader,
+        &repo.objects_dir,
+        &roots,
+        &haves,
+        UploadPackShallowOptions::depth(None),
+        fetch_hash,
+        PackKeepPolicy::None,
+        &mut receive,
+    )?;
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
     }
@@ -21000,57 +30465,59 @@ fn fetch_with_daemon_remote_depth(
     missing_ref_code: i32,
     url: &str,
     depth: usize,
+    append: bool,
+    write_fetch_head: bool,
+    verbose: bool,
 ) -> Result<()> {
-    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let mut request_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
-    let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     if let Some(branch) = branch {
-        let ref_name = branch_ref_name(&branch)?;
-        let id = rows
-            .iter()
-            .find(|row| row.name == ref_name)
-            .map(|row| row.id.clone())
-            .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
-        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
-        request_roots.push(id.clone());
-        shallow_roots.push(id);
-    } else {
-        for row in rows
-            .iter()
-            .filter(|row| row.name.starts_with("refs/heads/"))
-        {
-            let branch = row
-                .name
-                .strip_prefix("refs/heads/")
-                .ok_or_else(|| CliError::Fatal {
-                    code: 128,
-                    message: format!("invalid source branch ref '{}'", row.name),
-                })?;
-            destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &row.id)?;
-            request_roots.push(row.id.clone());
-            shallow_roots.push(row.id.clone());
-        }
-        if let Some(branch) = daemon_head_branch(url)? {
-            destination_refs.write_symbolic_ref(
-                &format!("refs/remotes/{remote}/HEAD"),
-                &format!("refs/remotes/{remote}/{branch}"),
-            )?;
-        }
-        for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
-            if !row.name.ends_with("^{}") {
-                destination_refs.write_ref(&row.name, &row.id)?;
-                request_roots.push(row.id.clone());
-            }
-        }
+        return fetch_with_daemon_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            url,
+            UploadPackShallowOptions::depth(Some(depth)),
+            append,
+            write_fetch_head,
+            verbose,
+        );
     }
-    sort_dedup_object_ids(&mut request_roots);
-    sort_dedup_object_ids(&mut shallow_roots);
-    let boundaries =
-        daemon_fetch_pack_with_depth(url, &repo.objects_dir, &request_roots, Some(depth))?;
-    write_shallow_file(
-        &repo,
-        boundaries_or_local_fallback(&repo, &shallow_roots, depth, boundaries)?,
+    let (rows, advertised_shallow_boundaries) =
+        daemon_ls_remote_rows_with_verbose(url, false, false, false, &[], verbose)?;
+    let head_branch = daemon_head_branch_with_verbose(url, verbose)?;
+    let objects_dir = repo.objects_dir.clone();
+    fetch_configured_advertised_remote_deepen(
+        repo,
+        remote,
+        url,
+        &rows,
+        &advertised_shallow_boundaries,
+        head_branch,
+        missing_ref_code,
+        append,
+        write_fetch_head,
+        depth,
+        &[],
+        |roots, haves, options| {
+            if verbose {
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
+                    url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                    verbose,
+                )
+            } else {
+                daemon_fetch_pack_with_shallow_options_and_haves(
+                    url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            }
+        },
     )
 }
 
@@ -21063,9 +30530,10 @@ fn fetch_with_daemon_remote_shallow_options(
     options: UploadPackShallowOptions<'_>,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
 ) -> Result<()> {
     let (rows, advertised_shallow_boundaries) =
-        daemon_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
+        daemon_ls_remote_rows_with_verbose(url, false, false, false, &[], verbose)?;
     let objects_dir = repo.objects_dir.clone();
     fetch_with_advertised_remote_shallow_options(
         repo,
@@ -21079,15 +30547,23 @@ fn fetch_with_daemon_remote_shallow_options(
         append,
         write_fetch_head,
         |roots, haves, options| {
-            daemon_fetch_pack_with_shallow_options_and_haves(
+            daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                 url,
                 &objects_dir,
                 roots,
                 haves,
                 options,
+                verbose,
             )
         },
     )
+}
+
+fn filter_capability_missing_error() -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: "fatal: server does not support filter capability\n".to_owned(),
+    }
 }
 
 fn fetch_with_daemon_remote_filter(
@@ -21097,17 +30573,152 @@ fn fetch_with_daemon_remote_filter(
     missing_ref_code: i32,
     url: &str,
     filter: &str,
+    depth: Option<usize>,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
+    refetch: bool,
 ) -> Result<()> {
-    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let advertised =
+        daemon_open_advertised_upload_pack_with_verbose(url, false, false, false, &[], verbose)?;
+    validate_smart_transport_hash_match(local_hash, advertised.hash)?;
+    let filter_supported = advertised.has_capability("filter");
+    if !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let fetch_hash = advertised.hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: true,
+            ..ForceIndexReasons::default()
+        },
+    )?);
+    let rows = advertised.rows.clone();
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
+
+    if !filter_supported {
+        let Some(branch) = branch else {
+            let (mut roots, ref_updates) =
+                configured_network_fetch_roots_and_updates(&remote, &rows)?;
+            sort_dedup_object_ids(&mut roots);
+            let mut receive = PackReceiveResult::default();
+            let result = daemon_fetch_pack_from_advertised_stream_with_policy(
+                advertised.stream,
+                advertised.reader,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                clone_v0_upload_pack_options(depth, Some(filter), false),
+                fetch_hash,
+                PackKeepPolicy::Transient,
+                &mut receive,
+            )?;
+            let promisor_content =
+                filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+            receive
+                .publish_filtered_promisor_markers(&promisor_content)
+                .map_err(CliError::Io)?;
+            receive
+                .finalize_refetch_promisor_markers(refetch)
+                .map_err(CliError::Io)?;
+            if let Some(depth) = depth {
+                write_shallow_file(
+                    &repo,
+                    boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+                )?;
+            }
+            for (name, id) in ref_updates {
+                destination_refs.write_ref(&name, &id)?;
+            }
+            if let Some(head_branch) = advertised.head_branch {
+                destination_refs.write_symbolic_ref(
+                    &format!("refs/remotes/{remote}/HEAD"),
+                    &format!("refs/remotes/{remote}/{head_branch}"),
+                )?;
+            }
+            if write_fetch_head {
+                let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+                if !fetch_refspecs.is_empty() {
+                    write_network_configured_fetch_head_file_with_hash(
+                        &repo,
+                        &rows,
+                        &remote,
+                        url,
+                        &fetch_refspecs,
+                        append,
+                        false,
+                        fetch_hash,
+                    )?;
+                }
+            }
+            record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+            receive.release_owned();
+            return Ok(());
+        };
+        let ref_name = branch_ref_name(&branch)?;
+        let id = rows
+            .iter()
+            .find(|row| row.name == ref_name)
+            .map(|row| row.id.clone())
+            .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+        let roots = [id.clone()];
+        let mut receive = PackReceiveResult::default();
+        let result = daemon_fetch_pack_from_advertised_stream_with_policy(
+            advertised.stream,
+            advertised.reader,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            clone_v0_upload_pack_options(depth, Some(filter), false),
+            fetch_hash,
+            PackKeepPolicy::Transient,
+            &mut receive,
+        )?;
+        let promisor_content = filtered_network_promisor_marker_content(
+            &destination_refs,
+            &remote,
+            &rows,
+            Some(&branch),
+        )?;
+        receive
+            .publish_filtered_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+        receive
+            .finalize_refetch_promisor_markers(refetch)
+            .map_err(CliError::Io)?;
+        if let Some(depth) = depth {
+            write_shallow_file(
+                &repo,
+                boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+            )?;
+        }
+        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+        if write_fetch_head {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        }
+        receive.release_owned();
+        return Ok(());
+    }
+
+    let filter_hash = fetch_hash;
     let Some(branch) = branch else {
-        let head_branch = daemon_head_branch(url)?;
+        let head_branch = advertised.head_branch.clone();
         let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_filter(
+        let mut receive = PackReceiveResult::default();
+        let promisor_content =
+            filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+        let stream = advertised.stream;
+        let reader = advertised.reader;
+        let mut session = Some((stream, reader));
+        let mutation_plan = fetch_configured_advertised_remote_filter_with_hash_and_options(
             repo,
             remote,
             url,
@@ -21117,16 +30728,30 @@ fn fetch_with_daemon_remote_filter(
             filter,
             append,
             write_fetch_head,
+            filter_hash,
+            &haves,
+            clone_v0_upload_pack_options(depth, Some(filter), false),
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
-                    url,
+                let (stream, reader) = session.take().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "git daemon upload-pack session was already consumed".into(),
+                })?;
+                let result = daemon_fetch_pack_from_advertised_stream_with_policy(
+                    stream,
+                    reader,
                     &objects_dir,
                     roots,
                     haves,
                     options,
-                )
+                    filter_hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+                Ok(result.shallow_boundaries)
             },
-        );
+        )?;
+        publish_configured_filtered_fetch(&mut receive, &promisor_content, mutation_plan, true)?;
+        return Ok(());
     };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
@@ -21134,19 +30759,39 @@ fn fetch_with_daemon_remote_filter(
         .find(|row| row.name == ref_name)
         .map(|row| row.id.clone())
         .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let promisor_content =
+        filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, Some(&branch))?;
     let roots = [id.clone()];
-    daemon_fetch_pack_with_shallow_options_and_haves(
-        url,
+    let mut receive = PackReceiveResult::default();
+    let result = daemon_fetch_pack_from_advertised_stream_with_policy(
+        advertised.stream,
+        advertised.reader,
         &repo.objects_dir,
         &roots,
         &haves,
-        UploadPackShallowOptions::filter(filter),
+        clone_v0_upload_pack_options(depth, Some(filter), true),
+        filter_hash,
+        PackKeepPolicy::Transient,
+        &mut receive,
     )?;
+    receive
+        .publish_filtered_promisor_markers(&promisor_content)
+        .map_err(CliError::Io)?;
+    receive
+        .finalize_refetch_promisor_markers(refetch)
+        .map_err(CliError::Io)?;
+    if let Some(depth) = depth {
+        write_shallow_file(
+            &repo,
+            boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+        )?;
+    }
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     record_fetch_filter_promisor_config(&repo, &remote, filter)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
+    receive.release_owned();
     Ok(())
 }
 
@@ -21160,11 +30805,44 @@ fn fetch_with_ssh_remote(
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
+    fetch_with_ssh_remote_mode(
+        repo,
+        remote,
+        branch,
+        missing_ref_code,
+        url,
+        append,
+        write_fetch_head,
+        upload_pack_command,
+        false,
+    )
+}
+
+fn fetch_with_ssh_remote_mode(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
+    refetch: bool,
+) -> Result<()> {
     let rows =
         ssh_ls_remote_rows_with_upload_pack(url, false, false, false, &[], upload_pack_command)?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let fetch_hash =
+        SmartTransportHash::for_repo(&repo)?.with_pack_policy(FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, &remote, false)?,
+        )?);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut symbolic_head = None::<String>;
@@ -21205,12 +30883,17 @@ fn fetch_with_ssh_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    ssh_fetch_pack_with_haves_and_upload_pack(
+    let mut receive = PackReceiveResult::default();
+    ssh_fetch_pack_with_shallow_options_and_haves_impl_with_policy(
         url,
         &repo.objects_dir,
         &roots,
         &haves,
+        UploadPackShallowOptions::depth(None),
         upload_pack_command,
+        fetch_hash,
+        PackKeepPolicy::None,
+        &mut receive,
     )?;
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
@@ -21253,65 +30936,51 @@ fn fetch_with_ssh_remote_depth(
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
-    let rows =
-        ssh_ls_remote_rows_with_upload_pack(url, false, false, false, &[], upload_pack_command)?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let mut request_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
-    let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     if let Some(branch) = branch {
-        let ref_name = branch_ref_name(&branch)?;
-        let id = rows
-            .iter()
-            .find(|row| row.name == ref_name)
-            .map(|row| row.id.clone())
-            .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
-        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
-        if write_fetch_head {
-            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
-        }
-        request_roots.push(id.clone());
-        shallow_roots.push(id);
-    } else {
-        for row in rows
-            .iter()
-            .filter(|row| row.name.starts_with("refs/heads/"))
-        {
-            let branch = row
-                .name
-                .strip_prefix("refs/heads/")
-                .ok_or_else(|| CliError::Fatal {
-                    code: 128,
-                    message: format!("invalid source branch ref '{}'", row.name),
-                })?;
-            destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &row.id)?;
-            request_roots.push(row.id.clone());
-            shallow_roots.push(row.id.clone());
-        }
-        if let Some(branch) = ssh_head_branch_with_upload_pack(url, upload_pack_command)? {
-            destination_refs.write_symbolic_ref(
-                &format!("refs/remotes/{remote}/HEAD"),
-                &format!("refs/remotes/{remote}/{branch}"),
-            )?;
-        }
-        for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
-            if !row.name.ends_with("^{}") {
-                destination_refs.write_ref(&row.name, &row.id)?;
-                request_roots.push(row.id.clone());
-            }
-        }
+        return fetch_with_ssh_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            url,
+            UploadPackShallowOptions::depth(Some(depth)),
+            append,
+            write_fetch_head,
+            upload_pack_command,
+        );
     }
-    sort_dedup_object_ids(&mut request_roots);
-    sort_dedup_object_ids(&mut shallow_roots);
-    let boundaries = ssh_fetch_pack_with_depth_and_upload_pack(
+    let (rows, advertised_shallow_boundaries) = ssh_ls_remote_rows_with_shallows_and_upload_pack(
         url,
-        &repo.objects_dir,
-        &request_roots,
-        Some(depth),
+        false,
+        false,
+        false,
+        &[],
         upload_pack_command,
     )?;
-    write_shallow_file(
-        &repo,
-        boundaries_or_local_fallback(&repo, &shallow_roots, depth, boundaries)?,
+    let head_branch = ssh_head_branch_with_upload_pack(url, upload_pack_command)?;
+    let objects_dir = repo.objects_dir.clone();
+    fetch_configured_advertised_remote_deepen(
+        repo,
+        remote,
+        url,
+        &rows,
+        &advertised_shallow_boundaries,
+        head_branch,
+        missing_ref_code,
+        append,
+        write_fetch_head,
+        depth,
+        &[],
+        |roots, haves, options| {
+            ssh_fetch_pack_with_shallow_options_and_haves_and_upload_pack(
+                url,
+                &objects_dir,
+                roots,
+                haves,
+                options,
+                upload_pack_command,
+            )
+        },
     )
 }
 
@@ -21366,17 +31035,146 @@ fn fetch_with_ssh_remote_filter(
     missing_ref_code: i32,
     url: &str,
     filter: &str,
+    depth: Option<usize>,
     append: bool,
     write_fetch_head: bool,
+    refetch: bool,
 ) -> Result<()> {
-    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let mut advertised = ssh_open_advertised_upload_pack(url, false, false, false, &[])?;
+    validate_smart_transport_hash_match(local_hash, advertised.hash)?;
+    let filter_supported = advertised.has_capability("filter");
+    if !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let fetch_hash = advertised.hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: true,
+            ..ForceIndexReasons::default()
+        },
+    )?);
+    let rows = advertised.rows.clone();
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), fetch_hash);
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&store, &destination_refs)?
+    };
+
+    if !filter_supported {
+        let Some(branch) = branch else {
+            let (mut roots, ref_updates) =
+                configured_network_fetch_roots_and_updates(&remote, &rows)?;
+            sort_dedup_object_ids(&mut roots);
+            let mut receive = PackReceiveResult::default();
+            let result = ssh_fetch_pack_from_advertised_session_with_policy(
+                advertised.take_session()?,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                clone_v0_upload_pack_options(depth, Some(filter), false),
+                fetch_hash,
+                PackKeepPolicy::Transient,
+                &mut receive,
+            )?;
+            let promisor_content =
+                filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+            receive
+                .publish_filtered_promisor_markers(&promisor_content)
+                .map_err(CliError::Io)?;
+            receive
+                .finalize_refetch_promisor_markers(refetch)
+                .map_err(CliError::Io)?;
+            if let Some(depth) = depth {
+                write_shallow_file(
+                    &repo,
+                    boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+                )?;
+            }
+            for (name, id) in ref_updates {
+                destination_refs.write_ref(&name, &id)?;
+            }
+            if let Some(head_branch) = advertised.head_branch.clone() {
+                destination_refs.write_symbolic_ref(
+                    &format!("refs/remotes/{remote}/HEAD"),
+                    &format!("refs/remotes/{remote}/{head_branch}"),
+                )?;
+            }
+            if write_fetch_head {
+                let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+                if !fetch_refspecs.is_empty() {
+                    write_network_configured_fetch_head_file_with_hash(
+                        &repo,
+                        &rows,
+                        &remote,
+                        url,
+                        &fetch_refspecs,
+                        append,
+                        false,
+                        fetch_hash,
+                    )?;
+                }
+            }
+            record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+            receive.release_owned();
+            return Ok(());
+        };
+        let ref_name = branch_ref_name(&branch)?;
+        let id = rows
+            .iter()
+            .find(|row| row.name == ref_name)
+            .map(|row| row.id.clone())
+            .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+        let roots = [id.clone()];
+        let mut receive = PackReceiveResult::default();
+        let result = ssh_fetch_pack_from_advertised_session_with_policy(
+            advertised.take_session()?,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            clone_v0_upload_pack_options(depth, Some(filter), false),
+            fetch_hash,
+            PackKeepPolicy::Transient,
+            &mut receive,
+        )?;
+        let promisor_content = filtered_network_promisor_marker_content(
+            &destination_refs,
+            &remote,
+            &rows,
+            Some(&branch),
+        )?;
+        receive
+            .publish_filtered_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+        receive
+            .finalize_refetch_promisor_markers(refetch)
+            .map_err(CliError::Io)?;
+        if let Some(depth) = depth {
+            write_shallow_file(
+                &repo,
+                boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+            )?;
+        }
+        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+        if write_fetch_head {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        }
+        receive.release_owned();
+        return Ok(());
+    }
+
+    let filter_hash = fetch_hash;
     let Some(branch) = branch else {
-        let head_branch = ssh_head_branch(url)?;
+        let head_branch = advertised.head_branch.clone();
         let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_filter(
+        let mut receive = PackReceiveResult::default();
+        let promisor_content =
+            filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, None)?;
+        let mut session = Some(advertised.take_session()?);
+        let mutation_plan = fetch_configured_advertised_remote_filter_with_hash_and_options(
             repo,
             remote,
             url,
@@ -21386,16 +31184,28 @@ fn fetch_with_ssh_remote_filter(
             filter,
             append,
             write_fetch_head,
+            filter_hash,
+            &haves,
+            clone_v0_upload_pack_options(depth, Some(filter), true),
             |roots, haves, options| {
-                ssh_fetch_pack_with_shallow_options_and_haves(
-                    url,
+                let result = ssh_fetch_pack_from_advertised_session_with_policy(
+                    session.take().ok_or_else(|| CliError::Fatal {
+                        code: 128,
+                        message: "ssh upload-pack session was already consumed".into(),
+                    })?,
                     &objects_dir,
                     roots,
                     haves,
                     options,
-                )
+                    filter_hash,
+                    PackKeepPolicy::Transient,
+                    &mut receive,
+                )?;
+                Ok(result.shallow_boundaries)
             },
-        );
+        )?;
+        publish_configured_filtered_fetch(&mut receive, &promisor_content, mutation_plan, true)?;
+        return Ok(());
     };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
@@ -21403,20 +31213,106 @@ fn fetch_with_ssh_remote_filter(
         .find(|row| row.name == ref_name)
         .map(|row| row.id.clone())
         .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let promisor_content =
+        filtered_network_promisor_marker_content(&destination_refs, &remote, &rows, Some(&branch))?;
     let roots = [id.clone()];
-    ssh_fetch_pack_with_shallow_options_and_haves(
-        url,
+    let mut receive = PackReceiveResult::default();
+    let result = ssh_fetch_pack_from_advertised_session_with_policy(
+        advertised.take_session()?,
         &repo.objects_dir,
         &roots,
         &haves,
-        UploadPackShallowOptions::filter(filter),
+        clone_v0_upload_pack_options(depth, Some(filter), true),
+        filter_hash,
+        PackKeepPolicy::Transient,
+        &mut receive,
     )?;
+    receive
+        .publish_filtered_promisor_markers(&promisor_content)
+        .map_err(CliError::Io)?;
+    receive
+        .finalize_refetch_promisor_markers(refetch)
+        .map_err(CliError::Io)?;
+    if let Some(depth) = depth {
+        write_shallow_file(
+            &repo,
+            boundaries_or_local_fallback(&repo, &roots, depth, result.shallow_boundaries)?,
+        )?;
+    }
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     record_fetch_filter_promisor_config(&repo, &remote, filter)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
+    receive.release_owned();
     Ok(())
+}
+
+struct ConfiguredFilteredFetchMutationPlan {
+    repo: GitRepo,
+    remote: String,
+    url: String,
+    rows: Vec<LsRemoteRow>,
+    ref_updates: Vec<(String, ObjectId)>,
+    head_branch: Option<String>,
+    filter: String,
+    append: bool,
+    write_fetch_head: bool,
+    fetch_refspecs: Vec<String>,
+    hash: SmartTransportHash,
+    shallow_boundaries: Option<Vec<ObjectId>>,
+}
+
+fn publish_configured_filtered_fetch(
+    receive: &mut PackReceiveResult,
+    marker_content: &[u8],
+    mutation_plan: ConfiguredFilteredFetchMutationPlan,
+    rewrite_marker_content: bool,
+) -> Result<()> {
+    if rewrite_marker_content {
+        receive
+            .publish_filtered_promisor_markers(marker_content)
+            .map_err(CliError::Io)?;
+    } else {
+        receive
+            .publish_promisor_markers(marker_content)
+            .map_err(CliError::Io)?;
+    }
+    mutation_plan.apply()?;
+    receive.release_owned();
+    Ok(())
+}
+
+impl ConfiguredFilteredFetchMutationPlan {
+    fn apply(self) -> Result<()> {
+        if let Some(shallow_boundaries) = self.shallow_boundaries {
+            write_shallow_file(&self.repo, shallow_boundaries)?;
+        }
+        let destination_refs = refs_adapter_from_git_dir_with_hash(&self.repo.git_dir, self.hash);
+        for (name, id) in self.ref_updates {
+            destination_refs.write_ref(&name, &id)?;
+        }
+        if let Some(branch) = self.head_branch {
+            destination_refs.write_symbolic_ref(
+                &format!("refs/remotes/{}/HEAD", self.remote),
+                &format!("refs/remotes/{}/{}", self.remote, branch),
+            )?;
+        }
+        record_fetch_filter_promisor_config(&self.repo, &self.remote, &self.filter)?;
+        if self.write_fetch_head && !self.fetch_refspecs.is_empty() {
+            write_network_configured_fetch_head_file_with_hash(
+                &self.repo,
+                &self.rows,
+                &self.remote,
+                &self.url,
+                &self.fetch_refspecs,
+                self.append,
+                false,
+                self.hash,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 fn fetch_configured_advertised_remote_filter<F>(
@@ -21429,45 +31325,110 @@ fn fetch_configured_advertised_remote_filter<F>(
     filter: &str,
     append: bool,
     write_fetch_head: bool,
+    hash: SmartTransportHash,
+    haves: &[ObjectId],
+    fetch_pack: F,
+) -> Result<ConfiguredFilteredFetchMutationPlan>
+where
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
+{
+    fetch_configured_advertised_remote_filter_with_hash(
+        repo,
+        remote,
+        url,
+        rows,
+        head_branch,
+        missing_ref_code,
+        filter,
+        append,
+        write_fetch_head,
+        hash,
+        haves,
+        fetch_pack,
+    )
+}
+
+fn fetch_configured_advertised_remote_filter_with_hash<F>(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    rows: &[LsRemoteRow],
+    head_branch: Option<String>,
+    missing_ref_code: i32,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+    hash: SmartTransportHash,
+    haves: &[ObjectId],
+    fetch_pack: F,
+) -> Result<ConfiguredFilteredFetchMutationPlan>
+where
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
+{
+    fetch_configured_advertised_remote_filter_with_hash_and_options(
+        repo,
+        remote,
+        url,
+        rows,
+        head_branch,
+        missing_ref_code,
+        filter,
+        append,
+        write_fetch_head,
+        hash,
+        haves,
+        UploadPackShallowOptions::filter(filter),
+        fetch_pack,
+    )
+}
+
+fn fetch_configured_advertised_remote_filter_with_hash_and_options<F>(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    rows: &[LsRemoteRow],
+    head_branch: Option<String>,
+    missing_ref_code: i32,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+    hash: SmartTransportHash,
+    haves: &[ObjectId],
+    shallow_options: UploadPackShallowOptions<'_>,
     mut fetch_pack: F,
-) -> Result<()>
+) -> Result<ConfiguredFilteredFetchMutationPlan>
 where
     F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
 {
     if rows.is_empty() {
         return Err(missing_remote_ref_error(&remote, missing_ref_code));
     }
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, rows)?;
     sort_dedup_object_ids(&mut roots);
-    if !roots.is_empty() {
-        fetch_pack(&roots, &haves, UploadPackShallowOptions::filter(filter))?;
-    }
-    for (name, id) in ref_updates {
-        destination_refs.write_ref(&name, &id)?;
-    }
-    if let Some(branch) = head_branch {
-        destination_refs.write_symbolic_ref(
-            &format!("refs/remotes/{remote}/HEAD"),
-            &format!("refs/remotes/{remote}/{branch}"),
-        )?;
-    }
-    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    let fetched_shallow_boundaries = if roots.is_empty() {
+        Vec::new()
+    } else {
+        fetch_pack(&roots, haves, shallow_options)?
+    };
+    let shallow_boundaries = shallow_options
+        .depth
+        .map(|depth| boundaries_or_local_fallback(&repo, &roots, depth, fetched_shallow_boundaries))
+        .transpose()?;
     let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
-    if write_fetch_head && !fetch_refspecs.is_empty() {
-        write_network_configured_fetch_head_file(
-            &repo,
-            rows,
-            &remote,
-            url,
-            &fetch_refspecs,
-            append,
-            false,
-        )?;
-    }
-    Ok(())
+    Ok(ConfiguredFilteredFetchMutationPlan {
+        repo,
+        remote,
+        url: url.to_owned(),
+        rows: rows.to_vec(),
+        ref_updates,
+        head_branch,
+        filter: filter.to_owned(),
+        append,
+        write_fetch_head,
+        fetch_refspecs,
+        hash,
+        shallow_boundaries,
+    })
 }
 
 fn record_fetch_filter_promisor_config(repo: &GitRepo, remote: &str, filter: &str) -> Result<()> {
@@ -21545,11 +31506,12 @@ where
         shallow_boundaries,
         advertised_shallow_boundaries,
     );
+    write_shallow_file(&repo, shallow_boundaries)?;
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, _url, append, false)?;
     }
-    write_shallow_file(&repo, shallow_boundaries)
+    Ok(())
 }
 
 fn fetch_network_configured_update_shallow(
@@ -21558,61 +31520,23 @@ fn fetch_network_configured_update_shallow(
     missing_ref_code: i32,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
-        let mut helper = if parsed_url.scheme == HttpScheme::Https {
-            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
-        } else {
-            None
-        };
-        let (rows, head_branch, advertised_shallow_boundaries) =
-            discover_http_refs_with_helper_and_shallows(
-                &parsed_url,
-                helper.as_mut().map(std::convert::identity),
-                false,
-                false,
-                false,
-                &[],
-            )?;
-        let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_update_shallow(
+        return fetch_configured_http_remote_shallow_options(
             repo,
             remote,
-            &url,
-            &rows,
-            &advertised_shallow_boundaries,
-            head_branch,
             missing_ref_code,
             append,
             write_fetch_head,
-            |roots, haves, options| {
-                if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
-                        &parsed_url,
-                        helper,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
-                        &parsed_url,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                }
-            },
+            UploadPackShallowOptions::depth(None),
         );
     }
     if is_git_daemon_transport_url(&url) {
         let (rows, advertised_shallow_boundaries) =
-            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
-        let head_branch = daemon_head_branch(&url)?;
+            daemon_ls_remote_rows_with_verbose(&url, false, false, false, &[], verbose)?;
+        let head_branch = daemon_head_branch_with_verbose(&url, verbose)?;
         let objects_dir = repo.objects_dir.clone();
         return fetch_configured_advertised_remote_update_shallow(
             repo,
@@ -21625,12 +31549,13 @@ fn fetch_network_configured_update_shallow(
             append,
             write_fetch_head,
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                     &url,
                     &objects_dir,
                     roots,
                     haves,
                     options,
+                    verbose,
                 )
             },
         );
@@ -21671,62 +31596,23 @@ fn fetch_network_configured_unshallow(
     append: bool,
     write_fetch_head: bool,
     shallows: &[ObjectId],
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
-        let mut helper = if parsed_url.scheme == HttpScheme::Https {
-            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
-        } else {
-            None
-        };
-        let (rows, head_branch, advertised_shallow_boundaries) =
-            discover_http_refs_with_helper_and_shallows(
-                &parsed_url,
-                helper.as_mut().map(std::convert::identity),
-                false,
-                false,
-                false,
-                &[],
-            )?;
-        let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_unshallow(
+        return fetch_configured_http_remote_shallow_options(
             repo,
             remote,
-            &url,
-            &rows,
-            &advertised_shallow_boundaries,
-            head_branch,
             missing_ref_code,
             append,
             write_fetch_head,
-            shallows,
-            |roots, haves, options| {
-                if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
-                        &parsed_url,
-                        helper,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
-                        &parsed_url,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                }
-            },
+            UploadPackShallowOptions::unshallow(shallows),
         );
     }
     if is_git_daemon_transport_url(&url) {
         let (rows, advertised_shallow_boundaries) =
-            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
-        let head_branch = daemon_head_branch(&url)?;
+            daemon_ls_remote_rows_with_verbose(&url, false, false, false, &[], verbose)?;
+        let head_branch = daemon_head_branch_with_verbose(&url, verbose)?;
         let objects_dir = repo.objects_dir.clone();
         return fetch_configured_advertised_remote_unshallow(
             repo,
@@ -21740,12 +31626,13 @@ fn fetch_network_configured_unshallow(
             write_fetch_head,
             shallows,
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                     &url,
                     &objects_dir,
                     roots,
                     haves,
                     options,
+                    verbose,
                 )
             },
         );
@@ -21788,63 +31675,23 @@ fn fetch_network_configured_deepen(
     write_fetch_head: bool,
     deepen: usize,
     shallows: &[ObjectId],
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
-        let mut helper = if parsed_url.scheme == HttpScheme::Https {
-            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
-        } else {
-            None
-        };
-        let (rows, head_branch, advertised_shallow_boundaries) =
-            discover_http_refs_with_helper_and_shallows(
-                &parsed_url,
-                helper.as_mut().map(std::convert::identity),
-                false,
-                false,
-                false,
-                &[],
-            )?;
-        let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_deepen(
+        return fetch_configured_http_remote_shallow_options(
             repo,
             remote,
-            &url,
-            &rows,
-            &advertised_shallow_boundaries,
-            head_branch,
             missing_ref_code,
             append,
             write_fetch_head,
-            deepen,
-            shallows,
-            |roots, haves, options| {
-                if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
-                        &parsed_url,
-                        helper,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
-                        &parsed_url,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                }
-            },
+            UploadPackShallowOptions::depth_with_shallows(deepen, shallows),
         );
     }
     if is_git_daemon_transport_url(&url) {
         let (rows, advertised_shallow_boundaries) =
-            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
-        let head_branch = daemon_head_branch(&url)?;
+            daemon_ls_remote_rows_with_verbose(&url, false, false, false, &[], verbose)?;
+        let head_branch = daemon_head_branch_with_verbose(&url, verbose)?;
         let objects_dir = repo.objects_dir.clone();
         return fetch_configured_advertised_remote_deepen(
             repo,
@@ -21859,12 +31706,13 @@ fn fetch_network_configured_deepen(
             deepen,
             shallows,
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                     &url,
                     &objects_dir,
                     roots,
                     haves,
                     options,
+                    verbose,
                 )
             },
         );
@@ -21907,62 +31755,23 @@ fn fetch_network_configured_shallow_since(
     append: bool,
     write_fetch_head: bool,
     since: i64,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
-        let mut helper = if parsed_url.scheme == HttpScheme::Https {
-            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
-        } else {
-            None
-        };
-        let (rows, head_branch, advertised_shallow_boundaries) =
-            discover_http_refs_with_helper_and_shallows(
-                &parsed_url,
-                helper.as_mut().map(std::convert::identity),
-                false,
-                false,
-                false,
-                &[],
-            )?;
-        let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_shallow_since(
+        return fetch_configured_http_remote_shallow_options(
             repo,
             remote,
-            &url,
-            &rows,
-            &advertised_shallow_boundaries,
-            head_branch,
             missing_ref_code,
             append,
             write_fetch_head,
-            since,
-            |roots, haves, options| {
-                if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
-                        &parsed_url,
-                        helper,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
-                        &parsed_url,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                }
-            },
+            UploadPackShallowOptions::since(since),
         );
     }
     if is_git_daemon_transport_url(&url) {
         let (rows, advertised_shallow_boundaries) =
-            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
-        let head_branch = daemon_head_branch(&url)?;
+            daemon_ls_remote_rows_with_verbose(&url, false, false, false, &[], verbose)?;
+        let head_branch = daemon_head_branch_with_verbose(&url, verbose)?;
         let objects_dir = repo.objects_dir.clone();
         return fetch_configured_advertised_remote_shallow_since(
             repo,
@@ -21976,12 +31785,13 @@ fn fetch_network_configured_shallow_since(
             write_fetch_head,
             since,
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                     &url,
                     &objects_dir,
                     roots,
                     haves,
                     options,
+                    verbose,
                 )
             },
         );
@@ -22023,62 +31833,23 @@ fn fetch_network_configured_shallow_exclude(
     append: bool,
     write_fetch_head: bool,
     exclude_revs: &[String],
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
-        let mut helper = if parsed_url.scheme == HttpScheme::Https {
-            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
-        } else {
-            None
-        };
-        let (rows, head_branch, advertised_shallow_boundaries) =
-            discover_http_refs_with_helper_and_shallows(
-                &parsed_url,
-                helper.as_mut().map(std::convert::identity),
-                false,
-                false,
-                false,
-                &[],
-            )?;
-        let objects_dir = repo.objects_dir.clone();
-        return fetch_configured_advertised_remote_shallow_exclude(
+        return fetch_configured_http_remote_shallow_options(
             repo,
             remote,
-            &url,
-            &rows,
-            &advertised_shallow_boundaries,
-            head_branch,
             missing_ref_code,
             append,
             write_fetch_head,
-            exclude_revs,
-            |roots, haves, options| {
-                if let Some(helper) = helper.as_mut() {
-                    http_fetch_smart_pack_with_shallow_options_with_helper(
-                        &parsed_url,
-                        helper,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                } else {
-                    http_fetch_smart_pack_with_shallow_options_direct(
-                        &parsed_url,
-                        &objects_dir,
-                        roots,
-                        haves,
-                        options,
-                    )
-                }
-            },
+            UploadPackShallowOptions::deepen_not(exclude_revs),
         );
     }
     if is_git_daemon_transport_url(&url) {
         let (rows, advertised_shallow_boundaries) =
-            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
-        let head_branch = daemon_head_branch(&url)?;
+            daemon_ls_remote_rows_with_verbose(&url, false, false, false, &[], verbose)?;
+        let head_branch = daemon_head_branch_with_verbose(&url, verbose)?;
         let objects_dir = repo.objects_dir.clone();
         return fetch_configured_advertised_remote_shallow_exclude(
             repo,
@@ -22092,12 +31863,13 @@ fn fetch_network_configured_shallow_exclude(
             write_fetch_head,
             exclude_revs,
             |roots, haves, options| {
-                daemon_fetch_pack_with_shallow_options_and_haves(
+                daemon_fetch_pack_with_shallow_options_and_haves_verbose(
                     &url,
                     &objects_dir,
                     roots,
                     haves,
                     options,
+                    verbose,
                 )
             },
         );
@@ -22284,6 +32056,7 @@ where
     } else {
         shallow_boundaries
     };
+    write_shallow_file(&repo, shallow_boundaries)?;
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
     }
@@ -22305,7 +32078,7 @@ where
             false,
         )?;
     }
-    write_shallow_file(&repo, shallow_boundaries)
+    Ok(())
 }
 
 fn fetch_configured_advertised_remote_shallow_since<F>(
@@ -22418,6 +32191,201 @@ where
     write_shallow_file(&repo, shallow_boundaries)
 }
 
+fn fetch_configured_http_remote_shallow_options(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+    options: UploadPackShallowOptions<'_>,
+) -> Result<()> {
+    let local_hash = SmartTransportHash::for_repo(&repo)?;
+    let url = fetch_remote_url(&repo, &remote)?;
+    let protocol_v2 = read_config_value(&repo, "protocol.version")?.as_deref() == Some("2");
+    let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
+    let parsed_url = if protocol_v2 {
+        http_url_with_git_protocol_v2(&parsed_url)
+    } else {
+        parsed_url
+    };
+    let mut helper = if parsed_url.scheme == HttpScheme::Https {
+        Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
+    } else {
+        None
+    };
+    let mut v2_capabilities = None;
+    let (rows, head_branch, advertised_shallow_boundaries, hash) = if protocol_v2 {
+        let capabilities = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_capabilities_with_helper_for_local_hash_with_features(
+                &parsed_url,
+                helper,
+                false,
+                local_hash,
+            )?
+        } else {
+            http_upload_pack_v2_capabilities_direct_for_local_hash_with_features(
+                &parsed_url,
+                false,
+                local_hash,
+            )?
+        };
+        v2_capabilities = Some(capabilities.clone());
+        let hash = capabilities.hash;
+        let rows = if let Some(helper) = helper.as_mut() {
+            http_upload_pack_v2_ls_refs_configured_with_helper_with_hash(
+                &parsed_url,
+                helper,
+                &[],
+                hash,
+            )?
+        } else {
+            http_upload_pack_v2_ls_refs_configured_direct_with_hash(&parsed_url, &[], hash)?
+        };
+        (rows, None, Vec::new(), hash)
+    } else {
+        let (rows, head_branch, shallow_boundaries, hash) =
+            discover_http_refs_with_helper_and_shallows_with_hash(
+                &parsed_url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+        (rows, head_branch, shallow_boundaries, hash)
+    };
+    validate_smart_transport_hash_match(local_hash, hash)?;
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = v2_capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.packfile_uris)
+        && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris
+        && v2_capabilities
+            .as_ref()
+            .is_some_and(|capabilities| capabilities.sideband_all);
+    let hash = hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            packfile_uri: use_packfile_uris,
+            ..selected_remote_force_index_reasons(&repo, &remote, false)?
+        },
+    )?);
+    let mut pack_receipts = PackReceiveResult::default();
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let response_boundaries = if request_roots.is_empty() {
+        Vec::new()
+    } else if protocol_v2 {
+        if use_packfile_uris {
+            http_fetch_smart_pack_v2_with_uri_support_with_hash_and_receipt(
+                &parsed_url,
+                helper.as_mut(),
+                &repo,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                &uri_config,
+                sideband_all,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_v2_with_shallow_options_with_helper_with_hash_and_receipt(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        } else {
+            http_fetch_smart_pack_v2_with_shallow_options_direct_with_hash_and_receipt(
+                &parsed_url,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                &[],
+                options,
+                hash,
+                &mut pack_receipts,
+            )?
+        }
+    } else if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
+            &parsed_url,
+            helper,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            options,
+            hash,
+            &mut pack_receipts,
+        )?
+    } else {
+        http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
+            &parsed_url,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            options,
+            hash,
+            &mut pack_receipts,
+        )?
+    };
+    let shallow_boundaries = if response_boundaries.is_empty() && options.deepen_relative {
+        deepen_relative_shallow_boundaries(
+            &store,
+            options.shallows,
+            options.depth.unwrap_or_default(),
+        )?
+    } else if response_boundaries.is_empty() && options.uses_advertised_shallow_fallback() {
+        advertised_shallow_boundaries
+    } else {
+        response_boundaries
+    };
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = head_branch.or_else(|| unique_head_branch_from_rows(&rows)) {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file_with_hash(
+            &repo,
+            &rows,
+            &remote,
+            &url,
+            &fetch_refspecs,
+            append,
+            false,
+            hash,
+        )?;
+    }
+    if options.is_unshallow() {
+        write_shallow_file(&repo, Vec::new())?;
+    } else {
+        write_shallow_file(&repo, shallow_boundaries)?;
+    }
+    pack_receipts.release_owned();
+    Ok(())
+}
+
 fn configured_network_fetch_roots_and_updates(
     remote: &str,
     rows: &[LsRemoteRow],
@@ -22456,7 +32424,29 @@ fn write_network_configured_fetch_head_file(
     append: bool,
     explicit_refspec_fetch: bool,
 ) -> Result<()> {
-    let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
+    write_network_configured_fetch_head_file_with_hash(
+        repo,
+        rows,
+        remote,
+        url,
+        refspecs,
+        append,
+        explicit_refspec_fetch,
+        SmartTransportHash::for_repo(repo)?,
+    )
+}
+
+fn write_network_configured_fetch_head_file_with_hash(
+    repo: &GitRepo,
+    rows: &[LsRemoteRow],
+    remote: &str,
+    url: &str,
+    refspecs: &[String],
+    append: bool,
+    explicit_refspec_fetch: bool,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, hash.algorithm))?
         .and_then(|current| {
             let branch = branch_display_name(&current);
             read_config_section_value(repo, "branch", &branch, "remote")
@@ -22606,10 +32596,10 @@ fn object_exists_for_deepen_boundary(store: &LooseObjectStore, id: &ObjectId) ->
     }
 }
 
-fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
-    let _trace = phase_trace("clone_git_daemon");
+fn clone_v2_remote(options: CloneHttpOptions, transport: CloneTransportPlan) -> Result<()> {
     let CloneHttpOptions {
         quiet,
+        verbose: _,
         configs,
         template,
         reject_shallow,
@@ -22630,6 +32620,9 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         dissociate,
         depth,
         branch,
+        filter,
+        bundle_uri: _,
+        server_options,
         ref_format,
         keep_partial_on_missing_branch: _,
         worktree_first,
@@ -22639,6 +32632,13 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         original_repository,
         directory,
     } = options;
+    if transport != CloneTransportPlan::Ssh && transport != CloneTransportPlan::GitDaemon {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "protocol v2 clone requires SSH or git daemon".into(),
+        });
+    }
+
     let destination = match &directory {
         Some(path) => absolute_path_from_arg(path)?,
         None => default_daemon_clone_directory(&original_repository, effective_bare)?,
@@ -22646,6 +32646,11 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
     let destination_existed = destination.exists();
     let destination_label = clone_destination_label(directory.as_deref(), &destination);
     ensure_clone_destination(&destination, &destination_label)?;
+    let mut cleanup_guard =
+        CloneCleanupGuard::new(&destination, destination_existed, effective_bare);
+    if let Some(path) = separate_git_dir.as_ref() {
+        cleanup_guard.track_separate_git_dir(path)?;
+    }
     if !quiet {
         if effective_bare {
             eprintln!("Cloning into bare repository '{destination_label}'...");
@@ -22653,26 +32658,451 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
             eprintln!("Cloning into '{destination_label}'...");
         }
     }
-    let _ = (
+    let _ = (reject_shallow, background_fetch, demand_hydrate);
+    validate_remote_name(&remote_name)?;
+    let mut reference_object_dirs = reference_object_dirs(&references)?;
+    reference_object_dirs.extend(reference_if_able_object_dirs(&reference_if_able));
+
+    let mut ssh_session = None;
+    let mut daemon_connection = None;
+    let (
+        rows,
+        head_branch,
+        advertised_hash,
+        filter_supported,
+        packfile_uris,
+        sideband_all,
+        promisor_remote,
+    ) = match transport {
+        CloneTransportPlan::Ssh => {
+            let (session, capabilities) =
+                ssh_open_upload_pack_v2_with_capabilities(&repository, &server_options)?;
+            let hash = capabilities.hash;
+            let filter_supported = capabilities.filter;
+            ssh_session = Some(session);
+            let session = ssh_session.as_mut().expect("SSH v2 session installed");
+            let request = build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(
+                &server_options,
+                hash,
+            )?;
+            write_ssh_v2_request(session, &request)?;
+            let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport stdout is unavailable".into(),
+            })?;
+            let (rows, head_branch) =
+                parse_upload_pack_v2_ls_refs_response_with_hash_and_head(stdout, hash)?;
+            (
+                rows,
+                head_branch,
+                hash,
+                filter_supported,
+                capabilities.packfile_uris,
+                capabilities.sideband_all,
+                capabilities.promisor_remote,
+            )
+        }
+        CloneTransportPlan::GitDaemon => {
+            let (stream, reader, capabilities) =
+                daemon_open_upload_pack_v2_with_capabilities(&repository, &server_options)?;
+            let hash = capabilities.hash;
+            let filter_supported = capabilities.filter;
+            daemon_connection = Some((stream, reader));
+            let (stream, reader) = daemon_connection
+                .as_mut()
+                .expect("git daemon v2 connection installed");
+            let request = build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(
+                &server_options,
+                hash,
+            )?;
+            stream.write_all(&request)?;
+            stream.flush()?;
+            let (rows, head_branch) =
+                parse_upload_pack_v2_ls_refs_response_with_hash_and_head(reader, hash)?;
+            (
+                rows,
+                head_branch,
+                hash,
+                filter_supported,
+                capabilities.packfile_uris,
+                capabilities.sideband_all,
+                capabilities.promisor_remote,
+            )
+        }
+        CloneTransportPlan::SmartHttp | CloneTransportPlan::LocalOrUnsupported => {
+            unreachable!()
+        }
+    };
+    if filter.as_deref() != Some("auto") && filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let head_branch = head_branch.or_else(|| unique_head_branch_from_rows(&rows));
+    let target = http_clone_target(&rows, branch.as_deref(), head_branch.as_deref())?;
+    let initial_branch = target
+        .branch_name()
+        .or(head_branch.as_deref())
+        .unwrap_or("main")
+        .to_owned();
+    let result = init_repository(
+        &destination,
+        InitRepositoryOptions {
+            bare: effective_bare,
+            initial_branch,
+            objects_directory: None,
+            populate_template_files: template
+                .as_ref()
+                .is_none_or(|path| !path.as_os_str().is_empty()),
+            write_log_all_ref_updates: true,
+        },
+    )?;
+    cleanup_guard.mark_initialized();
+    let git_dir = match separate_git_dir {
+        Some(path) => relocate_separate_git_dir(&destination, &result.git_dir, &path)?,
+        None => result.git_dir.clone(),
+    };
+    cleanup_guard.update_git_dir(&git_dir);
+    let repo = GitRepo {
+        root: result.worktree,
+        git_dir: git_dir.clone(),
+        objects_dir: git_dir.join("objects"),
+        index_path: git_dir.join("index"),
+    };
+    let store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), advertised_hash);
+    if let Some(template) = template.as_ref() {
+        apply_clone_template(&repo, template)?;
+    }
+    if advertised_hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", advertised_hash.name())?;
+    }
+    apply_clone_ref_format(&repo, ref_format.as_deref(), advertised_hash.algorithm)?;
+    apply_clone_configs(&repo, &configs)?;
+    let mut filter = filter;
+    let mut promisor_remote_response = None;
+    if filter.as_deref() == Some("auto") {
+        let resolution =
+            resolve_upload_pack_auto_filter_with_remotes(&repo, promisor_remote.as_deref())?;
+        filter = resolution.filter;
+        promisor_remote_response = resolution.accepted_remotes;
+    }
+    if filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let uri_config = FetchPackUriConfig::from_repo(&repo)?;
+    let use_packfile_uris = packfile_uris && !uri_config.is_empty();
+    let sideband_all = use_packfile_uris && sideband_all;
+    if !dissociate {
+        write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
+    }
+    let fetch_hash = advertised_hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: filter.is_some(),
+            packfile_uri: use_packfile_uris,
+            ..ForceIndexReasons::default()
+        },
+    )?);
+    let roots = http_clone_fetch_roots(
+        &rows,
+        &target,
+        no_tags,
+        single_branch || worktree_first,
+        no_single_branch && !worktree_first,
+    );
+    let mut pack_receipts = PackReceiveResult::default();
+    let options = UploadPackShallowOptions::depth(depth)
+        .with_filter(filter.as_deref())
+        .with_promisor_remote(promisor_remote_response.as_deref());
+    let options = options.with_filter_support(filter_supported);
+    let shallow_boundaries = match transport {
+        CloneTransportPlan::Ssh => {
+            let session = ssh_session.take().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport session is unavailable".into(),
+            })?;
+            let result = if use_packfile_uris {
+                ssh_fetch_pack_v2_from_session_with_uri_support(
+                    session,
+                    &repo,
+                    &roots,
+                    &[],
+                    &server_options,
+                    options,
+                    &uri_config,
+                    sideband_all,
+                    fetch_hash,
+                    &mut pack_receipts,
+                )?
+            } else {
+                ssh_fetch_pack_v2_from_session_with_policy(
+                    session,
+                    &repo.objects_dir,
+                    &roots,
+                    &[],
+                    &server_options,
+                    options,
+                    fetch_hash,
+                    if filter.is_some() {
+                        PackKeepPolicy::Transient
+                    } else {
+                        PackKeepPolicy::None
+                    },
+                    &mut pack_receipts,
+                )?
+            };
+            result.into_shallow_boundaries()
+        }
+        CloneTransportPlan::GitDaemon => {
+            let (mut stream, mut reader) =
+                daemon_connection.take().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "git daemon transport connection is unavailable".into(),
+                })?;
+            let result = if use_packfile_uris {
+                daemon_fetch_smart_pack_v2_on_connection_with_uri_support(
+                    &mut stream,
+                    &mut reader,
+                    &repo,
+                    &roots,
+                    &[],
+                    &server_options,
+                    options,
+                    &uri_config,
+                    sideband_all,
+                    fetch_hash,
+                    &mut pack_receipts,
+                )?
+            } else {
+                daemon_fetch_smart_pack_v2_on_connection_with_options_and_policy(
+                    &mut stream,
+                    &mut reader,
+                    &repo.objects_dir,
+                    &roots,
+                    &[],
+                    &server_options,
+                    options,
+                    fetch_hash,
+                    if filter.is_some() {
+                        PackKeepPolicy::Transient
+                    } else {
+                        PackKeepPolicy::None
+                    },
+                    &mut pack_receipts,
+                )?
+            };
+            result.into_shallow_boundaries()
+        }
+        CloneTransportPlan::SmartHttp | CloneTransportPlan::LocalOrUnsupported => unreachable!(),
+    };
+    if filter.is_some() {
+        let promisor_content = clone_promisor_marker_content(
+            &rows,
+            &target,
+            no_tags,
+            single_branch || worktree_first,
+            no_single_branch && !worktree_first,
+        );
+        pack_receipts
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+    }
+    if let Some(depth) = depth {
+        let shallow_roots = clone_shallow_roots(&repo, &roots)?;
+        write_shallow_file(
+            &repo,
+            boundaries_or_local_fallback(&repo, &shallow_roots, depth, shallow_boundaries)?,
+        )?;
+    }
+
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
+    http_write_clone_refs(
+        &destination_refs,
+        &rows,
+        &remote_name,
+        head_branch.as_deref(),
+        &target,
+        HttpCloneRefOptions {
+            mirror,
+            effective_bare,
+            no_tags,
+            single_branch,
+            no_single_branch: no_single_branch && !worktree_first,
+            requested_branch: branch.is_some(),
+            worktree_first,
+        },
+    )?;
+    if depth.is_some() {
+        prune_missing_tag_refs(&destination_refs, &store)?;
+    }
+    set_config_values(
+        &repo,
+        &clone_remote_config_values(
+            &remote_name,
+            &original_repository,
+            &target,
+            !no_single_branch && single_branch,
+            effective_bare,
+            mirror,
+            no_tags,
+            worktree_first,
+            demand_hydrate,
+            filter.as_deref(),
+        ),
+    )?;
+    let head_id = match target {
+        CloneTarget::Branch { ref id, .. }
+        | CloneTarget::Tag { ref id, .. }
+        | CloneTarget::Detached { ref id } => id.clone(),
+        CloneTarget::MissingBranch { .. } => unreachable!("v2 clone does not keep missing branch"),
+        CloneTarget::Empty => {
+            pack_receipts.release_owned();
+            cleanup_guard.disarm();
+            eprintln!("warning: You appear to have cloned an empty repository.");
+            return Ok(());
+        }
+    };
+    if effective_bare {
+        match &target {
+            CloneTarget::Branch { name, .. } => {
+                destination_refs.write_head_symbolic(&format!("refs/heads/{name}"))?;
+            }
+            CloneTarget::Tag { id, .. } | CloneTarget::Detached { id } => {
+                destination_refs.write_head_direct(id)?;
+            }
+            CloneTarget::MissingBranch { .. } | CloneTarget::Empty => unreachable!(),
+        }
+    } else if let CloneTarget::Branch {
+        name: branch_name, ..
+    } = &target
+    {
+        destination_refs.write_ref(&format!("refs/heads/{branch_name}"), &head_id)?;
+        destination_refs.write_head_symbolic(&format!("refs/heads/{branch_name}"))?;
+    } else {
+        destination_refs.write_head_direct(&head_id)?;
+    }
+    let mut hydration_receive = if filter.is_some() && !effective_bare && !no_checkout {
+        Some(hydrate_filtered_remote_clone_checkout_objects(
+            &repo,
+            &store,
+            &head_id,
+            &repository,
+            transport,
+            true,
+            &server_options,
+            fetch_hash,
+        )?)
+    } else {
+        None
+    };
+    if !effective_bare && !no_checkout {
+        let _trace = phase_trace("clone_remote.checkout_hydration");
+        checkout_fresh_worktree(&repo, &store, &head_id)?;
+        if !recurse_submodules.is_empty() {
+            clone_submodules(
+                &repo,
+                &repository,
+                &recurse_submodules,
+                remote_submodules,
+                shallow_submodules,
+            )?;
+        }
+    }
+    pack_receipts.release_owned();
+    if let Some(receive) = hydration_receive.as_mut() {
+        receive.release_owned();
+    }
+    cleanup_guard.disarm();
+    Ok(())
+}
+
+fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
+    let _trace = phase_trace("clone_git_daemon");
+    let CloneHttpOptions {
+        quiet,
+        verbose,
+        configs,
+        template,
         reject_shallow,
         recurse_submodules,
         remote_submodules,
         shallow_submodules,
-    );
+        effective_bare,
+        mirror,
+        no_checkout,
+        remote_name,
+        no_tags,
+        single_branch,
+        no_single_branch,
+        separate_git_dir,
+        references,
+        reference_if_able,
+        shared: _shared,
+        dissociate,
+        depth,
+        branch,
+        filter,
+        bundle_uri: _,
+        ref_format,
+        keep_partial_on_missing_branch: _,
+        worktree_first,
+        background_fetch,
+        demand_hydrate,
+        repository,
+        original_repository,
+        directory,
+        server_options: _,
+    } = options;
+    let destination = match &directory {
+        Some(path) => absolute_path_from_arg(path)?,
+        None => default_daemon_clone_directory(&original_repository, effective_bare)?,
+    };
+    let destination_existed = destination.exists();
+    let destination_label = clone_destination_label(directory.as_deref(), &destination);
+    ensure_clone_destination(&destination, &destination_label)?;
+    let mut cleanup_guard =
+        CloneCleanupGuard::new(&destination, destination_existed, effective_bare);
+    if let Some(path) = separate_git_dir.as_ref() {
+        cleanup_guard.track_separate_git_dir(path)?;
+    }
+    if !quiet {
+        if effective_bare {
+            eprintln!("Cloning into bare repository '{destination_label}'...");
+        } else {
+            eprintln!("Cloning into '{destination_label}'...");
+        }
+    }
+    let _ = reject_shallow;
     validate_remote_name(&remote_name)?;
     let mut reference_object_dirs = reference_object_dirs(&references)?;
     reference_object_dirs.extend(reference_if_able_object_dirs(&reference_if_able));
     let effective_single_branch = !no_single_branch && single_branch;
     let advertised = {
         let _trace = phase_trace("clone_git_daemon.discovery");
-        daemon_open_advertised_upload_pack(&repository, false, false, false, &[])?
+        daemon_open_advertised_upload_pack_with_verbose(
+            &repository,
+            false,
+            false,
+            false,
+            &[],
+            verbose,
+        )?
     };
     let DaemonAdvertisedUploadPack {
         stream,
         reader,
         rows,
         head_branch,
+        terminated_with_flush,
+        capabilities,
+        hash: advertised_hash,
     } = advertised;
+    let filter_supported = filter
+        .as_deref()
+        .is_some_and(|_| capabilities.iter().any(|value| value == "filter"));
+    if filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
     let head_branch = head_branch.or_else(|| unique_head_branch_from_rows(&rows));
     let target = http_clone_target(&rows, branch.as_deref(), head_branch.as_deref())?;
     let initial_branch = target
@@ -22695,25 +33125,36 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
             },
         )?
     };
+    cleanup_guard.mark_initialized();
     let git_dir = match separate_git_dir {
         Some(path) => relocate_separate_git_dir(&destination, &result.git_dir, &path)?,
         None => result.git_dir.clone(),
     };
+    cleanup_guard.update_git_dir(&git_dir);
     let repo = GitRepo {
         root: result.worktree,
         git_dir: git_dir.clone(),
         objects_dir: git_dir.join("objects"),
         index_path: git_dir.join("index"),
     };
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), advertised_hash);
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
-    apply_clone_ref_format(&repo, ref_format.as_deref())?;
-    if let Err(error) = apply_clone_configs(&repo, &configs) {
-        cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
-        return Err(error);
+    if advertised_hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", advertised_hash.name())?;
     }
+    apply_clone_ref_format(&repo, ref_format.as_deref(), advertised_hash.algorithm)?;
+    apply_clone_configs(&repo, &configs)?;
+    let fetch_hash = advertised_hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: filter.is_some(),
+            ..ForceIndexReasons::default()
+        },
+    )?);
     if !dissociate {
         write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
     }
@@ -22724,17 +33165,50 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         single_branch || worktree_first,
         no_single_branch && !worktree_first,
     );
+    let mut pack_receipts = PackReceiveResult::default();
     let shallow_boundaries = {
         let _trace = phase_trace("clone_git_daemon.fetch_objects");
-        daemon_fetch_pack_from_advertised_stream(
-            stream,
-            reader,
-            &repo.objects_dir,
-            &roots,
-            &[],
-            depth,
-        )?
+        if let Some(filter) = filter.as_deref() {
+            let options = clone_v0_upload_pack_options(depth, Some(filter), filter_supported);
+            daemon_fetch_pack_from_advertised_stream_with_policy(
+                stream,
+                reader,
+                &repo.objects_dir,
+                &roots,
+                &[],
+                options,
+                fetch_hash,
+                PackKeepPolicy::Transient,
+                &mut pack_receipts,
+            )?
+            .into_shallow_boundaries()
+        } else {
+            daemon_fetch_pack_from_advertised_stream_with_policy(
+                stream,
+                reader,
+                &repo.objects_dir,
+                &roots,
+                &[],
+                clone_v0_upload_pack_options(depth, None, false),
+                fetch_hash,
+                PackKeepPolicy::None,
+                &mut pack_receipts,
+            )?
+            .into_shallow_boundaries()
+        }
     };
+    if filter.is_some() {
+        let promisor_content = clone_promisor_marker_content(
+            &rows,
+            &target,
+            no_tags,
+            single_branch || worktree_first,
+            no_single_branch && !worktree_first,
+        );
+        pack_receipts
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+    }
     if let Some(depth) = depth {
         let shallow_roots = clone_shallow_roots(&repo, &roots)?;
         write_shallow_file(
@@ -22743,7 +33217,7 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         )?;
     }
 
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
     {
         let _trace = phase_trace("clone_git_daemon.write_refs_config");
         http_write_clone_refs(
@@ -22777,6 +33251,7 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
                 no_tags,
                 worktree_first,
                 demand_hydrate,
+                filter.as_deref(),
             ),
         )?;
     }
@@ -22788,6 +33263,10 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
             unreachable!("git daemon clone does not keep missing branch")
         }
         CloneTarget::Empty => {
+            pack_receipts.release_owned();
+            if terminated_with_flush {
+                cleanup_guard.disarm();
+            }
             eprintln!("warning: You appear to have cloned an empty repository.");
             return Ok(());
         }
@@ -22815,16 +33294,45 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         destination_refs.write_head_direct(&head_id)?;
     }
     if effective_bare || no_checkout {
+        pack_receipts.release_owned();
+        cleanup_guard.disarm();
         return Ok(());
     }
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let mut hydration_receive = if filter.is_some() {
+        Some(hydrate_filtered_remote_clone_checkout_objects(
+            &repo,
+            &store,
+            &head_id,
+            &repository,
+            CloneTransportPlan::GitDaemon,
+            false,
+            &[],
+            fetch_hash,
+        )?)
+    } else {
+        None
+    };
     {
         let _trace = phase_trace("clone_git_daemon.checkout");
         checkout_fresh_worktree(&repo, &store, &head_id)?;
     }
+    if !recurse_submodules.is_empty() {
+        clone_submodules(
+            &repo,
+            &repository,
+            &recurse_submodules,
+            remote_submodules,
+            shallow_submodules,
+        )?;
+    }
     if background_fetch {
         spawn_worktree_first_background_fetch(&repo, &remote_name)?;
     }
+    if let Some(receive) = hydration_receive.as_mut() {
+        receive.release_owned();
+    }
+    pack_receipts.release_owned();
+    cleanup_guard.disarm();
     Ok(())
 }
 
@@ -22832,6 +33340,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
     let _trace = phase_trace("clone_ssh");
     let CloneHttpOptions {
         quiet,
+        verbose: _verbose,
         configs,
         template,
         reject_shallow,
@@ -22852,6 +33361,8 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         dissociate,
         depth,
         branch,
+        filter,
+        bundle_uri: _,
         ref_format,
         keep_partial_on_missing_branch: _,
         worktree_first,
@@ -22860,6 +33371,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         repository,
         original_repository,
         directory,
+        server_options,
     } = options;
     let destination = match &directory {
         Some(path) => absolute_path_from_arg(path)?,
@@ -22868,6 +33380,11 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
     let destination_existed = destination.exists();
     let destination_label = clone_destination_label(directory.as_deref(), &destination);
     ensure_clone_destination(&destination, &destination_label)?;
+    let mut cleanup_guard =
+        CloneCleanupGuard::new(&destination, destination_existed, effective_bare);
+    if let Some(path) = separate_git_dir.as_ref() {
+        cleanup_guard.track_separate_git_dir(path)?;
+    }
     if !quiet {
         if effective_bare {
             eprintln!("Cloning into bare repository '{destination_label}'...");
@@ -22875,12 +33392,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
             eprintln!("Cloning into '{destination_label}'...");
         }
     }
-    let _ = (
-        reject_shallow,
-        recurse_submodules,
-        remote_submodules,
-        shallow_submodules,
-    );
+    let _ = reject_shallow;
     validate_remote_name(&remote_name)?;
     let mut reference_object_dirs = reference_object_dirs(&references)?;
     reference_object_dirs.extend(reference_if_able_object_dirs(&reference_if_able));
@@ -22889,6 +33401,13 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         let _trace = phase_trace("clone_ssh.discovery");
         ssh_open_advertised_upload_pack(&repository, false, false, false, &[])?
     };
+    let filter_supported = filter
+        .as_deref()
+        .is_some_and(|_| advertised.has_capability("filter"));
+    if filter.is_some() && !filter_supported {
+        return Err(filter_capability_missing_error());
+    }
+    let advertised_hash = advertised.hash;
     let head_branch = advertised
         .head_branch
         .clone()
@@ -22914,6 +33433,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
             },
         )?
     };
+    cleanup_guard.mark_initialized();
     let git_dir = match separate_git_dir {
         Some(path) => relocate_separate_git_dir(&destination, &result.git_dir, &path)?,
         None => result.git_dir.clone(),
@@ -22924,15 +33444,24 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         objects_dir: git_dir.join("objects"),
         index_path: git_dir.join("index"),
     };
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), advertised_hash);
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
-    apply_clone_ref_format(&repo, ref_format.as_deref())?;
-    if let Err(error) = apply_clone_configs(&repo, &configs) {
-        cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
-        return Err(error);
+    if advertised_hash.algorithm == GitHashAlgorithm::Sha256 {
+        set_config_value(&repo, "core.repositoryformatversion", "1")?;
+        set_config_value(&repo, "extensions.objectFormat", advertised_hash.name())?;
     }
+    apply_clone_ref_format(&repo, ref_format.as_deref(), advertised_hash.algorithm)?;
+    apply_clone_configs(&repo, &configs)?;
+    let fetch_hash = advertised_hash.with_pack_policy(FetchPackPolicy::resolve(
+        &repo,
+        ForceIndexReasons {
+            promisor: filter.is_some(),
+            ..ForceIndexReasons::default()
+        },
+    )?);
     if !dissociate {
         write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
     }
@@ -22943,16 +33472,48 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         single_branch || worktree_first,
         no_single_branch && !worktree_first,
     );
+    let mut pack_receipts = PackReceiveResult::default();
     let shallow_boundaries = {
         let _trace = phase_trace("clone_ssh.fetch_objects");
-        ssh_fetch_pack_from_advertised_session(
-            advertised.take_session()?,
-            &repo.objects_dir,
-            &roots,
-            &[],
-            depth,
-        )?
+        if let Some(filter) = filter.as_deref() {
+            let options = clone_v0_upload_pack_options(depth, Some(filter), filter_supported);
+            ssh_fetch_pack_from_advertised_session_with_policy(
+                advertised.take_session()?,
+                &repo.objects_dir,
+                &roots,
+                &[],
+                options,
+                fetch_hash,
+                PackKeepPolicy::Transient,
+                &mut pack_receipts,
+            )?
+            .into_shallow_boundaries()
+        } else {
+            ssh_fetch_pack_from_advertised_session_with_policy(
+                advertised.take_session()?,
+                &repo.objects_dir,
+                &roots,
+                &[],
+                clone_v0_upload_pack_options(depth, None, false),
+                fetch_hash,
+                PackKeepPolicy::None,
+                &mut pack_receipts,
+            )?
+            .into_shallow_boundaries()
+        }
     };
+    if filter.is_some() {
+        let promisor_content = clone_promisor_marker_content(
+            &advertised.rows,
+            &target,
+            no_tags,
+            single_branch || worktree_first,
+            no_single_branch && !worktree_first,
+        );
+        pack_receipts
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+    }
     if let Some(depth) = depth {
         let shallow_roots = clone_shallow_roots(&repo, &roots)?;
         write_shallow_file(
@@ -22961,7 +33522,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         )?;
     }
 
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, fetch_hash);
     {
         let _trace = phase_trace("clone_ssh.write_refs_config");
         {
@@ -23001,6 +33562,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
                     no_tags,
                     worktree_first,
                     demand_hydrate,
+                    filter.as_deref(),
                 ),
             )?;
         }
@@ -23013,6 +33575,8 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
             unreachable!("SSH clone does not keep missing branch")
         }
         CloneTarget::Empty => {
+            pack_receipts.release_owned();
+            cleanup_guard.disarm();
             eprintln!("warning: You appear to have cloned an empty repository.");
             return Ok(());
         }
@@ -23040,16 +33604,45 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         destination_refs.write_head_direct(&head_id)?;
     }
     if effective_bare || no_checkout {
+        pack_receipts.release_owned();
+        cleanup_guard.disarm();
         return Ok(());
     }
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let mut hydration_receive = if filter.is_some() {
+        Some(hydrate_filtered_remote_clone_checkout_objects(
+            &repo,
+            &store,
+            &head_id,
+            &repository,
+            CloneTransportPlan::Ssh,
+            false,
+            &server_options,
+            fetch_hash,
+        )?)
+    } else {
+        None
+    };
     {
         let _trace = phase_trace("clone_ssh.checkout");
         checkout_fresh_worktree(&repo, &store, &head_id)?;
     }
+    if !recurse_submodules.is_empty() {
+        clone_submodules(
+            &repo,
+            &repository,
+            &recurse_submodules,
+            remote_submodules,
+            shallow_submodules,
+        )?;
+    }
     if background_fetch {
         spawn_worktree_first_background_fetch(&repo, &remote_name)?;
     }
+    if let Some(receive) = hydration_receive.as_mut() {
+        receive.release_owned();
+    }
+    pack_receipts.release_owned();
+    cleanup_guard.disarm();
     Ok(())
 }
 
@@ -23066,13 +33659,24 @@ fn fetch_with_repo_and_remote_depth(
     upload_pack_shallows: &[ObjectId],
     force_upload_pack_roots: bool,
     forced_update_row_for_branch: bool,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
         return fetch_with_http_remote_depth(repo, remote, branch, missing_ref_code, &url, depth);
     }
     if is_git_daemon_transport_url(&url) {
-        return fetch_with_daemon_remote_depth(repo, remote, branch, missing_ref_code, &url, depth);
+        return fetch_with_daemon_remote_depth(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            depth,
+            append,
+            write_fetch_head,
+            verbose,
+        );
     }
     if is_ssh_transport_url(&url) {
         return fetch_with_ssh_remote_depth(
@@ -23091,16 +33695,16 @@ fn fetch_with_repo_and_remote_depth(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let source_repo = GitRepo {
-        root: source.git_dir.clone(),
-        git_dir: source.git_dir.clone(),
-        objects_dir: source.common_dir.join("objects"),
-        index_path: source.git_dir.join("index"),
-    };
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
+    let source_repo = local_clone_source_repo(&source);
     if let Some(branch) = branch {
         let mut fetched_objects = HashSet::with_capacity(1);
         let mut roots = Vec::with_capacity(1);
@@ -23244,6 +33848,7 @@ fn fetch_with_repo_and_remote_shallow_since(
     append: bool,
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(branch) = branch else {
@@ -23265,6 +33870,7 @@ fn fetch_with_repo_and_remote_shallow_since(
                 append,
                 write_fetch_head,
                 since,
+                verbose,
             );
         }
         return Err(CliError::Fatal {
@@ -23294,6 +33900,7 @@ fn fetch_with_repo_and_remote_shallow_since(
             UploadPackShallowOptions::since(since),
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23313,10 +33920,15 @@ fn fetch_with_repo_and_remote_shallow_since(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let source_repo = local_clone_source_repo(&source);
     let ref_name = branch_ref_name(&branch)?;
     let id = source_refs
@@ -23419,6 +34031,7 @@ fn fetch_with_repo_and_remote_shallow_exclude(
     append: bool,
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(branch) = branch else {
@@ -23440,6 +34053,7 @@ fn fetch_with_repo_and_remote_shallow_exclude(
                 append,
                 write_fetch_head,
                 exclude_revs,
+                verbose,
             );
         }
         return Err(CliError::Fatal {
@@ -23469,6 +34083,7 @@ fn fetch_with_repo_and_remote_shallow_exclude(
             UploadPackShallowOptions::deepen_not(exclude_revs),
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23488,10 +34103,15 @@ fn fetch_with_repo_and_remote_shallow_exclude(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let source_repo = local_clone_source_repo(&source);
     let ref_name = branch_ref_name(&branch)?;
     let id = source_refs
@@ -23584,6 +34204,7 @@ fn fetch_with_repo_and_remote_deepen(
     atomic: bool,
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
@@ -23616,6 +34237,7 @@ fn fetch_with_repo_and_remote_deepen(
             false,
             &[],
             None,
+            verbose,
         );
     };
     let shallows = sorted_object_ids_from_set(&shallow_boundaries);
@@ -23635,6 +34257,7 @@ fn fetch_with_repo_and_remote_deepen(
             write_fetch_head,
             deepen,
             &shallows,
+            verbose,
         );
     };
     if is_http_transport_url(&url) {
@@ -23659,6 +34282,7 @@ fn fetch_with_repo_and_remote_deepen(
             UploadPackShallowOptions::depth_with_shallows(deepen, &shallows),
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23678,8 +34302,12 @@ fn fetch_with_repo_and_remote_deepen(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let ref_name = branch_ref_name(&branch)?;
     let id = source_refs
         .resolve(&ref_name)
@@ -23703,6 +34331,7 @@ fn fetch_with_repo_and_remote_deepen(
         &sorted_object_ids_from_set(&shallow_boundaries),
         upload_pack_command.is_some(),
         false,
+        verbose,
     )
 }
 
@@ -23721,6 +34350,7 @@ fn fetch_with_repo_and_remote_unshallow(
     atomic: bool,
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
@@ -23738,6 +34368,7 @@ fn fetch_with_repo_and_remote_unshallow(
                 append,
                 write_fetch_head,
                 &sorted_object_ids_from_set(&shallow_boundaries),
+                verbose,
             );
         };
         let shallows = sorted_object_ids_from_set(&shallow_boundaries);
@@ -23761,6 +34392,7 @@ fn fetch_with_repo_and_remote_unshallow(
                 append,
                 write_fetch_head,
                 &sorted_object_ids_from_set(&shallow_boundaries),
+                verbose,
             );
         };
         let shallows = sorted_object_ids_from_set(&shallow_boundaries);
@@ -23773,6 +34405,7 @@ fn fetch_with_repo_and_remote_unshallow(
             UploadPackShallowOptions::unshallow(&shallows),
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23784,6 +34417,7 @@ fn fetch_with_repo_and_remote_unshallow(
                 append,
                 write_fetch_head,
                 &sorted_object_ids_from_set(&shallow_boundaries),
+                verbose,
             );
         };
         let shallows = sorted_object_ids_from_set(&shallow_boundaries);
@@ -23803,7 +34437,10 @@ fn fetch_with_repo_and_remote_unshallow(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_hash = SmartTransportHash::for_repo(&local_clone_source_repo(&source))?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
     let fetch_refspecs = if branch.is_none() {
         configured_fetch_refspecs(&repo, &remote)?
     } else {
@@ -23832,6 +34469,7 @@ fn fetch_with_repo_and_remote_unshallow(
         false,
         &[],
         None,
+        verbose,
     )?;
     if let Some(command) = upload_pack_command {
         fetch_local_unshallow_objects_via_upload_pack(
@@ -23864,6 +34502,7 @@ fn fetch_with_repo_and_remote_update_shallow(
     missing_ref_code: i32,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if branch.is_none() {
@@ -23873,6 +34512,7 @@ fn fetch_with_repo_and_remote_update_shallow(
             missing_ref_code,
             append,
             write_fetch_head,
+            verbose,
         );
     }
     let branch = branch.expect("checked branchless above");
@@ -23898,6 +34538,7 @@ fn fetch_with_repo_and_remote_update_shallow(
             UploadPackShallowOptions::depth(None),
             append,
             write_fetch_head,
+            verbose,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23923,6 +34564,8 @@ fn fetch_with_repo_and_remote_filter(
     missing_ref_code: i32,
     append: bool,
     write_fetch_head: bool,
+    verbose: bool,
+    refetch: bool,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let remote = default_fetch_remote(&repo, remote)?;
@@ -23939,8 +34582,10 @@ fn fetch_with_repo_and_remote_filter(
             missing_ref_code,
             &url,
             filter,
+            None,
             append,
             write_fetch_head,
+            refetch,
         );
     }
     if is_git_daemon_transport_url(&url) {
@@ -23951,8 +34596,11 @@ fn fetch_with_repo_and_remote_filter(
             missing_ref_code,
             &url,
             filter,
+            None,
             append,
             write_fetch_head,
+            verbose,
+            refetch,
         );
     }
     if is_ssh_transport_url(&url) {
@@ -23963,8 +34611,10 @@ fn fetch_with_repo_and_remote_filter(
             missing_ref_code,
             &url,
             filter,
+            None,
             append,
             write_fetch_head,
+            refetch,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -23988,6 +34638,7 @@ fn fetch_with_repo_and_remote_filter(
             filter,
             append,
             write_fetch_head,
+            refetch,
         );
     };
     fetch_with_local_remote_filter_blob_none(
@@ -24000,6 +34651,7 @@ fn fetch_with_repo_and_remote_filter(
         missing_ref_code,
         append,
         write_fetch_head,
+        refetch,
     )
 }
 
@@ -24032,7 +34684,6 @@ fn fetch_with_repo_and_remote_filter_unshallow(
         });
     }
     validate_partial_clone_repository_extensions(&repo)?;
-    eprintln!("warning: filtering not recognized by server, ignoring");
     fetch_with_repo_and_remote_unshallow(
         repo.clone(),
         remote.clone(),
@@ -24048,6 +34699,7 @@ fn fetch_with_repo_and_remote_filter_unshallow(
         false,
         write_fetch_head,
         None,
+        false,
     )?;
     record_fetch_filter_promisor_config(&repo, &remote, filter)
 }
@@ -24068,6 +34720,55 @@ fn fetch_with_repo_and_remote_filter_depth(
         return Err(remote_repository_unavailable_error(&remote));
     }
     let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        let Some(branch) = branch else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --filter currently supports one named network remote branch".into(),
+            });
+        };
+        return fetch_with_http_remote_filter(
+            repo,
+            remote,
+            Some(branch),
+            missing_ref_code,
+            &url,
+            filter,
+            Some(depth),
+            append,
+            write_fetch_head,
+            false,
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        return fetch_with_daemon_remote_filter(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            filter,
+            Some(depth),
+            append,
+            write_fetch_head,
+            false,
+            false,
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        return fetch_with_ssh_remote_filter(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            filter,
+            Some(depth),
+            append,
+            write_fetch_head,
+            false,
+        );
+    }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
         return Err(CliError::Fatal {
             code: 128,
@@ -24110,12 +34811,17 @@ fn fetch_with_local_remote_filter_blob_none(
     missing_ref_code: i32,
     append: bool,
     write_fetch_head: bool,
+    refetch: bool,
 ) -> Result<()> {
     let source = local_clone_source(source_path)?;
     let source_repo = local_clone_source_repo(&source);
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     let target =
         resolve_local_filter_fetch_target(&source, &source_refs, branch, missing_ref_code)?;
     let destination_ref = match &target {
@@ -24127,17 +34833,34 @@ fn fetch_with_local_remote_filter_blob_none(
     let old_id = destination_ref
         .as_deref()
         .and_then(|destination| destination_refs.resolve(destination).ok());
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    let existing_packs = transport_pack_names(&repo.objects_dir)?;
-    pack_reachable_objects(
+    let promisor_content = match &target {
+        LocalFilterFetchTarget::NamedBranch { source_ref, .. } => render_promisor_marker_content(
+            vec![PromisorMarkerRef {
+                source_ref: source_ref.clone(),
+                old_id: old_id.clone(),
+            }],
+            target.id().algorithm(),
+        ),
+        LocalFilterFetchTarget::RawObject { .. } => Vec::new(),
+    };
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
+    let mut receive = PackReceiveResult::default();
+    let packed = pack_reachable_objects(
         &source_repo,
         &source_store,
         &destination_store,
         std::slice::from_ref(target.id()),
         &[],
+        &mut receive,
     )?;
-    write_promisor_markers_for_new_transport_packs(&repo.objects_dir, &existing_packs)?;
-    eprintln!("warning: filtering not recognized by server, ignoring");
+    let _ = packed;
+    receive
+        .publish_promisor_markers(&promisor_content)
+        .map_err(CliError::Io)?;
+    receive
+        .finalize_refetch_promisor_markers(refetch)
+        .map_err(CliError::Io)?;
     eprintln!("From {}", fetch_head_url_display(url));
     eprintln!(" * branch            {branch}       -> FETCH_HEAD");
     if let Some(destination_ref) = destination_ref.as_deref() {
@@ -24177,7 +34900,9 @@ fn fetch_with_local_remote_filter_blob_none(
             false,
         )?;
     }
-    record_fetch_filter_promisor_config(&repo, &remote, filter)
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    receive.release_owned();
+    Ok(())
 }
 
 fn fetch_with_local_remote_filter_configured(
@@ -24188,12 +34913,17 @@ fn fetch_with_local_remote_filter_configured(
     filter: &str,
     append: bool,
     write_fetch_head: bool,
+    refetch: bool,
 ) -> Result<()> {
     let source = local_clone_source(source_path)?;
     let source_repo = local_clone_source_repo(&source);
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
     let mut roots = Vec::new();
     collect_configured_fetch_roots(
@@ -24204,8 +34934,32 @@ fn fetch_with_local_remote_filter_configured(
         &mut roots,
     )?;
     sort_dedup_object_ids(&mut roots);
-    let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
-    copy_local_filtered_objects(&source_repo, &repo.objects_dir, &roots, &haves)?;
+    let haves = if refetch {
+        Vec::new()
+    } else {
+        collect_upload_pack_haves(&destination_store, &destination_refs)?
+    };
+    let promisor_content =
+        local_filtered_promisor_marker_content(&source_refs, &destination_refs, &fetch_refspecs)?;
+    let filter_spec = filter;
+    let filter = parse_upload_pack_filter(filter)?;
+    let mut receive = PackReceiveResult::default();
+    if let Some(pack_id) = copy_local_filtered_objects(
+        &source_repo,
+        &repo.objects_dir,
+        &roots,
+        &haves,
+        filter,
+        &mut receive,
+    )? {
+        let _ = pack_id;
+        receive
+            .publish_promisor_markers(&promisor_content)
+            .map_err(CliError::Io)?;
+        receive
+            .finalize_refetch_promisor_markers(refetch)
+            .map_err(CliError::Io)?;
+    }
     let update_rows = collect_configured_fetch_update_rows(
         &source_refs,
         &destination_refs,
@@ -24238,7 +34992,9 @@ fn fetch_with_local_remote_filter_configured(
             false,
         )?;
     }
-    record_fetch_filter_promisor_config(&repo, &remote, filter)
+    record_fetch_filter_promisor_config(&repo, &remote, filter_spec)?;
+    receive.release_owned();
+    Ok(())
 }
 
 enum LocalFilterFetchTarget {
@@ -24292,52 +35048,266 @@ fn resolve_local_filter_fetch_target(
     })
 }
 
-fn transport_pack_names(objects_dir: &std::path::Path) -> Result<HashSet<String>> {
-    let pack_dir = objects_dir.join("pack");
-    let entries = match fs::read_dir(&pack_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
-        Err(error) => return Err(CliError::Io(error)),
-    };
-    let mut names = HashSet::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) == Some("pack")
-            && let Some(name) = path.file_name().and_then(|value| value.to_str())
-        {
-            names.insert(name.to_owned());
-        }
-    }
-    Ok(names)
+fn write_promisor_markers_for_pack_ids(
+    pack_dir: &Path,
+    pack_ids: &[ObjectId],
+    content: &[u8],
+) -> io::Result<()> {
+    let _pack_lock = PackOperationLock::acquire(pack_dir)?;
+    write_promisor_markers_for_pack_ids_locked(pack_dir, pack_ids.iter(), content)
 }
 
-fn write_promisor_markers_for_new_transport_packs(
-    objects_dir: &std::path::Path,
-    existing_packs: &HashSet<String>,
-) -> Result<()> {
-    let pack_dir = objects_dir.join("pack");
-    let entries = match fs::read_dir(&pack_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(CliError::Io(error)),
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("pack") {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if existing_packs.contains(name) {
-            continue;
-        }
-        let promisor_path = path.with_extension("promisor");
-        if !promisor_path.exists() {
-            fs::write(promisor_path, b"").map_err(CliError::Io)?;
+fn write_promisor_markers_for_pack_ids_locked<'a, I>(
+    pack_dir: &Path,
+    pack_ids: I,
+    content: &[u8],
+) -> io::Result<()>
+where
+    I: IntoIterator<Item = &'a ObjectId>,
+{
+    for pack_id in pack_ids {
+        let marker = pack_file_path(pack_dir, pack_id, ".promisor");
+        match fs::symlink_metadata(&marker) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let temporary = unique_temp_sibling(&marker);
+                let temporary_guard = OwnedHttpTempPack::new(temporary.clone());
+                fs::write(&temporary, content)?;
+                set_promisor_marker_mode(&temporary)?;
+                sync_published_file(&temporary)?;
+                match fs::rename(&temporary, &marker) {
+                    Ok(()) => {
+                        temporary_guard.cleanup()?;
+                        sync_pack_directory(pack_dir)?;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                        temporary_guard.cleanup()?;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
         }
     }
     Ok(())
+}
+
+fn set_promisor_marker_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct PromisorMarkerRef {
+    source_ref: String,
+    old_id: Option<ObjectId>,
+}
+
+fn render_promisor_marker_content(
+    mut refs: Vec<PromisorMarkerRef>,
+    algorithm: GitHashAlgorithm,
+) -> Vec<u8> {
+    let mut seen = HashSet::with_capacity(refs.len());
+    refs.retain(|entry| seen.insert(entry.source_ref.clone()));
+    refs.sort_unstable_by(|left, right| left.source_ref.cmp(&right.source_ref));
+
+    let mut content = Vec::with_capacity(refs.len().saturating_mul(96));
+    for entry in refs {
+        if let Some(old_id) = entry
+            .old_id
+            .as_ref()
+            .filter(|old_id| old_id.algorithm() == algorithm)
+        {
+            old_id.write_hex_bytes(&mut content);
+        } else {
+            content.resize(content.len() + algorithm.digest_len() * 2, b'0');
+        }
+        content.push(b' ');
+        content.extend_from_slice(entry.source_ref.as_bytes());
+        content.push(b'\n');
+    }
+    content
+}
+
+fn local_clone_promisor_marker_content(
+    source_refs: &RefStore,
+    target: &CloneTarget,
+    no_tags: bool,
+    single_branch: bool,
+) -> Result<Vec<u8>> {
+    let mut marker_refs = Vec::new();
+    let mut algorithm = GitHashAlgorithm::Sha1;
+    let mut push_ref = |source_ref: &str, id: &ObjectId| {
+        algorithm = id.algorithm();
+        marker_refs.push(PromisorMarkerRef {
+            source_ref: source_ref.to_owned(),
+            old_id: Some(id.clone()),
+        });
+    };
+    if single_branch {
+        if let Ok(id) = source_refs.resolve("HEAD") {
+            push_ref("HEAD", &id);
+        }
+        match target {
+            CloneTarget::Branch { name, id } => push_ref(&format!("refs/heads/{name}"), id),
+            CloneTarget::Tag { name, id } => push_ref(&format!("refs/tags/{name}"), id),
+            CloneTarget::Detached { id } => push_ref("HEAD", id),
+            CloneTarget::Empty | CloneTarget::MissingBranch { .. } => {}
+        }
+    } else {
+        if let Ok(id) = source_refs.resolve("HEAD") {
+            push_ref("HEAD", &id);
+        }
+        source_refs.for_each_resolved_ref("refs/heads/", |source_ref, id| {
+            push_ref(source_ref, id);
+            Ok::<(), CliError>(())
+        })?;
+        if !no_tags {
+            source_refs.for_each_resolved_ref("refs/tags/", |source_ref, id| {
+                push_ref(source_ref, id);
+                Ok::<(), CliError>(())
+            })?;
+        }
+    }
+    Ok(render_promisor_marker_content(marker_refs, algorithm))
+}
+
+fn filtered_network_promisor_marker_content(
+    destination_refs: &OwnedCliRefsStoreAdapter,
+    remote: &str,
+    rows: &[LsRemoteRow],
+    branch: Option<&str>,
+) -> Result<Vec<u8>> {
+    let algorithm = rows
+        .first()
+        .map(|row| row.id.algorithm())
+        .unwrap_or(GitHashAlgorithm::Sha1);
+    let mut marker_refs = Vec::new();
+    if let Some(branch) = branch {
+        let source_ref = branch_ref_name(branch)?;
+        let destination_ref = format!("refs/remotes/{remote}/{branch}");
+        marker_refs.push(PromisorMarkerRef {
+            old_id: destination_refs.resolve(&destination_ref).ok(),
+            source_ref,
+        });
+    } else {
+        for row in rows.iter().filter(|row| {
+            (row.name.starts_with("refs/heads/") || row.name.starts_with("refs/tags/"))
+                && !row.name.ends_with("^{}")
+        }) {
+            let destination_ref = if let Some(branch) = row.name.strip_prefix("refs/heads/") {
+                format!("refs/remotes/{remote}/{branch}")
+            } else {
+                row.name.clone()
+            };
+            marker_refs.push(PromisorMarkerRef {
+                old_id: destination_refs.resolve(&destination_ref).ok(),
+                source_ref: row.name.clone(),
+            });
+        }
+    }
+    Ok(render_promisor_marker_content(marker_refs, algorithm))
+}
+
+fn local_filtered_promisor_marker_content(
+    source_refs: &RefStore,
+    destination_refs: &RefStore,
+    refspecs: &[String],
+) -> Result<Vec<u8>> {
+    let mut marker_refs = Vec::new();
+    let mut algorithm = GitHashAlgorithm::Sha1;
+    for refspec in refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, destination)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix, destination_prefix, destination_suffix)) =
+            wildcard_fetch_parts(source, destination)
+        {
+            source_refs.for_each_resolved_ref(source_prefix, |source_ref, source_id| {
+                algorithm = source_id.algorithm();
+                let Some(captured) = source_ref
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                else {
+                    return Ok::<(), CliError>(());
+                };
+                let destination_ref = format!("{destination_prefix}{captured}{destination_suffix}");
+                marker_refs.push(PromisorMarkerRef {
+                    old_id: destination_refs.resolve(&destination_ref).ok(),
+                    source_ref: source_ref.to_owned(),
+                });
+                Ok::<(), CliError>(())
+            })?;
+        } else if !source.contains('*') && !destination.contains('*') {
+            match resolve_fetch_refspec_source_id(source_refs, source) {
+                Ok(source_id) => algorithm = source_id.algorithm(),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(CliError::Io(error)),
+            }
+            let destination_ref = destination_fetch_ref_name(destination)?;
+            marker_refs.push(PromisorMarkerRef {
+                old_id: destination_refs.resolve(&destination_ref).ok(),
+                source_ref: source.to_owned(),
+            });
+        }
+    }
+    source_refs.for_each_resolved_ref("refs/tags/", |source_ref, source_id| {
+        algorithm = source_id.algorithm();
+        marker_refs.push(PromisorMarkerRef {
+            old_id: destination_refs.resolve(source_ref).ok(),
+            source_ref: source_ref.to_owned(),
+        });
+        Ok::<(), CliError>(())
+    })?;
+    Ok(render_promisor_marker_content(marker_refs, algorithm))
+}
+
+fn clone_promisor_marker_content(
+    refs: &[LsRemoteRow],
+    target: &CloneTarget,
+    no_tags: bool,
+    single_branch: bool,
+    no_single_branch: bool,
+) -> Vec<u8> {
+    let mut wanted_names = Vec::new();
+    let effective_single_branch = !no_single_branch && single_branch;
+    if effective_single_branch {
+        wanted_names.push("HEAD".to_owned());
+        match target {
+            CloneTarget::Branch { name, .. } => wanted_names.push(format!("refs/heads/{name}")),
+            CloneTarget::Tag { name, .. } => wanted_names.push(format!("refs/tags/{name}")),
+            CloneTarget::Detached { .. }
+            | CloneTarget::Empty
+            | CloneTarget::MissingBranch { .. } => {}
+        }
+    } else {
+        for row in refs {
+            if row.name == "HEAD"
+                || (row.name.starts_with("refs/")
+                    && !row.name.ends_with("^{}")
+                    && (!no_tags || !row.name.starts_with("refs/tags/")))
+            {
+                wanted_names.push(row.name.clone());
+            }
+        }
+    }
+
+    let mut content = Vec::new();
+    for name in wanted_names {
+        let Some(row) = refs.iter().find(|row| row.name == name) else {
+            continue;
+        };
+        content.extend_from_slice(row.id.to_hex().as_bytes());
+        content.push(b' ');
+        content.extend_from_slice(name.as_bytes());
+        content.push(b'\n');
+    }
+    content
 }
 
 fn fetch_with_local_remote_filter_blob_none_depth(
@@ -24354,11 +35324,16 @@ fn fetch_with_local_remote_filter_blob_none_depth(
 ) -> Result<()> {
     let source = local_clone_source(source_path)?;
     let source_repo = local_clone_source_repo(&source);
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(&repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_refs = refs_adapter_from_git_dir_with_hash(&source.git_dir, source_hash);
+    let destination_refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, destination_hash);
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_store =
+        object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), destination_hash);
     let ref_name = branch_ref_name(branch)?;
     let id = source_refs
         .resolve(&ref_name)
@@ -24393,7 +35368,6 @@ fn fetch_with_local_remote_filter_blob_none_depth(
     }
     sort_dedup_object_ids(&mut shallow_boundaries);
 
-    eprintln!("warning: filtering not recognized by server, ignoring");
     eprintln!("From {}", fetch_head_url_display(url));
     eprintln!(" * branch            {branch}       -> FETCH_HEAD");
     if let Some(old_id) = old_id {
@@ -24406,7 +35380,13 @@ fn fetch_with_local_remote_filter_blob_none_depth(
     } else {
         eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
     }
-    write_fetch_destination_ref(&repo, &destination_refs, &destination_ref, &id, Some(&remote))?;
+    write_fetch_destination_ref(
+        &repo,
+        &destination_refs,
+        &destination_ref,
+        &id,
+        Some(&remote),
+    )?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
@@ -24424,8 +35404,13 @@ fn fetch_local_unshallow_objects_via_upload_pack(
     repository_path: &str,
     shallows: &[ObjectId],
 ) -> Result<()> {
-    let destination_refs = refs_adapter_from_git_dir(&destination_repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    let destination_refs =
+        refs_adapter_from_git_dir_with_hash(&destination_repo.git_dir, destination_hash);
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
     collect_unshallow_roots(
         source_refs,
@@ -24461,9 +35446,16 @@ fn copy_local_unshallow_objects(
     missing_ref_code: i32,
 ) -> Result<()> {
     let source_repo = local_clone_source_repo(source);
-    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let source_hash = SmartTransportHash::for_repo(&source_repo)?;
+    let destination_hash = SmartTransportHash::for_repo(destination_repo)?;
+    validate_smart_transport_hash_match(destination_hash, source_hash)?;
+    let source_store =
+        object_adapter_from_objects_dir_with_hash(source.common_dir.join("objects"), source_hash);
     validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
-    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let destination_store = object_adapter_from_objects_dir_with_hash(
+        destination_repo.objects_dir.clone(),
+        destination_hash,
+    );
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
     collect_unshallow_roots(
         source_refs,
@@ -24488,6 +35480,7 @@ fn copy_local_unshallow_objects(
         PackEncodeOptions::delta(10, 50),
         PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
     )
+    .map(|_| ())
 }
 
 fn collect_unshallow_roots(
@@ -24548,6 +35541,7 @@ fn read_repo_shallow_boundaries(repo: &GitRepo) -> Result<Option<HashSet<ObjectI
     if !path.exists() {
         return Ok(None);
     }
+    let hash = SmartTransportHash::for_repo(repo)?;
     let content = fs::read_to_string(path).map_err(CliError::Io)?;
     let mut boundaries = HashSet::new();
     for line in content
@@ -24555,7 +35549,7 @@ fn read_repo_shallow_boundaries(repo: &GitRepo) -> Result<Option<HashSet<ObjectI
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {
-        boundaries.insert(ObjectId::from_hex(GitHashAlgorithm::Sha1, line)?);
+        boundaries.insert(ObjectId::from_hex(hash.algorithm, line)?);
     }
     if boundaries.is_empty() {
         Ok(None)
@@ -24598,7 +35592,8 @@ fn boundaries_or_local_fallback(
     if !remote_boundaries.is_empty() {
         return Ok(remote_boundaries);
     }
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let hash = SmartTransportHash::for_repo(repo)?;
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     shallow_boundaries(&store, roots, depth)
 }
 
@@ -24651,7 +35646,15 @@ fn boundaries_or_local_exclusion_fallback(
 }
 
 fn clone_shallow_roots(repo: &GitRepo, roots: &[ObjectId]) -> Result<Vec<ObjectId>> {
-    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    clone_shallow_roots_with_hash(repo, roots, SmartTransportHash::for_repo(repo)?)
+}
+
+fn clone_shallow_roots_with_hash(
+    repo: &GitRepo,
+    roots: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
+    let store = object_adapter_from_objects_dir_with_hash(repo.objects_dir.clone(), hash);
     let mut out = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
     let mut seen = HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
     for id in roots {
@@ -24776,11 +35779,31 @@ impl ParsedDaemonUrl {
             });
         }
         let path = format!("/{path}").trim_end_matches('/').to_owned();
-        Ok(Self { host, port, path })
+        let virtual_host = DaemonVirtualHost::from_environment()?;
+        if host.contains('\n')
+            || path.contains('\n')
+            || virtual_host
+                .as_ref()
+                .is_some_and(DaemonVirtualHost::contains_newline)
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "newline is forbidden in git:// hosts and repo paths".into(),
+            });
+        }
+        Ok(Self {
+            host,
+            port,
+            path,
+            virtual_host,
+        })
     }
 
     fn host_header_len(&self) -> usize {
-        self.host.len() + daemon_host_port_suffix_len(self.port)
+        self.virtual_host.as_ref().map_or_else(
+            || self.host.len() + daemon_host_port_suffix_len(self.port),
+            DaemonVirtualHost::len,
+        )
     }
 }
 
@@ -24917,6 +35940,20 @@ impl RemoteCommandSession {
     }
 }
 
+impl Drop for RemoteCommandSession {
+    fn drop(&mut self) {
+        // A clone can fail after discovery but before the fetch helper takes
+        // ownership of the session.  Do not leave the remote upload-pack
+        // child alive in that error path.
+        let _ = self.stdin.take();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(mut pipe) = self.stderr.take() {
+            let _ = io::copy(&mut pipe, &mut io::sink());
+        }
+    }
+}
+
 pub(crate) fn is_ssh_transport_url(value: &str) -> bool {
     if value.starts_with("file://") {
         return false;
@@ -24986,6 +36023,7 @@ fn spawn_ssh_remote_command_with_git_protocol(
     let mut command = ssh_transport_command(program, argv);
     if let Some(git_protocol) = git_protocol {
         command.env("GIT_PROTOCOL", git_protocol);
+        command.args(["-o", "SendEnv=GIT_PROTOCOL"]);
     }
     if let Some(port) = url.port {
         command.arg("-p").arg(port.to_string());
@@ -25110,11 +36148,24 @@ fn daemon_receive_pack_advertisement(url: &str) -> Result<ReceivePackAdvertiseme
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_service_handshake(&mut stream, &url, "git-receive-pack")?;
     let mut reader = daemon_transport_reader(stream);
-    parse_receive_pack_advertisement(&mut reader)
+    parse_daemon_receive_pack_advertisement(&mut reader)
 }
 
 fn parse_receive_pack_advertisement<R: BufRead + ?Sized>(
     reader: &mut R,
+) -> Result<ReceivePackAdvertisement> {
+    parse_receive_pack_advertisement_with_remote_errors(reader, false)
+}
+
+fn parse_daemon_receive_pack_advertisement<R: BufRead + ?Sized>(
+    reader: &mut R,
+) -> Result<ReceivePackAdvertisement> {
+    parse_receive_pack_advertisement_with_remote_errors(reader, true)
+}
+
+fn parse_receive_pack_advertisement_with_remote_errors<R: BufRead + ?Sized>(
+    reader: &mut R,
+    daemon_remote_errors: bool,
 ) -> Result<ReceivePackAdvertisement> {
     let mut refs = BTreeMap::new();
     let mut capabilities = BTreeSet::new();
@@ -25125,6 +36176,9 @@ fn parse_receive_pack_advertisement<R: BufRead + ?Sized>(
             continue;
         }
         if let Some(message) = payload.strip_prefix(b"ERR ") {
+            if daemon_remote_errors {
+                return Err(daemon_remote_error(message));
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: String::from_utf8_lossy(message).trim().to_owned(),
@@ -25175,7 +36229,16 @@ fn build_upload_pack_request(
     haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallows(roots, haves, depth, &[])
+    build_upload_pack_request_with_hash(roots, haves, depth, SmartTransportHash::sha1())
+}
+
+fn build_upload_pack_request_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallows_with_hash(roots, haves, depth, &[], hash)
 }
 
 fn append_pkt_payload(out: &mut Vec<u8>, payload: &[u8]) -> Result<()> {
@@ -25189,8 +36252,46 @@ fn append_upload_pack_v2_command_header(
     command: &str,
     server_options: &[String],
 ) -> Result<()> {
-    append_pkt_payload(out, format!("command={command}\n").as_bytes())?;
-    append_pkt_payload(out, b"agent=zmin/0.1.0\n")?;
+    append_upload_pack_v2_command_header_with_hash(
+        out,
+        command,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn append_upload_pack_v2_command_header_with_hash(
+    out: &mut Vec<u8>,
+    command: &str,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<()> {
+    append_upload_pack_v2_command_header_with_hash_and_promisor_remote(
+        out,
+        command,
+        server_options,
+        hash,
+        None,
+    )
+}
+
+fn append_upload_pack_v2_command_header_with_hash_and_promisor_remote(
+    out: &mut Vec<u8>,
+    command: &str,
+    server_options: &[String],
+    hash: SmartTransportHash,
+    promisor_remote: Option<&str>,
+) -> Result<()> {
+    // Git's v2 request framing uses a bare fetch command, while ls-refs keeps
+    // the line terminator.  The receiver accepts either spelling, but this
+    // distinction is part of the smart-HTTP wire contract.
+    let command_payload = if command == "fetch" {
+        format!("command={command}")
+    } else {
+        format!("command={command}\n")
+    };
+    append_pkt_payload(out, command_payload.as_bytes())?;
+    append_pkt_payload(out, b"agent=zmin/0.1.0")?;
     for option in server_options {
         if option
             .as_bytes()
@@ -25202,9 +36303,16 @@ fn append_upload_pack_v2_command_header(
                 message: "fetch --server-option value contains an invalid character".into(),
             });
         }
-        append_pkt_payload(out, format!("server-option={option}\n").as_bytes())?;
+        append_pkt_payload(out, format!("server-option={option}").as_bytes())?;
     }
-    append_pkt_payload(out, b"object-format=sha1\n")?;
+    append_pkt_payload(out, format!("object-format={}", hash.name()).as_bytes())?;
+    if let Some(promisor_remote) = promisor_remote {
+        validate_upload_pack_promisor_remote_value(promisor_remote, "promisor-remote")?;
+        append_pkt_payload(
+            out,
+            format!("promisor-remote={promisor_remote}\n").as_bytes(),
+        )?;
+    }
     out.extend_from_slice(b"0001");
     Ok(())
 }
@@ -25214,15 +36322,44 @@ fn build_upload_pack_v2_ls_refs_request(
     server_options: &[String],
 ) -> Result<Vec<u8>> {
     let ref_name = branch_ref_name(branch)?;
-    build_upload_pack_v2_ls_refs_prefix_request(&[ref_name.as_str()], server_options)
+    build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+        &[ref_name.as_str()],
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_v2_ls_refs_request_with_hash(
+    branch: &str,
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    let ref_name = branch_ref_name(branch)?;
+    build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+        &[ref_name.as_str()],
+        server_options,
+        hash,
+    )
 }
 
 fn build_upload_pack_v2_ls_refs_configured_fetch_request(
     server_options: &[String],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_v2_ls_refs_prefix_request(
-        &["HEAD", "refs/heads/", "refs/tags/"],
+    build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+        &["refs/heads/", "refs/tags/", "HEAD"],
         server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+        &["refs/heads/", "refs/tags/", "HEAD"],
+        server_options,
+        hash,
     )
 }
 
@@ -25230,10 +36367,24 @@ fn build_upload_pack_v2_ls_refs_prefix_request(
     prefixes: &[&str],
     server_options: &[String],
 ) -> Result<Vec<u8>> {
+    build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+        prefixes,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_v2_ls_refs_prefix_request_with_hash(
+    prefixes: &[&str],
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
     let mut request =
         Vec::with_capacity(256 + server_options.iter().map(String::len).sum::<usize>());
-    append_upload_pack_v2_command_header(&mut request, "ls-refs", server_options)?;
+    append_upload_pack_v2_command_header_with_hash(&mut request, "ls-refs", server_options, hash)?;
     append_pkt_payload(&mut request, b"peel\n")?;
+    append_pkt_payload(&mut request, b"symrefs\n")?;
+    append_pkt_payload(&mut request, b"unborn\n")?;
     for prefix in prefixes {
         append_pkt_payload(&mut request, format!("ref-prefix {prefix}\n").as_bytes())?;
     }
@@ -25246,15 +36397,98 @@ fn build_upload_pack_v2_fetch_request(
     haves: &[ObjectId],
     server_options: &[String],
 ) -> Result<Vec<u8>> {
+    build_upload_pack_v2_fetch_request_with_hash(
+        roots,
+        haves,
+        server_options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_v2_fetch_request_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+        roots,
+        haves,
+        server_options,
+        UploadPackShallowOptions {
+            depth: None,
+            since: None,
+            deepen_not: &[],
+            shallows: &[],
+            deepen_relative: false,
+            filter: None,
+            filter_capability: false,
+            promisor_remote: None,
+        },
+        hash,
+    )
+}
+
+fn build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+        roots,
+        haves,
+        server_options,
+        options,
+        hash,
+        &[],
+        false,
+    )
+}
+
+fn build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    uri_protocols: &[String],
+    sideband_all: bool,
+) -> Result<Vec<u8>> {
     let mut request = Vec::with_capacity(
-        upload_pack_request_capacity(roots, haves, None, None, &[], &[], false, None)
-            + 256
+        upload_pack_request_capacity(
+            roots,
+            haves,
+            options.depth,
+            options.since,
+            options.deepen_not,
+            options.shallows,
+            options.deepen_relative,
+            options.filter,
+        ) + 256
             + server_options.iter().map(String::len).sum::<usize>(),
     );
-    append_upload_pack_v2_command_header(&mut request, "fetch", server_options)?;
-    append_pkt_payload(&mut request, b"thin-pack\n")?;
-    append_pkt_payload(&mut request, b"no-progress\n")?;
-    append_pkt_payload(&mut request, b"ofs-delta\n")?;
+    append_upload_pack_v2_command_header_with_hash_and_promisor_remote(
+        &mut request,
+        "fetch",
+        server_options,
+        hash,
+        options.promisor_remote,
+    )?;
+    append_pkt_payload(&mut request, b"thin-pack")?;
+    append_pkt_payload(&mut request, b"no-progress")?;
+    append_pkt_payload(&mut request, b"ofs-delta")?;
+    if sideband_all {
+        append_pkt_payload(&mut request, b"sideband-all")?;
+    }
+    append_upload_pack_v2_shallow_options(&mut request, options)?;
+    if !uri_protocols.is_empty() {
+        append_pkt_payload(
+            &mut request,
+            format!("packfile-uris {}", uri_protocols.join(",")).as_bytes(),
+        )?;
+    }
     for root in roots {
         append_pkt_line_len(&mut request, b"want ".len() + root.hex_len() + 1)?;
         request.extend_from_slice(b"want ");
@@ -25270,6 +36504,34 @@ fn build_upload_pack_v2_fetch_request(
     append_pkt_payload(&mut request, b"done\n")?;
     request.extend_from_slice(b"0000");
     Ok(request)
+}
+
+fn append_upload_pack_v2_shallow_options(
+    request: &mut Vec<u8>,
+    options: UploadPackShallowOptions<'_>,
+) -> Result<()> {
+    for shallow in options.shallows {
+        append_pkt_line_len(request, b"shallow ".len() + shallow.hex_len() + 1)?;
+        request.extend_from_slice(b"shallow ");
+        shallow.write_hex_bytes(request);
+        request.push(b'\n');
+    }
+    if let Some(depth) = options.depth {
+        append_pkt_payload(request, format!("deepen {depth}\n").as_bytes())?;
+    }
+    if let Some(since) = options.since {
+        append_pkt_payload(request, format!("deepen-since {since}\n").as_bytes())?;
+    }
+    for rev in options.deepen_not {
+        append_pkt_payload(request, format!("deepen-not {rev}\n").as_bytes())?;
+    }
+    if options.deepen_relative {
+        append_pkt_payload(request, b"deepen-relative\n")?;
+    }
+    if let Some(filter) = options.filter {
+        append_pkt_payload(request, format!("filter {filter}").as_bytes())?;
+    }
+    Ok(())
 }
 
 enum PktLineFrame {
@@ -25317,11 +36579,63 @@ fn read_pkt_line_frame_into<R: Read + ?Sized>(
 fn parse_upload_pack_v2_capabilities<R: Read + ?Sized>(
     reader: &mut R,
     require_server_option: bool,
-) -> Result<()> {
+) -> Result<SmartTransportHash> {
+    parse_upload_pack_v2_capabilities_impl(reader, require_server_option, None)
+}
+
+fn parse_upload_pack_v2_capabilities_for_local_hash<R: Read + ?Sized>(
+    reader: &mut R,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<SmartTransportHash> {
+    parse_upload_pack_v2_capabilities_impl(reader, require_server_option, Some(local_hash))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UploadPackV2Capabilities {
+    hash: SmartTransportHash,
+    filter: bool,
+    packfile_uris: bool,
+    sideband_all: bool,
+    promisor_remote: Option<String>,
+}
+
+fn parse_upload_pack_v2_capabilities_for_local_hash_with_features<R: Read + ?Sized>(
+    reader: &mut R,
+    require_server_option: bool,
+    local_hash: SmartTransportHash,
+) -> Result<UploadPackV2Capabilities> {
+    parse_upload_pack_v2_capabilities_impl_with_features(
+        reader,
+        require_server_option,
+        Some(local_hash),
+    )
+}
+
+fn parse_upload_pack_v2_capabilities_impl<R: Read + ?Sized>(
+    reader: &mut R,
+    require_server_option: bool,
+    local_hash: Option<SmartTransportHash>,
+) -> Result<SmartTransportHash> {
+    parse_upload_pack_v2_capabilities_impl_with_features(reader, require_server_option, local_hash)
+        .map(|capabilities| capabilities.hash)
+}
+
+fn parse_upload_pack_v2_capabilities_impl_with_features<R: Read + ?Sized>(
+    reader: &mut R,
+    require_server_option: bool,
+    local_hash: Option<SmartTransportHash>,
+) -> Result<UploadPackV2Capabilities> {
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     let mut version_seen = false;
     let mut server_option_seen = false;
     let mut service_header_seen = false;
+    let mut hash = SmartTransportHash::sha1();
+    let mut object_format_seen = false;
+    let mut filter = false;
+    let mut packfile_uris = false;
+    let mut sideband_all = false;
+    let mut promisor_remote = None;
     loop {
         match read_pkt_line_frame_into(reader, &mut payload)? {
             PktLineFrame::Eof | PktLineFrame::ResponseEnd => break,
@@ -25335,6 +36649,35 @@ fn parse_upload_pack_v2_capabilities<R: Read + ?Sized>(
                     service_header_seen = true;
                 } else if trim_lf_payload(&payload) == b"server-option" {
                     server_option_seen = true;
+                } else if let Some(value) = trim_lf_payload(&payload).strip_prefix(b"fetch=") {
+                    for feature in value.split(|byte| *byte == b' ') {
+                        filter |= feature == b"filter";
+                        packfile_uris |= feature == b"packfile-uris";
+                        sideband_all |= feature == b"sideband-all";
+                    }
+                } else if let Some(value) =
+                    trim_lf_payload(&payload).strip_prefix(b"object-format=")
+                {
+                    if !object_format_seen {
+                        object_format_seen = true;
+                        hash = SmartTransportHash::from_object_format(value)?;
+                    }
+                } else if let Some(value) =
+                    trim_lf_payload(&payload).strip_prefix(b"promisor-remote=")
+                {
+                    if promisor_remote.is_some()
+                        || value.is_empty()
+                        || value.len() > UPLOAD_PACK_PROMISOR_REMOTE_VALUE_LENGTH_LIMIT
+                        || value.iter().any(|byte| byte.is_ascii_control())
+                    {
+                        return Err(CliError::Fatal {
+                            code: 128,
+                            message: "invalid promisor-remote capability".into(),
+                        });
+                    }
+                    let value = ascii_line_as_str(value)?;
+                    parse_upload_pack_promisor_remote_capability(Some(value))?;
+                    promisor_remote = Some(value.to_owned());
                 }
             }
         }
@@ -25351,13 +36694,49 @@ fn parse_upload_pack_v2_capabilities<R: Read + ?Sized>(
             message: "remote upload-pack does not advertise protocol v2 server-option".into(),
         });
     }
-    Ok(())
+    if !object_format_seen
+        && let Some(local_hash) =
+            local_hash.filter(|local_hash| local_hash.algorithm == GitHashAlgorithm::Sha256)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "the server does not support algorithm '{}'",
+                local_hash.name()
+            ),
+        });
+    }
+    if let Some(local_hash) = local_hash {
+        validate_smart_transport_hash_match(local_hash, hash)?;
+    }
+    Ok(UploadPackV2Capabilities {
+        hash,
+        filter,
+        packfile_uris,
+        sideband_all,
+        promisor_remote,
+    })
 }
 
 fn parse_upload_pack_v2_ls_refs_response<R: Read + ?Sized>(
     reader: &mut R,
 ) -> Result<Vec<LsRemoteRow>> {
+    parse_upload_pack_v2_ls_refs_response_with_hash(reader, SmartTransportHash::sha1())
+}
+
+fn parse_upload_pack_v2_ls_refs_response_with_hash<R: Read + ?Sized>(
+    reader: &mut R,
+    hash: SmartTransportHash,
+) -> Result<Vec<LsRemoteRow>> {
+    parse_upload_pack_v2_ls_refs_response_with_hash_and_head(reader, hash).map(|(rows, _)| rows)
+}
+
+fn parse_upload_pack_v2_ls_refs_response_with_hash_and_head<R: Read + ?Sized>(
+    reader: &mut R,
+    hash: SmartTransportHash,
+) -> Result<(Vec<LsRemoteRow>, Option<String>)> {
     let mut rows = Vec::with_capacity(HTTP_REMOTE_REF_ROWS_CAPACITY_HINT);
+    let mut head_branch = None;
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     loop {
         match read_pkt_line_frame_into(reader, &mut payload)? {
@@ -25373,11 +36752,22 @@ fn parse_upload_pack_v2_ls_refs_response<R: Read + ?Sized>(
                 let Some((id, rest)) = split_ls_remote_space_payload(&payload) else {
                     continue;
                 };
-                if id == b"unborn" {
+                let (id, rest) = if id == b"unborn" {
+                    let Some((name, attributes)) = split_once_byte(rest, b' ') else {
+                        continue;
+                    };
+                    if name == b"HEAD" {
+                        head_branch = ls_refs_symref_target(attributes);
+                    }
                     continue;
-                }
+                } else {
+                    (id, rest)
+                };
                 let (name, attributes) = split_once_byte(rest, b' ').unwrap_or((rest, b""));
-                let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
+                if name == b"HEAD" {
+                    head_branch = ls_refs_symref_target(attributes);
+                }
+                let id = ObjectId::from_hex_bytes(hash.algorithm, id)?;
                 let name = String::from_utf8_lossy(name).into_owned();
                 rows.push(LsRemoteRow {
                     id,
@@ -25387,14 +36777,22 @@ fn parse_upload_pack_v2_ls_refs_response<R: Read + ?Sized>(
                     .find_map(|attribute| attribute.strip_prefix(b"peeled:"))
                 {
                     rows.push(LsRemoteRow {
-                        id: ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, peeled)?,
+                        id: ObjectId::from_hex_bytes(hash.algorithm, peeled)?,
                         name: format!("{name}^{{}}"),
                     });
                 }
             }
         }
     }
-    Ok(rows)
+    Ok((rows, head_branch))
+}
+
+fn ls_refs_symref_target(attributes: &[u8]) -> Option<String> {
+    ascii_tokens(attributes)
+        .find_map(|attribute| attribute.strip_prefix(b"symref-target:"))
+        .filter(|target| target.starts_with(b"refs/heads/"))
+        .map(|target| String::from_utf8_lossy(target).into_owned())
+        .and_then(|target| target.strip_prefix("refs/heads/").map(str::to_owned))
 }
 
 #[derive(Clone, Copy)]
@@ -25405,6 +36803,8 @@ pub(crate) struct UploadPackShallowOptions<'a> {
     shallows: &'a [ObjectId],
     deepen_relative: bool,
     filter: Option<&'a str>,
+    filter_capability: bool,
+    promisor_remote: Option<&'a str>,
 }
 
 impl<'a> UploadPackShallowOptions<'a> {
@@ -25416,6 +36816,8 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows: &[],
             deepen_relative: false,
             filter: None,
+            filter_capability: false,
+            promisor_remote: None,
         }
     }
 
@@ -25427,6 +36829,8 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows,
             deepen_relative: true,
             filter: None,
+            filter_capability: false,
+            promisor_remote: None,
         }
     }
 
@@ -25438,6 +36842,8 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows,
             deepen_relative: false,
             filter: None,
+            filter_capability: false,
+            promisor_remote: None,
         }
     }
 
@@ -25449,6 +36855,8 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows: &[],
             deepen_relative: false,
             filter: None,
+            filter_capability: false,
+            promisor_remote: None,
         }
     }
 
@@ -25460,6 +36868,8 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows: &[],
             deepen_relative: false,
             filter: None,
+            filter_capability: false,
+            promisor_remote: None,
         }
     }
 
@@ -25471,7 +36881,27 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows: &[],
             deepen_relative: false,
             filter: Some(filter),
+            filter_capability: true,
+            promisor_remote: None,
         }
+    }
+
+    fn with_filter(mut self, filter: Option<&'a str>) -> Self {
+        self.filter = filter;
+        self.filter_capability = filter.is_some();
+        self
+    }
+
+    fn with_filter_support(mut self, filter_supported: bool) -> Self {
+        if !filter_supported {
+            self.filter = None;
+        }
+        self
+    }
+
+    fn with_promisor_remote(mut self, promisor_remote: Option<&'a str>) -> Self {
+        self.promisor_remote = promisor_remote;
+        self
     }
 
     fn uses_advertised_shallow_fallback(self) -> bool {
@@ -25493,13 +36923,50 @@ impl<'a> UploadPackShallowOptions<'a> {
     }
 }
 
+fn clone_v0_upload_pack_options<'a>(
+    depth: Option<usize>,
+    filter: Option<&'a str>,
+    filter_supported: bool,
+) -> UploadPackShallowOptions<'a> {
+    UploadPackShallowOptions::depth(depth)
+        .with_filter(filter)
+        .with_filter_support(filter_supported)
+}
+
 fn build_upload_pack_request_with_shallows(
     roots: &[ObjectId],
     haves: &[ObjectId],
     depth: Option<usize>,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options_flags(
+    build_upload_pack_request_with_shallows_with_hash(
+        roots,
+        haves,
+        depth,
+        shallows,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_request_with_shallows_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    shallows: &[ObjectId],
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    if roots
+        .iter()
+        .chain(haves)
+        .chain(shallows)
+        .any(|id| id.algorithm() != hash.algorithm)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "smart HTTP object ID algorithm mismatch".into(),
+        });
+    }
+    build_upload_pack_request_with_shallow_options_flags_with_hash(
         roots,
         haves,
         depth,
@@ -25508,8 +36975,10 @@ fn build_upload_pack_request_with_shallows(
         shallows,
         false,
         None,
+        false,
         true,
         true,
+        hash,
     )
 }
 
@@ -25549,6 +37018,47 @@ fn build_upload_pack_request_with_shallow_options_flags(
     no_progress: bool,
     include_tag: bool,
 ) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags_with_hash(
+        roots,
+        haves,
+        depth,
+        since,
+        deepen_not,
+        shallows,
+        deepen_relative,
+        filter,
+        filter.is_some(),
+        no_progress,
+        include_tag,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_request_with_shallow_options_flags_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    since: Option<i64>,
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+    deepen_relative: bool,
+    filter: Option<&str>,
+    filter_capability: bool,
+    no_progress: bool,
+    include_tag: bool,
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    if roots
+        .iter()
+        .chain(haves)
+        .chain(shallows)
+        .any(|id| id.algorithm() != hash.algorithm)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "smart HTTP object ID algorithm mismatch".into(),
+        });
+    }
     let mut request = Vec::with_capacity(upload_pack_request_capacity(
         roots,
         haves,
@@ -25561,7 +37071,7 @@ fn build_upload_pack_request_with_shallow_options_flags(
     ));
     let first_extra = upload_pack_request_capabilities(
         deepen_relative,
-        filter.is_some(),
+        filter_capability,
         no_progress,
         include_tag,
     );
@@ -25629,7 +37139,21 @@ fn build_upload_pack_request_from_shallow_options(
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(
+    build_upload_pack_request_from_shallow_options_with_hash(
+        roots,
+        haves,
+        options,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn build_upload_pack_request_from_shallow_options_with_hash(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags_with_hash(
         roots,
         haves,
         options.depth,
@@ -25638,6 +37162,10 @@ fn build_upload_pack_request_from_shallow_options(
         options.shallows,
         options.deepen_relative,
         options.filter,
+        options.filter_capability,
+        true,
+        true,
+        hash,
     )
 }
 
@@ -25823,17 +37351,45 @@ fn parse_upload_pack_sideband_response_to_file<R: Read>(
     pack_path: &Path,
     shallow_hint: usize,
 ) -> Result<Option<Vec<ObjectId>>> {
+    parse_upload_pack_sideband_response_to_file_with_hash(
+        reader,
+        pack_path,
+        shallow_hint,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn parse_upload_pack_sideband_response_to_file_with_hash<R: Read>(
+    reader: &mut R,
+    pack_path: &Path,
+    shallow_hint: usize,
+    hash: SmartTransportHash,
+) -> Result<Option<Vec<ObjectId>>> {
     let file = fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .open(pack_path)?;
-    parse_upload_pack_sideband_response_to_open_file(reader, file, shallow_hint)
+    parse_upload_pack_sideband_response_to_open_file_with_hash(reader, file, shallow_hint, hash)
 }
 
 fn parse_upload_pack_sideband_response_to_open_file<R: Read>(
     reader: &mut R,
     file: fs::File,
     shallow_hint: usize,
+) -> Result<Option<Vec<ObjectId>>> {
+    parse_upload_pack_sideband_response_to_open_file_with_hash(
+        reader,
+        file,
+        shallow_hint,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn parse_upload_pack_sideband_response_to_open_file_with_hash<R: Read>(
+    reader: &mut R,
+    file: fs::File,
+    shallow_hint: usize,
+    hash: SmartTransportHash,
 ) -> Result<Option<Vec<ObjectId>>> {
     let mut shallow_boundaries = Vec::with_capacity(shallow_hint);
     let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
@@ -25846,7 +37402,7 @@ fn parse_upload_pack_sideband_response_to_open_file<R: Read>(
             PktLineRead::Payload => {}
         }
         if let Some(id) = upload_pack_shallow_id_from_payload(&payload) {
-            shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+            shallow_boundaries.push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
             continue;
         }
         if upload_pack_unshallow_id_from_payload(&payload).is_some() {
@@ -25878,36 +37434,95 @@ fn upload_pack_unshallow_id_from_payload(payload: &[u8]) -> Option<&[u8]> {
         .filter(|id| !id.is_empty())
 }
 
-fn http_fetch_smart_pack_with_depth_with_helper(
+fn http_fetch_smart_pack_with_depth_with_helper_with_hash(
     url: &ParsedHttpUrl,
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     depth: Option<usize>,
+    hash: SmartTransportHash,
 ) -> Result<Vec<ObjectId>> {
-    http_fetch_smart_pack_with_shallow_options_with_helper(
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_depth_with_helper_with_hash_and_receipt(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        depth,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_with_depth_with_helper_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<Vec<ObjectId>> {
+    http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
         url,
         helper,
         objects_dir,
         roots,
         haves,
         UploadPackShallowOptions::depth(depth),
+        hash,
+        receive,
     )
 }
 
-fn http_fetch_smart_pack_with_shallow_options_with_helper(
+fn http_fetch_smart_pack_with_shallow_options_with_helper_with_hash(
     url: &ParsedHttpUrl,
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
+        url,
+        helper,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_with_shallow_options_with_helper_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request_from_shallow_options(roots, haves, options)?;
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
         let head = helper.request_to_file(
@@ -25926,49 +37541,116 @@ fn http_fetch_smart_pack_with_shallow_options_with_helper(
         }
         let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
         let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
-        let Some(shallow_boundaries) =
-            parse_upload_pack_sideband_response_to_open_file(&mut body, file, roots.len())?
+        let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+        let Some(shallow_boundaries) = parse_upload_pack_sideband_response_to_open_file_with_hash(
+            &mut body,
+            file,
+            roots.len(),
+            hash,
+        )?
         else {
-            let _ = fs::remove_file(&temp_pack);
+            temp_pack_guard.cleanup().map_err(CliError::Io)?;
             return Err(CliError::Fatal {
                 code: 128,
                 message: "remote upload-pack response did not contain a pack".into(),
             });
         };
-        write_indexed_pack_file(objects_dir, &temp_pack, false)?;
+        write_received_pack_file_with_hash(
+            objects_dir,
+            &temp_pack,
+            !haves.is_empty(),
+            hash,
+            receive,
+        )?;
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         Ok(shallow_boundaries)
     })();
     let _ = fs::remove_file(response_path);
     result
 }
 
-fn http_fetch_smart_pack_with_depth_direct(
+fn http_fetch_smart_pack_with_depth_direct_with_hash(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     depth: Option<usize>,
+    hash: SmartTransportHash,
 ) -> Result<Vec<ObjectId>> {
-    http_fetch_smart_pack_with_shallow_options_direct(
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_depth_direct_with_hash_and_receipt(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        depth,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_with_depth_direct_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
+) -> Result<Vec<ObjectId>> {
+    http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
         url,
         objects_dir,
         roots,
         haves,
         UploadPackShallowOptions::depth(depth),
+        hash,
+        receive,
     )
 }
 
-fn http_fetch_smart_pack_with_shallow_options_direct(
+fn http_fetch_smart_pack_with_shallow_options_direct_with_hash(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+) -> Result<Vec<ObjectId>> {
+    let mut receive = PackReceiveResult::default();
+    let result = http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        hash,
+        &mut receive,
+    );
+    if result.is_ok() {
+        receive.release_owned();
+    }
+    result
+}
+
+fn http_fetch_smart_pack_with_shallow_options_direct_with_hash_and_receipt(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    receive: &mut PackReceiveResult,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request_from_shallow_options(roots, haves, options)?;
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Err(CliError::Fatal {
@@ -25977,16 +37659,22 @@ fn http_fetch_smart_pack_with_shallow_options_direct(
         });
     }
     let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
-    let Some(shallow_boundaries) =
-        parse_upload_pack_sideband_response_to_open_file(&mut body, file, roots.len())?
+    let temp_pack_guard = OwnedHttpTempPack::new(temp_pack.clone());
+    let Some(shallow_boundaries) = parse_upload_pack_sideband_response_to_open_file_with_hash(
+        &mut body,
+        file,
+        roots.len(),
+        hash,
+    )?
     else {
-        let _ = fs::remove_file(&temp_pack);
+        temp_pack_guard.cleanup().map_err(CliError::Io)?;
         return Err(CliError::Fatal {
             code: 128,
             message: "remote upload-pack response did not contain a pack".into(),
         });
     };
-    write_indexed_pack_file(objects_dir, &temp_pack, false)?;
+    write_received_pack_file_with_hash(objects_dir, &temp_pack, !haves.is_empty(), hash, receive)?;
+    temp_pack_guard.cleanup().map_err(CliError::Io)?;
     Ok(shallow_boundaries)
 }
 
@@ -26066,29 +37754,32 @@ fn ssh_open_advertised_upload_pack(
         spawn_ssh_remote_command(&parsed, "git-upload-pack")?
     };
     let advertisement_start = phase_trace_enabled().then(Instant::now);
-    let (rows, head_branch, _) = {
+    let advertisement = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "ssh transport stdout is unavailable".into(),
         })?;
-        parse_upload_pack_advertisement_rows_with_shallows(
-            stdout, heads, tags, refs_only, patterns,
-        )?
+        parse_upload_pack_v0_advertisement(stdout, heads, tags, refs_only, patterns, false)?
     };
     if let Some(start) = advertisement_start {
         phase_trace_emit(
             "ssh_upload_pack.open.advertisement",
             start.elapsed().as_secs_f64(),
             &[
-                ("rows", rows.len().to_string()),
-                ("head_branch", head_branch.is_some().to_string()),
+                ("rows", advertisement.rows.len().to_string()),
+                (
+                    "head_branch",
+                    advertisement.head_branch.is_some().to_string(),
+                ),
             ],
         );
     }
     Ok(SshAdvertisedUploadPack {
         session: Some(session),
-        rows,
-        head_branch,
+        rows: advertisement.rows,
+        head_branch: advertisement.head_branch,
+        capabilities: advertisement.capabilities,
+        hash: advertisement.hash,
     })
 }
 
@@ -26130,6 +37821,34 @@ pub(crate) fn ssh_fetch_pack_with_haves(
     haves: &[ObjectId],
 ) -> Result<()> {
     ssh_fetch_pack_with_depth_and_haves(url, objects_dir, roots, haves, None).map(|_| ())
+}
+
+pub(crate) fn ssh_fetch_pack_with_haves_for_promisor(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+) -> Result<()> {
+    let mut receive = PackReceiveResult::default();
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
+    let result = ssh_fetch_pack_with_shallow_options_and_haves_impl_with_policy(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        UploadPackShallowOptions::filter("blob:none"),
+        None,
+        hash,
+        PackKeepPolicy::Transient,
+        &mut receive,
+    )?;
+    let _ = result;
+    receive
+        .publish_promisor_markers_and_release_owned(b"")
+        .map_err(CliError::Io)
 }
 
 fn ssh_fetch_pack_with_haves_and_upload_pack(
@@ -26193,6 +37912,7 @@ fn ssh_fetch_pack_with_depth_and_haves_and_upload_pack(
         UploadPackShallowOptions::depth(depth),
         upload_pack_command,
     )
+    .map(PackFetchResult::into_shallow_boundaries)
 }
 
 fn ssh_upload_pack_service(upload_pack_command: Option<&str>) -> Result<&str> {
@@ -26222,6 +37942,7 @@ fn ssh_fetch_pack_with_shallow_options_and_haves_and_upload_pack(
         options,
         upload_pack_command,
     )
+    .map(PackFetchResult::into_shallow_boundaries)
 }
 
 fn ssh_fetch_pack_with_shallow_options_and_haves(
@@ -26239,6 +37960,7 @@ fn ssh_fetch_pack_with_shallow_options_and_haves(
         options,
         None,
     )
+    .map(PackFetchResult::into_shallow_boundaries)
 }
 
 fn ssh_fetch_pack_with_shallow_options_and_haves_impl(
@@ -26248,9 +37970,38 @@ fn ssh_fetch_pack_with_shallow_options_and_haves_impl(
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
     upload_pack_command: Option<&str>,
-) -> Result<Vec<ObjectId>> {
+) -> Result<PackFetchResult> {
+    let mut receive = PackReceiveResult::default();
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::resolve_for_objects_dir(objects_dir, ForceIndexReasons::default())?,
+    )?;
+    ssh_fetch_pack_with_shallow_options_and_haves_impl_with_policy(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        upload_pack_command,
+        hash,
+        PackKeepPolicy::None,
+        &mut receive,
+    )
+}
+
+fn ssh_fetch_pack_with_shallow_options_and_haves_impl_with_policy(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    upload_pack_command: Option<&str>,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
     if roots.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
     let parsed = ParsedSshUrl::parse(url)?;
     let service = ssh_upload_pack_service(upload_pack_command)?;
@@ -26268,7 +38019,8 @@ fn ssh_fetch_pack_with_shallow_options_and_haves_impl(
         while read_pkt_line_payload_into(stdout, &mut line)? {}
     }
 
-    let request = build_upload_pack_request_from_shallow_options(roots, haves, options)?;
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
     {
         let _trace = phase_trace("ssh_fetch_pack.request");
         session
@@ -26302,15 +38054,25 @@ fn ssh_fetch_pack_with_shallow_options_and_haves_impl(
         };
         shallow_boundaries
     };
-    {
+    let pack_id = {
         let _trace = phase_trace("ssh_fetch_pack.index_pack");
-        write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    }
+        write_indexed_pack_file_with_policy(
+            objects_dir,
+            &temp_pack,
+            !haves.is_empty(),
+            hash,
+            keep_policy,
+            receive,
+        )?
+    };
     {
         let _trace = phase_trace("ssh_fetch_pack.finish");
         session.finish()?;
     }
-    Ok(shallow_boundaries)
+    Ok(PackFetchResult {
+        shallow_boundaries,
+        installed_pack_ids: vec![pack_id],
+    })
 }
 
 fn ssh_fetch_pack_from_advertised_session(
@@ -26369,6 +38131,76 @@ fn ssh_fetch_pack_from_advertised_session(
     Ok(shallow_boundaries)
 }
 
+fn ssh_fetch_pack_from_advertised_session_with_policy(
+    mut session: RemoteCommandSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
+    if roots.is_empty() {
+        session.finish()?;
+        return Ok(PackFetchResult::default());
+    }
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
+    {
+        let _trace = phase_trace("ssh_fetch_pack.request");
+        session
+            .stdin
+            .as_mut()
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport stdin is unavailable".into(),
+            })?
+            .write_all(&request)?;
+        drop(session.stdin.take());
+    }
+
+    let temp_pack = temp_http_pack_path(objects_dir)?;
+    let shallow_boundaries = {
+        let _trace = phase_trace("ssh_fetch_pack.sideband_to_pack");
+        let Some(shallow_boundaries) = parse_upload_pack_sideband_response_to_file(
+            session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "ssh transport stdout is unavailable".into(),
+            })?,
+            &temp_pack,
+            roots.len(),
+        )?
+        else {
+            let _ = fs::remove_file(&temp_pack);
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "ssh upload-pack response did not contain a pack".into(),
+            });
+        };
+        shallow_boundaries
+    };
+    let pack_id = {
+        let _trace = phase_trace("ssh_fetch_pack.index_pack");
+        write_indexed_pack_file_with_policy(
+            objects_dir,
+            &temp_pack,
+            !haves.is_empty(),
+            hash,
+            keep_policy,
+            receive,
+        )?
+    };
+    {
+        let _trace = phase_trace("ssh_fetch_pack.finish");
+        session.finish()?;
+    }
+    Ok(PackFetchResult {
+        shallow_boundaries,
+        installed_pack_ids: vec![pack_id],
+    })
+}
+
 pub(crate) fn fetch_pack_with_local_upload_pack_command(
     command: &str,
     repository_path: &str,
@@ -26401,6 +38233,31 @@ pub(crate) fn fetch_pack_with_local_upload_pack_command_with_options(
     options: UploadPackShallowOptions<'_>,
     keep: bool,
 ) -> Result<Vec<ObjectId>> {
+    fetch_pack_with_local_upload_pack_command_with_options_and_result(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        keep,
+    )
+    .map(|result| result.shallow_boundaries)
+}
+
+pub(crate) fn fetch_pack_with_local_upload_pack_command_with_options_and_result(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    keep: bool,
+) -> Result<PackFetchResult> {
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
@@ -26412,22 +38269,26 @@ pub(crate) fn fetch_pack_with_local_upload_pack_command_with_options(
     }
     if roots.is_empty() {
         session.finish()?;
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
-    let request = build_upload_pack_request_from_shallow_options(roots, haves, options)?;
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
     let request_status = write_local_upload_pack_request(&mut session, &request)?;
     drop(session.stdin.take());
 
     let temp_pack = temp_http_pack_path(objects_dir)?;
     let pack_result = match request_status {
-        LocalUploadPackRequestStatus::Sent => parse_upload_pack_sideband_response_to_file(
-            session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "local upload-pack stdout is unavailable".into(),
-            })?,
-            &temp_pack,
-            roots.len(),
-        )?,
+        LocalUploadPackRequestStatus::Sent => {
+            parse_upload_pack_sideband_response_to_file_with_hash(
+                session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "local upload-pack stdout is unavailable".into(),
+                })?,
+                &temp_pack,
+                roots.len(),
+                hash,
+            )?
+        }
         LocalUploadPackRequestStatus::BrokenPipe => None,
     };
     if pack_result.is_none() {
@@ -26442,12 +38303,37 @@ pub(crate) fn fetch_pack_with_local_upload_pack_command_with_options(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let installed_pack_id =
+        finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
     let stderr = session
         .finish_with_stderr()
         .map_err(local_upload_pack_failure)?;
     emit_local_upload_pack_progress_from_stderr(&stderr, true);
-    Ok(pack_result.unwrap_or_default())
+    Ok(PackFetchResult {
+        shallow_boundaries: pack_result.unwrap_or_default(),
+        installed_pack_ids: installed_pack_id.into_iter().collect(),
+    })
+}
+
+pub(crate) fn fetch_pack_with_local_upload_pack_command_with_options_for_promisor(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+) -> Result<()> {
+    let result = fetch_pack_with_local_upload_pack_command_with_options_and_result(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        false,
+    )?;
+    write_promisor_markers_for_pack_ids(&objects_dir.join("pack"), result.installed_pack_ids(), b"")
+        .map_err(CliError::Io)
 }
 
 fn fetch_pack_with_local_upload_pack_command_with_depth(
@@ -26463,6 +38349,39 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
     deepen_relative: bool,
     keep: bool,
 ) -> Result<Vec<ObjectId>> {
+    fetch_pack_with_local_upload_pack_command_with_depth_and_result(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        depth,
+        shallows,
+        no_progress,
+        include_tag,
+        deepen_relative,
+        keep,
+    )
+    .map(|result| result.shallow_boundaries)
+}
+
+fn fetch_pack_with_local_upload_pack_command_with_depth_and_result(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    deepen_relative: bool,
+    keep: bool,
+) -> Result<PackFetchResult> {
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
@@ -26474,30 +38393,38 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
     }
     if roots.is_empty() {
         session.finish()?;
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
-    let request = build_fetch_pack_request_with_shallows(
+    let request = build_upload_pack_request_with_shallow_options_flags_with_hash(
         roots,
         haves,
         depth,
+        None,
+        &[],
         shallows,
+        deepen_relative,
+        None,
+        false,
         no_progress,
         include_tag,
-        deepen_relative,
+        hash,
     )?;
     let request_status = write_local_upload_pack_request(&mut session, &request)?;
     drop(session.stdin.take());
 
     let temp_pack = temp_http_pack_path(objects_dir)?;
     let pack_result = match request_status {
-        LocalUploadPackRequestStatus::Sent => parse_upload_pack_sideband_response_to_file(
-            session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "local upload-pack stdout is unavailable".into(),
-            })?,
-            &temp_pack,
-            roots.len(),
-        )?,
+        LocalUploadPackRequestStatus::Sent => {
+            parse_upload_pack_sideband_response_to_file_with_hash(
+                session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "local upload-pack stdout is unavailable".into(),
+                })?,
+                &temp_pack,
+                roots.len(),
+                hash,
+            )?
+        }
         LocalUploadPackRequestStatus::BrokenPipe => None,
     };
     if pack_result.is_none() {
@@ -26512,12 +38439,16 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let installed_pack_id =
+        finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
     let stderr = session
         .finish_with_stderr()
         .map_err(local_upload_pack_failure)?;
     emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
-    Ok(pack_result.unwrap_or_default())
+    Ok(PackFetchResult {
+        shallow_boundaries: pack_result.unwrap_or_default(),
+        installed_pack_ids: installed_pack_id.into_iter().collect(),
+    })
 }
 
 fn fetch_pack_with_local_upload_pack_command_with_since(
@@ -26532,6 +38463,37 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
     include_tag: bool,
     keep: bool,
 ) -> Result<Vec<ObjectId>> {
+    fetch_pack_with_local_upload_pack_command_with_since_and_result(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        since,
+        shallows,
+        no_progress,
+        include_tag,
+        keep,
+    )
+    .map(|result| result.shallow_boundaries)
+}
+
+fn fetch_pack_with_local_upload_pack_command_with_since_and_result(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    since: i64,
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    keep: bool,
+) -> Result<PackFetchResult> {
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
@@ -26543,29 +38505,38 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
     }
     if roots.is_empty() {
         session.finish()?;
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
-    let request = build_fetch_pack_request_with_since(
+    let request = build_upload_pack_request_with_shallow_options_flags_with_hash(
         roots,
         haves,
-        since,
+        None,
+        Some(since),
+        &[],
         shallows,
+        false,
+        None,
+        false,
         no_progress,
         include_tag,
+        hash,
     )?;
     let request_status = write_local_upload_pack_request(&mut session, &request)?;
     drop(session.stdin.take());
 
     let temp_pack = temp_http_pack_path(objects_dir)?;
     let pack_result = match request_status {
-        LocalUploadPackRequestStatus::Sent => parse_upload_pack_sideband_response_to_file(
-            session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "local upload-pack stdout is unavailable".into(),
-            })?,
-            &temp_pack,
-            roots.len(),
-        )?,
+        LocalUploadPackRequestStatus::Sent => {
+            parse_upload_pack_sideband_response_to_file_with_hash(
+                session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "local upload-pack stdout is unavailable".into(),
+                })?,
+                &temp_pack,
+                roots.len(),
+                hash,
+            )?
+        }
         LocalUploadPackRequestStatus::BrokenPipe => None,
     };
     if pack_result.is_none() {
@@ -26580,12 +38551,16 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let installed_pack_id =
+        finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
     let stderr = session
         .finish_with_stderr()
         .map_err(local_upload_pack_failure)?;
     emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
-    Ok(pack_result.unwrap_or_default())
+    Ok(PackFetchResult {
+        shallow_boundaries: pack_result.unwrap_or_default(),
+        installed_pack_ids: installed_pack_id.into_iter().collect(),
+    })
 }
 
 fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
@@ -26600,6 +38575,37 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
     include_tag: bool,
     keep: bool,
 ) -> Result<Vec<ObjectId>> {
+    fetch_pack_with_local_upload_pack_command_with_deepen_not_and_result(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        deepen_not,
+        shallows,
+        no_progress,
+        include_tag,
+        keep,
+    )
+    .map(|result| result.shallow_boundaries)
+}
+
+fn fetch_pack_with_local_upload_pack_command_with_deepen_not_and_result(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    keep: bool,
+) -> Result<PackFetchResult> {
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
@@ -26611,29 +38617,38 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
     }
     if roots.is_empty() {
         session.finish()?;
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
-    let request = build_fetch_pack_request_with_deepen_not(
+    let request = build_upload_pack_request_with_shallow_options_flags_with_hash(
         roots,
         haves,
+        None,
+        None,
         deepen_not,
         shallows,
+        false,
+        None,
+        false,
         no_progress,
         include_tag,
+        hash,
     )?;
     let request_status = write_local_upload_pack_request(&mut session, &request)?;
     drop(session.stdin.take());
 
     let temp_pack = temp_http_pack_path(objects_dir)?;
     let pack_result = match request_status {
-        LocalUploadPackRequestStatus::Sent => parse_upload_pack_sideband_response_to_file(
-            session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: "local upload-pack stdout is unavailable".into(),
-            })?,
-            &temp_pack,
-            roots.len(),
-        )?,
+        LocalUploadPackRequestStatus::Sent => {
+            parse_upload_pack_sideband_response_to_file_with_hash(
+                session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "local upload-pack stdout is unavailable".into(),
+                })?,
+                &temp_pack,
+                roots.len(),
+                hash,
+            )?
+        }
         LocalUploadPackRequestStatus::BrokenPipe => None,
     };
     if pack_result.is_none() {
@@ -26648,12 +38663,16 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let installed_pack_id =
+        finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
     let stderr = session
         .finish_with_stderr()
         .map_err(local_upload_pack_failure)?;
     emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
-    Ok(pack_result.unwrap_or_default())
+    Ok(PackFetchResult {
+        shallow_boundaries: pack_result.unwrap_or_default(),
+        installed_pack_ids: installed_pack_id.into_iter().collect(),
+    })
 }
 
 fn spawn_local_upload_pack_command(
@@ -26921,8 +38940,35 @@ fn receive_pack_request_capacity(push_refs: &[(PushRef, Option<ObjectId>)]) -> u
 }
 
 fn daemon_transport_connect(url: &ParsedDaemonUrl) -> Result<std::net::TcpStream> {
-    let stream = std::net::TcpStream::connect((url.host.as_str(), url.port))?;
+    daemon_transport_connect_with_verbose(url, false)
+}
+
+fn daemon_transport_connect_with_verbose(
+    url: &ParsedDaemonUrl,
+    verbose: bool,
+) -> Result<std::net::TcpStream> {
+    if verbose {
+        eprint!("Looking up {} ... ", url.host);
+    }
+    let addresses = match (url.host.as_str(), url.port).to_socket_addrs() {
+        Ok(addresses) => addresses.collect::<Vec<_>>(),
+        Err(error) => {
+            if verbose {
+                eprintln!();
+            }
+            return Err(CliError::Io(error));
+        }
+    };
+    if verbose {
+        eprintln!("done.");
+        eprint!("Connecting to {} (port {}) ... ", url.host, url.port);
+    }
+    let stream = std::net::TcpStream::connect(addresses.as_slice())?;
     stream.set_nodelay(true)?;
+    if verbose {
+        let peer = stream.peer_addr()?.ip();
+        eprintln!("{} done.", peer);
+    }
     Ok(stream)
 }
 
@@ -26997,10 +39043,14 @@ fn write_daemon_service_request(
     out.push(b' ');
     out.extend_from_slice(url.path.as_bytes());
     out.extend_from_slice(b"\0host=");
-    out.extend_from_slice(url.host.as_bytes());
-    if url.port != 9418 {
-        out.push(b':');
-        append_decimal_usize(out, usize::from(url.port));
+    if let Some(virtual_host) = &url.virtual_host {
+        out.extend_from_slice(virtual_host.as_bytes());
+    } else {
+        out.extend_from_slice(url.host.as_bytes());
+        if url.port != 9418 {
+            out.push(b':');
+            append_decimal_usize(out, usize::from(url.port));
+        }
     }
     out.push(0);
     if !extra_params.is_empty() {
@@ -27023,6 +39073,28 @@ pub(crate) fn daemon_ls_remote_rows(
     daemon_ls_remote_rows_with_shallows(url, heads, tags, refs_only, patterns).map(|(rows, _)| rows)
 }
 
+fn daemon_ls_remote_rows_with_verbose(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+    verbose: bool,
+) -> Result<(Vec<LsRemoteRow>, Vec<ObjectId>)> {
+    let url = ParsedDaemonUrl::parse(url)?;
+    let mut stream = daemon_transport_connect_with_verbose(&url, verbose)?;
+    daemon_transport_handshake(&mut stream, &url)?;
+    let mut reader = daemon_transport_reader(stream);
+    parse_daemon_upload_pack_advertisement_rows_with_shallows(
+        &mut reader,
+        heads,
+        tags,
+        refs_only,
+        patterns,
+    )
+    .map(|(rows, _, shallow_boundaries)| (rows, shallow_boundaries))
+}
+
 fn daemon_ls_remote_rows_with_shallows(
     url: &str,
     heads: bool,
@@ -27034,7 +39106,7 @@ fn daemon_ls_remote_rows_with_shallows(
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_handshake(&mut stream, &url)?;
     let mut reader = daemon_transport_reader(stream);
-    parse_upload_pack_advertisement_rows_with_shallows(
+    parse_daemon_upload_pack_advertisement_rows_with_shallows(
         &mut reader,
         heads,
         tags,
@@ -27051,22 +39123,31 @@ fn daemon_open_advertised_upload_pack(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<DaemonAdvertisedUploadPack> {
+    daemon_open_advertised_upload_pack_with_verbose(url, heads, tags, refs_only, patterns, false)
+}
+
+fn daemon_open_advertised_upload_pack_with_verbose(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+    verbose: bool,
+) -> Result<DaemonAdvertisedUploadPack> {
     let url = ParsedDaemonUrl::parse(url)?;
-    let mut stream = daemon_transport_connect(&url)?;
+    let mut stream = daemon_transport_connect_with_verbose(&url, verbose)?;
     daemon_transport_handshake(&mut stream, &url)?;
     let mut reader = daemon_transport_reader(stream.try_clone()?);
-    let (rows, head_branch, _) = parse_upload_pack_advertisement_rows_with_shallows(
-        &mut reader,
-        heads,
-        tags,
-        refs_only,
-        patterns,
-    )?;
+    let advertisement =
+        parse_upload_pack_v0_advertisement(&mut reader, heads, tags, refs_only, patterns, true)?;
     Ok(DaemonAdvertisedUploadPack {
         stream,
         reader,
-        rows,
-        head_branch,
+        rows: advertisement.rows,
+        head_branch: advertisement.head_branch,
+        terminated_with_flush: advertisement.terminated_with_flush,
+        capabilities: advertisement.capabilities,
+        hash: advertisement.hash,
     })
 }
 
@@ -27101,34 +39182,107 @@ fn parse_upload_pack_advertisement_rows_with_shallows<R: BufRead>(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>)> {
+    let advertisement =
+        parse_upload_pack_v0_advertisement(reader, heads, tags, refs_only, patterns, false)?;
+    Ok((
+        advertisement.rows,
+        advertisement.head_branch,
+        advertisement.shallow_boundaries,
+    ))
+}
+
+fn parse_daemon_upload_pack_advertisement_rows_with_shallows<R: BufRead>(
+    reader: &mut R,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>)> {
+    parse_daemon_upload_pack_advertisement_rows_with_termination(
+        reader, heads, tags, refs_only, patterns,
+    )
+    .map(|(rows, head_branch, shallow_boundaries, _)| (rows, head_branch, shallow_boundaries))
+}
+
+fn parse_daemon_upload_pack_advertisement_rows_with_termination<R: BufRead>(
+    reader: &mut R,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>, bool)> {
+    let advertisement =
+        parse_upload_pack_v0_advertisement(reader, heads, tags, refs_only, patterns, true)?;
+    Ok((
+        advertisement.rows,
+        advertisement.head_branch,
+        advertisement.shallow_boundaries,
+        advertisement.terminated_with_flush,
+    ))
+}
+
+fn parse_upload_pack_v0_advertisement<R: BufRead>(
+    reader: &mut R,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+    daemon_remote_errors: bool,
+) -> Result<UploadPackV0Advertisement> {
     let mut rows = Vec::with_capacity(HTTP_REMOTE_REF_ROWS_CAPACITY_HINT);
     let mut head_branch = None;
     let mut shallow_boundaries = Vec::new();
+    let mut capabilities = Vec::new();
+    let mut capabilities_seen = false;
+    let mut hash = SmartTransportHash::sha1();
     let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
-    while read_pkt_line_payload_into(reader, &mut line)? {
+    let terminated_with_flush = loop {
+        match read_pkt_line_payload_state_into(reader, &mut line)? {
+            PktLinePayloadState::Eof => break false,
+            PktLinePayloadState::Flush => break true,
+            PktLinePayloadState::Payload => {}
+        }
         if let Some(nul_pos) = line.iter().position(|byte| *byte == 0)
-            && head_branch.is_none()
+            && !capabilities_seen
         {
-            head_branch = head_symref_branch_from_capabilities(&line[nul_pos + 1..]);
+            let advertised = &line[nul_pos + 1..];
+            head_branch = head_symref_branch_from_capabilities(advertised);
+            hash = SmartTransportHash::from_capabilities_strict(advertised, hash)?;
+            capabilities = ascii_tokens(advertised)
+                .map(|token| ascii_token_as_str(token).map(str::to_owned))
+                .collect::<Result<Vec<_>>>()?;
+            capabilities_seen = true;
         }
         let payload = line.split(|byte| *byte == 0).next().unwrap_or(&line);
         if payload.starts_with(b"version ") {
             continue;
         }
         if let Some(message) = payload.strip_prefix(b"ERR ") {
+            if daemon_remote_errors {
+                return Err(daemon_remote_error(message));
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: String::from_utf8_lossy(message).trim().to_owned(),
             });
         }
         if let Some(id) = upload_pack_shallow_id_from_payload(payload) {
-            shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+            if id.len() != hash.algorithm.digest_len() * 2 {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "invalid git upload-pack shallow advertisement: {}",
+                        String::from_utf8_lossy(payload).trim()
+                    ),
+                });
+            }
+            shallow_boundaries.push(ObjectId::from_hex_bytes(hash.algorithm, id)?);
             continue;
         }
         let Some((id, name)) = split_ls_remote_space_payload(payload) else {
             continue;
         };
-        if id.len() != GitHashAlgorithm::Sha1.digest_len() * 2 {
+        if id.len() != hash.algorithm.digest_len() * 2 {
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!(
@@ -27140,16 +39294,27 @@ fn parse_upload_pack_advertisement_rows_with_shallows<R: BufRead>(
         if !ls_remote_ref_name_selected(name, heads, tags, refs_only) {
             continue;
         }
-        let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
+        let id = ObjectId::from_hex_bytes(hash.algorithm, id)?;
         push_ls_remote_row_bytes(&mut rows, id, name, patterns);
-    }
+    };
     sort_dedup_object_ids(&mut shallow_boundaries);
-    Ok((rows, head_branch, shallow_boundaries))
+    Ok(UploadPackV0Advertisement {
+        rows,
+        head_branch,
+        shallow_boundaries,
+        capabilities,
+        hash,
+        terminated_with_flush,
+    })
 }
 
-fn daemon_head_branch(url: &str) -> Result<Option<String>> {
+pub(crate) fn daemon_head_branch(url: &str) -> Result<Option<String>> {
+    daemon_head_branch_with_verbose(url, false)
+}
+
+fn daemon_head_branch_with_verbose(url: &str, verbose: bool) -> Result<Option<String>> {
     let url = ParsedDaemonUrl::parse(url)?;
-    let mut stream = daemon_transport_connect(&url)?;
+    let mut stream = daemon_transport_connect_with_verbose(&url, verbose)?;
     daemon_transport_handshake(&mut stream, &url)?;
     let mut reader = daemon_transport_reader(stream);
     let Some(line) = read_pkt_line_payload_from_reader(&mut reader)? else {
@@ -27176,7 +39341,53 @@ pub(crate) fn daemon_fetch_pack_with_haves(
     roots: &[ObjectId],
     haves: &[ObjectId],
 ) -> Result<()> {
-    daemon_fetch_pack_with_depth_and_haves(url, objects_dir, roots, haves, None).map(|_| ())
+    daemon_fetch_pack_with_haves_verbose(url, objects_dir, roots, haves, false)
+}
+
+pub(crate) fn daemon_fetch_pack_with_haves_for_promisor(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+) -> Result<()> {
+    let mut receive = PackReceiveResult::default();
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::threshold_default(),
+    )?;
+    let result = daemon_fetch_pack_with_shallow_options_and_haves_verbose_with_result_with_policy(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        UploadPackShallowOptions::filter("blob:none"),
+        false,
+        hash,
+        PackKeepPolicy::Transient,
+        &mut receive,
+    )?;
+    let _ = result;
+    receive
+        .publish_promisor_markers_and_release_owned(b"")
+        .map_err(CliError::Io)
+}
+
+fn daemon_fetch_pack_with_haves_verbose(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    verbose: bool,
+) -> Result<()> {
+    daemon_fetch_pack_with_shallow_options_and_haves_verbose(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        UploadPackShallowOptions::depth(None),
+        verbose,
+    )
+    .map(|_| ())
 }
 
 fn daemon_fetch_pack_with_depth(
@@ -27204,6 +39415,24 @@ fn daemon_fetch_pack_with_depth_and_haves(
     )
 }
 
+fn daemon_fetch_pack_with_depth_and_haves_verbose(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    verbose: bool,
+) -> Result<Vec<ObjectId>> {
+    daemon_fetch_pack_with_shallow_options_and_haves_verbose(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        UploadPackShallowOptions::depth(depth),
+        verbose,
+    )
+}
+
 fn daemon_fetch_pack_with_shallow_options_and_haves(
     url: &str,
     objects_dir: &std::path::Path,
@@ -27211,13 +39440,79 @@ fn daemon_fetch_pack_with_shallow_options_and_haves(
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
 ) -> Result<Vec<ObjectId>> {
+    daemon_fetch_pack_with_shallow_options_and_haves_verbose(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        false,
+    )
+}
+
+fn daemon_fetch_pack_with_shallow_options_and_haves_verbose(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    verbose: bool,
+) -> Result<Vec<ObjectId>> {
+    daemon_fetch_pack_with_shallow_options_and_haves_verbose_with_result(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        verbose,
+    )
+    .map(PackFetchResult::into_shallow_boundaries)
+}
+
+fn daemon_fetch_pack_with_shallow_options_and_haves_verbose_with_result(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    verbose: bool,
+) -> Result<PackFetchResult> {
+    let mut receive = PackReceiveResult::default();
+    let hash = SmartTransportHash::for_objects_dir_with_policy(
+        objects_dir,
+        FetchPackPolicy::resolve_for_objects_dir(objects_dir, ForceIndexReasons::default())?,
+    )?;
+    daemon_fetch_pack_with_shallow_options_and_haves_verbose_with_result_with_policy(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        verbose,
+        hash,
+        PackKeepPolicy::None,
+        &mut receive,
+    )
+}
+
+fn daemon_fetch_pack_with_shallow_options_and_haves_verbose_with_result_with_policy(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    verbose: bool,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
     if roots.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PackFetchResult::default());
     }
     let url = ParsedDaemonUrl::parse(url)?;
     let mut stream = {
         let _trace = phase_trace("daemon_fetch_pack.connect");
-        let mut stream = daemon_transport_connect(&url)?;
+        let mut stream = daemon_transport_connect_with_verbose(&url, verbose)?;
         daemon_transport_handshake(&mut stream, &url)?;
         stream
     };
@@ -27228,7 +39523,8 @@ fn daemon_fetch_pack_with_shallow_options_and_haves(
         while read_pkt_line_payload_into(&mut reader, &mut line)? {}
     }
 
-    let request = build_upload_pack_request_from_shallow_options(roots, haves, options)?;
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
     {
         let _trace = phase_trace("daemon_fetch_pack.request");
         stream.write_all(&request)?;
@@ -27249,11 +39545,21 @@ fn daemon_fetch_pack_with_shallow_options_and_haves(
         };
         shallow_boundaries
     };
-    {
+    let pack_id = {
         let _trace = phase_trace("daemon_fetch_pack.index_pack");
-        write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    }
-    Ok(shallow_boundaries)
+        write_indexed_pack_file_with_policy(
+            objects_dir,
+            &temp_pack,
+            !haves.is_empty(),
+            hash,
+            keep_policy,
+            receive,
+        )?
+    };
+    Ok(PackFetchResult {
+        shallow_boundaries,
+        installed_pack_ids: vec![pack_id],
+    })
 }
 
 fn daemon_fetch_pack_from_advertised_stream(
@@ -27295,6 +39601,59 @@ fn daemon_fetch_pack_from_advertised_stream(
     Ok(shallow_boundaries)
 }
 
+fn daemon_fetch_pack_from_advertised_stream_with_policy(
+    mut stream: std::net::TcpStream,
+    mut reader: io::BufReader<std::net::TcpStream>,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    hash: SmartTransportHash,
+    keep_policy: PackKeepPolicy,
+    receive: &mut PackReceiveResult,
+) -> Result<PackFetchResult> {
+    if roots.is_empty() {
+        return Ok(PackFetchResult::default());
+    }
+    let request =
+        build_upload_pack_request_from_shallow_options_with_hash(roots, haves, options, hash)?;
+    {
+        let _trace = phase_trace("daemon_fetch_pack.request");
+        stream.write_all(&request)?;
+        stream.flush()?;
+    }
+
+    let temp_pack = temp_http_pack_path(objects_dir)?;
+    let shallow_boundaries = {
+        let _trace = phase_trace("daemon_fetch_pack.sideband_to_pack");
+        let Some(shallow_boundaries) =
+            parse_upload_pack_sideband_response_to_file(&mut reader, &temp_pack, roots.len())?
+        else {
+            let _ = fs::remove_file(&temp_pack);
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "git daemon upload-pack response did not contain a pack".into(),
+            });
+        };
+        shallow_boundaries
+    };
+    let pack_id = {
+        let _trace = phase_trace("daemon_fetch_pack.index_pack");
+        write_indexed_pack_file_with_policy(
+            objects_dir,
+            &temp_pack,
+            !haves.is_empty(),
+            hash,
+            keep_policy,
+            receive,
+        )?
+    };
+    Ok(PackFetchResult {
+        shallow_boundaries,
+        installed_pack_ids: vec![pack_id],
+    })
+}
+
 fn daemon_send_receive_pack(
     url: &str,
     push_refs: &[(PushRef, Option<ObjectId>)],
@@ -27305,7 +39664,7 @@ fn daemon_send_receive_pack(
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_service_handshake(&mut stream, &url, "git-receive-pack")?;
     let mut reader = daemon_transport_reader(stream.try_clone()?);
-    let advertisement = parse_receive_pack_advertisement(&mut reader)?;
+    let advertisement = parse_daemon_receive_pack_advertisement(&mut reader)?;
     if !advertisement.capabilities.contains("report-status") {
         return Err(CliError::Fatal {
             code: 128,
@@ -27348,6 +39707,8 @@ pub(crate) fn http_backend() -> Result<()> {
             if !http_backend_service_enabled(&repo, "http.uploadpack", true)? {
                 return http_backend_status(&mut stdout, "403 Forbidden");
             }
+            let hash = SmartTransportHash::for_repo(&repo)?;
+            let server_policy = UploadPackServerPolicy::from_repo(&repo)?;
             http_backend_no_cache_headers(&mut stdout, "application/x-git-upload-pack-result")?;
             stdout.flush()?;
             let result = (|| {
@@ -27361,16 +39722,43 @@ pub(crate) fn http_backend() -> Result<()> {
                     io::Cursor::new(request_body),
                 );
                 if upload_pack_protocol_v2_requested() {
-                    let request = read_upload_pack_v2_request_from_stdin(&mut stdin)
+                    let request =
+                        read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+                            &mut stdin,
+                            hash,
+                            server_policy.clone(),
+                        )
                         .map_err(http_backend_map_request_body_error)?;
-                    return upload_pack_v2_respond_to_writer(&repo, request, &mut stdout);
+                    let request = match request {
+                        UploadPackV2RequestRead::Request(request) => request,
+                        UploadPackV2RequestRead::Eof | UploadPackV2RequestRead::Empty => {
+                            UploadPackV2Request::Unknown
+                        }
+                    };
+                    return upload_pack_v2_respond_to_writer_with_hash_and_server_policy(
+                        &repo,
+                        request,
+                        &mut stdout,
+                        hash,
+                        server_policy.clone(),
+                    );
                 }
-                let request = read_upload_pack_request_from_stdin(&mut stdin)
-                    .map_err(http_backend_map_request_body_error)?;
+                let request = read_upload_pack_request_from_stdin_with_hash_and_policy(
+                    &mut stdin,
+                    hash,
+                    server_policy.filter.clone(),
+                )
+                .map_err(http_backend_map_request_body_error)?;
                 if request.wants.is_empty() {
                     return Ok(());
                 }
-                upload_pack_respond_with_pack(&repo, request, true)
+                upload_pack_respond_with_pack_with_hash_and_server_policy(
+                    &repo,
+                    request,
+                    true,
+                    hash,
+                    server_policy,
+                )
             })();
             return http_backend_child_result(result);
         }
@@ -27411,15 +39799,27 @@ pub(crate) fn http_backend() -> Result<()> {
         if !http_backend_service_enabled(&repo, "http.uploadpack", true)? {
             return http_backend_status(&mut stdout, "403 Forbidden");
         }
-        let runtime = primitive_runtime_for_repo(&repo);
+        let hash = SmartTransportHash::for_repo(&repo)?;
+        let server_policy = UploadPackServerPolicy::from_repo(&repo)?;
+        let runtime = primitive_runtime_for_repo_with_hash(&repo, hash);
         let refs = runtime.refs_store_adapter();
         http_backend_no_cache_headers(&mut stdout, "application/x-git-upload-pack-advertisement")?;
         write_pkt_line(&mut stdout, b"# service=git-upload-pack\n")?;
         stdout.write_all(b"0000")?;
         if upload_pack_protocol_v2_requested() {
-            write_upload_pack_v2_capabilities(&mut stdout)?;
+            write_upload_pack_v2_capabilities_with_server_policy(
+                &mut stdout,
+                hash,
+                server_policy.clone(),
+            )?;
         } else {
-            write_upload_pack_advertisement_from_adapter(&refs, &mut stdout, true)?;
+            write_upload_pack_advertisement_from_hash_and_policy(
+                &refs,
+                &mut stdout,
+                true,
+                hash,
+                server_policy.filter,
+            )?;
         }
         stdout.flush()?;
         return Ok(());
@@ -28185,26 +40585,73 @@ fn write_upload_pack_advertisement_from_adapter<W: Write>(
     out: &mut W,
     include_no_done: bool,
 ) -> Result<()> {
-    let store = object_adapter_from_objects_dir(refs.objects_dir());
-    let capabilities = upload_pack_capabilities_from_adapter(refs, include_no_done)?;
+    write_upload_pack_advertisement_from_adapter_with_hash(
+        refs,
+        out,
+        include_no_done,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn write_upload_pack_advertisement_from_adapter_with_hash<W: Write>(
+    refs: &OwnedCliRefsStoreAdapter,
+    out: &mut W,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    write_upload_pack_advertisement_from_hash_and_policy(
+        refs,
+        out,
+        include_no_done,
+        hash,
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn write_upload_pack_advertisement_from_hash_and_policy<W: Write>(
+    refs: &OwnedCliRefsStoreAdapter,
+    out: &mut W,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
+) -> Result<()> {
+    let store = object_adapter_from_objects_dir_with_hash(refs.objects_dir(), hash);
+    let capabilities =
+        upload_pack_capabilities_from_hash_and_policy(refs, include_no_done, hash, filter_policy)?;
     let mut wrote = false;
     if let Some(head) = refs.resolve_ref("HEAD")? {
-        write_ref_advertisement_pkt_line(out, Some(&head), "HEAD", Some(&capabilities))?;
+        write_ref_advertisement_pkt_line_with_hash(
+            out,
+            Some(&head),
+            "HEAD",
+            Some(&capabilities),
+            hash,
+        )?;
         wrote = true;
     }
     refs.for_each_server_info_ref(|id, name| {
-        write_upload_pack_ref_advertisement(
+        if name.ends_with("^{}") {
+            return Ok::<(), CliError>(());
+        }
+        write_upload_pack_ref_advertisement_with_hash(
             out,
             &store,
             id,
             name,
             (!wrote).then_some(capabilities.as_str()),
+            hash,
         )?;
         wrote = true;
         Ok::<(), CliError>(())
     })?;
     if !wrote {
-        write_ref_advertisement_pkt_line(out, None, "capabilities^{}", Some(&capabilities))?;
+        write_ref_advertisement_pkt_line_with_hash(
+            out,
+            None,
+            "capabilities^{}",
+            Some(&capabilities),
+            hash,
+        )?;
         out.write_all(b"0000")?;
         return Ok(());
     }
@@ -28219,11 +40666,35 @@ fn write_upload_pack_ref_advertisement<W: Write>(
     name: &str,
     capabilities: Option<&str>,
 ) -> Result<()> {
-    write_ref_advertisement_pkt_line(out, Some(id), name, capabilities)?;
+    write_upload_pack_ref_advertisement_with_hash(
+        out,
+        store,
+        id,
+        name,
+        capabilities,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn write_upload_pack_ref_advertisement_with_hash<W: Write>(
+    out: &mut W,
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    name: &str,
+    capabilities: Option<&str>,
+    hash: SmartTransportHash,
+) -> Result<()> {
+    write_ref_advertisement_pkt_line_with_hash(out, Some(id), name, capabilities, hash)?;
     if name.starts_with("refs/tags/")
         && let Some(peeled) = peel_tag(store, id)?
     {
-        write_ref_advertisement_pkt_line(out, Some(&peeled), &format!("{name}^{{}}"), None)?;
+        write_ref_advertisement_pkt_line_with_hash(
+            out,
+            Some(&peeled),
+            &format!("{name}^{{}}"),
+            None,
+            hash,
+        )?;
     }
     Ok(())
 }
@@ -28231,6 +40702,32 @@ fn write_upload_pack_ref_advertisement<W: Write>(
 fn upload_pack_capabilities_from_adapter(
     refs: &OwnedCliRefsStoreAdapter,
     include_no_done: bool,
+) -> Result<String> {
+    upload_pack_capabilities_from_adapter_with_hash(
+        refs,
+        include_no_done,
+        SmartTransportHash::sha1(),
+    )
+}
+
+fn upload_pack_capabilities_from_adapter_with_hash(
+    refs: &OwnedCliRefsStoreAdapter,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+) -> Result<String> {
+    upload_pack_capabilities_from_hash_and_policy(
+        refs,
+        include_no_done,
+        hash,
+        UploadPackFilterPolicy::default(),
+    )
+}
+
+fn upload_pack_capabilities_from_hash_and_policy(
+    refs: &OwnedCliRefsStoreAdapter,
+    include_no_done: bool,
+    hash: SmartTransportHash,
+    filter_policy: UploadPackFilterPolicy,
 ) -> Result<String> {
     let mut capabilities = String::from(
         "multi_ack thin-pack side-band side-band-64k ofs-delta shallow \
@@ -28244,7 +40741,12 @@ fn upload_pack_capabilities_from_adapter(
         capabilities.push_str(" symref=HEAD:");
         capabilities.push_str(&target);
     }
-    capabilities.push_str(" object-format=sha1 agent=zmin/0.1.0");
+    if filter_policy.advertised() {
+        capabilities.push_str(" filter");
+    }
+    capabilities.push_str(" object-format=");
+    capabilities.push_str(hash.name());
+    capabilities.push_str(" agent=zmin/0.1.0");
     Ok(capabilities)
 }
 
@@ -28287,9 +40789,1131 @@ fn is_zero_object_id_object(value: &ObjectId) -> bool {
 mod transport_request_tests {
     use super::*;
     use std::ffi::{OsStr, OsString};
+    use zmin_git_core::GitObjectSink;
 
     fn oid(hex: &str) -> ObjectId {
         ObjectId::from_hex(GitHashAlgorithm::Sha1, hex).expect("object id")
+    }
+
+    fn append_sideband_pkt_line(out: &mut Vec<u8>, payload: &[u8]) {
+        let mut framed = Vec::with_capacity(payload.len() + 1);
+        framed.push(1);
+        framed.extend_from_slice(payload);
+        append_pkt_payload(out, &framed).expect("sideband pkt-line");
+    }
+
+    #[test]
+    fn smart_http_object_format_capabilities_keep_first_format() {
+        let default = SmartTransportHash::sha1();
+
+        let first_wins = SmartTransportHash::from_capabilities(
+            b"object-format=sha1 object-format=sha256",
+            default,
+        )
+        .expect("first object format wins");
+        assert_eq!(first_wins, SmartTransportHash::sha1());
+
+        let later_unsupported = SmartTransportHash::from_capabilities(
+            b"object-format=sha1 object-format=sha512",
+            default,
+        )
+        .expect("later object format is ignored");
+        assert_eq!(later_unsupported, SmartTransportHash::sha1());
+
+        let duplicate = SmartTransportHash::from_capabilities(
+            b"object-format=sha256 object-format=sha256",
+            default,
+        )
+        .expect("duplicate object format is accepted");
+        assert_eq!(
+            duplicate,
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256)
+        );
+
+        let unsupported = SmartTransportHash::from_capabilities(b"object-format=sha512", default)
+            .expect_err("unsupported object format");
+        assert!(matches!(
+            unsupported,
+            CliError::Fatal { message, .. }
+                if message == "unknown object format 'sha512' specified by server"
+        ));
+    }
+
+    #[test]
+    fn configured_fetch_head_uses_sha256_reftable_refs() {
+        let temp = tempfile::TempDir::new().expect("temp repository");
+        let git_dir = temp.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("git directory");
+        fs::write(
+            git_dir.join("config"),
+            b"[core]\n\trepositoryformatversion = 1\n\tbare = false\n[extensions]\n\tobjectFormat = sha256\n\trefStorage = reftable\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n",
+        )
+        .expect("repository config");
+        let refs = RefStore::new(&git_dir, GitHashAlgorithm::Sha256);
+        let id = ObjectId::new(GitHashAlgorithm::Sha256, &[7; 32]);
+        refs.write_ref("refs/heads/main", &id).expect("source ref");
+        refs.write_head_symbolic("refs/heads/main").expect("HEAD");
+        let repo = GitRepo {
+            root: temp.path().to_path_buf(),
+            git_dir: git_dir.clone(),
+            objects_dir: git_dir.join("objects"),
+            index_path: git_dir.join("index"),
+        };
+
+        write_configured_fetch_head_file(
+            &repo,
+            &refs,
+            &refs,
+            "origin",
+            "file:///source",
+            &["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            false,
+            false,
+            false,
+            false,
+        )
+        .expect("FETCH_HEAD");
+
+        let fetch_head = fs::read_to_string(git_dir.join("FETCH_HEAD")).expect("FETCH_HEAD");
+        assert!(fetch_head.starts_with(&id.to_hex()));
+        assert_eq!(fetch_head.as_bytes()[64], b'\t');
+    }
+
+    #[test]
+    fn clone_v0_filter_request_keeps_capability_and_hash_width() {
+        let sha1_root = oid("1111111111111111111111111111111111111111");
+        let supported = clone_v0_upload_pack_options(None, Some("blob:none"), true);
+        let request = build_upload_pack_request_from_shallow_options_with_hash(
+            &[sha1_root.clone()],
+            &[],
+            supported,
+            SmartTransportHash::sha1(),
+        )
+        .expect("SHA-1 filtered request");
+        let request = String::from_utf8(request).expect("request text");
+        assert!(request.contains("filter\n"));
+        assert!(request.contains("filter blob:none\n"));
+
+        let unsupported = clone_v0_upload_pack_options(Some(2), Some("blob:none"), false);
+        let request = build_upload_pack_request_from_shallow_options_with_hash(
+            &[sha1_root],
+            &[],
+            unsupported,
+            SmartTransportHash::sha1(),
+        )
+        .expect("unsupported filtered request");
+        let request = String::from_utf8(request).expect("request text");
+        assert!(request.contains("deepen 2\n"));
+        assert!(request.contains(" filter\n"));
+        assert!(!request.contains("filter blob:none\n"));
+
+        let sha256_root = ObjectId::from_hex(
+            GitHashAlgorithm::Sha256,
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .expect("SHA-256 object id");
+        let request = build_upload_pack_request_from_shallow_options_with_hash(
+            &[sha256_root],
+            &[],
+            clone_v0_upload_pack_options(None, Some("blob:none"), true),
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256),
+        )
+        .expect("SHA-256 filtered request");
+        assert!(request.windows(64).any(|window| {
+            window == b"1111111111111111111111111111111111111111111111111111111111111111"
+        }));
+    }
+
+    #[test]
+    fn smart_http_v2_absent_object_format_fails_for_sha256_local() {
+        let mut response = Vec::new();
+        append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+        response.extend_from_slice(b"0000");
+        let error = parse_upload_pack_v2_capabilities_for_local_hash(
+            &mut io::Cursor::new(response),
+            false,
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256),
+        )
+        .expect_err("missing SHA-256 capability");
+        match error {
+            CliError::Fatal { code, message } => {
+                assert_eq!(code, 128);
+                assert_eq!(message, "the server does not support algorithm 'sha256'");
+            }
+            other => panic!("expected fatal error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn smart_http_v2_capabilities_record_filter_feature() {
+        let mut response = Vec::new();
+        append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+        append_pkt_payload(&mut response, b"fetch=shallow wait-for-done filter\n")
+            .expect("fetch capability pkt-line");
+        append_pkt_payload(&mut response, b"object-format=sha1\n").expect("object format pkt-line");
+        response.extend_from_slice(b"0000");
+        let capabilities = parse_upload_pack_v2_capabilities_for_local_hash_with_features(
+            &mut io::Cursor::new(response),
+            false,
+            SmartTransportHash::sha1(),
+        )
+        .expect("v2 capabilities");
+        assert!(capabilities.filter);
+
+        let mut response = Vec::new();
+        append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+        append_pkt_payload(&mut response, b"fetch=shallow wait-for-done\n")
+            .expect("fetch capability pkt-line");
+        response.extend_from_slice(b"0000");
+        let capabilities = parse_upload_pack_v2_capabilities_for_local_hash_with_features(
+            &mut io::Cursor::new(response),
+            false,
+            SmartTransportHash::sha1(),
+        )
+        .expect("v2 capabilities");
+        assert!(!capabilities.filter);
+
+        let mut response = Vec::new();
+        append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+        append_pkt_payload(&mut response, b"fetch=shallow wait-for-done filter\n")
+            .expect("fetch capability pkt-line");
+        append_pkt_payload(&mut response, b"object-format=sha256\n")
+            .expect("object format pkt-line");
+        response.extend_from_slice(b"0000");
+        let capabilities = parse_upload_pack_v2_capabilities_impl_with_features(
+            &mut io::Cursor::new(response),
+            false,
+            None,
+        )
+        .expect("v2 SHA-256 capabilities");
+        assert!(capabilities.filter);
+        assert_eq!(
+            capabilities.hash,
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256)
+        );
+
+        let mut response = Vec::new();
+        append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+        append_pkt_payload(
+            &mut response,
+            b"fetch=shallow wait-for-done packfile-uris sideband-all\n",
+        )
+        .expect("fetch capability pkt-line");
+        append_pkt_payload(&mut response, b"object-format=sha1\n").expect("object format pkt-line");
+        response.extend_from_slice(b"0000");
+        let capabilities = parse_upload_pack_v2_capabilities_for_local_hash_with_features(
+            &mut io::Cursor::new(response),
+            false,
+            SmartTransportHash::sha1(),
+        )
+        .expect("packfile URI capabilities");
+        assert!(capabilities.packfile_uris);
+        assert!(capabilities.sideband_all);
+    }
+
+    #[test]
+    fn smart_http_v2_packfile_uri_request_has_one_ordered_feature_line() {
+        let root = oid("1111111111111111111111111111111111111111");
+        let request =
+            build_upload_pack_v2_fetch_request_with_shallow_options_with_hash_and_features(
+                &[root],
+                &[],
+                &[],
+                UploadPackShallowOptions::depth(None),
+                SmartTransportHash::sha1(),
+                &["https".to_owned(), "http".to_owned(), "https".to_owned()],
+                true,
+            )
+            .expect("packfile URI request");
+        let request = String::from_utf8(request).expect("request text");
+        assert_eq!(request.matches("sideband-all").count(), 1);
+        assert_eq!(request.matches("packfile-uris ").count(), 1);
+        assert!(request.contains("packfile-uris https,http,https"));
+    }
+
+    #[test]
+    fn smart_http_v2_packfile_uri_response_parses_sideband_sections_strictly() {
+        let mut response = Vec::new();
+        append_sideband_pkt_line(&mut response, b"shallow-info\n");
+        append_sideband_pkt_line(
+            &mut response,
+            b"shallow 1111111111111111111111111111111111111111\n",
+        );
+        response.extend_from_slice(b"0001");
+        append_sideband_pkt_line(&mut response, b"wanted-refs\n");
+        append_sideband_pkt_line(
+            &mut response,
+            b"2222222222222222222222222222222222222222 refs/heads/main\n",
+        );
+        response.extend_from_slice(b"0001");
+        append_sideband_pkt_line(&mut response, b"packfile-uris\n");
+        append_sideband_pkt_line(
+            &mut response,
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa https://cdn.example.test/one.pack\n",
+        );
+        response.extend_from_slice(b"0001");
+        append_sideband_pkt_line(&mut response, b"packfile\n");
+        let mut pack = vec![1];
+        pack.extend_from_slice(b"PACK");
+        append_pkt_payload(&mut response, &pack).expect("pack pkt-line");
+        response.extend_from_slice(b"0000");
+
+        let temp = tempfile::TempDir::new().expect("temp directory");
+        let pack_path = temp.path().join("inline.pack");
+        let file = fs::File::create(&pack_path).expect("pack output");
+        let parsed = parse_upload_pack_v2_uri_response_to_open_file(
+            &mut io::Cursor::new(response),
+            &pack_path,
+            file,
+            SmartTransportHash::sha1(),
+            true,
+        )
+        .expect("URI response");
+        assert_eq!(parsed.packfile_uris.len(), 1);
+        assert_eq!(parsed.shallow_boundaries.len(), 1);
+        assert_eq!(fs::read(&pack_path).expect("inline pack"), b"PACK");
+
+        let mut malformed = Vec::new();
+        append_sideband_pkt_line(&mut malformed, b"packfile-uris\n");
+        malformed.extend_from_slice(b"0001");
+        append_sideband_pkt_line(&mut malformed, b"wanted-refs\n");
+        malformed.extend_from_slice(b"0001");
+        let malformed_path = temp.path().join("malformed.pack");
+        let error = parse_upload_pack_v2_uri_response_to_open_file(
+            &mut io::Cursor::new(malformed),
+            &malformed_path,
+            fs::File::create(&malformed_path).expect("malformed output"),
+            SmartTransportHash::sha1(),
+            true,
+        )
+        .expect_err("misordered URI response");
+        assert!(matches!(error, CliError::Fatal { .. }));
+    }
+
+    #[test]
+    fn v2_server_option_capability_is_required_only_for_requested_options() {
+        for (advertised, server_options) in [
+            (false, Vec::<String>::new()),
+            (true, Vec::<String>::new()),
+            (false, vec!["trace=clone".to_owned()]),
+            (true, vec!["trace=clone".to_owned()]),
+        ] {
+            let mut response = Vec::new();
+            append_pkt_payload(&mut response, b"version 2\n").expect("version pkt-line");
+            append_pkt_payload(&mut response, b"fetch=shallow wait-for-done\n")
+                .expect("fetch capability pkt-line");
+            if advertised {
+                append_pkt_payload(&mut response, b"server-option\n")
+                    .expect("server-option capability pkt-line");
+            }
+            append_pkt_payload(&mut response, b"object-format=sha1\n")
+                .expect("object format pkt-line");
+            response.extend_from_slice(b"0000");
+
+            let result = parse_upload_pack_v2_capabilities_impl_with_features(
+                &mut io::Cursor::new(response),
+                !server_options.is_empty(),
+                None,
+            );
+            if !advertised && !server_options.is_empty() {
+                let error = result.expect_err("missing requested server-option capability");
+                assert!(matches!(
+                    error,
+                    CliError::Fatal { message, .. }
+                        if message == "remote upload-pack does not advertise protocol v2 server-option"
+                ));
+            } else {
+                result.expect("v2 capability requirement should match requested options");
+            }
+        }
+    }
+
+    #[test]
+    fn smart_http_v2_ls_refs_requests_symrefs_and_unborn_and_parses_head() {
+        let request = build_upload_pack_v2_ls_refs_configured_fetch_request_with_hash(
+            &[],
+            SmartTransportHash::sha1(),
+        )
+        .expect("ls-refs request");
+        assert!(
+            request
+                .windows(b"symrefs\n".len())
+                .any(|window| window == b"symrefs\n")
+        );
+        assert!(
+            request
+                .windows(b"unborn\n".len())
+                .any(|window| window == b"unborn\n")
+        );
+
+        let head = oid("1111111111111111111111111111111111111111");
+        let mut response = Vec::new();
+        append_pkt_payload(
+            &mut response,
+            format!("{} HEAD symref-target:refs/heads/main\n", head.to_hex()).as_bytes(),
+        )
+        .expect("HEAD pkt-line");
+        append_pkt_payload(
+            &mut response,
+            format!("{} refs/heads/other\n", head.to_hex()).as_bytes(),
+        )
+        .expect("branch pkt-line");
+        response.extend_from_slice(b"0000");
+        let (rows, branch) = parse_upload_pack_v2_ls_refs_response_with_hash_and_head(
+            &mut io::Cursor::new(response),
+            SmartTransportHash::sha1(),
+        )
+        .expect("ls-refs response");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn filtered_ssh_daemon_clone_protocol_selection_allows_v0_and_v2_only() {
+        assert!(matches!(
+            clone_http_protocol_version(&[]),
+            HttpProtocolVersion::V0
+        ));
+        assert!(matches!(
+            clone_http_protocol_version(&["protocol.version=2".to_owned()]),
+            HttpProtocolVersion::V2
+        ));
+        assert!(matches!(
+            clone_http_protocol_version(&["protocol.version=1".to_owned()]),
+            HttpProtocolVersion::V1
+        ));
+    }
+
+    #[test]
+    fn filtered_remote_default_checkout_accepts_filter_families() {
+        for transport in [CloneTransportPlan::Ssh, CloneTransportPlan::GitDaemon] {
+            let plan = ClonePlan {
+                mode: CloneModePlan::Standard,
+                transport,
+            };
+            validate_clone_plan_for_options(
+                plan,
+                false,
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("blob:none"),
+            )
+            .expect("blob:none default checkout is supported");
+
+            validate_clone_plan_for_options(
+                plan,
+                false,
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("tree:0"),
+            )
+            .expect("tree filters are supported for remote checkout");
+            validate_clone_plan_for_options(
+                plan,
+                false,
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("combine:blob:none+tree:0"),
+            )
+            .expect("combined filters are supported for remote checkout");
+
+            validate_clone_plan_for_options(
+                plan,
+                true,
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("tree:0"),
+            )
+            .expect("bare arbitrary filters remain allowed");
+            validate_clone_plan_for_options(
+                plan,
+                false,
+                true,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("tree:0"),
+            )
+            .expect("no-checkout arbitrary filters remain allowed");
+
+            let instant_plan = ClonePlan {
+                mode: CloneModePlan::WorktreeFirst,
+                transport,
+            };
+            let error = validate_clone_plan_for_options(
+                instant_plan,
+                false,
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                Some("blob:none"),
+            )
+            .expect_err("filtered instant checkout must fail before transport");
+            assert!(matches!(
+                error,
+                CliError::Fatal { message, .. }
+                    if message
+                        == "clone --filter checkout over SSH and git daemon does not support --instant"
+            ));
+        }
+    }
+
+    #[test]
+    fn clone_bundle_uri_rejects_shallow_options_before_destination_setup() {
+        for (option, depth, since, excludes) in [
+            ("--depth", Some(1), None, Vec::new()),
+            ("--shallow-since", None, Some("2025-01-01"), Vec::new()),
+            ("--shallow-exclude", None, None, vec!["main".to_owned()]),
+        ] {
+            let error = validate_clone_bundle_uri_options(
+                Some("/tmp/example.bundle"),
+                depth,
+                since,
+                &excludes,
+            )
+            .expect_err("bundle URI and shallow options must conflict");
+            assert!(matches!(
+                error,
+                CliError::Fatal { code: 128, message }
+                    if message == format!("--bundle-uri is incompatible with {option}")
+            ));
+        }
+        validate_clone_bundle_uri_options(Some("/tmp/example.bundle"), None, None, &[])
+            .expect("direct bundle without shallow options");
+        validate_clone_bundle_uri_options(None, Some(1), None, &[])
+            .expect("shallow clone without bundle URI");
+    }
+
+    #[test]
+    fn v2_filtered_clone_fetch_request_is_hash_aware_and_single_request_shaped() {
+        let hash = SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256);
+        let root = ObjectId::from_hex(hash.algorithm, &"a".repeat(64)).expect("root");
+        let request = build_upload_pack_v2_fetch_request_with_shallow_options_with_hash(
+            &[root],
+            &[],
+            &["trace=clone".to_owned()],
+            UploadPackShallowOptions::depth(Some(3))
+                .with_filter(Some("blob:none"))
+                .with_filter_support(true),
+            hash,
+        )
+        .expect("v2 filtered fetch request");
+        let request = String::from_utf8(request).expect("request text");
+        assert_eq!(request.matches("command=fetch").count(), 1);
+        assert!(request.contains("object-format=sha256"));
+        assert!(!request.contains("object-format=sha256\n"));
+        assert!(request.contains("server-option=trace=clone"));
+        assert!(!request.contains("server-option=trace=clone\n"));
+        assert!(request.contains("want "));
+        assert!(request.contains("deepen 3\n"));
+        assert!(request.contains("filter blob:none"));
+        assert!(request.ends_with("done\n0000"));
+    }
+
+    #[test]
+    fn smart_http_promisor_marker_content_deduplicates_source_refs() {
+        let first = oid("1111111111111111111111111111111111111111");
+        let second = oid("2222222222222222222222222222222222222222");
+        let content = render_promisor_marker_content(
+            vec![
+                PromisorMarkerRef {
+                    source_ref: "refs/heads/main".to_owned(),
+                    old_id: Some(first.clone()),
+                },
+                PromisorMarkerRef {
+                    source_ref: "refs/heads/main".to_owned(),
+                    old_id: Some(second),
+                },
+            ],
+            GitHashAlgorithm::Sha1,
+        );
+        assert_eq!(
+            content,
+            format!("{} refs/heads/main\n", first.to_hex()).into_bytes()
+        );
+    }
+
+    #[test]
+    fn smart_http_pack_storage_and_keep_policy_matrix() {
+        assert_eq!(parse_unpack_limit("0x10").expect("hex limit"), Some(16));
+        assert_eq!(parse_unpack_limit("2k").expect("k limit"), Some(2048));
+        assert_eq!(
+            parse_unpack_limit("3M").expect("M limit"),
+            Some(3 * 1024 * 1024)
+        );
+        assert_eq!(parse_unpack_limit("-1k").expect("negative unset"), None);
+        assert!(parse_unpack_limit("").is_err());
+        assert!(parse_unpack_limit("08").is_err());
+        assert!(parse_unpack_limit("1x").is_err());
+        assert!(parse_unpack_limit("2147483648").is_err());
+
+        let below = FetchPackPolicy {
+            unpack_limit: Some(3),
+            force_index: ForceIndexReasons::default(),
+            validation_mode: None,
+        };
+        assert_eq!(
+            below.receive_decision(Some(2)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Loose,
+                keep: PackKeepPolicy::None,
+            }
+        );
+        assert_eq!(
+            below.receive_decision(Some(3)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Indexed,
+                keep: PackKeepPolicy::Transient,
+            }
+        );
+        assert_eq!(
+            FetchPackPolicy {
+                unpack_limit: Some(0),
+                force_index: ForceIndexReasons::default(),
+                validation_mode: None,
+            }
+            .receive_decision(None),
+            PackReceiveDecision {
+                storage: PackStorageMode::Loose,
+                keep: PackKeepPolicy::None,
+            }
+        );
+        assert_eq!(
+            FetchPackPolicy {
+                unpack_limit: Some(1),
+                force_index: ForceIndexReasons {
+                    promisor: true,
+                    ..ForceIndexReasons::default()
+                },
+                validation_mode: None,
+            }
+            .receive_decision(Some(0)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Indexed,
+                keep: PackKeepPolicy::None,
+            }
+        );
+        assert_eq!(
+            FetchPackPolicy {
+                unpack_limit: Some(100),
+                force_index: ForceIndexReasons {
+                    keep_pack: true,
+                    ..ForceIndexReasons::default()
+                },
+                validation_mode: None,
+            }
+            .receive_decision(Some(3)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Indexed,
+                keep: PackKeepPolicy::Transient,
+            }
+        );
+        assert_eq!(
+            FetchPackPolicy {
+                unpack_limit: Some(100),
+                force_index: ForceIndexReasons {
+                    fsck_objects: true,
+                    ..ForceIndexReasons::default()
+                },
+                validation_mode: None,
+            }
+            .receive_decision(Some(3)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Indexed,
+                keep: PackKeepPolicy::None,
+            }
+        );
+        assert_eq!(
+            FetchPackPolicy {
+                unpack_limit: Some(3),
+                force_index: ForceIndexReasons {
+                    promisor: true,
+                    ..ForceIndexReasons::default()
+                },
+                validation_mode: None,
+            }
+            .receive_decision(Some(2)),
+            PackReceiveDecision {
+                storage: PackStorageMode::Indexed,
+                keep: PackKeepPolicy::None,
+            }
+        );
+
+        let filtered = FetchPackPolicy {
+            unpack_limit: Some(3),
+            force_index: ForceIndexReasons {
+                promisor: true,
+                ..ForceIndexReasons::default()
+            },
+            validation_mode: None,
+        };
+        assert!(!filtered.should_rewrite_promisor_marker(Some(2)));
+        assert!(filtered.should_rewrite_promisor_marker(Some(3)));
+        assert!(filtered.should_rewrite_promisor_marker(Some(4)));
+        assert!(!filtered.should_rewrite_promisor_marker(Some(0)));
+        let explicit_keep = FetchPackPolicy {
+            force_index: ForceIndexReasons {
+                keep_pack: true,
+                promisor: true,
+                ..ForceIndexReasons::default()
+            },
+            ..filtered
+        };
+        assert!(explicit_keep.should_rewrite_promisor_marker(Some(0)));
+    }
+
+    #[test]
+    fn promisor_install_protection_is_transient_until_marker_metadata_dual_hash() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let policy = FetchPackPolicy {
+                unpack_limit: Some(3),
+                force_index: ForceIndexReasons {
+                    promisor: true,
+                    ..ForceIndexReasons::default()
+                },
+                validation_mode: None,
+            };
+            let below_limit = policy.receive_decision(Some(2));
+            assert_eq!(below_limit.storage, PackStorageMode::Indexed);
+            assert_eq!(below_limit.keep, PackKeepPolicy::None);
+            assert_eq!(
+                PackInstallProtection::for_decision(policy, below_limit.storage)
+                    .keep_policy(below_limit.keep),
+                PackKeepPolicy::Transient,
+                "internal marker protection must not change Git's do_keep decision"
+            );
+
+            let temp = tempfile::tempdir().expect("tempdir");
+            let objects_dir = temp.path().join("objects");
+            let pack_dir = objects_dir.join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let store = zmin_git_core::InMemoryObjectStore::new(algorithm);
+            let object_id = store
+                .write_object(GitObjectKind::Blob, b"below promisor threshold")
+                .expect("object");
+            let mut pack = Vec::new();
+            write_pack_from_store_with_options(
+                &store,
+                algorithm,
+                std::slice::from_ref(&object_id),
+                PackEncodeOptions::UNDELTIFIED,
+                &mut pack,
+            )
+            .expect("pack");
+            let incoming = temp.path().join("incoming.pack");
+            fs::write(&incoming, pack).expect("incoming pack");
+            let hash = SmartTransportHash::for_algorithm(algorithm).with_pack_policy(policy);
+            let mut receive = PackReceiveResult::default();
+            write_received_pack_file_with_hash(&objects_dir, &incoming, false, hash, &mut receive)
+                .expect("indexed promisor install");
+            let pack_id = receive
+                .installed_packs
+                .first()
+                .map(|(_, pack_id)| pack_id.clone())
+                .expect("installed pack");
+            let keep_path = pack_file_path(&pack_dir, &pack_id, ".keep");
+            let marker_path = pack_file_path(&pack_dir, &pack_id, ".promisor");
+            assert!(keep_path.exists(), "indexed promisor install must be kept");
+
+            receive
+                .publish_filtered_promisor_markers(b"non-empty must be suppressed")
+                .expect("empty marker boundary");
+            assert!(keep_path.exists(), "keep must survive marker publication");
+            assert_eq!(fs::read(&marker_path).expect("marker"), b"");
+
+            // Metadata publication owns the release boundary; the marker
+            // writer itself must not drop the receipt early.
+            receive.release_owned();
+            assert!(!keep_path.exists(), "keep must release after metadata");
+        }
+    }
+
+    #[test]
+    fn smart_http_fsck_boolean_accepts_git_numeric_values() {
+        assert!(!parse_fetch_bool("").expect("empty false"));
+        assert!(parse_fetch_bool("-1").expect("negative numeric true"));
+        assert!(parse_fetch_bool("0x2").expect("hex numeric true"));
+        assert!(!parse_fetch_bool("off").expect("off false"));
+        assert!(parse_fetch_bool("yes").expect("yes true"));
+        assert!(parse_fetch_bool("08").is_err());
+    }
+
+    #[test]
+    fn smart_http_filtered_marker_publish_respects_keep_matrix_dual_hash() {
+        for (algorithm, pack_hex, old_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "0123456789012345678901234567890123456789",
+                "1111111111111111111111111111111111111111",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "0123456789012345678901234567890123456789012345678901234567890123",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            ),
+        ] {
+            for rewrite in [false, true] {
+                let temp = tempfile::tempdir().expect("tempdir");
+                let pack_dir = temp.path().join("pack");
+                fs::create_dir_all(&pack_dir).expect("pack dir");
+                let pack_id = ObjectId::from_hex(algorithm, pack_hex).expect("pack id");
+                let old_id = ObjectId::from_hex(algorithm, old_hex).expect("old id");
+                let content = render_promisor_marker_content(
+                    vec![PromisorMarkerRef {
+                        source_ref: "refs/heads/main".to_owned(),
+                        old_id: Some(old_id),
+                    }],
+                    algorithm,
+                );
+                let mut receive = PackReceiveResult::default();
+                receive.record_installed(&pack_dir, pack_id.clone());
+                receive.record_promisor_marker_decision(rewrite);
+                receive
+                    .publish_filtered_promisor_markers(&content)
+                    .expect("publish marker");
+                assert_eq!(
+                    fs::read(pack_file_path(&pack_dir, &pack_id, ".promisor")).expect("marker"),
+                    if rewrite { content } else { Vec::new() }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn refetch_promisor_marker_finalization_removes_stale_dual_hash() {
+        for (algorithm, installed_hex, stale_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "0123456789012345678901234567890123456789",
+                "1111111111111111111111111111111111111111",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "0123456789012345678901234567890123456789012345678901234567890123",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("refetch marker tempdir");
+            let pack_dir = temp.path().join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let installed = ObjectId::from_hex(algorithm, installed_hex).expect("installed id");
+            let stale = ObjectId::from_hex(algorithm, stale_hex).expect("stale id");
+            let stale_marker = pack_file_path(&pack_dir, &stale, ".promisor");
+            fs::write(&stale_marker, b"stale").expect("stale marker");
+
+            let mut receive = PackReceiveResult::default();
+            receive.record_installed(&pack_dir, installed.clone());
+            receive
+                .publish_promisor_markers(b"")
+                .expect("publish refetch marker");
+            receive
+                .finalize_refetch_promisor_markers(true)
+                .expect("finalize refetch markers");
+
+            assert!(!stale_marker.exists());
+            assert!(pack_file_path(&pack_dir, &installed, ".promisor").exists());
+        }
+    }
+
+    #[test]
+    fn configured_filtered_fetch_publishes_marker_before_metadata_dual_hash() {
+        for (algorithm, pack_hex, old_hex, new_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "0123456789012345678901234567890123456789",
+                "1111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "0123456789012345678901234567890123456789012345678901234567890123",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("configured fetch tempdir");
+            let repo = test_repo_at(temp.path());
+            let pack_dir = repo.objects_dir.join("pack");
+            fs::create_dir_all(&pack_dir).expect("pack dir");
+            let pack_id = ObjectId::from_hex(algorithm, pack_hex).expect("pack id");
+            let old_id = ObjectId::from_hex(algorithm, old_hex).expect("old id");
+            let new_id = ObjectId::from_hex(algorithm, new_hex).expect("new id");
+            let destination_refs = RefStore::new(&repo.git_dir, algorithm);
+            destination_refs
+                .write_ref("refs/remotes/origin/main", &old_id)
+                .expect("old ref");
+
+            let content = format!("{old_hex} refs/heads/main\n").into_bytes();
+            let mut receive = PackReceiveResult::default();
+            receive.record_installed(&pack_dir, pack_id.clone());
+            receive.record_promisor_marker_decision(true);
+            let rows = vec![LsRemoteRow {
+                id: new_id.clone(),
+                name: "refs/heads/main".to_owned(),
+            }];
+            let plan = fetch_configured_advertised_remote_filter_with_hash(
+                repo.clone(),
+                "origin".to_owned(),
+                "https://example.test/repo.git",
+                &rows,
+                Some("main".to_owned()),
+                128,
+                "blob:none",
+                false,
+                false,
+                SmartTransportHash::for_algorithm(algorithm),
+                &[],
+                |_roots, _haves, _options| Ok(Vec::new()),
+            )
+            .expect("configured mutation plan");
+
+            publish_configured_filtered_fetch(&mut receive, &content, plan, true)
+                .expect("marker then metadata");
+
+            assert_eq!(
+                fs::read(pack_file_path(&pack_dir, &pack_id, ".promisor"))
+                    .expect("promisor marker"),
+                content
+            );
+            assert_eq!(
+                destination_refs
+                    .read_ref("refs/remotes/origin/main")
+                    .expect("updated ref"),
+                RefTarget::Direct(new_id)
+            );
+            assert_eq!(
+                destination_refs
+                    .read_ref("refs/remotes/origin/HEAD")
+                    .expect("remote HEAD"),
+                RefTarget::Symbolic("refs/remotes/origin/main".to_owned())
+            );
+            assert_eq!(
+                read_config_section_value(&repo, "remote", "origin", "promisor")
+                    .expect("promisor config"),
+                Some("true".to_owned())
+            );
+            assert_eq!(
+                read_config_section_value(&repo, "remote", "origin", "partialclonefilter")
+                    .expect("filter config"),
+                Some("blob:none".to_owned())
+            );
+        }
+    }
+
+    #[test]
+    fn configured_filtered_fetch_marker_failure_preserves_metadata_dual_hash() {
+        for (algorithm, old_hex, new_hex) in [
+            (
+                GitHashAlgorithm::Sha1,
+                "1111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222",
+            ),
+            (
+                GitHashAlgorithm::Sha256,
+                "1111111111111111111111111111111111111111111111111111111111111111",
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            ),
+        ] {
+            let temp = tempfile::tempdir().expect("configured failure tempdir");
+            let repo = test_repo_at(temp.path());
+            let original_config =
+                b"[remote \"origin\"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
+            fs::write(repo.git_dir.join("config"), original_config).expect("config");
+            let old_id = ObjectId::from_hex(algorithm, old_hex).expect("old id");
+            let new_id = ObjectId::from_hex(algorithm, new_hex).expect("new id");
+            let destination_refs = RefStore::new(&repo.git_dir, algorithm);
+            destination_refs
+                .write_ref("refs/remotes/origin/main", &old_id)
+                .expect("old ref");
+
+            // A regular file in place of the pack directory makes the marker
+            // lock fail before any mutation plan operation can run.
+            let pack_dir = temp.path().join("pack-not-a-directory");
+            fs::write(&pack_dir, b"not a directory").expect("pack sentinel");
+            let mut receive = PackReceiveResult::default();
+            receive.record_installed(
+                &pack_dir,
+                ObjectId::from_hex(
+                    algorithm,
+                    if algorithm == GitHashAlgorithm::Sha1 {
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    } else {
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                )
+                .expect("pack id"),
+            );
+            let rows = vec![LsRemoteRow {
+                id: new_id,
+                name: "refs/heads/main".to_owned(),
+            }];
+            let plan = fetch_configured_advertised_remote_filter_with_hash(
+                repo.clone(),
+                "origin".to_owned(),
+                "https://example.test/repo.git",
+                &rows,
+                Some("main".to_owned()),
+                128,
+                "blob:none",
+                false,
+                false,
+                SmartTransportHash::for_algorithm(algorithm),
+                &[],
+                |_roots, _haves, _options| Ok(Vec::new()),
+            )
+            .expect("configured mutation plan");
+
+            assert!(publish_configured_filtered_fetch(&mut receive, b"", plan, true).is_err());
+            assert_eq!(
+                fs::read(repo.git_dir.join("config")).expect("unchanged config"),
+                original_config
+            );
+            assert_eq!(
+                destination_refs
+                    .read_ref("refs/remotes/origin/main")
+                    .expect("unchanged ref"),
+                RefTarget::Direct(old_id)
+            );
+            assert!(
+                destination_refs
+                    .read_ref("refs/remotes/origin/HEAD")
+                    .is_err()
+            );
+            let config = fs::read_to_string(repo.git_dir.join("config")).expect("config");
+            assert!(!config.contains("remote.origin.promisor"));
+        }
+    }
+
+    #[test]
+    fn smart_http_policy_parses_both_config_precedence_sources() {
+        let temp = tempfile::TempDir::new().expect("policy config temp dir");
+        let repo = test_repo_at(temp.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tunpackLimit = 4\n\tfsckObjects = 0\n[transfer]\n\tunpackLimit = 9\n\tfsckObjects = 1\n",
+        )
+        .expect("write policy config");
+        let policy = FetchPackPolicy::resolve(&repo, ForceIndexReasons::default())
+            .expect("fetch values take precedence");
+        assert_eq!(policy.unpack_limit, Some(4));
+        assert!(!policy.force_index.fsck_objects);
+        assert_eq!(
+            FetchPackPolicy::resolve_for_objects_dir(
+                &repo.objects_dir,
+                ForceIndexReasons::default()
+            )
+            .expect("ordinary receive policy from objects dir"),
+            policy,
+            "ordinary SSH/daemon indexers must use the repository policy"
+        );
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tunpackLimit = -1k\n[transfer]\n\tunpackLimit = 0x10\n",
+        )
+        .expect("write fallback policy config");
+        let policy = FetchPackPolicy::resolve(&repo, ForceIndexReasons::default())
+            .expect("negative fetch value falls through");
+        assert_eq!(policy.unpack_limit, Some(16));
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tunpackLimit = 4\n[transfer]\n\tunpackLimit = invalid\n",
+        )
+        .expect("write invalid lower precedence config");
+        assert!(
+            FetchPackPolicy::resolve(&repo, ForceIndexReasons::default()).is_err(),
+            "invalid transfer value must remain fatal even when fetch wins"
+        );
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tfsckObjects\n[transfer]\n\tfsckObjects = 0\n",
+        )
+        .expect("write implicit fsck config");
+        let policy = FetchPackPolicy::resolve(&repo, ForceIndexReasons::default())
+            .expect("implicit fetch fsck value");
+        assert!(policy.force_index.fsck_objects);
+        assert_eq!(
+            policy.validation_mode,
+            Some(zmin_git_core::pack::PackValidationMode::Strict)
+        );
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tfsckObjects =\n[transfer]\n\tfsckObjects = 1\n",
+        )
+        .expect("write empty fsck config");
+        let policy = FetchPackPolicy::resolve(&repo, ForceIndexReasons::default())
+            .expect("empty fetch fsck value");
+        assert!(!policy.force_index.fsck_objects);
+        assert_eq!(policy.validation_mode, None);
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tfsckObjects = 1\n[remote \"origin\"]\n\tpromisor = true\n[extensions]\n\tpartialclone = origin\n",
+        )
+        .expect("write selected promisor config");
+        assert!(selected_remote_is_promisor(&repo, "origin").expect("selected promisor"));
+        let policy = FetchPackPolicy::resolve(
+            &repo,
+            ForceIndexReasons {
+                promisor: true,
+                ..ForceIndexReasons::default()
+            },
+        )
+        .expect("selected promisor fsck policy");
+        assert_eq!(
+            policy.validation_mode,
+            Some(zmin_git_core::pack::PackValidationMode::FsckObjects)
+        );
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tfsckObjects = 0\n[remote \"unrelated\"]\n\tpromisor = true\n[extensions]\n\tpartialclone = origin\n",
+        )
+        .expect("write unrelated promisor config");
+        assert!(selected_remote_is_promisor(&repo, "origin").expect("extension promisor"));
+        assert!(selected_remote_is_promisor(&repo, "unrelated").expect("remote promisor"));
+        assert!(!selected_remote_is_promisor(&repo, "ordinary").expect("ordinary remote"));
+        let policy = FetchPackPolicy::resolve(
+            &repo,
+            selected_remote_force_index_reasons(&repo, "ordinary", false)
+                .expect("ordinary remote reasons"),
+        )
+        .expect("ordinary remote policy");
+        assert_eq!(policy.validation_mode, None);
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[fetch]\n\tfsckObjects = 0\n[transfer]\n\tfsckObjects = 08\n",
+        )
+        .expect("write invalid lower-priority fsck config");
+        assert!(
+            FetchPackPolicy::resolve(&repo, ForceIndexReasons::default()).is_err(),
+            "invalid lower-priority fsck value must remain fatal"
+        );
     }
 
     fn test_repo_at(root: &std::path::Path) -> GitRepo {
@@ -28305,9 +41929,109 @@ mod transport_request_tests {
     }
 
     #[test]
+    fn daemon_host_canonicalization_matches_git_rules() {
+        assert_eq!(
+            daemon_request_host_name("LOCALHOST").expect("hostname"),
+            "localhost"
+        );
+        assert_eq!(
+            daemon_request_host_name("[::1]:9418").expect("ipv6 hostname"),
+            "::1"
+        );
+        assert_eq!(
+            daemon_request_host_name("foo/bar").expect("sanitized hostname"),
+            "foobar"
+        );
+        assert!(daemon_request_host_name("[::1]garbage").is_err());
+    }
+
+    #[test]
+    fn daemon_request_preserves_negotiated_protocol_version() {
+        let request =
+            parse_daemon_request(b"git-upload-pack /repo.git\0host=LOCALHOST:9418\0\0version=1\0")
+                .expect("protocol v1 request");
+        assert_eq!(request.protocol_version, DaemonProtocolVersion::V1);
+        assert_eq!(request.host.as_deref(), Some("localhost"));
+
+        let request = parse_daemon_request(b"git-upload-pack /repo.git\0\0version=2\0")
+            .expect("protocol v2 request");
+        assert_eq!(request.protocol_version, DaemonProtocolVersion::V2);
+
+        let request = parse_daemon_request(b"git-upload-pack /repo.git\0host=localhost\0")
+            .expect("protocol v0 request");
+        assert_eq!(request.protocol_version, DaemonProtocolVersion::V0);
+    }
+
+    #[test]
+    fn daemon_request_framing_and_duplicate_versions_match_git() {
+        for payload in [
+            b"git-upload-pack /repo.git\0host=localhost\0\0version=1\0version=2\0".as_slice(),
+            b"git-upload-pack /repo.git\0host=localhost\0\0version=2\0version=1\0".as_slice(),
+        ] {
+            let request = parse_daemon_request(payload).expect("duplicate protocol versions");
+            assert_eq!(request.protocol_version, DaemonProtocolVersion::V2);
+            assert_eq!(request.host.as_deref(), Some("localhost"));
+        }
+
+        for payload in [
+            b"git-upload-pack /repo.git\0\0version=2\0".as_slice(),
+            b"git-upload-pack /repo.git\0\0\0version=2\0".as_slice(),
+        ] {
+            let request = parse_daemon_request(payload).expect("empty optional host");
+            assert_eq!(request.host, None);
+            assert_eq!(request.protocol_version, DaemonProtocolVersion::V2);
+            assert!(request.has_extended_args);
+        }
+
+        let request =
+            parse_daemon_request(b"git-upload-pack /repo.git\0host=\0").expect("empty host field");
+        assert_eq!(request.host.as_deref(), Some(""));
+
+        let request = parse_daemon_request(
+            b"git-upload-pack /repo.git\0host=localhost\0\0host=attacker\0version=2\0",
+        )
+        .expect("post-boundary host field");
+        assert_eq!(request.host.as_deref(), Some("localhost"));
+        assert_eq!(request.protocol_version, DaemonProtocolVersion::V2);
+
+        assert!(parse_daemon_request(b"git-upload-pack /repo.git\0version=2\0").is_err());
+        assert!(parse_daemon_request(b"git-upload-pack /repo.git\0foo=bar\0").is_err());
+    }
+
+    #[test]
+    fn daemon_interpolated_path_requires_absolute_safe_expansion() {
+        assert!(daemon_interpolated_path_is_safe("/srv/localhost/repo.git"));
+        assert_eq!(
+            expand_daemon_interpolated_path("%H%D", "..", "/escape.git"),
+            "../escape.git"
+        );
+        assert!(!daemon_interpolated_path_is_safe("../escape.git"));
+        assert!(!daemon_interpolated_path_is_safe("../repo.git"));
+        assert!(!daemon_interpolated_path_is_safe("/srv/../repo.git"));
+        assert!(!daemon_interpolated_path_is_safe("/srv//repo.git"));
+        assert!(!daemon_interpolated_path_is_safe("/srv/./repo.git"));
+    }
+
+    #[test]
+    fn daemon_export_path_matching_is_exact_only_for_strict_paths() {
+        let allowed = Path::new("/srv/repo.git");
+        assert!(daemon_export_path_matches(allowed, allowed, true));
+        assert!(!daemon_export_path_matches(
+            allowed,
+            Path::new("/srv/repo.git/child.git"),
+            true
+        ));
+        assert!(daemon_export_path_matches(
+            allowed,
+            Path::new("/srv/repo.git/child.git"),
+            false
+        ));
+    }
+
+    #[test]
     fn transport_small_collection_capacity_hints_cover_expected_entries() {
         assert_eq!(TAG_PEEL_SEEN_CAPACITY_HINT, 4);
-        assert_eq!(CLONE_CONFIG_VALUES_CAPACITY_HINT, 9);
+        assert_eq!(CLONE_CONFIG_VALUES_CAPACITY_HINT, 12);
     }
 
     #[test]
@@ -28326,6 +42050,7 @@ mod transport_request_tests {
             false,
             true,
             true,
+            Some("blob:none"),
         );
 
         assert!(values.contains(&(
@@ -28340,6 +42065,10 @@ mod transport_request_tests {
         assert!(values.contains(&("branch.main.merge".to_owned(), "refs/heads/main".to_owned())));
         assert!(values.contains(&("zmin.worktreeFirst".to_owned(), "true".to_owned())));
         assert!(values.contains(&("remote.origin.promisor".to_owned(), "true".to_owned())));
+        assert!(values.contains(&(
+            "remote.origin.partialclonefilter".to_owned(),
+            "blob:none".to_owned()
+        )));
     }
 
     #[test]
@@ -28665,6 +42394,128 @@ mod transport_request_tests {
     }
 
     #[test]
+    fn typed_upload_pack_advertisement_preserves_capabilities_and_sha256_ids() {
+        let head = "a".repeat(GitHashAlgorithm::Sha256.digest_len() * 2);
+        let branch = "b".repeat(GitHashAlgorithm::Sha256.digest_len() * 2);
+        let shallow = "c".repeat(GitHashAlgorithm::Sha256.digest_len() * 2);
+        let mut advertisement = Vec::new();
+        write_pkt_line(
+            &mut advertisement,
+            format!(
+                "{} HEAD\0symref=HEAD:refs/heads/main object-format=sha256 filter unknown=kept\n",
+                head
+            )
+            .as_bytes(),
+        )
+        .expect("head advertisement");
+        write_pkt_line(
+            &mut advertisement,
+            format!("shallow {shallow}\n").as_bytes(),
+        )
+        .expect("shallow advertisement");
+        write_pkt_line(
+            &mut advertisement,
+            format!("{} refs/heads/main\n", branch).as_bytes(),
+        )
+        .expect("branch advertisement");
+        advertisement.extend_from_slice(b"0000");
+
+        let mut reader = io::BufReader::new(advertisement.as_slice());
+        let parsed =
+            parse_upload_pack_v0_advertisement(&mut reader, false, false, false, &[], false)
+                .expect("parse typed advertisement");
+
+        assert_eq!(
+            parsed.hash,
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256)
+        );
+        assert_eq!(parsed.head_branch.as_deref(), Some("main"));
+        assert!(parsed.has_capability("filter"));
+        assert!(parsed.has_capability("unknown=kept"));
+        assert_eq!(parsed.capabilities.len(), 4);
+        assert_eq!(parsed.rows.len(), 2);
+        assert_eq!(parsed.rows[0].id.algorithm(), GitHashAlgorithm::Sha256);
+        assert_eq!(parsed.rows[1].id.algorithm(), GitHashAlgorithm::Sha256);
+        assert_eq!(parsed.shallow_boundaries.len(), 1);
+        assert_eq!(
+            parsed.shallow_boundaries[0].algorithm(),
+            GitHashAlgorithm::Sha256
+        );
+        assert!(parsed.terminated_with_flush);
+    }
+
+    #[test]
+    fn typed_upload_pack_advertisement_defaults_to_sha1_without_filter() {
+        let head = oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let mut advertisement = Vec::new();
+        write_pkt_line(
+            &mut advertisement,
+            format!(
+                "{} HEAD\0symref=HEAD:refs/heads/main agent=test\n",
+                head.to_hex()
+            )
+            .as_bytes(),
+        )
+        .expect("head advertisement");
+        advertisement.extend_from_slice(b"0000");
+
+        let mut reader = io::BufReader::new(advertisement.as_slice());
+        let parsed =
+            parse_upload_pack_v0_advertisement(&mut reader, false, false, false, &[], false)
+                .expect("parse typed advertisement");
+
+        assert_eq!(parsed.hash, SmartTransportHash::sha1());
+        assert!(!parsed.has_capability("filter"));
+        assert_eq!(
+            parsed.capabilities,
+            vec!["symref=HEAD:refs/heads/main", "agent=test"]
+        );
+        assert_eq!(parsed.rows[0].id.algorithm(), GitHashAlgorithm::Sha1);
+    }
+
+    #[test]
+    fn typed_upload_pack_advertisement_rejects_bad_object_format_and_width() {
+        for capabilities in [
+            "object-format=sha1 object-format=sha256",
+            "object-format=sha512",
+        ] {
+            let mut advertisement = Vec::new();
+            write_pkt_line(
+                &mut advertisement,
+                format!(
+                    "{} HEAD\0{capabilities}\n",
+                    "a".repeat(GitHashAlgorithm::Sha1.digest_len() * 2)
+                )
+                .as_bytes(),
+            )
+            .expect("head advertisement");
+            advertisement.extend_from_slice(b"0000");
+            let mut reader = io::BufReader::new(advertisement.as_slice());
+            assert!(
+                parse_upload_pack_v0_advertisement(&mut reader, false, false, false, &[], false,)
+                    .is_err()
+            );
+        }
+
+        let mut advertisement = Vec::new();
+        write_pkt_line(
+            &mut advertisement,
+            format!(
+                "{} HEAD\0object-format=sha256\n",
+                "a".repeat(GitHashAlgorithm::Sha1.digest_len() * 2)
+            )
+            .as_bytes(),
+        )
+        .expect("head advertisement");
+        advertisement.extend_from_slice(b"0000");
+        let mut reader = io::BufReader::new(advertisement.as_slice());
+        assert!(
+            parse_upload_pack_v0_advertisement(&mut reader, false, false, false, &[], false,)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn http_clone_target_prefers_peeled_tag_without_allocating_per_row_name() {
         let tag_object = oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let peeled = oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
@@ -28685,14 +42536,14 @@ mod transport_request_tests {
     }
 
     #[test]
-    fn http_clone_fetch_roots_filters_and_deduplicates_refs() {
+    fn http_clone_fetch_roots_filters_and_preserves_duplicate_wants() {
         let head = oid("1111111111111111111111111111111111111111");
         let branch = oid("2222222222222222222222222222222222222222");
         let tag = oid("3333333333333333333333333333333333333333");
         let peeled = oid("4444444444444444444444444444444444444444");
         let refs = vec![
             LsRemoteRow {
-                id: head,
+                id: head.clone(),
                 name: "HEAD".into(),
             },
             LsRemoteRow {
@@ -28715,7 +42566,7 @@ mod transport_request_tests {
 
         let roots = http_clone_fetch_roots(&refs, &CloneTarget::Empty, true, false, false);
 
-        assert_eq!(roots, vec![branch]);
+        assert_eq!(roots, vec![head, branch.clone(), branch]);
     }
 
     #[test]
@@ -28750,6 +42601,96 @@ mod transport_request_tests {
         .expect("have");
         write_pkt_line(&mut expected, b"done\n").expect("done");
         assert_eq!(actual, expected);
+    }
+
+    fn assert_hash_aware_upload_pack_request(
+        algorithm: GitHashAlgorithm,
+        root_hex: &str,
+        have_hex: &str,
+        shallow_hex: &str,
+    ) {
+        let root = ObjectId::from_hex(algorithm, root_hex).expect("root object id");
+        let have = ObjectId::from_hex(algorithm, have_hex).expect("have object id");
+        let shallow = ObjectId::from_hex(algorithm, shallow_hex).expect("shallow object id");
+        let options = UploadPackShallowOptions {
+            depth: Some(7),
+            since: None,
+            deepen_not: &[],
+            shallows: std::slice::from_ref(&shallow),
+            deepen_relative: false,
+            filter: Some("blob:none"),
+            filter_capability: true,
+            promisor_remote: None,
+        };
+        let request = build_upload_pack_request_from_shallow_options_with_hash(
+            std::slice::from_ref(&root),
+            std::slice::from_ref(&have),
+            options,
+            SmartTransportHash::for_algorithm(algorithm),
+        )
+        .expect("hash-aware upload-pack request");
+
+        let first_want = format!(
+            "want {} side-band-64k thin-pack ofs-delta no-progress include-tag filter\n",
+            root.to_hex()
+        );
+        let shallow_line = format!("shallow {}\n", shallow.to_hex());
+        let have_line = format!("have {}\n", have.to_hex());
+        assert!(
+            request
+                .windows(first_want.len())
+                .any(|window| window == first_want.as_bytes())
+        );
+        assert!(
+            request
+                .windows(shallow_line.len())
+                .any(|window| window == shallow_line.as_bytes())
+        );
+        assert!(
+            request
+                .windows(b"deepen 7\n".len())
+                .any(|window| window == b"deepen 7\n")
+        );
+        assert!(
+            request
+                .windows(b"filter blob:none\n".len())
+                .any(|window| window == b"filter blob:none\n")
+        );
+        assert!(
+            request
+                .windows(have_line.len())
+                .any(|window| window == have_line.as_bytes())
+        );
+    }
+
+    #[test]
+    fn ssh_request_builder_uses_negotiated_sha256_with_filter_and_depth() {
+        assert_hash_aware_upload_pack_request(
+            GitHashAlgorithm::Sha256,
+            &"1".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+            &"2".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+            &"3".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+        );
+    }
+
+    #[test]
+    fn daemon_request_builder_uses_negotiated_sha256_with_filter_and_shallow() {
+        assert_hash_aware_upload_pack_request(
+            GitHashAlgorithm::Sha256,
+            &"a".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+            &"b".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+            &"c".repeat(GitHashAlgorithm::Sha256.digest_len() * 2),
+        );
+    }
+
+    #[test]
+    fn hash_aware_ssh_and_daemon_request_builder_preserves_sha1() {
+        assert_hash_aware_upload_pack_request(
+            GitHashAlgorithm::Sha1,
+            "1111111111111111111111111111111111111111",
+            "2222222222222222222222222222222222222222",
+            "3333333333333333333333333333333333333333",
+        );
     }
 
     #[test]
@@ -29206,6 +43147,992 @@ mod transport_request_tests {
     }
 
     #[test]
+    fn upload_pack_filter_capabilities_are_hash_aware_and_policy_gated() {
+        let temp = tempfile::TempDir::new().expect("repo");
+        let repo = test_repo_at(temp.path());
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let hash = SmartTransportHash::for_algorithm(algorithm);
+            let refs = refs_adapter_from_git_dir_with_hash(&repo.git_dir, hash);
+            let disabled = UploadPackFilterPolicy::default();
+            let disabled_v0 =
+                upload_pack_capabilities_from_hash_and_policy(&refs, true, hash, disabled)
+                    .expect("disabled v0 capabilities");
+            assert!(
+                !disabled_v0
+                    .split_whitespace()
+                    .any(|value| value == "filter")
+            );
+            let mut enabled = disabled;
+            enabled.allow_filter = true;
+            let enabled_v0 =
+                upload_pack_capabilities_from_hash_and_policy(&refs, true, hash, enabled)
+                    .expect("enabled v0 capabilities");
+            assert_eq!(
+                enabled_v0
+                    .split_whitespace()
+                    .filter(|value| *value == "filter")
+                    .count(),
+                1
+            );
+            assert!(enabled_v0.contains(&format!("filter object-format={}", hash.name())));
+
+            for policy in [disabled, enabled] {
+                let mut body = Vec::new();
+                write_upload_pack_v2_capabilities_with_policy(&mut body, hash, policy)
+                    .expect("v2 capabilities");
+                let body = String::from_utf8(body).expect("capability bytes");
+                let expected = if policy.allow_filter {
+                    "fetch=shallow wait-for-done filter\n"
+                } else {
+                    "fetch=shallow wait-for-done\n"
+                };
+                assert_eq!(body.matches(expected).count(), 1);
+                assert!(body.contains(&format!("object-format={}\n", hash.name())));
+            }
+        }
+    }
+
+    #[test]
+    fn upload_pack_blob_packfile_uri_config_presence_is_bounded_and_deferred() {
+        let mut implicit = parse_config_entry("uploadpack.blobPackfileUri", "").expect("entry");
+        implicit.implicit_bool = true;
+        let explicit_empty = parse_config_entry("uploadpack.blobPackfileUri", "").expect("entry");
+        let policy = UploadPackBlobPackfileUriPolicy::from_entries(&[implicit, explicit_empty])
+            .expect("URI policy");
+        assert!(policy.advertised());
+        assert_eq!(policy.values.len(), 1);
+        assert!(matches!(
+            policy.values[0].parse(SmartTransportHash::sha1()),
+            Err(CliError::Fatal { message, .. })
+                if message == "value of uploadpack.blobpackfileuri must be of the form '<object-hash> <pack-hash> <uri>' (got '')"
+        ));
+
+        let mut implicit_values = Vec::new();
+        for _ in 0..=UPLOAD_PACK_BLOB_PACKFILE_URI_CONFIG_COUNT_LIMIT {
+            let mut entry = parse_config_entry("uploadpack.blobPackfileUri", "").expect("entry");
+            entry.implicit_bool = true;
+            implicit_values.push(entry);
+        }
+        implicit_values.push(
+            parse_config_entry(
+                "uploadpack.blobPackfileUri",
+                &format!(
+                    "{} {} https://example.test/one.pack",
+                    "a".repeat(40),
+                    "b".repeat(40)
+                ),
+            )
+            .expect("entry"),
+        );
+        let policy = UploadPackBlobPackfileUriPolicy::from_entries(&implicit_values)
+            .expect("implicit booleans must not consume value bound");
+        assert_eq!(policy.values.len(), 1);
+
+        let mut too_many = Vec::new();
+        for _ in 0..=UPLOAD_PACK_BLOB_PACKFILE_URI_CONFIG_COUNT_LIMIT {
+            too_many
+                .push(parse_config_entry("uploadpack.blobPackfileUri", "value").expect("entry"));
+        }
+        assert!(UploadPackBlobPackfileUriPolicy::from_entries(&too_many).is_err());
+
+        let too_long = "x".repeat(UPLOAD_PACK_BLOB_PACKFILE_URI_VALUE_LENGTH_LIMIT + 1);
+        let too_long =
+            [parse_config_entry("uploadpack.blobPackfileUri", &too_long).expect("entry")];
+        assert!(UploadPackBlobPackfileUriPolicy::from_entries(&too_long).is_err());
+
+        for unsafe_value in ["value\nnext", "value\tunsafe", "value\u{2003}unsafe"] {
+            let entry =
+                [parse_config_entry("uploadpack.blobPackfileUri", unsafe_value).expect("entry")];
+            assert!(UploadPackBlobPackfileUriPolicy::from_entries(&entry).is_err());
+        }
+    }
+
+    #[test]
+    fn upload_pack_blob_packfile_uri_accepts_sha1_and_sha256_hash_syntax() {
+        let sha1 = parse_upload_pack_blob_packfile_uri(
+            &format!(
+                "{} {} https://example.test/pack",
+                "a".repeat(40),
+                "b".repeat(40)
+            ),
+            SmartTransportHash::sha1(),
+        )
+        .expect("SHA-1 URI config");
+        assert_eq!(sha1.object_hash.algorithm(), GitHashAlgorithm::Sha1);
+        assert_eq!(sha1.pack_hash.algorithm(), GitHashAlgorithm::Sha1);
+
+        let sha256 = parse_upload_pack_blob_packfile_uri(
+            &format!(
+                "{} {} https://example.test/pack",
+                "c".repeat(64),
+                "d".repeat(64)
+            ),
+            SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256),
+        )
+        .expect("SHA-256 URI config");
+        assert_eq!(sha256.object_hash.algorithm(), GitHashAlgorithm::Sha256);
+        assert_eq!(sha256.pack_hash.algorithm(), GitHashAlgorithm::Sha256);
+    }
+
+    #[test]
+    fn upload_pack_v2_uri_capabilities_are_independently_policy_gated() {
+        let mut body = Vec::new();
+        let policy = UploadPackServerPolicy {
+            blob_packfile_uri: UploadPackBlobPackfileUriPolicy {
+                values: vec![UploadPackBlobPackfileUriConfig {
+                    value: "uri".into(),
+                }],
+            },
+            allow_sideband_all: true,
+            ..UploadPackServerPolicy::default()
+        };
+        write_upload_pack_v2_capabilities_with_server_policy(
+            &mut body,
+            SmartTransportHash::sha1(),
+            policy,
+        )
+        .expect("v2 capabilities");
+        let body = String::from_utf8(body).expect("capabilities");
+        assert!(body.contains("fetch=shallow wait-for-done sideband-all packfile-uris\n"));
+
+        let temp = tempfile::tempdir().expect("repo");
+        let repo = test_repo_at(temp.path());
+        let refs = refs_adapter_from_git_dir(&repo.git_dir);
+        let v0 = upload_pack_capabilities_from_hash_and_policy(
+            &refs,
+            true,
+            SmartTransportHash::sha1(),
+            UploadPackFilterPolicy::default(),
+        )
+        .expect("v0 capabilities");
+        assert!(!v0.contains("sideband-all"));
+        assert!(!v0.contains("packfile-uris"));
+
+        let mut v1_body = Vec::new();
+        write_upload_pack_v1_advertisement_from_adapter_with_hash_and_policy(
+            &refs,
+            &mut v1_body,
+            SmartTransportHash::sha1(),
+            UploadPackFilterPolicy::default(),
+        )
+        .expect("v1 capabilities");
+        let v1 = String::from_utf8_lossy(&v1_body);
+        assert!(!v1.contains("sideband-all"));
+        assert!(!v1.contains("packfile-uris"));
+    }
+
+    #[test]
+    fn upload_pack_v2_uri_request_is_negotiated_strictly_and_sideband_gated() {
+        let want = oid("1111111111111111111111111111111111111111");
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, b"command=fetch\n").expect("command");
+        input.extend_from_slice(b"0001");
+        write_pkt_line(&mut input, format!("want {}\n", want.to_hex()).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"packfile-uris https,http\n").expect("URI protocols");
+        write_pkt_line(&mut input, b"sideband-all\n").expect("sideband-all");
+        input.extend_from_slice(b"0000");
+        let policy = UploadPackServerPolicy {
+            blob_packfile_uri: UploadPackBlobPackfileUriPolicy {
+                values: vec![UploadPackBlobPackfileUriConfig {
+                    value: "uri".into(),
+                }],
+            },
+            allow_sideband_all: true,
+            ..UploadPackServerPolicy::default()
+        };
+        let request = read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(input)),
+            SmartTransportHash::sha1(),
+            policy.clone(),
+        )
+        .expect("v2 URI request");
+        assert!(matches!(
+            request,
+            UploadPackV2RequestRead::Request(UploadPackV2Request::Fetch(UploadPackRequest {
+                sideband_all: true,
+                packfile_uri_protocols,
+                ..
+            })) if packfile_uri_protocols == vec!["https", "http"]
+        ));
+
+        let mut no_sideband = Vec::new();
+        write_pkt_line(&mut no_sideband, b"command=fetch\n").expect("command");
+        no_sideband.extend_from_slice(b"0001");
+        write_pkt_line(
+            &mut no_sideband,
+            format!("want {}\n", want.to_hex()).as_bytes(),
+        )
+        .expect("want");
+        write_pkt_line(&mut no_sideband, b"packfile-uris https\n").expect("URI protocols");
+        no_sideband.extend_from_slice(b"0000");
+        let request = read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(no_sideband)),
+            SmartTransportHash::sha1(),
+            policy,
+        )
+        .expect("inline fallback request");
+        assert!(matches!(
+            request,
+            UploadPackV2RequestRead::Request(UploadPackV2Request::Fetch(UploadPackRequest {
+                sideband_all: false,
+                packfile_uri_protocols,
+                ..
+            })) if packfile_uri_protocols.is_empty()
+        ));
+
+        let mut duplicate = Vec::new();
+        write_pkt_line(&mut duplicate, b"command=fetch\n").expect("command");
+        duplicate.extend_from_slice(b"0001");
+        write_pkt_line(&mut duplicate, b"packfile-uris https\n").expect("URI protocols");
+        write_pkt_line(&mut duplicate, b"packfile-uris http\n").expect("duplicate URI");
+        duplicate.extend_from_slice(b"0000");
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(duplicate)),
+            SmartTransportHash::sha1(),
+            UploadPackServerPolicy {
+                blob_packfile_uri: UploadPackBlobPackfileUriPolicy {
+                    values: vec![UploadPackBlobPackfileUriConfig {
+                        value: "uri".into(),
+                    }],
+                },
+                ..UploadPackServerPolicy::default()
+            },
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("duplicate URI lines must fail"),
+        };
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. } if message == "multiple packfile-uris lines forbidden"
+        ));
+
+        let mut unadvertised = Vec::new();
+        write_pkt_line(&mut unadvertised, b"command=fetch\n").expect("command");
+        unadvertised.extend_from_slice(b"0001");
+        write_pkt_line(&mut unadvertised, b"packfile-uris https\n").expect("URI protocols");
+        unadvertised.extend_from_slice(b"0000");
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(unadvertised)),
+            SmartTransportHash::sha1(),
+            UploadPackServerPolicy::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("unadvertised URI line must fail"),
+        };
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. } if message == "unexpected line: 'packfile-uris https'"
+        ));
+    }
+
+    #[test]
+    fn upload_pack_promisor_remote_capability_is_configured_and_bounded() {
+        let entries = [
+            parse_config_entry("promisor.advertise", "true").expect("advertise"),
+            parse_config_entry("promisor.sendFields", "partialCloneFilter").expect("fields"),
+            parse_config_entry("remote.blobstore.promisor", "true").expect("promisor"),
+            parse_config_entry(
+                "remote.blobstore.url",
+                "https://blobstore.example.invalid/objects",
+            )
+            .expect("url"),
+            parse_config_entry("remote.blobstore.partialCloneFilter", "blob:limit=1")
+                .expect("filter"),
+        ];
+        let policy =
+            UploadPackPromisorRemotePolicy::from_entries(&entries).expect("promisor policy");
+        assert!(policy.advertised());
+        assert_eq!(
+            policy.capability_value().expect("capability").as_deref(),
+            Some(
+                "name=blobstore,url=https://blobstore.example.invalid/objects,partialCloneFilter=blob:limit=1"
+            )
+        );
+
+        let mut body = Vec::new();
+        write_upload_pack_v2_capabilities_with_server_policy(
+            &mut body,
+            SmartTransportHash::sha1(),
+            UploadPackServerPolicy {
+                promisor_remote: policy,
+                ..UploadPackServerPolicy::default()
+            },
+        )
+        .expect("capabilities");
+        assert!(String::from_utf8(body)
+            .expect("capabilities UTF-8")
+            .contains("promisor-remote=name=blobstore,url=https://blobstore.example.invalid/objects,partialCloneFilter=blob:limit=1\n"));
+    }
+
+    #[test]
+    fn upload_pack_auto_filter_preserves_advertised_order_and_acceptance_policy() {
+        let temp = tempfile::tempdir().expect("repo");
+        let repo = test_repo_at(temp.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tacceptFromServer = all\n[remote \"first\"]\n\tpromisor = true\n\turl = https://first.example/objects\n[remote \"second\"]\n\tpromisor = true\n\turl = https://second.example/objects\n",
+        )
+        .expect("promisor config");
+        let resolution = resolve_upload_pack_auto_filter_with_remotes(
+            &repo,
+            Some("name=first,url=https://first.example/objects,partialCloneFilter=blob:none;name=second,url=https://second.example/objects,partialCloneFilter=tree:0"),
+        )
+        .expect("auto resolution");
+        assert_eq!(resolution.accepted_remotes.as_deref(), Some("first;second"));
+        assert_eq!(
+            resolution.filter.as_deref(),
+            Some("combine:blob:none+tree:0")
+        );
+
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tacceptFromServer = knownUrl\n[remote \"first\"]\n\tpromisor = true\n\turl = https://different.example/objects\n",
+        )
+        .expect("known URL config");
+        let resolution = resolve_upload_pack_auto_filter_with_remotes(
+            &repo,
+            Some("name=first,url=https://first.example/objects,partialCloneFilter=blob:none"),
+        )
+        .expect("known URL resolution");
+        assert_eq!(resolution, UploadPackAutoFilterResolution::default());
+    }
+
+    #[test]
+    fn upload_pack_auto_filter_without_recommendation_is_inline_only() {
+        let temp = tempfile::tempdir().expect("repo");
+        let repo = test_repo_at(temp.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tacceptFromServer = all\n[remote \"origin\"]\n\tpromisor = true\n\turl = https://origin.example/objects\n",
+        )
+        .expect("promisor config");
+        assert_eq!(
+            local_clone_promisor_remote_capability(&repo).expect("source capability"),
+            None
+        );
+        let resolution = resolve_upload_pack_auto_filter_with_remotes(&repo, None)
+            .expect("empty recommendation");
+        assert_eq!(resolution, UploadPackAutoFilterResolution::default());
+    }
+
+    #[test]
+    fn local_clone_auto_filter_uses_only_advertised_source_recommendation() {
+        let temp = tempfile::tempdir().expect("repo");
+        let repo = test_repo_at(temp.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tadvertise = true\n\tsendFields = partialCloneFilter\n[remote \"blobstore\"]\n\tpromisor = true\n\turl = https://blobstore.example/objects\n\tpartialCloneFilter = blob:limit=1\n",
+        )
+        .expect("advertised promisor config");
+        assert_eq!(
+            local_clone_promisor_remote_capability(&repo)
+                .expect("source capability")
+                .as_deref(),
+            Some(
+                "name=blobstore,url=https://blobstore.example/objects,partialCloneFilter=blob:limit=1"
+            )
+        );
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tacceptFromServer = all\n[remote \"blobstore\"]\n\tpromisor = true\n\turl = https://blobstore.example/objects\n\tpartialCloneFilter = blob:limit=1\n",
+        )
+        .expect("non-advertised promisor config");
+        assert_eq!(
+            local_clone_promisor_remote_capability(&repo).expect("source capability"),
+            None
+        );
+    }
+
+    #[test]
+    fn upload_pack_auto_filter_keeps_complete_accepted_remote_set() {
+        let temp = tempfile::tempdir().expect("repo");
+        let repo = test_repo_at(temp.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            b"[promisor]\n\tacceptFromServer = all\n[remote \"origin\"]\n\tpromisor = true\n\turl = https://origin.example/objects\n",
+        )
+        .expect("promisor config");
+        let resolution = resolve_upload_pack_auto_filter_with_remotes(
+            &repo,
+            Some("name=origin,url=https://origin.example/objects,partialCloneFilter=blob:none;name=unconfigured,url=https://unconfigured.example/objects,partialCloneFilter=not-a-filter;name=metadata,url=https://metadata.example/objects"),
+        )
+        .expect("auto resolution");
+        assert_eq!(
+            resolution.accepted_remotes.as_deref(),
+            Some("origin;unconfigured;metadata")
+        );
+        assert_eq!(resolution.filter.as_deref(), Some("blob:none"));
+    }
+
+    #[test]
+    fn upload_pack_v2_rejects_duplicate_command_with_stock_diagnostic() {
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, b"command=fetch\n").expect("command");
+        write_pkt_line(&mut input, b"command=fetch\n").expect("duplicate command");
+        input.extend_from_slice(b"0001");
+        input.extend_from_slice(b"0000");
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(input)),
+            SmartTransportHash::sha1(),
+            UploadPackServerPolicy::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("duplicate command must fail"),
+        };
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. }
+                if message == "command 'fetch' requested after already requesting command 'fetch'"
+        ));
+    }
+
+    #[test]
+    fn upload_pack_v2_rejects_missing_and_unknown_commands() {
+        for (request, expected) in [
+            (b"00010000".to_vec(), "no command requested"),
+            (
+                {
+                    let mut request = Vec::new();
+                    write_pkt_line(&mut request, b"command=receive-pack\n").expect("command");
+                    request.extend_from_slice(b"00010000");
+                    request
+                },
+                "invalid command 'receive-pack'",
+            ),
+            (
+                {
+                    let mut request = Vec::new();
+                    write_pkt_line(&mut request, b"command=fetch\n").expect("command");
+                    request.extend_from_slice(b"0000");
+                    request
+                },
+                "missing section delimiter",
+            ),
+        ] {
+            let error =
+                match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+                    &mut io::BufReader::new(io::Cursor::new(request)),
+                    SmartTransportHash::sha1(),
+                    UploadPackServerPolicy::default(),
+                ) {
+                    Err(error) => error,
+                    Ok(_) => panic!("invalid v2 command must fail"),
+                };
+            assert!(matches!(
+                error,
+                CliError::Fatal { message, .. } if message == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn upload_pack_uri_request_limits_and_unadvertised_sideband_are_rejected() {
+        let uri_policy = UploadPackServerPolicy {
+            blob_packfile_uri: UploadPackBlobPackfileUriPolicy {
+                values: vec![UploadPackBlobPackfileUriConfig {
+                    value: "uri".into(),
+                }],
+            },
+            ..UploadPackServerPolicy::default()
+        };
+        let too_many_protocols = (0..=UPLOAD_PACK_URI_PROTOCOL_COUNT_LIMIT)
+            .map(|_| "https")
+            .collect::<Vec<_>>()
+            .join(",");
+        let error = parse_upload_pack_uri_protocols(
+            too_many_protocols.as_bytes(),
+            format!("packfile-uris {too_many_protocols}").as_bytes(),
+        )
+        .expect_err("too many URI protocols must fail");
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. }
+                if message.starts_with("unexpected line: 'packfile-uris ")
+        ));
+
+        let mut long_request = Vec::new();
+        write_pkt_line(&mut long_request, b"command=fetch\n").expect("command");
+        long_request.extend_from_slice(b"0001");
+        write_pkt_line(
+            &mut long_request,
+            format!(
+                "packfile-uris {}\n",
+                "h".repeat(UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT)
+            )
+            .as_bytes(),
+        )
+        .expect("long URI line");
+        long_request.extend_from_slice(b"0000");
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(long_request)),
+            SmartTransportHash::sha1(),
+            uri_policy.clone(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("oversized request line must fail"),
+        };
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. }
+                if message == format!(
+                    "upload-pack request line exceeds {UPLOAD_PACK_V2_REQUEST_LINE_LENGTH_LIMIT} bytes"
+                )
+        ));
+
+        let mut sideband = Vec::new();
+        write_pkt_line(&mut sideband, b"command=fetch\n").expect("command");
+        sideband.extend_from_slice(b"0001");
+        write_pkt_line(&mut sideband, b"sideband-all\n").expect("sideband-all");
+        sideband.extend_from_slice(b"0000");
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_server_policy(
+            &mut io::BufReader::new(io::Cursor::new(sideband)),
+            SmartTransportHash::sha1(),
+            uri_policy,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("unadvertised sideband-all must fail"),
+        };
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. } if message == "unexpected line: 'sideband-all'"
+        ));
+
+        let mut v0_uri = Vec::new();
+        write_pkt_line(&mut v0_uri, b"packfile-uris https\n").expect("URI line");
+        let error = read_upload_pack_request_from_stdin_with_hash_and_policy(
+            &mut io::BufReader::new(io::Cursor::new(v0_uri)),
+            SmartTransportHash::sha1(),
+            UploadPackFilterPolicy::default(),
+        )
+        .expect_err("v0 URI feature must be rejected");
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. } if message == "unexpected line: 'packfile-uris https'"
+        ));
+    }
+
+    #[test]
+    fn upload_pack_blob_packfile_uri_selection_matches_protocol_and_filter_reachability() {
+        let temp = tempfile::TempDir::new().expect("URI selection repository");
+        let repo = test_repo_at(temp.path());
+        let store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1);
+        let selected_blob = store
+            .write_object(GitObjectKind::Blob, b"selected")
+            .expect("selected blob");
+        let filtered_blob = store
+            .write_object(GitObjectKind::Blob, b"filtered")
+            .expect("filtered blob");
+        let mappings = vec![
+            UploadPackBlobPackfileUri {
+                object_hash: selected_blob.clone(),
+                pack_hash: oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                uri: "https://example.test/selected.pack".into(),
+            },
+            UploadPackBlobPackfileUri {
+                object_hash: filtered_blob.clone(),
+                pack_hash: oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+                uri: "https://example.test/filtered.pack".into(),
+            },
+        ];
+        let mut ids = vec![selected_blob.clone()];
+        let selected =
+            select_upload_pack_blob_packfile_uris(&mut ids, &mappings, &["https".into()])
+                .expect("matching URI selection");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].object_hash, selected_blob);
+        assert!(ids.is_empty(), "selected blob must be excluded inline");
+
+        let mut mismatched_ids = vec![filtered_blob.clone()];
+        let selected =
+            select_upload_pack_blob_packfile_uris(&mut mismatched_ids, &mappings, &["http".into()])
+                .expect("mismatched URI protocol fallback");
+        assert!(selected.is_empty());
+        assert_eq!(mismatched_ids, vec![filtered_blob]);
+
+        let configured_reachable = oid("cccccccccccccccccccccccccccccccccccccccc");
+        let mut reachable_ids = vec![configured_reachable.clone()];
+        let selected = select_upload_pack_blob_packfile_uris(
+            &mut reachable_ids,
+            &[UploadPackBlobPackfileUri {
+                object_hash: configured_reachable,
+                pack_hash: oid("dddddddddddddddddddddddddddddddddddddddd"),
+                uri: "https://example.test/reachable.pack".into(),
+            }],
+            &["https".into()],
+        )
+        .expect("reachable configured object selection");
+        assert_eq!(selected.len(), 1);
+        assert!(reachable_ids.is_empty());
+    }
+
+    #[test]
+    fn upload_pack_blob_packfile_uri_selection_supports_sha256_and_bounds_metadata() {
+        let temp = tempfile::TempDir::new().expect("URI selection repository");
+        let repo = test_repo_at(temp.path());
+        let hash = SmartTransportHash::for_algorithm(GitHashAlgorithm::Sha256);
+        let store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha256);
+        let blob = store
+            .write_object(GitObjectKind::Blob, b"SHA-256 URI blob")
+            .expect("SHA-256 blob");
+        let mapping = UploadPackBlobPackfileUri {
+            object_hash: blob.clone(),
+            pack_hash: ObjectId::new(GitHashAlgorithm::Sha256, &[0x11; 32]),
+            uri: "https://example.test/wrong-advertised-hash.pack".into(),
+        };
+        let mut ids = vec![blob.clone()];
+        let selected = select_upload_pack_blob_packfile_uris(
+            &mut ids,
+            std::slice::from_ref(&mapping),
+            &["https".into()],
+        )
+        .expect("SHA-256 URI selection");
+        assert_eq!(selected, vec![mapping.clone()]);
+        assert!(ids.is_empty());
+        assert_eq!(selected[0].pack_hash.to_hex(), "11".repeat(32));
+        assert_eq!(
+            selected[0].uri,
+            "https://example.test/wrong-advertised-hash.pack"
+        );
+        assert_eq!(hash.algorithm, GitHashAlgorithm::Sha256);
+
+        let oversized = UploadPackBlobPackfileUri {
+            object_hash: blob.clone(),
+            pack_hash: ObjectId::new(GitHashAlgorithm::Sha256, &[0x22; 32]),
+            uri: format!(
+                "https://example.test/{}",
+                "u".repeat(UPLOAD_PACK_BLOB_PACKFILE_URI_METADATA_LENGTH_LIMIT)
+            ),
+        };
+        let error =
+            select_upload_pack_blob_packfile_uris(&mut vec![blob], &[oversized], &["https".into()])
+                .expect_err("oversized selected metadata must fail");
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. }
+                if message.contains("selected uploadpack.blobpackfileuri metadata exceeds")
+        ));
+    }
+
+    #[test]
+    fn upload_pack_temp_pack_raii_cleanup_removes_file_on_drop() {
+        let temp = tempfile::TempDir::new().expect("temp directory");
+        let path = temp.path().join("upload-pack.pack");
+        fs::write(&path, b"PACK").expect("temporary pack");
+        {
+            let pack = TempUploadPack {
+                path: path.clone(),
+                packfile_uris: Vec::new(),
+            };
+            assert!(pack.path().exists());
+        }
+        assert!(!path.exists(), "temporary pack must be removed on drop");
+    }
+
+    #[test]
+    fn upload_pack_blob_packfile_uri_mapping_validation_is_deferred_and_duplicate_fatal() {
+        let malformed = UploadPackBlobPackfileUriPolicy {
+            values: vec![UploadPackBlobPackfileUriConfig {
+                value: "malformed mapping".into(),
+            }],
+        };
+        assert!(malformed.advertised());
+        assert!(matches!(
+            malformed.resolve(SmartTransportHash::sha1()),
+            Err(CliError::Fatal { message, .. })
+                if message.contains("uploadpack.blobpackfileuri")
+        ));
+
+        let duplicate = UploadPackBlobPackfileUriPolicy {
+            values: vec![
+                UploadPackBlobPackfileUriConfig {
+                    value: format!(
+                        "{} {} https://example.test/one.pack",
+                        "a".repeat(40),
+                        "b".repeat(40)
+                    ),
+                },
+                UploadPackBlobPackfileUriConfig {
+                    value: format!(
+                        "{} {} https://example.test/two.pack",
+                        "a".repeat(40),
+                        "c".repeat(40)
+                    ),
+                },
+            ],
+        };
+        let error = duplicate
+            .resolve(SmartTransportHash::sha1())
+            .expect_err("duplicate object mapping must fail");
+        assert!(matches!(
+            error,
+            CliError::Fatal { message, .. }
+                if message == "duplicate object hash 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' in uploadpack.blobpackfileuri"
+        ));
+    }
+
+    #[test]
+    fn upload_pack_v2_uri_response_section_framing_uses_sideband_and_raw_delim() {
+        let mut output = Vec::new();
+        write_upload_pack_v2_response_line(&mut output, true, b"shallow-info\n")
+            .expect("shallow section header");
+        write_upload_pack_v2_response_line(
+            &mut output,
+            true,
+            b"shallow aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        )
+        .expect("shallow section line");
+        output.extend_from_slice(b"0001");
+        write_upload_pack_v2_response_line(&mut output, true, b"packfile-uris\n")
+            .expect("URI section header");
+        write_upload_pack_v2_response_line(
+            &mut output,
+            true,
+            b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa http://example.test/a.pack\n",
+        )
+        .expect("URI record");
+        output.extend_from_slice(b"0001");
+        write_upload_pack_v2_response_line(&mut output, true, b"packfile\n")
+            .expect("pack section header");
+        output.extend_from_slice(b"0000");
+
+        assert_eq!(&output[0..4], b"0012");
+        assert_eq!(output[4], 1);
+        assert_eq!(
+            output
+                .windows(4)
+                .filter(|window| *window == b"0001")
+                .count(),
+            2
+        );
+        assert!(output.windows(5).any(|window| window == b"\x01pack"));
+        assert_eq!(&output[output.len() - 4..], b"0000");
+    }
+
+    #[test]
+    fn upload_pack_filter_policy_resolves_bans_depth_combine_and_invalid_values() {
+        let temp = tempfile::TempDir::new().expect("repo");
+        let repo = test_repo_at(temp.path());
+        fs::write(
+            repo.git_dir.join("config"),
+            "[uploadpack]\n\tallowFilter = true\n[uploadpackfilter]\n\tallow = false\n[uploadpackfilter \"blob:none\"]\n\tallow = true\n[uploadpackfilter \"tree\"]\n\tmaxDepth = 2\n",
+        )
+        .expect("filter config");
+        let policy = UploadPackFilterPolicy::from_repo(&repo).expect("filter policy");
+        assert!(policy.advertised());
+        assert!(
+            policy
+                .validate(&parse_upload_pack_filter("blob:none").expect("blob:none"))
+                .is_ok()
+        );
+        let blob_limit = parse_upload_pack_filter("blob:limit=1k").expect("blob:limit");
+        match policy.validate(&blob_limit).expect_err("banned blob limit") {
+            CliError::Fatal { message, .. } => {
+                assert_eq!(message, "filter 'blob:limit' not supported")
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(
+            policy
+                .validate(&parse_upload_pack_filter("tree:2").expect("tree:2"))
+                .is_ok()
+        );
+        match policy
+            .validate(&parse_upload_pack_filter("tree:3").expect("tree:3"))
+            .expect_err("tree depth")
+        {
+            CliError::Fatal { message, .. } => {
+                assert_eq!(message, "tree filter allows max depth 2, but got 3")
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let combined = parse_upload_pack_filter("combine:blob%3Anone+blob%3Alimit%3D1k")
+            .expect("combined filter");
+        assert!(policy.validate(&combined).is_err());
+
+        fs::write(
+            repo.git_dir.join("config"),
+            "[uploadpack]\n\tallowFilter = true\n[uploadpackfilter \"tree\"]\n\tallow = false\n\tmaxDepth = 0x10\n",
+        )
+        .expect("tree max depth config");
+        let policy = UploadPackFilterPolicy::from_repo(&repo).expect("tree max depth policy");
+        assert!(
+            policy
+                .validate(&parse_upload_pack_filter("tree:010").expect("octal tree depth"))
+                .is_ok()
+        );
+
+        fs::write(
+            repo.git_dir.join("config"),
+            "[uploadpack]\n\tallowFilter = true\n[uploadpackfilter \"tree\"]\n\tmaxDepth = +2\n\tallow = false\n",
+        )
+        .expect("tree allow override config");
+        let policy = UploadPackFilterPolicy::from_repo(&repo).expect("tree allow policy");
+        assert!(
+            policy
+                .validate(&parse_upload_pack_filter("tree:2").expect("tree depth"))
+                .is_err()
+        );
+
+        assert_eq!(parse_git_unsigned("0x100"), Ok(256));
+        assert_eq!(parse_git_unsigned("010"), Ok(8));
+        assert_eq!(parse_git_unsigned("+2"), Ok(2));
+        assert_eq!(parse_git_unsigned(" 2k"), Ok(2 * 1024));
+        for value in ["08", "-0", "18446744073709551616"] {
+            assert!(
+                parse_git_unsigned(value).is_err(),
+                "expected invalid unsigned {value:?}"
+            );
+        }
+
+        fs::write(
+            repo.git_dir.join("config"),
+            "[uploadpack]\n\tallowFilter = true\n[uploadpackfilter \"tree\"]\n\tmaxDepth = -0\n",
+        )
+        .expect("invalid tree max depth config");
+        let error = UploadPackFilterPolicy::from_repo(&repo).expect_err("invalid tree max depth");
+        match error {
+            CliError::Fatal { message, .. } => assert_eq!(
+                message,
+                "bad numeric config value '-0' for 'uploadpackfilter.tree.maxdepth': invalid unit"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        fs::write(
+            repo.git_dir.join("config"),
+            "[uploadpack]\n\tallowFilter = maybe\n\tallowFilter = true\n",
+        )
+        .expect("invalid filter config");
+        let error = UploadPackFilterPolicy::from_repo(&repo).expect_err("invalid bool");
+        match error {
+            CliError::Fatal { message, .. } => {
+                assert!(message.contains("bad boolean config value 'maybe'"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn upload_pack_filter_request_requires_v0_negotiation_and_policy() {
+        let want = oid("1111111111111111111111111111111111111111");
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, format!("want {}\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("filter");
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let error = read_upload_pack_request_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            UploadPackFilterPolicy::default(),
+        )
+        .expect_err("filter must require negotiation");
+        match error {
+            CliError::Fatal { message, .. } => assert_eq!(
+                message,
+                "git upload-pack: filtering capability not negotiated"
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, format!("want {} filter\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("filter");
+        let mut enabled = UploadPackFilterPolicy::default();
+        enabled.allow_filter = true;
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let request = read_upload_pack_request_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            enabled,
+        )
+        .expect("negotiated filter");
+        assert!(request.filter.is_some());
+
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, format!("want {} filter\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("first filter");
+        write_pkt_line(&mut input, b"filter tree:1\n").expect("second filter");
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let error = read_upload_pack_request_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            enabled,
+        )
+        .expect_err("duplicate v0 filters must fail");
+        match error {
+            CliError::Fatal { message, .. } => {
+                assert_eq!(message, "multiple filter-specs cannot be combined")
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, b"command=fetch\n").expect("command");
+        input.extend_from_slice(b"0001");
+        write_pkt_line(&mut input, format!("want {}\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("filter");
+        input.extend_from_slice(b"0000");
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            UploadPackFilterPolicy::default(),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("v2 filter must require advertised capability"),
+        };
+        match error {
+            CliError::Fatal { message, .. } => {
+                assert_eq!(message, "unexpected line: 'filter blob:none'")
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, b"command=fetch\n").expect("command");
+        input.extend_from_slice(b"0001");
+        write_pkt_line(&mut input, format!("want {}\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("filter");
+        input.extend_from_slice(b"0000");
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let request = read_upload_pack_v2_request_state_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            enabled,
+        )
+        .expect("v2 negotiated filter");
+        assert!(matches!(
+            request,
+            UploadPackV2RequestRead::Request(UploadPackV2Request::Fetch(UploadPackRequest {
+                filter: Some(UploadPackFilter::BlobNone),
+                ..
+            }))
+        ));
+
+        let mut input = Vec::new();
+        write_pkt_line(&mut input, b"command=fetch\n").expect("command");
+        input.extend_from_slice(b"0001");
+        write_pkt_line(&mut input, format!("want {}\n", want).as_bytes()).expect("want");
+        write_pkt_line(&mut input, b"filter blob:none\n").expect("first filter");
+        write_pkt_line(&mut input, b"filter tree:1\n").expect("second filter");
+        input.extend_from_slice(b"0000");
+        let mut reader = io::BufReader::new(io::Cursor::new(input));
+        let error = match read_upload_pack_v2_request_state_from_stdin_with_hash_and_policy(
+            &mut reader,
+            SmartTransportHash::sha1(),
+            enabled,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("duplicate v2 filters must fail"),
+        };
+        match error {
+            CliError::Fatal { message, .. } => {
+                assert_eq!(message, "multiple filter-specs cannot be combined")
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn upload_pack_request_parser_uses_capacity_hints_for_growing_lists() {
         let want = oid("1111111111111111111111111111111111111111");
         let have = oid("2222222222222222222222222222222222222222");
@@ -29325,6 +44252,132 @@ mod transport_request_tests {
             )
             .expect("tree depth filter")
         );
+    }
+
+    #[test]
+    fn upload_pack_collect_filter_object_sets_match_sha1_and_sha256_graphs() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = tempfile::TempDir::new().expect("repo");
+            let repo = test_repo_at(temp.path());
+            let store = LooseObjectStore::new(&repo.objects_dir, algorithm);
+            let signature = Signature::new(
+                "Filter Oracle",
+                "filter-oracle@example.test",
+                1_700_000_000,
+                "+0000",
+            )
+            .expect("signature");
+            let old_root_blob = store
+                .write_object(GitObjectKind::Blob, b"old root")
+                .expect("old root blob");
+            let current_root_blob = store
+                .write_object(GitObjectKind::Blob, b"current root")
+                .expect("current root blob");
+            let nested_blob = store
+                .write_object(GitObjectKind::Blob, b"nested")
+                .expect("nested blob");
+            let nested_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[TreeEntry::new(
+                        TreeMode::File,
+                        "nested.txt",
+                        nested_blob.clone(),
+                    )
+                    .expect("nested entry")])
+                    .expect("nested tree bytes"),
+                )
+                .expect("nested tree");
+            let old_root_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[
+                        TreeEntry::new(TreeMode::Tree, "dir", nested_tree.clone())
+                            .expect("old dir entry"),
+                        TreeEntry::new(TreeMode::File, "root.txt", old_root_blob.clone())
+                            .expect("old root entry"),
+                    ])
+                    .expect("old root tree bytes"),
+                )
+                .expect("old root tree");
+            let current_root_tree = store
+                .write_object(
+                    GitObjectKind::Tree,
+                    &encode_tree(&[
+                        TreeEntry::new(TreeMode::Tree, "dir", nested_tree.clone())
+                            .expect("current dir entry"),
+                        TreeEntry::new(TreeMode::File, "root.txt", current_root_blob.clone())
+                            .expect("current root entry"),
+                    ])
+                    .expect("current root tree bytes"),
+                )
+                .expect("current root tree");
+            let first_commit = store
+                .write_object(
+                    GitObjectKind::Commit,
+                    &CommitBuilder::new(
+                        old_root_tree.clone(),
+                        signature.clone(),
+                        signature.clone(),
+                    )
+                    .message("filter oracle one")
+                    .expect("first message")
+                    .encode()
+                    .expect("first commit bytes"),
+                )
+                .expect("first commit");
+            let second_commit = store
+                .write_object(
+                    GitObjectKind::Commit,
+                    &CommitBuilder::new(current_root_tree.clone(), signature.clone(), signature)
+                        .parent(first_commit.clone())
+                        .message("filter oracle two")
+                        .expect("second message")
+                        .encode()
+                        .expect("second commit bytes"),
+                )
+                .expect("second commit");
+            let expected_tree_zero = [
+                first_commit.clone(),
+                second_commit.clone(),
+                current_root_tree.clone(),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>();
+            let expected_object_type_blob = [
+                first_commit.clone(),
+                second_commit.clone(),
+                current_root_tree.clone(),
+                old_root_blob.clone(),
+                current_root_blob.clone(),
+                nested_blob.clone(),
+            ]
+            .into_iter()
+            .collect::<HashSet<_>>();
+            let filters = [
+                ("tree:0", expected_tree_zero.clone()),
+                ("object:type=blob", expected_object_type_blob.clone()),
+                ("combine:blob%3Anone+tree%3A0", expected_tree_zero.clone()),
+                ("combine:tree%3A0+blob%3Anone", expected_tree_zero.clone()),
+            ];
+            for (filter_spec, expected) in filters {
+                let mut request = UploadPackRequest::default();
+                request.wants.push(second_commit.clone());
+                request.filter = Some(parse_upload_pack_filter(filter_spec).expect("filter"));
+                let ids = upload_pack_collect_pack_ids_with_hash(
+                    &repo,
+                    &store,
+                    &request,
+                    SmartTransportHash::for_algorithm(algorithm),
+                )
+                .expect("filtered object ids");
+                assert_eq!(
+                    ids.into_iter().collect::<HashSet<_>>(),
+                    expected,
+                    "{filter_spec}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -29503,6 +44556,23 @@ mod transport_request_tests {
     }
 
     #[test]
+    fn parsed_http_url_reads_configured_redirect_policy_and_http_version() {
+        let dir = tempfile::TempDir::new().expect("repo");
+        let repo = test_repo_at(dir.path());
+        std::fs::write(
+            repo.git_dir.join("config"),
+            "[http]\n\tfollowRedirects = true\n\tversion = HTTP/2\n",
+        )
+        .expect("config");
+
+        let url = parsed_http_url_with_extra_headers(Some(&repo), "https://example.test/repo.git")
+            .expect("parsed URL with config");
+
+        assert_eq!(url.follow_redirects, HttpFollowRedirects::All);
+        assert_eq!(url.http_version, Some("http2"));
+    }
+
+    #[test]
     fn parsed_http_url_scopes_proxy_to_matching_http_url() {
         let dir = tempfile::TempDir::new().expect("repo");
         let repo = test_repo_at(dir.path());
@@ -29635,13 +44705,14 @@ mod transport_request_tests {
     }
 
     #[test]
-    fn http_redirect_keeps_authorization_only_for_same_origin() {
+    fn http_redirect_filters_authorization_and_cookie_but_preserves_proxy_auth() {
         let source = ParsedHttpUrl::parse("https://user:pass@example.test/repo.git")
             .expect("source URL")
             .with_http_config(HttpUrlConfig {
                 authorization: None,
                 headers: vec![
                     "Authorization: Bearer scoped".to_owned(),
+                    "Cookie: session=scoped".to_owned(),
                     "Proxy-Authorization: Basic proxy".to_owned(),
                     "X-Zmin-Trace: keep".to_owned(),
                 ],
@@ -29650,6 +44721,8 @@ mod transport_request_tests {
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: None,
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
 
         let same = http_redirect_target_url(&source, "info/refs", "/repo.git/objects/info/packs")
@@ -29668,14 +44741,24 @@ mod transport_request_tests {
             same.extra_headers,
             vec![
                 "Authorization: Bearer scoped".to_owned(),
+                "Cookie: session=scoped".to_owned(),
                 "Proxy-Authorization: Basic proxy".to_owned(),
                 "X-Zmin-Trace: keep".to_owned()
             ]
         );
-        assert_eq!(cross.extra_headers, vec!["X-Zmin-Trace: keep".to_owned()]);
+        assert_eq!(
+            cross.extra_headers,
+            vec![
+                "Proxy-Authorization: Basic proxy".to_owned(),
+                "X-Zmin-Trace: keep".to_owned()
+            ]
+        );
         assert_eq!(
             different_port.extra_headers,
-            vec!["X-Zmin-Trace: keep".to_owned()]
+            vec![
+                "Proxy-Authorization: Basic proxy".to_owned(),
+                "X-Zmin-Trace: keep".to_owned()
+            ]
         );
     }
 
@@ -29694,6 +44777,8 @@ mod transport_request_tests {
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: None,
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
         let mut request = Vec::new();
 
@@ -29849,6 +44934,8 @@ mod transport_request_tests {
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: None,
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
         let mut frame = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
 
@@ -30106,6 +45193,7 @@ mod transport_request_tests {
             host: "example.test".to_owned(),
             port: 9418,
             path: "/repo.git".to_owned(),
+            virtual_host: None,
         };
         let mut request =
             Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
@@ -30126,6 +45214,7 @@ mod transport_request_tests {
             host: "example.test".to_owned(),
             port: 9419,
             path: "/repo.git".to_owned(),
+            virtual_host: None,
         };
         let mut request =
             Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
@@ -30138,6 +45227,54 @@ mod transport_request_tests {
             b"0035git-upload-pack /repo.git\0host=example.test:9419\0"
         );
         assert_eq!(request.capacity(), request.len());
+    }
+
+    #[test]
+    fn daemon_service_request_uses_virtual_host_without_url_port() {
+        let url = ParsedDaemonUrl {
+            host: "127.0.0.1".to_owned(),
+            port: 9419,
+            path: "/repo.git".to_owned(),
+            virtual_host: Some(DaemonVirtualHost::from_bytes(b"localhost".to_vec())),
+        };
+        let mut request =
+            Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
+
+        write_daemon_service_request(&mut request, &url, "git-upload-pack", &[])
+            .expect("daemon request");
+
+        assert_eq!(request, b"002dgit-upload-pack /repo.git\0host=localhost\0");
+    }
+
+    #[test]
+    fn daemon_service_request_preserves_empty_virtual_host() {
+        let url = ParsedDaemonUrl {
+            host: "127.0.0.1".to_owned(),
+            port: 9419,
+            path: "/repo.git".to_owned(),
+            virtual_host: Some(DaemonVirtualHost::from_bytes(Vec::new())),
+        };
+        let mut request =
+            Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
+
+        write_daemon_service_request(&mut request, &url, "git-upload-pack", &[])
+            .expect("daemon request");
+
+        assert_eq!(request, b"0024git-upload-pack /repo.git\0host=\0");
+    }
+
+    #[test]
+    fn parsed_daemon_url_rejects_newline_in_host_or_repo_path() {
+        for url in [
+            "git://example\n.test/repo.git",
+            "git://example.test/repo\n.git",
+        ] {
+            assert!(matches!(
+                ParsedDaemonUrl::parse(url),
+                Err(CliError::Fatal { code: 128, message })
+                    if message == "newline is forbidden in git:// hosts and repo paths"
+            ));
+        }
     }
 
     #[test]
@@ -30961,6 +46098,8 @@ done
                 client_cert_file: Some(config_cert.clone()),
                 client_key_file: Some(config_key.clone()),
                 proxy: None,
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
 
         {
@@ -31026,6 +46165,8 @@ done
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: Some("http://proxy.example:8080".to_owned()),
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
         let http_url = ParsedHttpUrl::parse("http://example.test/repo.git")
             .expect("parsed URL")
@@ -31037,6 +46178,8 @@ done
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: Some("http://proxy.example:8080".to_owned()),
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
 
         assert_eq!(
@@ -31061,6 +46204,8 @@ done
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: Some("http://proxy.example:8080".to_owned()),
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
 
         assert_eq!(
@@ -31152,6 +46297,8 @@ done
                 client_cert_file: None,
                 client_key_file: None,
                 proxy: None,
+                follow_redirects: HttpFollowRedirects::default(),
+                http_version: None,
             });
         let default_url =
             ParsedHttpUrl::parse("https://example.test/repo.git").expect("parsed URL");
@@ -31728,6 +46875,83 @@ done
     }
 
     #[test]
+    fn daemon_advertisement_distinguishes_flush_from_eof() {
+        let id = oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        for (suffix, expected_flush) in [(b"0000".as_slice(), true), (b"".as_slice(), false)] {
+            let mut body = Vec::new();
+            write_pkt_line(
+                &mut body,
+                format!("{} refs/heads/main\n", id.to_hex()).as_bytes(),
+            )
+            .expect("main");
+            body.extend_from_slice(suffix);
+            let mut reader = io::BufReader::new(io::Cursor::new(body));
+
+            let (_, _, _, terminated_with_flush) =
+                parse_daemon_upload_pack_advertisement_rows_with_termination(
+                    &mut reader,
+                    false,
+                    false,
+                    false,
+                    &[],
+                )
+                .expect("advertisement");
+            assert_eq!(terminated_with_flush, expected_flush);
+        }
+    }
+
+    #[test]
+    fn daemon_advertisement_rejects_truncated_pkt_line() {
+        let mut reader = io::BufReader::new(io::Cursor::new(b"0030short"));
+        let error = parse_daemon_upload_pack_advertisement_rows_with_termination(
+            &mut reader,
+            false,
+            false,
+            false,
+            &[],
+        )
+        .expect_err("truncated advertisement");
+        assert!(matches!(error, CliError::Io(_)));
+    }
+
+    #[test]
+    fn daemon_remote_errors_match_stock_client_mapping() {
+        for message in [
+            "no such repository",
+            "service not enabled",
+            "repository not exported",
+        ] {
+            let payload = format!("ERR {message}: /remote.git");
+            let mut body = Vec::new();
+            write_pkt_line(&mut body, payload.as_bytes()).expect("upload-pack error");
+            body.extend_from_slice(b"0000");
+            let mut upload_reader = io::BufReader::new(io::Cursor::new(body.clone()));
+            let upload_error = parse_daemon_upload_pack_advertisement_rows_with_shallows(
+                &mut upload_reader,
+                false,
+                false,
+                false,
+                &[],
+            )
+            .expect_err("daemon upload-pack error");
+            assert!(matches!(
+                upload_error,
+                CliError::Stderr { code: 128, text }
+                    if text == format!("fatal: remote error: {message}: /remote.git\n")
+            ));
+
+            let mut receive_reader = io::BufReader::new(io::Cursor::new(body));
+            let receive_error = parse_daemon_receive_pack_advertisement(&mut receive_reader)
+                .expect_err("daemon receive-pack error");
+            assert!(matches!(
+                receive_error,
+                CliError::Stderr { code: 128, text }
+                    if text == format!("fatal: remote error: {message}: /remote.git\n")
+            ));
+        }
+    }
+
+    #[test]
     fn upload_pack_advertisement_writes_head_before_sorted_refs_without_extra_rows() {
         let temp = tempfile::TempDir::new().expect("temp repo");
         let git_dir = temp.path().join(".git");
@@ -31985,6 +47209,140 @@ done
             discovery.rows.capacity(),
             HTTP_REMOTE_REF_ROWS_CAPACITY_HINT
         );
+    }
+
+    #[test]
+    fn smart_http_discovery_parser_records_filter_capability_without_allocating_tokens() {
+        let id = oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let mut body = Vec::new();
+        write_pkt_line(&mut body, b"# service=git-upload-pack\n").expect("service");
+        body.extend_from_slice(b"0000");
+        write_pkt_line(
+            &mut body,
+            format!(
+                "{} HEAD\0multi_ack filter symref=HEAD:refs/heads/main\n",
+                id.to_hex()
+            )
+            .as_bytes(),
+        )
+        .expect("head");
+        write_pkt_line(
+            &mut body,
+            format!("{} refs/heads/main\n", id.to_hex()).as_bytes(),
+        )
+        .expect("main");
+        body.extend_from_slice(b"0000");
+
+        let mut reader = io::BufReader::new(io::Cursor::new(body));
+        let discovery =
+            parse_smart_http_discovery_from_reader(&mut reader, false, false, false, &[])
+                .expect("parse smart")
+                .expect("smart discovery");
+
+        assert!(discovery.filter_supported);
+        assert_eq!(discovery.head_branch.as_deref(), Some("main"));
+        assert_eq!(discovery.rows.len(), 2);
+    }
+
+    #[test]
+    fn smart_http_discovery_parser_skips_protocol_v1_preamble() {
+        let id = oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let mut body = Vec::new();
+        write_pkt_line(&mut body, b"# service=git-upload-pack\n").expect("service");
+        body.extend_from_slice(b"0000");
+        write_pkt_line(&mut body, b"version 1\n").expect("protocol version");
+        write_pkt_line(
+            &mut body,
+            format!(
+                "{} HEAD\0multi_ack filter symref=HEAD:refs/heads/main\n",
+                id.to_hex()
+            )
+            .as_bytes(),
+        )
+        .expect("head");
+        write_pkt_line(
+            &mut body,
+            format!("{} refs/heads/main\n", id.to_hex()).as_bytes(),
+        )
+        .expect("main");
+        body.extend_from_slice(b"0000");
+
+        let mut reader = io::Cursor::new(body);
+        let discovery =
+            parse_smart_http_discovery_from_reader(&mut reader, false, false, false, &[])
+                .expect("parse smart")
+                .expect("smart discovery");
+
+        assert!(discovery.filter_supported);
+        assert_eq!(discovery.head_branch.as_deref(), Some("main"));
+        assert_eq!(discovery.rows.len(), 2);
+    }
+
+    #[test]
+    fn smart_http_discovery_parser_skips_protocol_v2_capabilities() {
+        let mut body = Vec::new();
+        write_pkt_line(&mut body, b"# service=git-upload-pack\n").expect("service");
+        body.extend_from_slice(b"0000");
+        write_pkt_line(&mut body, b"version 2\n").expect("protocol version");
+        write_pkt_line(&mut body, b"agent=zmin/0.1.0\n").expect("agent");
+        write_pkt_line(
+            &mut body,
+            b"fetch=shallow wait-for-done filter packfile-uris sideband-all\n",
+        )
+        .expect("fetch capabilities");
+        write_pkt_line(&mut body, b"server-option\n").expect("server option");
+        write_pkt_line(&mut body, b"object-format=sha256\n").expect("object format");
+        body.extend_from_slice(b"0000");
+
+        let mut reader = io::Cursor::new(body);
+        let discovery =
+            parse_smart_http_discovery_from_reader(&mut reader, false, false, false, &[])
+                .expect("parse smart")
+                .expect("smart discovery");
+
+        assert!(discovery.rows.is_empty());
+        assert!(discovery.filter_supported);
+        assert_eq!(discovery.hash.algorithm, GitHashAlgorithm::Sha256);
+    }
+
+    #[test]
+    fn upload_pack_request_filter_capability_without_filter_spec() {
+        let root = oid("1111111111111111111111111111111111111111");
+        let options = UploadPackShallowOptions::filter("blob:none").with_filter_support(false);
+        let request = build_upload_pack_request_from_shallow_options_with_hash(
+            std::slice::from_ref(&root),
+            &[],
+            options,
+            SmartTransportHash::sha1(),
+        )
+        .expect("unsupported filter request");
+        let request = String::from_utf8(request).expect("request text");
+
+        assert!(request.contains("want 1111111111111111111111111111111111111111 "));
+        assert!(request.contains(" filter\n"));
+        assert!(!request.contains("filter blob:none\n"));
+    }
+
+    #[test]
+    fn smart_http_discovery_parser_rejects_filter_only_when_capability_is_absent() {
+        let id = oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let mut body = Vec::new();
+        write_pkt_line(&mut body, b"# service=git-upload-pack\n").expect("service");
+        body.extend_from_slice(b"0000");
+        write_pkt_line(
+            &mut body,
+            format!("{} HEAD\0multi_ack\n", id.to_hex()).as_bytes(),
+        )
+        .expect("head");
+        body.extend_from_slice(b"0000");
+
+        let mut reader = io::BufReader::new(io::Cursor::new(body));
+        let discovery =
+            parse_smart_http_discovery_from_reader(&mut reader, false, false, false, &[])
+                .expect("parse smart")
+                .expect("smart discovery");
+
+        assert!(!discovery.filter_supported);
     }
 
     #[test]
@@ -32298,6 +47656,34 @@ done
         let mut rest = Vec::new();
         reader.read_to_end(&mut rest).expect("remaining bytes");
         assert_eq!(rest, b"-rest");
+    }
+
+    #[test]
+    fn clone_bundle_checksum_failure_keeps_index_pack_diagnostics() {
+        let error = CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "pack checksum mismatch",
+        ));
+        assert_eq!(
+            clone_bundle_install_error_text(&error).as_deref(),
+            Some("fatal: pack is corrupted (SHA1 mismatch)\nerror: index-pack died\n")
+        );
+        let hash_mismatch = CliError::Fatal {
+            code: 128,
+            message: "bundle uses hash algorithm sha256, but repository uses sha1".into(),
+        };
+        assert_eq!(
+            clone_bundle_install_error_text(&hash_mismatch).as_deref(),
+            Some(
+                "fatal: bundle uses hash algorithm sha256, but repository uses sha1\nerror: index-pack died\n"
+            )
+        );
+
+        let non_integrity = CliError::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "permission denied",
+        ));
+        assert!(clone_bundle_install_error_text(&non_integrity).is_none());
     }
 
     #[cfg(windows)]

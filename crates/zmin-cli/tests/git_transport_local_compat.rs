@@ -63,13 +63,32 @@ fn chmod_executable(path: &std::path::Path) {
     }
 }
 
-#[cfg(unix)]
 fn case_insensitive_filesystem(root: &std::path::Path) -> bool {
-    let probe = root.join("case-insensitive-probe");
-    fs::create_dir(&probe).expect("create case probe");
-    fs::write(probe.join("CamelCase"), b"good\n").expect("write uppercase probe");
-    fs::write(probe.join("camelcase"), b"bad\n").expect("write lowercase probe");
-    fs::read(probe.join("CamelCase")).expect("read uppercase probe") != b"good\n"
+    let probe = tempfile::Builder::new()
+        .prefix("zmin-case-sensitivity-")
+        .tempdir_in(root)
+        .expect("create case-sensitivity probe directory");
+    let uppercase = probe.path().join("CaseSensitivityProbe");
+    let lowercase = probe.path().join("casesensitivityprobe");
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&uppercase)
+        .expect("create uppercase case-sensitivity probe");
+    let case_insensitive = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lowercase)
+    {
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => true,
+        Err(error) => panic!("probe filesystem case sensitivity: {error}"),
+    };
+    probe
+        .close()
+        .expect("remove case-sensitivity probe directory");
+    case_insensitive
 }
 
 fn assert_matching_depth_fetch_state(

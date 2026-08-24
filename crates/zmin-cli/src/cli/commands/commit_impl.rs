@@ -1,10 +1,10 @@
 use super::*;
 use std::collections::HashSet;
 
-const WRITE_TREE_INDEX_CACHE_FILE: &str = "write-tree-cache-v1";
+const WRITE_TREE_INDEX_CACHE_FILE: &str = "write-tree-cache-v2";
 
 struct WriteTreeIndexCache {
-    index_sha1_hex: String,
+    index_checksum_hex: String,
     tree_id: ObjectId,
 }
 
@@ -711,6 +711,7 @@ fn commit_no_changes<T>() -> Result<T> {
 }
 
 fn read_merge_heads(repo: &GitRepo) -> Result<Vec<ObjectId>> {
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
     let path = repo.git_dir.join("MERGE_HEAD");
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
@@ -721,7 +722,7 @@ fn read_merge_heads(repo: &GitRepo) -> Result<Vec<ObjectId>> {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            ObjectId::from_hex(GitHashAlgorithm::Sha1, line.trim()).map_err(|error| {
+            ObjectId::from_hex(algorithm, line.trim()).map_err(|error| {
                 CliError::Fatal {
                     code: 128,
                     message: format!("corrupt MERGE_HEAD: {error}"),
@@ -979,7 +980,7 @@ fn signature_summary_date(signature: &Signature) -> Result<String> {
 }
 
 fn commit_summary_branch(repo: &GitRepo) -> Result<String> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_hash_algorithm_from_config(repo)?);
     match refs.read_head() {
         Ok(RefTarget::Symbolic(name)) => Ok(name
             .strip_prefix("refs/heads/")
@@ -1205,7 +1206,7 @@ fn update_commit_head_ref(
                 let _trace = phase_trace("commit.update_ref.resolve_old");
                 common_refs
                     .resolve(&target)
-                    .unwrap_or_else(|_| zero_object_id())
+                    .unwrap_or_else(|_| commit_zero_object_id(id.algorithm()))
             };
             let common_repo = GitRepo {
                 root: repo.root.clone(),
@@ -1234,6 +1235,10 @@ fn update_commit_head_ref(
             }
         }
     }
+}
+
+fn commit_zero_object_id(algorithm: GitHashAlgorithm) -> ObjectId {
+    ObjectId::new(algorithm, &vec![0; algorithm.digest_len()])
 }
 
 fn commit_cleanup_mode(cleanup: Option<&str>, no_cleanup: bool) -> Result<CommitCleanupMode> {
@@ -1796,7 +1801,7 @@ fn write_worktree_verbose_patch<W: Write>(
                 .root
                 .join(String::from_utf8_lossy(&entry.path).as_ref());
             let content = fs::read(path)?;
-            worktree_entry.id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
+            worktree_entry.id = hash_object(store.algorithm(), GitObjectKind::Blob, &content);
             worktree_index.upsert(worktree_entry)?;
         }
     }
@@ -1846,7 +1851,7 @@ fn write_tree_command(prefix: Option<&str>, missing_ok: bool) -> Result<()> {
     }
     let index_cache_key = if prefix.is_none() {
         let _trace = phase_trace("write_tree.cache_key");
-        compute_write_tree_index_cache_key(&repo)?
+        compute_write_tree_index_cache_key(&repo, algorithm)?
     } else {
         None
     };
@@ -1856,13 +1861,13 @@ fn write_tree_command(prefix: Option<&str>, missing_ok: bool) -> Result<()> {
     }
     let cached_tree = if prefix.is_none() {
         let _trace = phase_trace("write_tree.read_cache");
-        read_write_tree_index_cache(&repo)?
+        read_write_tree_index_cache(&repo, algorithm)?
     } else {
         None
     };
-    if let Some(index_sha1_hex) = index_cache_key.as_deref()
+    if let Some(index_checksum_hex) = index_cache_key.as_deref()
         && let Some(cached) = cached_tree
-        && cached.index_sha1_hex == index_sha1_hex
+        && cached.index_checksum_hex == index_checksum_hex
         && store.contains_object(&cached.tree_id)?
     {
         println!("{}", cached.tree_id.to_hex());
@@ -1888,12 +1893,12 @@ fn write_tree_command(prefix: Option<&str>, missing_ok: bool) -> Result<()> {
         index.refresh_cache_tree();
         index.write_to_path(&repo.index_path)?;
     }
-    if let Some(index_sha1_hex) = index_cache_key {
+    if let Some(index_checksum_hex) = index_cache_key {
         let _trace = phase_trace("write_tree.write_cache");
         write_write_tree_index_cache(
             &repo,
             &WriteTreeIndexCache {
-                index_sha1_hex,
+                index_checksum_hex,
                 tree_id: tree.clone(),
             },
         )?;
@@ -1902,22 +1907,26 @@ fn write_tree_command(prefix: Option<&str>, missing_ok: bool) -> Result<()> {
     Ok(())
 }
 
-fn compute_write_tree_index_cache_key(repo: &GitRepo) -> Result<Option<String>> {
+fn compute_write_tree_index_cache_key(
+    repo: &GitRepo,
+    algorithm: GitHashAlgorithm,
+) -> Result<Option<String>> {
     if !repo.index_path.is_file() {
         return Ok(None);
     }
     let bytes = fs::read(&repo.index_path)?;
-    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let digest_len = algorithm.digest_len();
     if bytes.len() < digest_len {
         return Ok(None);
     }
     let checksum = &bytes[bytes.len() - digest_len..];
-    Ok(Some(
-        ObjectId::new(GitHashAlgorithm::Sha1, checksum).to_hex(),
-    ))
+    Ok(Some(ObjectId::new(algorithm, checksum).to_hex()))
 }
 
-fn read_write_tree_index_cache(repo: &GitRepo) -> Result<Option<WriteTreeIndexCache>> {
+fn read_write_tree_index_cache(
+    repo: &GitRepo,
+    algorithm: GitHashAlgorithm,
+) -> Result<Option<WriteTreeIndexCache>> {
     let path = write_tree_index_cache_path(repo);
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -1928,7 +1937,7 @@ fn read_write_tree_index_cache(repo: &GitRepo) -> Result<Option<WriteTreeIndexCa
         return Ok(None);
     };
     let mut lines = text.lines();
-    let Some(index_sha1_hex) = lines.next() else {
+    let Some(index_checksum_hex) = lines.next() else {
         return Ok(None);
     };
     let Some(tree_hex) = lines.next() else {
@@ -1937,11 +1946,14 @@ fn read_write_tree_index_cache(repo: &GitRepo) -> Result<Option<WriteTreeIndexCa
     if lines.next().is_some() {
         return Ok(None);
     }
-    let Ok(tree_id) = ObjectId::from_hex(GitHashAlgorithm::Sha1, tree_hex) else {
+    if ObjectId::from_hex(algorithm, index_checksum_hex).is_err() {
+        return Ok(None);
+    }
+    let Ok(tree_id) = ObjectId::from_hex(algorithm, tree_hex) else {
         return Ok(None);
     };
     Ok(Some(WriteTreeIndexCache {
-        index_sha1_hex: index_sha1_hex.to_owned(),
+        index_checksum_hex: index_checksum_hex.to_owned(),
         tree_id,
     }))
 }
@@ -1953,7 +1965,7 @@ fn write_write_tree_index_cache(repo: &GitRepo, cache: &WriteTreeIndexCache) -> 
         message: "write-tree cache path has no parent".into(),
     })?;
     fs::create_dir_all(parent)?;
-    let content = format!("{}\n{}\n", cache.index_sha1_hex, cache.tree_id.to_hex());
+    let content = format!("{}\n{}\n", cache.index_checksum_hex, cache.tree_id.to_hex());
     let tmp_path = unique_temp_sibling(&path);
     fs::write(&tmp_path, content)?;
     fs::rename(tmp_path, path)?;
@@ -2080,7 +2092,8 @@ fn commit_tree(
     no_gpg_sign: bool,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let tree = resolve_objectish(&repo, tree).map_err(|_| CliError::Fatal {
         code: 128,
         message: format!("not a valid object name {tree}"),
@@ -2267,31 +2280,20 @@ fn read_commit_tree_message_file(path: &std::path::Path) -> Result<Vec<u8>> {
 
 fn mktree(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut input = Vec::new();
-    io::stdin().read_to_end(&mut input)?;
-    let records = split_mktree_records(&input, nul_terminated)?;
-    if batch {
-        let mut group = Vec::new();
-        for record in records {
-            if record.is_empty() {
-                write_mktree_group(&store, &group, missing)?;
-                group.clear();
-            } else {
-                group.push(record);
-            }
-        }
-        if !group.is_empty() {
-            write_mktree_group(&store, &group, missing)?;
-        }
-    } else {
-        let records = records
-            .into_iter()
-            .filter(|record| !record.is_empty())
-            .collect::<Vec<_>>();
-        write_mktree_group(&store, &records, missing)?;
-    }
-    Ok(())
+    let algorithm = repo_hash_algorithm_from_config(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    run_mktree(
+        &store,
+        &mut input,
+        &mut output,
+        nul_terminated,
+        missing,
+        batch,
+    )
 }
 
 pub(crate) fn split_mktree_records(input: &[u8], nul_terminated: bool) -> Result<Vec<String>> {
@@ -2350,7 +2352,7 @@ pub(crate) fn parse_mktree_entry(
     }
     let tree_mode = parse_mktree_mode(mode, object_type)?;
     let object_kind = tree_entry_kind(tree_mode);
-    let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?;
+    let id = ObjectId::from_hex(store.algorithm(), id)?;
     if !missing && tree_mode != TreeMode::Gitlink {
         let object = store.read_object(&id).map_err(|_| CliError::Fatal {
             code: 128,

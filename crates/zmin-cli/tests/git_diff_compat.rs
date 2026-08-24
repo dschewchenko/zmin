@@ -1,16 +1,69 @@
 mod common;
 
+use std::collections::HashMap;
+use std::io::Write;
 use std::process::Command;
-use std::{fs, path::Path};
+use std::{fs, path::Path, path::PathBuf};
 
+use flate2::{Compression, write::ZlibEncoder};
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    command_any_output_with_stdin, command_output_with_env, configure_identity, git, git_args,
-    git_failure_output, git_init, git_status, git_with_env, git_with_stdin, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
-    run_zmin_with_stdin, write_file, zmin_bin,
+    RawCommandOutput, command_any_output_with_stdin, command_output_with_env, command_raw_output,
+    command_raw_output_with_stdin, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status, git_with_env, git_with_stdin, pinned_git_args, pinned_git_init_sha256,
+    pinned_git_with_env, required_pinned_stock_git, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, write_file,
+    zmin_bin,
 };
+
+fn pinned_stock_git() -> PathBuf {
+    required_pinned_stock_git()
+}
+
+fn diff_tree_abbrev_tuple(
+    zmin: &str,
+    stock: &str,
+    repo: &Path,
+    config: Option<&str>,
+    stdin: bool,
+    abbrev_args: &[&str],
+    head: &str,
+) -> (RawCommandOutput, RawCommandOutput) {
+    let mut args = vec!["diff-tree"];
+    if let Some(config) = config {
+        args.splice(0..0, ["-c", config]);
+    }
+    if stdin {
+        args.extend(["--stdin", "--format=%h"]);
+    } else {
+        args.extend(["--format=%h"]);
+    }
+    args.extend_from_slice(abbrev_args);
+    if stdin {
+        args.push("-s");
+    } else {
+        args.extend(["-s", "HEAD"]);
+    }
+    let zmin_result = if stdin {
+        command_raw_output_with_stdin(zmin, repo, &args, format!("{head}\n").as_bytes(), "zmin")
+    } else {
+        command_raw_output(zmin, repo, &args, "zmin")
+    };
+    let stock_result = if stdin {
+        command_raw_output_with_stdin(
+            stock,
+            repo,
+            &args,
+            format!("{head}\n").as_bytes(),
+            "stock Git",
+        )
+    } else {
+        command_raw_output(stock, repo, &args, "stock Git")
+    };
+    (zmin_result, stock_result)
+}
 
 fn command_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, String) {
     let output = Command::new(common::test_command_program(command))
@@ -66,6 +119,129 @@ fn two_commit_repo() -> TempDir {
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "second"]);
     repo
+}
+
+fn write_abbrev_collision_object(repo: &Path, kind: &str, content: &[u8]) -> String {
+    let mut object = format!("{kind} {}\0", content.len()).into_bytes();
+    object.extend_from_slice(content);
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&object);
+    let object_id = hasher.finalize();
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&object).expect("compress loose object");
+    let compressed = encoder.finish().expect("finish loose object");
+    let hex = object_id.to_hex();
+    let object_dir = repo.join(".git/objects").join(&hex[..2]);
+    fs::create_dir_all(&object_dir).expect("create loose object directory");
+    fs::write(object_dir.join(&hex[2..]), compressed).expect("write loose object");
+    hex
+}
+
+fn write_abbrev_collision_tree(repo: &Path, blob_id: &str, name: &[u8]) -> String {
+    write_abbrev_collision_tree_entries(repo, &[(blob_id, name)])
+}
+
+fn write_abbrev_collision_tree_entries(repo: &Path, entries: &[(&str, &[u8])]) -> String {
+    let mut tree = Vec::new();
+    for (blob_id, name) in entries {
+        tree.extend_from_slice(b"100644 ");
+        tree.extend_from_slice(name);
+        tree.push(0);
+        tree.extend_from_slice(&hex_to_bytes(blob_id));
+    }
+    write_abbrev_collision_object(repo, "tree", &tree)
+}
+
+fn write_abbrev_collision_commit(repo: &Path, tree_id: &str, parent: Option<&str>) -> String {
+    let parent_line = parent.map_or(String::new(), |id| format!("parent {id}\n"));
+    let content = format!(
+        "tree {tree_id}\n{parent_line}author Diff Collision <diff@example.test> 1700000000 +0000\ncommitter Diff Collision <diff@example.test> 1700000000 +0000\n\ncollision\n"
+    );
+    write_abbrev_collision_object(repo, "commit", content.as_bytes())
+}
+
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|chunk| {
+            let value = std::str::from_utf8(chunk).expect("hex chunk utf8");
+            u8::from_str_radix(value, 16).expect("hex byte")
+        })
+        .collect()
+}
+
+struct NoIndexBlobCandidate {
+    content: Vec<u8>,
+    id: String,
+}
+
+struct NoIndexBlobCollision {
+    old_content: Vec<u8>,
+    new_content: Vec<u8>,
+    prefix: String,
+}
+
+fn no_index_blob_id(algorithm: GitHashAlgorithm, content: &[u8]) -> String {
+    let mut object = format!("blob {}\0", content.len()).into_bytes();
+    object.extend_from_slice(content);
+    let mut hasher = GitObjectHash::new(algorithm);
+    hasher.update(&object);
+    hasher.finalize().to_hex()
+}
+
+fn no_index_blob_collision(algorithm: GitHashAlgorithm) -> NoIndexBlobCollision {
+    let label = match algorithm {
+        GitHashAlgorithm::Sha1 => "sha1",
+        GitHashAlgorithm::Sha256 => "sha256",
+    };
+    let mut candidates = HashMap::<String, NoIndexBlobCandidate>::new();
+    for number in 0..100_000 {
+        let content = format!("no-index-{label}-collision-{number:05}\n").into_bytes();
+        let id = no_index_blob_id(algorithm, &content);
+        let prefix = id[..7].to_owned();
+        if let Some(previous) = candidates.get(&prefix) {
+            if previous.id != id {
+                return NoIndexBlobCollision {
+                    old_content: previous.content.clone(),
+                    new_content: content,
+                    prefix,
+                };
+            }
+        } else {
+            candidates.insert(prefix, NoIndexBlobCandidate { content, id });
+        }
+    }
+    panic!("bounded {label} no-index collision search did not find a pair");
+}
+
+struct PatchIndexIds {
+    old: String,
+    new: String,
+}
+
+fn patch_index_ids(stdout: &[u8]) -> PatchIndexIds {
+    let line = stdout
+        .split(|byte| *byte == b'\n')
+        .find(|line| line.starts_with(b"index "))
+        .expect("patch index line");
+    let range = line
+        .split(|byte| byte.is_ascii_whitespace())
+        .nth(1)
+        .expect("patch index range");
+    let separator = range
+        .windows(2)
+        .position(|pair| pair == b"..")
+        .expect("patch index range separator");
+    let old = &range[..separator];
+    let new = &range[separator + 2..];
+    PatchIndexIds {
+        old: String::from_utf8(old.to_vec())
+            .expect("old patch index id")
+            .to_owned(),
+        new: String::from_utf8(new.to_vec())
+            .expect("new patch index id")
+            .to_owned(),
+    }
 }
 
 #[test]
@@ -314,6 +490,501 @@ fn diff_cached_raw_z_uses_stock_git_default_abbrev() {
 }
 
 #[test]
+fn diff_tree_raw_extends_seed_width_for_colliding_output_objects() {
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    let repo = git_init();
+    let left = write_abbrev_collision_object(repo.path(), "blob", b"abbrev-sha1-collision-006687");
+    let right = write_abbrev_collision_object(repo.path(), "blob", b"abbrev-sha1-collision-040110");
+    assert_eq!(
+        &left[..7],
+        &right[..7],
+        "fixture must collide at seed width"
+    );
+    let unrelated_old =
+        write_abbrev_collision_object(repo.path(), "blob", b"abbrev-sha1-unrelated-old");
+    let unrelated_new =
+        write_abbrev_collision_object(repo.path(), "blob", b"abbrev-sha1-unrelated-new");
+    let old_tree =
+        write_abbrev_collision_tree_entries(repo.path(), &[(&left, b"a"), (&unrelated_old, b"b")]);
+    let new_tree =
+        write_abbrev_collision_tree_entries(repo.path(), &[(&right, b"a"), (&unrelated_new, b"b")]);
+    let old_commit = write_abbrev_collision_commit(repo.path(), &old_tree, None);
+    let new_commit = write_abbrev_collision_commit(repo.path(), &new_tree, Some(&old_commit));
+    for value in ["7", "12", "4", "no"] {
+        let config = format!("core.abbrev={value}");
+        let args = [
+            "-c",
+            config.as_str(),
+            "diff-tree",
+            "--raw",
+            "--abbrev",
+            "--no-commit-id",
+            &old_commit,
+            &new_commit,
+        ];
+        let zmin = command_raw_output(zmin_bin(), repo.path(), &args, "zmin");
+        let stock_result = command_raw_output(stock, repo.path(), &args, "stock Git");
+        assert_eq!(zmin, stock_result, "core.abbrev={value}");
+        let rows = stock_result
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|row| !row.is_empty())
+            .map(|row| {
+                row.split(|byte| byte.is_ascii_whitespace())
+                    .filter(|field| !field.is_empty())
+                    .map(|field| field.len())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let minimum = value.parse::<usize>().unwrap_or(40);
+        assert_eq!(rows.len(), 2, "core.abbrev={value}");
+        assert!(rows.iter().all(|fields| fields[2] >= minimum));
+        assert_eq!(rows[0][2], rows[0][3], "colliding row width");
+        assert_eq!(rows[1][2], rows[1][3], "unrelated row width");
+        if value == "7" || value == "4" {
+            let unrelated_width = value.parse::<usize>().expect("numeric core.abbrev");
+            assert_eq!(
+                [rows[0][2], rows[0][3], rows[1][2], rows[1][3]],
+                [8, 8, unrelated_width, unrelated_width],
+                "per-object widths for core.abbrev={value}"
+            );
+        } else if value == "no" {
+            assert_eq!(rows[0][2], 40, "core.abbrev=no");
+            assert_eq!(rows[1][2], 40, "core.abbrev=no");
+        }
+    }
+    for args in [
+        [
+            "diff-tree",
+            "--raw",
+            "--abbrev=7",
+            "--no-commit-id",
+            old_commit.as_str(),
+            new_commit.as_str(),
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=7",
+            "log",
+            "--raw",
+            "--format=%H",
+            "--max-count",
+            "1",
+            new_commit.as_str(),
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "raw history tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn root_patch_null_side_uses_default_abbrev_width_sha1_and_sha256() {
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for sha256 in [false, true] {
+        let repo = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        configure_identity(repo.path());
+        write_file(repo.path(), "root.txt", "root\n");
+        git(repo.path(), ["add", "-A"]);
+        git_with_env(repo.path(), ["commit", "-m", "root"]);
+
+        let args = ["diff-tree", "--root", "-p", "--no-commit-id", "HEAD"];
+        let zmin = command_raw_output(zmin_bin(), repo.path(), &args, "zmin");
+        let expected = command_raw_output(stock, repo.path(), &args, "stock Git");
+        assert_eq!(zmin, expected, "root patch tuple: sha256={sha256}");
+        let ids = patch_index_ids(&expected.stdout);
+        assert_eq!(ids.old.len(), 7, "root null width: sha256={sha256}");
+        assert_eq!(ids.new.len(), 7, "root new width: sha256={sha256}");
+    }
+}
+
+#[test]
+fn sha256_diff_and_diff_tree_abbrev_match_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    pinned_git_args(repo.path(), &["config", "user.name", "Bench"]);
+    pinned_git_args(repo.path(), &["config", "user.email", "bench@example.test"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "base"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ],
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    pinned_git_args(repo.path(), &["add", "-A"]);
+    pinned_git_with_env(
+        repo.path(),
+        &["commit", "-m", "second"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000001 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000001 +0000"),
+        ],
+    );
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for args in [
+        ["diff", "--raw", "--no-abbrev", "HEAD~1", "HEAD"].as_slice(),
+        [
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--raw",
+            "--no-abbrev",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=12",
+            "diff",
+            "--raw",
+            "--abbrev",
+            "HEAD~1",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=no",
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--raw",
+            "--abbrev",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--raw",
+            "--abbrev=40",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "diff-tree",
+            "--root",
+            "--no-commit-id",
+            "--raw",
+            "--abbrev=63",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-256 diff tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn sha256_no_index_raw_abbrev_matches_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    write_file(repo.path(), "left.txt", "left\n");
+    write_file(repo.path(), "right.txt", "right\n");
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for args in [
+        [
+            "diff",
+            "--no-index",
+            "--raw",
+            "--abbrev=4",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--raw",
+            "--no-abbrev",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-256 no-index tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn sha1_no_index_patch_abbrev_matches_pinned_git() {
+    let repo = git_init();
+    write_file(repo.path(), "left.txt", "left\n");
+    write_file(repo.path(), "right.txt", "right\n");
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for args in [
+        ["diff", "--no-index", "--patch", "left.txt", "right.txt"].as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--abbrev=12",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=12",
+            "diff",
+            "--no-index",
+            "--patch",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=no",
+            "diff",
+            "--no-index",
+            "--patch",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--no-abbrev",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--full-index",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-1 no-index patch tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn sha256_no_index_patch_abbrev_matches_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    write_file(repo.path(), "left.txt", "left\n");
+    write_file(repo.path(), "right.txt", "right\n");
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for args in [
+        ["diff", "--no-index", "--patch", "left.txt", "right.txt"].as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--abbrev=12",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=12",
+            "diff",
+            "--no-index",
+            "--patch",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "-c",
+            "core.abbrev=no",
+            "diff",
+            "--no-index",
+            "--patch",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--no-abbrev",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--full-index",
+            "left.txt",
+            "right.txt",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-256 no-index patch tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn no_index_patch_no_abbrev_keeps_fixed_seed_for_sha1_sha256_collisions() {
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    for use_sha256 in [false, true] {
+        let (repo, algorithm) = if use_sha256 {
+            (pinned_git_init_sha256(), GitHashAlgorithm::Sha256)
+        } else {
+            (git_init(), GitHashAlgorithm::Sha1)
+        };
+        let collision = no_index_blob_collision(algorithm);
+        write_file(
+            repo.path(),
+            "old",
+            std::str::from_utf8(&collision.old_content).expect("collision fixture utf8"),
+        );
+        write_file(
+            repo.path(),
+            "new",
+            std::str::from_utf8(&collision.new_content).expect("collision fixture utf8"),
+        );
+        let no_abbrev = ["diff", "--no-index", "--patch", "--no-abbrev", "old", "new"];
+        let zmin = command_raw_output(zmin_bin(), repo.path(), &no_abbrev, "zmin");
+        let stock_result = command_raw_output(stock, repo.path(), &no_abbrev, "stock Git");
+        assert_eq!(zmin, stock_result, "fixed no-abbrev tuple: {algorithm:?}");
+        let ids = patch_index_ids(&stock_result.stdout);
+        assert_eq!(ids.old.len(), 7, "old fixed width: {algorithm:?}");
+        assert_eq!(ids.new.len(), 7, "new fixed width: {algorithm:?}");
+        assert_eq!(
+            ids.old, collision.prefix,
+            "old collision prefix: {algorithm:?}"
+        );
+        assert_eq!(
+            ids.new, collision.prefix,
+            "new collision prefix: {algorithm:?}"
+        );
+
+        let full_index = [
+            "diff",
+            "--no-index",
+            "--patch",
+            "--no-abbrev",
+            "--full-index",
+            "old",
+            "new",
+        ];
+        let zmin = command_raw_output(zmin_bin(), repo.path(), &full_index, "zmin");
+        let stock_result = command_raw_output(stock, repo.path(), &full_index, "stock Git");
+        assert_eq!(
+            zmin, stock_result,
+            "full-index precedence tuple: {algorithm:?}"
+        );
+        let ids = patch_index_ids(&stock_result.stdout);
+        let full_width = match algorithm {
+            GitHashAlgorithm::Sha1 => 40,
+            GitHashAlgorithm::Sha256 => 64,
+        };
+        assert_eq!(ids.old.len(), full_width, "old full width: {algorithm:?}");
+        assert_eq!(ids.new.len(), full_width, "new full width: {algorithm:?}");
+    }
+}
+
+#[test]
+fn sha256_no_index_binary_add_delete_patch_matches_pinned_git() {
+    let repo = pinned_git_init_sha256();
+    let stock = required_pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    fs::write(repo.path().join("added.bin"), b"new\0payload\n").expect("write added binary");
+    fs::write(repo.path().join("deleted.bin"), b"old\0payload\n").expect("write deleted binary");
+
+    for args in [
+        [
+            "diff",
+            "--no-index",
+            "--binary",
+            "--no-abbrev",
+            "/dev/null",
+            "added.bin",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--binary",
+            "--full-index",
+            "/dev/null",
+            "added.bin",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--binary",
+            "--no-abbrev",
+            "deleted.bin",
+            "/dev/null",
+        ]
+        .as_slice(),
+        [
+            "diff",
+            "--no-index",
+            "--binary",
+            "--full-index",
+            "deleted.bin",
+            "/dev/null",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_raw_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_raw_output(stock, repo.path(), args, "stock Git"),
+            "SHA-256 no-index binary tuple: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn diff_stat_scales_graph_like_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -412,6 +1083,8 @@ fn diff_tree_combined_raw_for_merge_matches_stock_git() {
         ["diff", "--line-prefix=abc", "main", "main^", "side"].as_slice(),
         ["diff-tree", "-c", "main"].as_slice(),
         ["diff-tree", "-c", "--abbrev", "main"].as_slice(),
+        ["diff-tree", "-c", "--raw", "--abbrev=7", "main"].as_slice(),
+        ["diff-tree", "--cc", "--raw", "--abbrev=7", "main"].as_slice(),
         ["diff-tree", "--cc", "main"].as_slice(),
         ["diff-tree", "-c", "--stat", "main"].as_slice(),
         ["diff-tree", "--cc", "--stat", "main"].as_slice(),
@@ -986,6 +1659,169 @@ fn diff_tree_stdin_log_format_matches_stock_git() {
         command_any_output_with_stdin(zmin_bin(), repo.path(), &args, &revs, "zmin"),
         command_any_output_with_stdin("git", repo.path(), &args, &revs, "git")
     );
+}
+
+#[test]
+fn diff_tree_format_abbrev_policy_is_validated_before_stdin() {
+    let stock = pinned_stock_git();
+    let stock = stock.to_str().expect("pinned Git path is UTF-8");
+    let repo = two_commit_repo();
+    let head = git(repo.path(), ["rev-parse", "HEAD"]);
+
+    for stdin in [false, true] {
+        for request_abbrev in [false, true] {
+            for value in ["12", "4", "no"] {
+                let config = format!("core.abbrev={value}");
+                let abbrev_args: &[&str] = if request_abbrev { &["--abbrev"] } else { &[] };
+                let (zmin, expected) = diff_tree_abbrev_tuple(
+                    zmin_bin(),
+                    stock,
+                    repo.path(),
+                    Some(&config),
+                    stdin,
+                    &abbrev_args,
+                    &head,
+                );
+                assert_eq!(
+                    zmin, expected,
+                    "core.abbrev={value}, stdin={stdin}, request_abbrev={request_abbrev}"
+                );
+                assert_eq!(zmin.status, 0, "core.abbrev={value}, stdin={stdin}");
+                let width = zmin
+                    .stdout
+                    .split(|byte| *byte == b'\n')
+                    .next()
+                    .expect("formatted diff-tree output")
+                    .iter()
+                    .copied()
+                    .filter(|byte| *byte != b'\r')
+                    .count();
+                assert_eq!(
+                    width,
+                    if !request_abbrev || value == "no" {
+                        40
+                    } else {
+                        value.parse().unwrap()
+                    },
+                    "core.abbrev={value}, stdin={stdin}, request_abbrev={request_abbrev}"
+                );
+            }
+        }
+
+        for abbrev_args in [
+            &[][..],
+            &["--abbrev"][..],
+            &["--abbrev=7"][..],
+            &["--abbrev=12"][..],
+            &["--abbrev=4"][..],
+            &["--abbrev=0"][..],
+            &["--abbrev=+1"][..],
+            &["--abbrev=-1"][..],
+            &["--abbrev=12junk"][..],
+            &["--abbrev=999999999999999999999999"][..],
+            &["--no-abbrev"][..],
+            &["--no-abbrev", "--abbrev=12"][..],
+            &["--abbrev=12", "--no-abbrev"][..],
+            &["--abbrev=4", "--abbrev=12"][..],
+        ] {
+            let (zmin, expected) = diff_tree_abbrev_tuple(
+                zmin_bin(),
+                stock,
+                repo.path(),
+                None,
+                stdin,
+                abbrev_args,
+                &head,
+            );
+            assert_eq!(zmin, expected, "abbrev args={abbrev_args:?}, stdin={stdin}");
+        }
+
+        let ulong_max = if std::mem::size_of::<std::os::raw::c_ulong>() == 4 {
+            u32::MAX as u128
+        } else {
+            u64::MAX as u128
+        };
+        for value in [ulong_max, ulong_max + 1] {
+            let argument = format!("--abbrev=-{value}");
+            let abbrev_args = [argument.as_str()];
+            let (zmin, expected) = diff_tree_abbrev_tuple(
+                zmin_bin(),
+                stock,
+                repo.path(),
+                None,
+                stdin,
+                &abbrev_args,
+                &head,
+            );
+            assert_eq!(
+                zmin, expected,
+                "negative c_ulong boundary={value}, stdin={stdin}"
+            );
+        }
+
+        for (config, abbrev_args) in [
+            ("core.abbrev= 12", &["--abbrev"][..]),
+            ("core.abbrev=+12", &[][..]),
+            ("core.abbrev=\t12", &["--abbrev"][..]),
+        ] {
+            let (zmin, expected) = diff_tree_abbrev_tuple(
+                zmin_bin(),
+                stock,
+                repo.path(),
+                Some(config),
+                stdin,
+                abbrev_args,
+                &head,
+            );
+            assert_eq!(zmin, expected, "config={config:?}, stdin={stdin}");
+        }
+
+        for request_abbrev in [false, true] {
+            for configs in [
+                ("core.abbrev=bogus", "core.abbrev=12"),
+                ("core.abbrev=12", "core.abbrev=bogus"),
+            ] {
+                let mut args = vec!["-c", configs.0, "-c", configs.1, "diff-tree"];
+                if stdin {
+                    args.extend(["--stdin", "--format=%h"]);
+                } else {
+                    args.extend(["--format=%h"]);
+                }
+                if request_abbrev {
+                    args.push("--abbrev");
+                }
+                if stdin {
+                    args.push("-s");
+                } else {
+                    args.extend(["-s", "HEAD"]);
+                }
+                let zmin = if stdin {
+                    command_raw_output_with_stdin(
+                        zmin_bin(),
+                        repo.path(),
+                        &args,
+                        format!("{head}\n").as_bytes(),
+                        "zmin",
+                    )
+                } else {
+                    command_raw_output(zmin_bin(), repo.path(), &args, "zmin")
+                };
+                let expected = if stdin {
+                    command_raw_output_with_stdin(
+                        stock,
+                        repo.path(),
+                        &args,
+                        format!("{head}\n").as_bytes(),
+                        "stock Git",
+                    )
+                } else {
+                    command_raw_output(stock, repo.path(), &args, "stock Git")
+                };
+                assert_eq!(zmin, expected, "configs={configs:?}, stdin={stdin}");
+                assert_ne!(zmin.status, 0, "configs={configs:?}, stdin={stdin}");
+            }
+        }
+    }
 }
 
 #[test]

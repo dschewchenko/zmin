@@ -1,32 +1,35 @@
 # Command Compatibility Audit
 
-This file is the compact summary of the current Git command entry-point
-surface.
+## Current Git v2.55.0 target
 
-## Baselines
+The authoritative current scope is the committed
+`tools/git-upstream-compat-contract.tsv`, explained by
+`docs/git/upstream_compatibility_baseline.md`. The target is 100% of the frozen
+current/nondeprecated Git v2.55.0 surface: 1045 of 1046 top-level shell test
+files. The sole whole-file exclusion is `t5323-pack-redundant.sh`; git-svn,
+git-cvsserver, gitweb, cvsimport and git-p4 remain included, as do deprecated
+assertions inside retained mixed tests. This target is not currently claimed
+as achieved by command presence, a local census or selected oracle rows.
 
-- Git `v2.32.0`: `145/145` tracked command entry points present
-- Git `v2.47.1`: `151/151` tracked command entry points present
-- complete Git `v2.47.1` behavior matrices: `0/151`
-- complete documented command-option behavior matrices: `0/4632`
-- commands with any written behavior matrix rows: `2/151`
-- documented command-option pairs represented by at least one row: `50/4632`
-  audit progress only, not option support
+The separate `tools/zmin-extensions-contract.tsv` contains 40 stable primary
+Zmin rows and 7 relationship-neutral rows: 47 tracked contract rows, not 47
+Git APIs. It is not mixed into the Git denominator. Its `command.lfs` row is a
+bounded Git LFS v3.7.1-compatible extension slice, not a claim of arbitrary
+Git LFS ecosystem parity; configured mTLS/client identity fails before network
+access and is an extension transport exclusion, not a Git-denominator
+exclusion.
+The seven current Git names `backfill`, `diff-pairs`, `format-rev`, `history`,
+`last-modified`, `repo` and `url-parse` are explicitly not extensions. Stock
+Git's singular `git hook run` is distinct from Zmin's plural `zmin hooks`
+product surface.
 
-## Current state
+## Historical v2.47.1 evidence retained
 
-- no missing commands for the tracked baselines
-- current live `v2.47` report: `203` implemented commands, `151` matching
-  the selected baseline, `0` missing, and `52` additive Zmin commands
-- compatibility report is generated from the live CLI schema, not from a hand-maintained list
-- extra commands stay visible in the report as additive surface, not as baseline failures
-- command inventory parity means the command name exists; it is not a claim
-  that every option, option value, option combination, repository state or
-  transport workflow matches stock Git
-- variant parity is tracked separately in
-  `docs/cli/variant_compatibility_plan.md`
-- option inventory starts from `tools/git-compat-option-inventory.sh`, then
-  expands into behavior variants in `docs/cli/git_compatibility_inventory.md`
+The older command counts, matrix counts and selected audit progress below are
+retained historical evidence only. They do not define current scope or prove
+drop-in parity. Variant parity remains documented separately in
+`docs/cli/variant_compatibility_plan.md`; current machine projections are under
+`docs/cli/census/`.
 
 ## Hard-fail inventory
 
@@ -149,7 +152,7 @@ Recently closed replacement gaps:
   machine-readable combinations
 - `status --untracked-cache`, `status --no-untracked-cache`,
   `status --split-index`, and `status --no-split-index` were reclassified as
-  invalid input because stock Git `2.47.1` rejects them for `git status`
+  invalid input because pinned stock Git `v2.55.0` rejects them for `git status`
 - global `--no-optional-locks status --short` matches stock Git through the
   shared leading-global-option parser
 - `status --renames`, `status --no-renames`, `status --find-renames`, and
@@ -194,7 +197,7 @@ supported-surface `exhaustive` set are green on macOS and
 Windows/Git-for-Windows through the local Parallels runner. This is still not a
 claim of full upstream Git parity outside the supported and tested surface.
 Current command inventory validation is green for tracked baselines:
-`ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh`, `ZMIN_GIT_BASELINE=v2.47.1
+`ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh`, `ZMIN_GIT_BASELINE=v2.55.0
 ./tools/git-command-gap.sh`, and `cargo test -p zmin-cli --test
 compatibility_command -- --nocapture` all pass with zero missing baseline
 commands.
@@ -203,7 +206,7 @@ commands.
 
 The counted extension inventory is maintained separately in
 `docs/cli/zmin_extensions_inventory.md`. These features are additive and must
-not be reported as Git `2.47.1` compatibility coverage.
+not be reported as current Git v2.55.0 compatibility coverage.
 
 `zmin clone --worktree-first` and `zmin clone --instant` are
 additive Zmin clone modes. They do not change default `zmin clone`
@@ -263,18 +266,28 @@ Validation:
 - `tools/parallels-windows-runner.sh validate targeted git_clone_compat
   clone_worktree_first_rejects_non_worktree_or_remote_modes`
 
-`zmin repo` is an additive repository-inspection command. Stock Git `2.47.1`
-does not provide `git repo`, so its `info` and `structure` output modes are
-tracked only in `docs/cli/zmin_extensions_inventory.md`, not in the Git
-compatibility denominator.
+`repo`, `info`, and `structure` are current-Git relationship evidence in the
+v2.55.0 contract. They are not Zmin-only exclusions and must not be used to
+inflate the extension inventory; see
+`tools/zmin-extensions-contract.tsv` for the separate neutral relationship
+projection.
 
 `zmin hooks` is additive Zmin porcelain; it does not replace or change the
-Git-compatible `git hook run` command. The first managed hooks slice supports:
+Git-compatible `git hook run` command. The managed hooks slice supports:
 
 - `zmin hooks init`
-- `zmin hooks add [--force] <hook> <command>`
+- `zmin hooks add [--force] [--staged-runner] [--ext <extensions>] <hook> <command>`
 - `zmin hooks list`
+- `zmin hooks run <hook> --staged [--ext <extensions>] [--list] [--dry-run] ...`
 - `zmin hooks remove <hook>`
+
+`hooks run` uses the index-backed staged selector, supports extension and
+pathspec filtering, and can either list selected paths, preview the command, or
+execute it. `--staged-runner` on `hooks add` installs the managed pre-commit
+wrapper using the same selector. The five neutral managed-hook relationship
+rows are `hooks -> init`, `hooks -> add`, `hooks -> list`, `hooks -> remove`,
+and `hooks -> run`; together with the current-Git `repo -> info` and
+`repo -> structure` rows, they remain separate from the 40 primary Zmin rows.
 
 Supported hook names are `pre-commit`, `commit-msg`, `pre-push`,
 `post-checkout`, and `post-merge`. Managed hooks store commands as multi-value
@@ -292,6 +305,11 @@ Validation:
 - `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
   targeted git_admin_tools_compat
   managed_hooks_add_list_remove_and_protect_manual_hooks`
+
+The source/test suite also covers staged `hooks run` list, extension filtering,
+dry-run, pathspec filtering, and the staged-runner wrapper. The native Windows
+command above records the managed add/list/remove case only; no native Windows
+result is inferred for the newer staged-runner cases.
 
 `zmin save`, `zmin changes`, `zmin publish`,
 `zmin update`, `zmin undo`, `zmin timeline`, and
@@ -320,12 +338,17 @@ Validation:
 
 - `cargo test -p zmin-cli --test git_cms_porcelain_compat -- --nocapture`
 - `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
-  file git_cms_porcelain_compat` (`4/4`)
+  file git_cms_porcelain_compat`
+
+The current `git_cms_porcelain_compat` source suite contains six test functions,
+and the captured macOS run is `6/6`. The native Windows evidence currently
+captured for this file is a `4/4` subset; it is not treated as a six-case
+Windows result, and no unrecorded platform run is inferred.
 
 ## Commands to run
 
 ```bash
 ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh
-ZMIN_GIT_BASELINE=v2.47.1 ./tools/git-command-gap.sh
+ZMIN_GIT_BASELINE=v2.55.0 ./tools/git-command-gap.sh
 cargo test -p zmin-cli --test compatibility_command
 ```

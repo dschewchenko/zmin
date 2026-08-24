@@ -2,7 +2,7 @@ use super::*;
 use chrono::TimeZone;
 use std::collections::BTreeMap;
 use std::io::{BufRead, Read, Write};
-use std::path::Component;
+use std::path::{Component, Path};
 use zmin_git_core::GitObjectStore as CoreGitObjectStore;
 use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::{GitObjectStore, GitPrimitiveRuntime, GitRefsStore};
@@ -97,7 +97,8 @@ pub(crate) struct UpdateRefCommandOptions<'a> {
 
 pub(crate) fn update_ref(options: UpdateRefCommandOptions<'_>) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let algorithm = repo_hash_algorithm_from_config(&repo).map_err(CliError::Io)?;
+    let runtime = CliPrimitiveRuntime::new_from_repo(&repo, algorithm);
     let refs = runtime.refs_store_adapter();
     if options.stdin {
         if options.delete
@@ -1990,9 +1991,7 @@ fn update_ref_name_is_valid(name: &str) -> bool {
 }
 
 fn update_ref_delete_name_is_valid(name: &str) -> bool {
-    (name == "HEAD"
-        || update_ref_name_is_pseudoref(name)
-        || check_ref_format(name, false))
+    (name == "HEAD" || update_ref_name_is_pseudoref(name) || check_ref_format(name, false))
         || (name.starts_with("refs/")
             && !name
                 .split('/')
@@ -2384,39 +2383,38 @@ fn update_ref_transaction_hook_input(
                 new_id,
                 old_id,
                 no_deref,
-            } => {
-                Some((
-                    old_id
-                        .as_ref()
-                        .map(ObjectId::to_hex)
-                        .unwrap_or_else(|| zero_object_id().to_hex()),
-                    new_id.to_hex(),
-                    name.clone(),
-                    !*no_deref,
-                ))
-            }
+            } => Some((
+                old_id
+                    .as_ref()
+                    .map(ObjectId::to_hex)
+                    .unwrap_or_else(|| zero_object_id().to_hex()),
+                new_id.to_hex(),
+                name.clone(),
+                !*no_deref,
+            )),
             UpdateRefStdinOp::Create {
                 name,
                 new_id,
                 no_deref,
-            } => {
-                Some((zero_object_id().to_hex(), new_id.to_hex(), name.clone(), !*no_deref))
-            }
+            } => Some((
+                zero_object_id().to_hex(),
+                new_id.to_hex(),
+                name.clone(),
+                !*no_deref,
+            )),
             UpdateRefStdinOp::Delete {
                 name,
                 old_id,
                 no_deref,
-            } => {
-                Some((
-                    old_id
-                        .as_ref()
-                        .map(ObjectId::to_hex)
-                        .unwrap_or_else(|| zero_object_id().to_hex()),
-                    zero_object_id().to_hex(),
-                    name.clone(),
-                    !*no_deref,
-                ))
-            }
+            } => Some((
+                old_id
+                    .as_ref()
+                    .map(ObjectId::to_hex)
+                    .unwrap_or_else(|| zero_object_id().to_hex()),
+                zero_object_id().to_hex(),
+                name.clone(),
+                !*no_deref,
+            )),
             UpdateRefStdinOp::SymrefCreate {
                 name, new_target, ..
             } => Some((
@@ -2907,7 +2905,8 @@ pub(crate) fn symbolic_ref(
     target: Vec<String>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let algorithm = symbolic_ref_object_format(&repo)?;
+    let runtime = CliPrimitiveRuntime::new_from_repo(&repo, algorithm);
     let refs = runtime.refs();
     if target.len() > 1 || (delete && !target.is_empty()) {
         return Err(CliError::Stderr {
@@ -2937,7 +2936,7 @@ pub(crate) fn symbolic_ref(
         let old_id = symbolic_ref_resolved_id(&repo, name)?;
         let old_value = symbolic_ref_read_raw(&repo, name)?
             .map(|target| format!("ref:{target}"))
-            .unwrap_or_else(|| zero_object_id().to_hex());
+            .unwrap_or_else(|| symbolic_ref_zero_object_id(algorithm).to_hex());
         let hook_input = format!("{old_value} ref:{target} {name}\n");
         update_ref_run_transaction_hook_with_input(&repo, "prepared", &hook_input)?;
         symbolic_ref_write_raw(&repo, name, target)?;
@@ -3002,6 +3001,10 @@ fn symbolic_ref_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
             message: format!("unsupported object format '{value}'"),
         }),
     }
+}
+
+fn symbolic_ref_zero_object_id(algorithm: GitHashAlgorithm) -> ObjectId {
+    ObjectId::new(algorithm, &vec![0; algorithm.digest_len()])
 }
 
 fn symbolic_ref_resolved_id(repo: &GitRepo, name: &str) -> Result<Option<ObjectId>> {
@@ -3082,7 +3085,7 @@ fn symbolic_ref_read_raw(repo: &GitRepo, name: &str) -> Result<Option<String>> {
     } else {
         common_git_dir
     };
-    let refs = RefStore::new(&ref_git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&ref_git_dir, symbolic_ref_object_format(repo)?);
     if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
         let target = if name == "HEAD" {
             refs.read_head()
@@ -3135,7 +3138,7 @@ fn symbolic_ref_write_raw(repo: &GitRepo, name: &str, target: &str) -> Result<()
             message: format!("{name} is not a valid ref name"),
         });
     }
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, symbolic_ref_object_format(repo)?);
     write_symbolic_ref_with_repo_config(repo, &refs, name, target)
 }
 
@@ -3462,21 +3465,31 @@ fn refs_clear_storage_root(storage_root: &Path, root_refs: &[String]) -> Result<
     Ok(())
 }
 
-fn refs_exists(reference: &str) -> Result<()> {
-    let repo = find_repo()?;
-    let root = if reference.starts_with("refs/") {
-        read_common_git_dir(&repo.git_dir)?
-    } else {
-        repo.git_dir
-    };
-    match fs::symlink_metadata(root.join(reference)) {
-        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
-            Ok(())
-        }
-        Ok(_) => Err(refs_exists_missing_error()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(refs_exists_missing_error()),
-        Err(error) => Err(CliError::Io(error)),
+fn refs_exists(refs: &RefStore, reference: &str) -> Result<()> {
+    match refs.read_ref(reference) {
+        Ok(_) => Ok(()),
+        Err(error) => match error.kind() {
+            io::ErrorKind::NotFound | io::ErrorKind::IsADirectory => {
+                Err(refs_exists_missing_error())
+            }
+            _ => Err(CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: failed to look up reference: {}\n",
+                    show_ref_lookup_error_text(&error)
+                ),
+            }),
+        },
     }
+}
+
+fn show_ref_lookup_error_text(error: &io::Error) -> String {
+    let text = error.to_string();
+    error.raw_os_error().map_or(text.clone(), |code| {
+        text.strip_suffix(&format!(" (os error {code})"))
+            .unwrap_or(&text)
+            .to_owned()
+    })
 }
 
 fn refs_exists_missing_error() -> CliError {
@@ -3535,7 +3548,7 @@ fn refs_verify(
     refs_verify_print_findings(&findings);
     if has_error {
         return Err(CliError::Stderr {
-            code: 1,
+            code: 255,
             text: String::new(),
         });
     }
@@ -3739,10 +3752,9 @@ fn refs_verify_collect_dir(
             refs_verify_symlink(&entry.path(), &full_name, findings)?;
             continue;
         }
-        // The files backend checks each loose-ref basename independently.
-        // This intentionally rejects a nested `@` component even though the
-        // full refname (for example `refs/heads/@`) passes check-ref-format.
-        if !check_ref_format(&name, true) {
+        // Validate the complete refname so a qualified `@` component remains
+        // valid while malformed components are still rejected.
+        if !check_ref_format(&full_name, false) {
             refs_verify_push(
                 findings,
                 config.bad_ref_name,
@@ -4345,25 +4357,30 @@ fn symbolic_ref_usage() -> String {
     .to_owned()
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ShowRefFormat {
-    hash: Option<usize>,
-    abbrev: Option<usize>,
+    hash_output: bool,
+    widths: RenderedAbbrevWidths,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ShowRefRow {
+    id: ObjectId,
+    name: String,
+    peel_failed: bool,
 }
 
 fn show_ref_matches(ref_name: &str, pattern: &str) -> bool {
     ref_name == pattern || ref_name.ends_with(&format!("/{pattern}"))
 }
 
-fn print_show_ref_row(id: &ObjectId, name: &str, format: ShowRefFormat) -> Result<()> {
-    let mut hex = id.to_hex();
-    if let Some(length) = format.hash.or(format.abbrev) {
-        hex.truncate(length.min(hex.len()));
-    }
-    if format.hash.is_some() && !name.ends_with("^{}") {
+fn print_show_ref_row(row: &ShowRefRow, width: usize, format: &ShowRefFormat) -> Result<()> {
+    let mut hex = row.id.to_hex();
+    hex.truncate(width.min(hex.len()));
+    if format.hash_output && !row.name.ends_with("^{}") {
         println!("{hex}");
     } else {
-        println!("{hex} {name}");
+        println!("{hex} {}", row.name);
     }
     Ok(())
 }
@@ -4374,13 +4391,15 @@ pub(crate) fn show_ref(
     heads: bool,
     tags: bool,
     dereference: bool,
-    hash: Option<usize>,
-    abbrev: Option<usize>,
+    output_options: Vec<ShowRefOutputOption>,
     verify: bool,
     exists: bool,
     exclude_existing: Option<&str>,
     patterns: Vec<String>,
 ) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let algorithm = symbolic_ref_object_format(&repo)?;
+    let configured_abbrev = configured_core_abbrev_state(&repo)?;
     let mut exclusive_modes = Vec::new();
     if verify {
         exclusive_modes.push("--verify");
@@ -4393,19 +4412,18 @@ pub(crate) fn show_ref(
     }
     if exclusive_modes.len() > 1 {
         return Err(CliError::Fatal {
-            code: 129,
+            code: 128,
             message: format!(
                 "options '{}' cannot be used together",
                 exclusive_modes.join("' and '")
             ),
         });
     }
-    let repo = find_repo_or_bare()?;
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(&repo, algorithm);
     let refs = runtime.refs();
-    let format = ShowRefFormat { hash, abbrev };
+    let raw_refs = runtime.refs_store_adapter().as_ref_store();
     if let Some(pattern) = exclude_existing {
-        return show_ref_exclude_existing(&repo, refs, pattern);
+        return show_ref_exclude_existing(raw_refs, pattern);
     }
     if exists {
         if patterns.is_empty() {
@@ -4420,101 +4438,246 @@ pub(crate) fn show_ref(
                 message: "--exists requires exactly one reference".into(),
             });
         }
-        return refs_exists(&patterns[0]);
+        return refs_exists(raw_refs, &patterns[0]);
     }
     if verify {
         if patterns.is_empty() {
             return Err(CliError::Fatal {
-                code: 129,
-                message: "--verify requires at least one ref".into(),
+                code: 128,
+                message: "--verify requires a reference".into(),
             });
         }
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+        let mut output_rows = Vec::new();
         for ref_name in patterns {
             let id = show_ref_verify_object_id(&repo, refs, &ref_name, quiet)?;
-            if !runtime
-                .objects()
-                .object_exists(&id.to_hex())
-                .map_err(|error| map_primitive_error(error, "read object"))?
-            {
-                return Err(CliError::Exit(1));
-            }
+            store
+                .read_object(&id)
+                .map_err(|_| show_ref_bad_ref(&ref_name, &id))?;
+            output_rows.push(ShowRefRow {
+                id: id.clone(),
+                name: ref_name.clone(),
+                peel_failed: false,
+            });
             if !quiet {
-                print_show_ref_row(&id, &ref_name, format)?;
-                if dereference && let Some(peeled) = peel_show_ref_tag(&store, &id)? {
-                    print_show_ref_row(&peeled, &format!("{ref_name}^{{}}"), format)?;
+                if dereference
+                    && let Some(peeled) = peel_show_ref_tag(&store, &id)
+                        .map_err(|_| show_ref_bad_ref(&ref_name, &id))?
+                {
+                    output_rows.push(ShowRefRow {
+                        id: peeled,
+                        name: format!("{ref_name}^{{}}"),
+                        peel_failed: false,
+                    });
                 }
             }
         }
-        return Ok(());
-    }
-    let prefixes = match (heads, tags) {
-        (false, false) => vec!["refs/"],
-        (true, false) => vec!["refs/heads/"],
-        (false, true) => vec!["refs/tags/"],
-        (true, true) => vec!["refs/heads/", "refs/tags/"],
-    };
-    let mut rows = BTreeMap::new();
-    for prefix in prefixes {
-        for (name, raw_id) in refs
-            .list_refs(Some(prefix))
-            .map_err(|error| map_primitive_error(error, "list references"))?
-        {
-            if patterns.is_empty()
-                || patterns
-                    .iter()
-                    .any(|pattern| show_ref_matches(&name, pattern))
-            {
-                let id = parse_primitive_object_id(&raw_id).map_err(|error| CliError::Fatal {
-                    code: 128,
-                    message: format!("show-ref metadata decode failed for '{name}': {error:?}"),
-                })?;
-                rows.insert(name, id);
-            }
+        if quiet {
+            return Ok(());
         }
+        let format = show_ref_format(&store, &output_rows, &output_options, configured_abbrev)?;
+        for (index, row) in output_rows.iter().enumerate() {
+            print_show_ref_row(row, format.width_for(index), &format)?;
+        }
+        return Ok(());
     }
     let head_id = if head {
-        match refs.read_ref(&"HEAD".to_owned()) {
-            Ok(Some(raw_id)) => {
-                Some(
-                    parse_primitive_object_id(&raw_id).map_err(|error| CliError::Fatal {
-                        code: 128,
-                        message: format!("HEAD metadata decode failed: {error:?}"),
-                    })?,
-                )
-            }
-            Ok(None) => None,
-            Err(error) => return Err(map_primitive_error(error, "read HEAD")),
+        match raw_refs.resolve("HEAD") {
+            Ok(id) => Some(id),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(CliError::Io(error)),
         }
     } else {
         None
     };
-    if rows.is_empty() && head_id.is_none() {
+    let policy = resolve_show_ref_output_policy(configured_abbrev, &output_options, algorithm);
+    if matches!(policy.abbreviation, CoreAbbrevConfigState::Full) {
+        return show_ref_full_output(
+            raw_refs,
+            &patterns,
+            heads,
+            tags,
+            head_id,
+            dereference,
+            quiet,
+            policy.hash_output,
+            algorithm,
+            &repo,
+        );
+    }
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let mut output_rows = Vec::new();
+    if let Some(id) = head_id {
+        output_rows.push(ShowRefRow {
+            id,
+            name: "HEAD".to_owned(),
+            peel_failed: false,
+        });
+    }
+    raw_refs.for_each_resolved_ref_streaming("refs/", |name, id| -> Result<()> {
+        if !show_ref_name_selected(name, heads, tags)
+            || (!patterns.is_empty()
+                && !patterns
+                    .iter()
+                    .any(|pattern| show_ref_matches(name, pattern)))
+        {
+            return Ok(());
+        }
+        let row_index = output_rows.len();
+        output_rows.push(ShowRefRow {
+            id: id.clone(),
+            name: name.to_owned(),
+            peel_failed: false,
+        });
+        if dereference {
+            match peel_show_ref_tag(&store, id) {
+                Ok(Some(peeled)) => output_rows.push(ShowRefRow {
+                    id: peeled,
+                    name: format!("{name}^{{}}"),
+                    peel_failed: false,
+                }),
+                Ok(None) => {}
+                Err(_) => output_rows[row_index].peel_failed = true,
+            }
+        }
+        Ok(())
+    })?;
+    if output_rows.is_empty() {
         return Err(CliError::Exit(1));
     }
-    if quiet {
-        return Ok(());
-    }
-    if let Some(id) = head_id {
-        print_show_ref_row(&id, "HEAD", format)?;
-    }
-    let store = if dereference {
-        Some(LooseObjectStore::new(
-            repo.objects_dir.clone(),
-            GitHashAlgorithm::Sha1,
-        ))
-    } else {
-        None
-    };
-    for (name, id) in rows {
-        print_show_ref_row(&id, &name, format)?;
-        if let Some(store) = &store
-            && let Some(peeled) = peel_show_ref_tag(store, &id)?
-        {
-            print_show_ref_row(&peeled, &format!("{name}^{{}}"), format)?;
+    let format = show_ref_format(&store, &output_rows, &output_options, configured_abbrev)?;
+    for (index, row) in output_rows.iter().enumerate() {
+        store
+            .read_object(&row.id)
+            .map_err(|_| show_ref_bad_ref(&row.name, &row.id))?;
+        if !quiet {
+            print_show_ref_row(row, format.width_for(index), &format)?;
+        }
+        if dereference && row.peel_failed {
+            return Err(show_ref_bad_ref(&row.name, &row.id));
         }
     }
     Ok(())
+}
+
+fn show_ref_name_selected(name: &str, heads: bool, tags: bool) -> bool {
+    match (heads, tags) {
+        (false, false) => true,
+        (true, false) => name.starts_with("refs/heads/"),
+        (false, true) => name.starts_with("refs/tags/"),
+        (true, true) => name.starts_with("refs/heads/") || name.starts_with("refs/tags/"),
+    }
+}
+
+fn show_ref_full_output(
+    refs: &zmin_git_core::RefStore,
+    patterns: &[String],
+    heads: bool,
+    tags: bool,
+    head_id: Option<ObjectId>,
+    dereference: bool,
+    quiet: bool,
+    hash_output: bool,
+    algorithm: GitHashAlgorithm,
+    repo: &GitRepo,
+) -> Result<()> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let format = ShowRefFormat {
+        hash_output,
+        widths: RenderedAbbrevWidths::fixed(0, full_abbrev_len(algorithm)),
+    };
+    let mut emitted = false;
+    if let Some(id) = head_id {
+        show_ref_emit_full_row(&store, &format, id, "HEAD", dereference, quiet)?;
+        emitted = true;
+    }
+    refs.for_each_resolved_ref_streaming("refs/", |name, id| -> Result<()> {
+        if !show_ref_name_selected(name, heads, tags)
+            || (!patterns.is_empty()
+                && !patterns
+                    .iter()
+                    .any(|pattern| show_ref_matches(name, pattern)))
+        {
+            return Ok(());
+        }
+        show_ref_emit_full_row(&store, &format, id.clone(), name, dereference, quiet)?;
+        emitted = true;
+        Ok(())
+    })?;
+    if emitted {
+        Ok(())
+    } else {
+        Err(CliError::Exit(1))
+    }
+}
+
+fn show_ref_emit_full_row(
+    store: &LooseObjectStore,
+    format: &ShowRefFormat,
+    id: ObjectId,
+    name: &str,
+    dereference: bool,
+    quiet: bool,
+) -> Result<()> {
+    store
+        .read_object(&id)
+        .map_err(|_| show_ref_bad_ref(name, &id))?;
+    if !quiet {
+        print_show_ref_row(
+            &ShowRefRow {
+                id: id.clone(),
+                name: name.to_owned(),
+                peel_failed: false,
+            },
+            format.widths.empty_width(),
+            format,
+        )?;
+    }
+    if dereference
+        && let Some(peeled) =
+            peel_show_ref_tag(store, &id).map_err(|_| show_ref_bad_ref(name, &id))?
+    {
+        if !quiet {
+            print_show_ref_row(
+                &ShowRefRow {
+                    id: peeled,
+                    name: format!("{name}^{{}}"),
+                    peel_failed: false,
+                },
+                format.widths.empty_width(),
+                format,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn show_ref_format(
+    store: &LooseObjectStore,
+    rows: &[ShowRefRow],
+    output_options: &[ShowRefOutputOption],
+    configured: CoreAbbrevConfigState,
+) -> Result<ShowRefFormat> {
+    let policy = resolve_show_ref_output_policy(configured, output_options, store.algorithm());
+    let ids = BorrowedObjectIds::from_iter(rows.iter().map(|row| &row.id));
+    let widths = rendered_abbrev_widths_for_borrowed_ids(store, policy.abbreviation, &ids)?;
+    Ok(ShowRefFormat {
+        hash_output: policy.hash_output,
+        widths,
+    })
+}
+
+impl ShowRefFormat {
+    fn width_for(&self, index: usize) -> usize {
+        self.widths.width_for(index)
+    }
+}
+
+fn show_ref_bad_ref(ref_name: &str, id: &ObjectId) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("git show-ref: bad ref {ref_name} ({})", id.to_hex()),
+    }
 }
 
 fn show_ref_verify_object_id(
@@ -4559,37 +4722,78 @@ fn show_ref_verify_object_id(
     })
 }
 
-fn show_ref_exclude_existing(repo: &GitRepo, refs: &dyn GitRefsStore, pattern: &str) -> Result<()> {
-    let common_dir = read_common_git_dir(&repo.git_dir)?;
-    for line in io::stdin().lock().lines() {
-        let line = line?;
-        let candidate = line.strip_suffix("^{}").unwrap_or(&line);
+const SHOW_REF_INPUT_CHUNK_BYTES: usize = 1023;
+
+fn read_show_ref_input_chunk<R: BufRead>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+) -> io::Result<Option<()>> {
+    buffer.clear();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok((!buffer.is_empty()).then_some(()));
+        }
+        let remaining = SHOW_REF_INPUT_CHUNK_BYTES - buffer.len();
+        let take = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(remaining, |position| position + 1)
+            .min(remaining)
+            .min(available.len());
+        buffer.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if buffer.len() == SHOW_REF_INPUT_CHUNK_BYTES || buffer.last() == Some(&b'\n') {
+            return Ok(Some(()));
+        }
+    }
+}
+
+fn show_ref_exclude_existing(refs: &RefStore, pattern: &str) -> Result<()> {
+    let snapshot = refs.raw_ref_snapshot().map_err(CliError::Io)?;
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut buffer = Vec::with_capacity(SHOW_REF_INPUT_CHUNK_BYTES);
+    let mut stdout = io::stdout().lock();
+    while read_show_ref_input_chunk(&mut reader, &mut buffer)?.is_some() {
+        let line = buffer.strip_suffix(b"\n").unwrap_or(&buffer);
+        let candidate = line.strip_suffix(b"^{}").unwrap_or(line);
         let ref_name = candidate
-            .split_ascii_whitespace()
-            .last()
+            .rsplit(|byte| byte.is_ascii_whitespace())
+            .next()
             .unwrap_or(candidate);
-        if !pattern.is_empty() && !ref_name.starts_with(pattern) {
+        if !pattern.is_empty() && !ref_name.starts_with(pattern.as_bytes()) {
             continue;
         }
-        if !check_ref_format(ref_name, false) {
-            eprintln!("warning: ref '{ref_name}' ignored");
-            continue;
-        }
-        match refs.read_ref(&ref_name.to_owned()) {
-            Ok(Some(_)) => continue,
-            Ok(None) => {
-                if common_dir.join(ref_name).is_file() {
-                    continue;
-                }
-            }
+        let ref_name = match zmin_git_core::refs::RawRefName::from_bytes(ref_name) {
+            Ok(ref_name) => ref_name,
             Err(_) => {
-                eprintln!("warning: ref '{ref_name}' ignored");
+                write_show_ref_warning(ref_name)?;
+                continue;
+            }
+        };
+        match refs.raw_ref_exists(&ref_name, &snapshot) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) if error.kind() == io::ErrorKind::IsADirectory => {}
+            Err(_) => {
+                write_show_ref_warning(ref_name.as_bytes())?;
                 continue;
             }
         }
-        println!("{candidate}");
+        stdout.write_all(candidate)?;
+        stdout.write_all(b"\n")?;
     }
+    stdout.flush()?;
     Ok(())
+}
+
+fn write_show_ref_warning(ref_name: &[u8]) -> io::Result<()> {
+    let ref_name = ref_name.split(|byte| *byte == 0).next().unwrap_or_default();
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(b"warning: ref '")?;
+    stderr.write_all(ref_name)?;
+    stderr.write_all(b"' ignored\n")
 }
 
 fn peel_show_ref_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<ObjectId>> {
@@ -4614,7 +4818,7 @@ fn peel_show_ref_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<O
             return Ok(peeled_any.then_some(current));
         }
         peeled_any = true;
-        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+        let tag = decode_tag(store.algorithm(), &object.content)?;
         expected_kind = Some(tag.target_kind);
         current = tag.target;
     }
@@ -4656,9 +4860,19 @@ enum ForEachRefQuoteMode {
     Tcl,
 }
 
+enum ForEachRefPatternSource {
+    Explicit(Vec<Vec<u8>>),
+    Stdin(ForEachRefStdinSelection),
+}
+
+struct ForEachRefStdinSelection {
+    matched_refs: BTreeMap<String, ()>,
+}
+
 pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    warn_for_each_ref_invalid_names(&repo)?;
+    let algorithm = symbolic_ref_object_format(&repo)?;
+    warn_for_each_ref_invalid_names(&repo, algorithm)?;
     if [options.shell, options.python, options.perl, options.tcl]
         .into_iter()
         .filter(|enabled| *enabled)
@@ -4689,7 +4903,7 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         .iter()
         .any(|atom| atom.starts_with("is-base:"))
     {
-        warn_for_each_ref_bad_tag_pointers(&repo)?;
+        warn_for_each_ref_bad_tag_pointers(&repo, algorithm)?;
     }
     let mailmap = if requirements.need_mailmap {
         core_commands::read_mailmap(&repo, None, None)?
@@ -4697,14 +4911,34 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         Vec::new()
     };
     let current_head_ref = current_branch_ref_from_head_file(&repo.git_dir)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let filter = for_each_ref_filter(&repo, &store, &options)?;
-    let patterns = if options.stdin {
-        read_for_each_ref_stdin_patterns()?
+    let runtime = CliPrimitiveRuntime::new_from_repo(&repo, algorithm);
+    let candidate_ref_names = for_each_ref_pattern_candidates(
+        &repo,
+        runtime.refs(),
+        algorithm,
+        options.include_root_refs,
+    )?;
+    let pattern_source = if options.stdin {
+        ForEachRefPatternSource::Stdin(read_for_each_ref_stdin_selection(
+            &candidate_ref_names,
+            options.ignore_case,
+        )?)
     } else {
-        options.patterns
+        ForEachRefPatternSource::Explicit(
+            options
+                .patterns
+                .iter()
+                .map(|pattern| pattern.as_bytes().to_vec())
+                .collect(),
+        )
     };
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let exclude = options
+        .exclude
+        .iter()
+        .map(|pattern| pattern.as_bytes().to_vec())
+        .collect::<Vec<_>>();
     let commit_cache = CommitObjectCache::new(&store);
     if options.sort.is_empty()
         && !options.omit_empty
@@ -4714,15 +4948,15 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         let refs = OwnedCliRefsStoreAdapter::from_paths(
             &repo.git_dir,
             read_common_git_dir(&repo.git_dir)?,
-            GitHashAlgorithm::Sha1,
+            algorithm,
         );
         print_simple_for_each_ref_rows(
             &repo,
             &refs,
             &store,
             &commit_cache,
-            &patterns,
-            &options.exclude,
+            &pattern_source,
+            &exclude,
             options.ignore_case,
             options.include_root_refs,
             filter.as_ref(),
@@ -4732,14 +4966,19 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         return Ok(());
     }
     let short_names = load_for_each_ref_short_name_context(&repo, requirements.need_short_name)?;
-    let symrefs = load_for_each_ref_symrefs(&repo, requirements.need_symref)?;
-    if options.sort.is_empty() {
+    let symrefs = load_for_each_ref_symrefs(&repo, requirements.need_symref, algorithm)?;
+    if !matches!(pattern_source, ForEachRefPatternSource::Stdin(_))
+        && options.sort.is_empty()
+        && requirements.describe_atoms.is_empty()
+    {
         print_for_each_ref_rows(
             &repo,
             runtime.refs(),
             runtime.objects(),
-            &patterns,
-            &options.exclude,
+            &store,
+            &commit_cache,
+            &pattern_source,
+            &exclude,
             options.ignore_case,
             options.include_root_refs,
             filter.as_ref(),
@@ -4760,8 +4999,10 @@ pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
         &repo,
         runtime.refs(),
         runtime.objects(),
-        &patterns,
-        &options.exclude,
+        &store,
+        &commit_cache,
+        &pattern_source,
+        &exclude,
         options.ignore_case,
         options.include_root_refs,
         filter.as_ref(),
@@ -4878,6 +5119,19 @@ struct ForEachRefRequirements {
 }
 
 #[derive(Debug, Default)]
+struct ForEachRefDescriptionContext {
+    values: BTreeMap<(String, String), String>,
+}
+
+impl ForEachRefDescriptionContext {
+    fn value_for(&self, object_id: &ObjectId, atom: &str) -> Option<&str> {
+        self.values
+            .get(&(object_id.to_hex(), atom.to_owned()))
+            .map(String::as_str)
+    }
+}
+
+#[derive(Debug, Default)]
 struct ForEachRefShortNameContext {
     strict: bool,
     ref_names: BTreeSet<String>,
@@ -4931,22 +5185,62 @@ fn for_each_ref_quote_mode(options: &ForEachRefOptions<'_>) -> ForEachRefQuoteMo
     ForEachRefQuoteMode::None
 }
 
-fn read_for_each_ref_stdin_patterns() -> Result<Vec<String>> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
-    Ok(input
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect())
+fn read_for_each_ref_stdin_selection(
+    candidate_ref_names: &[String],
+    ignore_case: bool,
+) -> Result<ForEachRefStdinSelection> {
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+    let mut matched_refs = BTreeMap::new();
+    let mut record = Vec::new();
+    loop {
+        record.clear();
+        if stdin.read_until(b'\n', &mut record)? == 0 {
+            break;
+        }
+        if record.last() == Some(&b'\n') {
+            record.pop();
+            if record.last() == Some(&b'\r') {
+                record.pop();
+            }
+        }
+        for ref_name in candidate_ref_names {
+            if wildcard_match_maybe_casefold_bytes(&record, ref_name.as_bytes(), ignore_case) {
+                matched_refs.insert(ref_name.clone(), ());
+            }
+        }
+    }
+    Ok(ForEachRefStdinSelection { matched_refs })
 }
 
-fn read_head_direct_ref(git_dir: &Path) -> Result<String> {
+fn for_each_ref_pattern_candidates(
+    repo: &GitRepo,
+    refs: &dyn GitRefsStore,
+    algorithm: GitHashAlgorithm,
+    include_root_refs: bool,
+) -> Result<Vec<String>> {
+    let mut names = BTreeMap::new();
+    if include_root_refs {
+        for (name, _) in resolved_for_each_ref_root_refs(repo, algorithm)? {
+            names.insert(name, ());
+        }
+    }
+    for (name, _) in refs
+        .list_refs(Some("refs/"))
+        .map_err(|error| map_primitive_error(error, "list refs"))?
+    {
+        if for_each_ref_name_is_valid(&name) {
+            names.insert(name, ());
+        }
+    }
+    Ok(names.into_keys().collect())
+}
+
+fn read_head_direct_ref(git_dir: &Path, algorithm: GitHashAlgorithm) -> Result<String> {
     let head = fs::read_to_string(git_dir.join("HEAD"))?;
     let value = head.trim();
     if let Some(target) = value.strip_prefix("ref: ") {
-        let refs = RefStore::new(git_dir, GitHashAlgorithm::Sha1);
+        let refs = RefStore::new(git_dir, algorithm);
         let id = refs.resolve(target).map_err(|_| CliError::Fatal {
             code: 128,
             message: format!("bad ref: {target}"),
@@ -4958,37 +5252,173 @@ fn read_head_direct_ref(git_dir: &Path) -> Result<String> {
 
 fn for_each_ref_pattern_matches(
     ref_name: &str,
-    patterns: &[String],
-    exclude: &[String],
+    pattern_source: &ForEachRefPatternSource,
+    exclude: &[Vec<u8>],
     ignore_case: bool,
 ) -> bool {
-    (patterns.is_empty()
-        || patterns
-            .iter()
-            .any(|pattern| wildcard_match_maybe_casefold(pattern, ref_name, ignore_case)))
-        && !exclude
-            .iter()
-            .any(|pattern| wildcard_match_maybe_casefold(pattern, ref_name, ignore_case))
+    let included = match pattern_source {
+        ForEachRefPatternSource::Explicit(patterns) => {
+            patterns.is_empty()
+                || patterns.iter().any(|pattern| {
+                    wildcard_match_maybe_casefold_bytes(pattern, ref_name.as_bytes(), ignore_case)
+                })
+        }
+        ForEachRefPatternSource::Stdin(selection) => selection.matched_refs.contains_key(ref_name),
+    };
+    included
+        && !exclude.iter().any(|pattern| {
+            wildcard_match_maybe_casefold_bytes(pattern, ref_name.as_bytes(), ignore_case)
+        })
 }
 
-fn wildcard_match_maybe_casefold(pattern: &str, value: &str, ignore_case: bool) -> bool {
-    let matches_prefix = |pattern: &str, value: &str| {
-        let pattern = pattern.trim_end_matches('/');
-        value == pattern || value.starts_with(&format!("{pattern}/"))
-    };
-    if ignore_case {
-        let pattern = pattern.to_ascii_lowercase();
-        let value = value.to_ascii_lowercase();
-        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-            wildcard_match(&pattern, &value)
-        } else {
-            matches_prefix(&pattern, &value)
-        }
-    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        wildcard_match(pattern, value)
+fn wildcard_match_maybe_casefold_bytes(pattern: &[u8], value: &[u8], ignore_case: bool) -> bool {
+    let pattern = if ignore_case {
+        pattern
+            .iter()
+            .map(|byte| byte.to_ascii_lowercase())
+            .collect::<Vec<_>>()
     } else {
-        matches_prefix(pattern, value)
+        pattern.to_vec()
+    };
+    let value = if ignore_case {
+        value
+            .iter()
+            .map(|byte| byte.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    } else {
+        value.to_vec()
+    };
+    let pattern = pattern.strip_suffix(b"/").unwrap_or(&pattern);
+    if pattern
+        .iter()
+        .any(|byte| matches!(*byte, b'*' | b'?' | b'['))
+    {
+        wildcard_match_bytes(pattern, &value)
+    } else {
+        value == pattern
+            || value
+                .get(pattern.len())
+                .is_some_and(|separator| *separator == b'/')
+                && value.starts_with(pattern)
     }
+}
+
+fn wildcard_match_bytes(pattern: &[u8], value: &[u8]) -> bool {
+    let width = value.len() + 1;
+    let mut memo = vec![None; (pattern.len() + 1) * width];
+    wildcard_match_bytes_memo(pattern, value, 0, 0, &mut memo)
+}
+
+fn wildcard_match_bytes_memo(
+    pattern: &[u8],
+    value: &[u8],
+    pattern_index: usize,
+    value_index: usize,
+    memo: &mut [Option<bool>],
+) -> bool {
+    let width = value.len() + 1;
+    let memo_index = pattern_index * width + value_index;
+    if let Some(result) = memo[memo_index] {
+        return result;
+    }
+    let result = if pattern_index == pattern.len() {
+        value_index == value.len()
+    } else {
+        match pattern[pattern_index] {
+            b'*' => {
+                wildcard_match_bytes_memo(pattern, value, pattern_index + 1, value_index, memo)
+                    || (value_index < value.len()
+                        && wildcard_match_bytes_memo(
+                            pattern,
+                            value,
+                            pattern_index,
+                            value_index + 1,
+                            memo,
+                        ))
+            }
+            b'?' => {
+                value_index < value.len()
+                    && wildcard_match_bytes_memo(
+                        pattern,
+                        value,
+                        pattern_index + 1,
+                        value_index + 1,
+                        memo,
+                    )
+            }
+            b'[' => {
+                if let Some((class_end, matched)) =
+                    wildcard_class_matches(&pattern[pattern_index + 1..], value.get(value_index))
+                {
+                    matched
+                        && wildcard_match_bytes_memo(
+                            pattern,
+                            value,
+                            pattern_index + class_end + 2,
+                            value_index + 1,
+                            memo,
+                        )
+                } else {
+                    value.get(value_index) == Some(&b'[')
+                        && wildcard_match_bytes_memo(
+                            pattern,
+                            value,
+                            pattern_index + 1,
+                            value_index + 1,
+                            memo,
+                        )
+                }
+            }
+            byte => {
+                value_index < value.len()
+                    && byte == value[value_index]
+                    && wildcard_match_bytes_memo(
+                        pattern,
+                        value,
+                        pattern_index + 1,
+                        value_index + 1,
+                        memo,
+                    )
+            }
+        }
+    };
+    memo[memo_index] = Some(result);
+    result
+}
+
+fn wildcard_class_matches(class: &[u8], value: Option<&u8>) -> Option<(usize, bool)> {
+    let value = *value?;
+    let mut index = 0;
+    let negated = matches!(class.first(), Some(b'!' | b'^'));
+    if negated {
+        index += 1;
+    }
+    let mut matched = false;
+    let mut previous = None;
+    while index < class.len() {
+        let byte = class[index];
+        if byte == b']' && previous.is_some() {
+            return Some((index, if negated { !matched } else { matched }));
+        }
+        if byte == b'-'
+            && let Some(start) = previous
+            && let Some(end) = class.get(index + 1).copied()
+            && end != b']'
+        {
+            if start <= value && value <= end {
+                matched = true;
+            }
+            previous = Some(end);
+            index += 2;
+            continue;
+        }
+        if byte == value {
+            matched = true;
+        }
+        previous = Some(byte);
+        index += 1;
+    }
+    None
 }
 
 fn for_each_ref_filter(
@@ -5020,20 +5450,6 @@ fn for_each_ref_filter(
         no_merged,
         points_at,
     }))
-}
-
-fn for_each_ref_filter_matches(
-    repo: &GitRepo,
-    ref_name: &str,
-    object_id: &str,
-    filter: Option<&ForEachRefFilter>,
-) -> Result<bool> {
-    let Some(filter) = filter else {
-        return Ok(true);
-    };
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let commit_cache = CommitObjectCache::new(&store);
-    for_each_ref_filter_matches_with_store(&store, &commit_cache, ref_name, object_id, Some(filter))
 }
 
 fn for_each_ref_filter_matches_with_store(
@@ -5090,38 +5506,30 @@ fn for_each_ref_filter_matches_with_store(
     Ok(true)
 }
 
-fn collect_for_each_ref_rows(
+fn collect_for_each_ref_targets(
     repo: &GitRepo,
     refs: &dyn GitRefsStore,
-    objects: &dyn GitObjectStore,
-    patterns: &[String],
-    exclude: &[String],
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    pattern_source: &ForEachRefPatternSource,
+    exclude: &[Vec<u8>],
     ignore_case: bool,
     include_root_refs: bool,
     filter: Option<&ForEachRefFilter>,
-    requirements: &ForEachRefRequirements,
-    mailmap: &[core_commands::MailmapEntry],
-    symrefs: &ForEachRefSymrefs,
-    short_names: &ForEachRefShortNameContext,
-    current_head_ref: Option<&str>,
-) -> Result<Vec<ForEachRefRow>> {
-    let mut rows = Vec::new();
+) -> Result<Vec<(String, String)>> {
+    let mut targets = Vec::new();
     if include_root_refs {
-        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
-            if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
-                && for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
-            {
-                rows.push(build_for_each_ref_row(
-                    repo,
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo, store.algorithm())? {
+            if for_each_ref_pattern_matches(&ref_name, pattern_source, exclude, ignore_case)
+                && for_each_ref_filter_matches_with_store(
+                    store,
+                    commit_cache,
                     &ref_name,
                     &object_id,
-                    objects,
-                    requirements,
-                    mailmap,
-                    symrefs,
-                    short_names,
-                    current_head_ref,
-                )?);
+                    filter,
+                )?
+            {
+                targets.push((ref_name, object_id));
             }
         }
     }
@@ -5132,31 +5540,102 @@ fn collect_for_each_ref_rows(
         if !for_each_ref_name_is_valid(&ref_name) {
             continue;
         }
-        if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
-            && for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
-        {
-            rows.push(build_for_each_ref_row(
-                repo,
+        if for_each_ref_pattern_matches(&ref_name, pattern_source, exclude, ignore_case)
+            && for_each_ref_filter_matches_with_store(
+                store,
+                commit_cache,
                 &ref_name,
                 &object_id,
+                filter,
+            )?
+        {
+            targets.push((ref_name, object_id));
+        }
+    }
+    Ok(targets)
+}
+
+fn build_for_each_ref_description_context(
+    repo: &GitRepo,
+    targets: &[(String, String)],
+    requirements: &ForEachRefRequirements,
+) -> Result<ForEachRefDescriptionContext> {
+    let object_ids = targets
+        .iter()
+        .map(|(_, object_id)| parse_primitive_object_id(object_id))
+        .collect::<Result<Vec<_>>>()?;
+    let mut context = ForEachRefDescriptionContext::default();
+    for atom in &requirements.describe_atoms {
+        let batch = history_commands::describe_for_each_ref_batch(repo, &object_ids, atom)?;
+        for object_id in &object_ids {
+            context.values.insert(
+                (object_id.to_hex(), atom.clone()),
+                batch.value_for(object_id).unwrap_or_default().to_owned(),
+            );
+        }
+    }
+    Ok(context)
+}
+
+fn collect_for_each_ref_rows(
+    repo: &GitRepo,
+    refs: &dyn GitRefsStore,
+    objects: &dyn GitObjectStore,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    pattern_source: &ForEachRefPatternSource,
+    exclude: &[Vec<u8>],
+    ignore_case: bool,
+    include_root_refs: bool,
+    filter: Option<&ForEachRefFilter>,
+    requirements: &ForEachRefRequirements,
+    mailmap: &[core_commands::MailmapEntry],
+    symrefs: &ForEachRefSymrefs,
+    short_names: &ForEachRefShortNameContext,
+    current_head_ref: Option<&str>,
+) -> Result<Vec<ForEachRefRow>> {
+    let targets = collect_for_each_ref_targets(
+        repo,
+        refs,
+        store,
+        commit_cache,
+        pattern_source,
+        exclude,
+        ignore_case,
+        include_root_refs,
+        filter,
+    )?;
+    let description_context = (!requirements.describe_atoms.is_empty())
+        .then(|| build_for_each_ref_description_context(repo, &targets, requirements))
+        .transpose()?;
+    targets
+        .iter()
+        .map(|(ref_name, object_id)| {
+            build_for_each_ref_row(
+                repo,
+                ref_name,
+                object_id,
                 objects,
+                store,
                 requirements,
                 mailmap,
                 symrefs,
                 short_names,
                 current_head_ref,
-            )?);
-        }
-    }
-    Ok(rows)
+                description_context.as_ref(),
+            )
+        })
+        .collect()
 }
 
 fn print_for_each_ref_rows(
     repo: &GitRepo,
     refs: &dyn GitRefsStore,
     objects: &dyn GitObjectStore,
-    patterns: &[String],
-    exclude: &[String],
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    pattern_source: &ForEachRefPatternSource,
+    exclude: &[Vec<u8>],
     ignore_case: bool,
     include_root_refs: bool,
     filter: Option<&ForEachRefFilter>,
@@ -5178,12 +5657,18 @@ fn print_for_each_ref_rows(
     let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
     if include_root_refs {
-        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo, store.algorithm())? {
             if remaining == 0 {
                 break;
             }
-            if !for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
-                || !for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
+            if !for_each_ref_pattern_matches(&ref_name, pattern_source, exclude, ignore_case)
+                || !for_each_ref_filter_matches_with_store(
+                    store,
+                    commit_cache,
+                    &ref_name,
+                    &object_id,
+                    filter,
+                )?
             {
                 continue;
             }
@@ -5195,11 +5680,13 @@ fn print_for_each_ref_rows(
                     &ref_name,
                     &object_id,
                     objects,
+                    store,
                     requirements,
                     mailmap,
                     symrefs,
                     short_names,
                     current_head_ref,
+                    None,
                 )?;
                 let rendered = render_for_each_ref_row_bytes_with_mode(
                     format,
@@ -5222,10 +5709,16 @@ fn print_for_each_ref_rows(
         if !for_each_ref_name_is_valid(ref_name) {
             return Ok(());
         }
-        if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
+        if !for_each_ref_pattern_matches(ref_name, pattern_source, exclude, ignore_case) {
             return Ok(());
         }
-        match for_each_ref_filter_matches(repo, ref_name, object_id, filter) {
+        match for_each_ref_filter_matches_with_store(
+            store,
+            commit_cache,
+            ref_name,
+            object_id,
+            filter,
+        ) {
             Ok(true) => {}
             Ok(false) => return Ok(()),
             Err(error) => {
@@ -5248,11 +5741,13 @@ fn print_for_each_ref_rows(
             ref_name,
             object_id,
             objects,
+            store,
             requirements,
             mailmap,
             symrefs,
             short_names,
             current_head_ref,
+            None,
         )
         .and_then(|row| {
             render_for_each_ref_row_bytes_with_mode(format, &row, quote_mode, color_enabled)
@@ -5281,8 +5776,8 @@ fn print_simple_for_each_ref_rows(
     refs: &dyn GitRefsStore,
     store: &LooseObjectStore,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
-    patterns: &[String],
-    exclude: &[String],
+    pattern_source: &ForEachRefPatternSource,
+    exclude: &[Vec<u8>],
     ignore_case: bool,
     include_root_refs: bool,
     filter: Option<&ForEachRefFilter>,
@@ -5293,11 +5788,11 @@ fn print_simple_for_each_ref_rows(
     let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
     if include_root_refs {
-        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo)? {
+        for (ref_name, object_id) in resolved_for_each_ref_root_refs(repo, store.algorithm())? {
             if remaining == 0 {
                 break;
             }
-            if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
+            if for_each_ref_pattern_matches(&ref_name, pattern_source, exclude, ignore_case)
                 && for_each_ref_filter_matches_with_store(
                     store,
                     commit_cache,
@@ -5318,7 +5813,7 @@ fn print_simple_for_each_ref_rows(
         if !for_each_ref_name_is_valid(ref_name) {
             return Ok(());
         }
-        if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
+        if !for_each_ref_pattern_matches(ref_name, pattern_source, exclude, ignore_case) {
             return Ok(());
         }
         match for_each_ref_filter_matches_with_store(
@@ -5350,21 +5845,25 @@ fn for_each_ref_name_is_valid(ref_name: &str) -> bool {
     check_ref_format(ref_name, false)
 }
 
-fn for_each_ref_head_id(repo: &GitRepo) -> Result<String> {
+fn for_each_ref_head_id(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<String> {
     let common_dir = read_common_git_dir(&repo.git_dir)?;
     if common_dir != repo.git_dir {
-        return read_head_direct_ref(&repo.git_dir);
+        return read_head_direct_ref(&repo.git_dir, algorithm);
     }
-    Ok(RefStore::new(common_dir, GitHashAlgorithm::Sha1)
+    Ok(RefStore::new(common_dir, algorithm)
         .resolve("HEAD")?
         .to_hex())
 }
 
-fn load_for_each_ref_symrefs(repo: &GitRepo, required: bool) -> Result<ForEachRefSymrefs> {
+fn load_for_each_ref_symrefs(
+    repo: &GitRepo,
+    required: bool,
+    algorithm: GitHashAlgorithm,
+) -> Result<ForEachRefSymrefs> {
     if !required {
         return Ok(BTreeMap::new());
     }
-    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, algorithm);
     let mut symrefs = BTreeMap::new();
     for (name, target) in refs.list_ref_targets("refs/")? {
         if let RefTarget::Symbolic(target) = target {
@@ -5382,23 +5881,26 @@ fn load_for_each_ref_symrefs(repo: &GitRepo, required: bool) -> Result<ForEachRe
     Ok(symrefs)
 }
 
-fn resolved_for_each_ref_root_refs(repo: &GitRepo) -> Result<Vec<(String, String)>> {
-    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+fn resolved_for_each_ref_root_refs(
+    repo: &GitRepo,
+    algorithm: GitHashAlgorithm,
+) -> Result<Vec<(String, String)>> {
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, algorithm);
     let mut rows = Vec::new();
     for name in refs.list_root_refs()? {
         if let Ok(id) = refs.resolve(&name) {
             rows.push((name, id.to_hex()));
         }
     }
-    if let Ok(id) = for_each_ref_head_id(repo) {
+    if let Ok(id) = for_each_ref_head_id(repo, algorithm) {
         rows.push(("HEAD".to_owned(), id));
     }
     rows.sort_by(|left, right| left.0.cmp(&right.0));
     Ok(rows)
 }
 
-fn warn_for_each_ref_invalid_names(repo: &GitRepo) -> Result<()> {
-    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, GitHashAlgorithm::Sha1);
+fn warn_for_each_ref_invalid_names(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<()> {
+    let refs = RefStore::new(read_common_git_dir(&repo.git_dir)?, algorithm);
     for ref_name in refs.list_refs("refs/")? {
         if !for_each_ref_name_is_valid(&ref_name) {
             eprintln!("warning: ignoring ref with broken name {ref_name}");
@@ -5407,18 +5909,18 @@ fn warn_for_each_ref_invalid_names(repo: &GitRepo) -> Result<()> {
     Ok(())
 }
 
-fn warn_for_each_ref_bad_tag_pointers(repo: &GitRepo) -> Result<()> {
+fn warn_for_each_ref_bad_tag_pointers(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<()> {
     let refs = RefStore::new(
         read_common_git_dir(&repo.git_dir)?,
         symbolic_ref_object_format(repo)?,
     );
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     refs.for_each_resolved_ref("refs/tags/", |_ref_name, id| {
         let object = store.read_object(&id)?;
         if object.kind != GitObjectKind::Tag {
             return Ok(());
         }
-        let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+        let tag = decode_tag(algorithm, &object.content)?;
         let target = store.read_object(&tag.target)?;
         if target.kind != tag.target_kind {
             eprintln!(
@@ -5500,29 +6002,27 @@ fn build_for_each_ref_row(
     ref_name: &str,
     object_id: &str,
     objects: &dyn GitObjectStore,
+    store: &LooseObjectStore,
     requirements: &ForEachRefRequirements,
     mailmap: &[core_commands::MailmapEntry],
     symrefs: &ForEachRefSymrefs,
     short_names: &ForEachRefShortNameContext,
     current_head_ref: Option<&str>,
+    description_context: Option<&ForEachRefDescriptionContext>,
 ) -> Result<ForEachRefRow> {
     let object_id = parse_primitive_object_id(object_id)?;
     let object_id_hex = object_id.to_hex();
     let peeled_object_id = if requirements.need_peeled && ref_name.starts_with("refs/tags/") {
-        peel_show_ref_tag(
-            &LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1),
-            &object_id,
-        )?
+        peel_show_ref_tag(store, &object_id)?
     } else {
         None
     };
     let (object_kind, metadata) =
         load_for_each_ref_metadata(ref_name, &object_id_hex, objects, requirements)?;
-    let loose_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let peeled_object_kind = peeled_object_id
         .as_ref()
         .map(|id| {
-            loose_store
+            store
                 .packed_first()
                 .read_object(id)
                 .map(|object| object.kind)
@@ -5531,14 +6031,14 @@ fn build_for_each_ref_row(
     let peeled_object_disk_size = if requirements.need_disk_size {
         peeled_object_id
             .as_ref()
-            .map(|id| loose_store.object_disk_size_hint(id))
+            .map(|id| store.object_disk_size_hint(id))
             .transpose()?
             .flatten()
     } else {
         None
     };
     let object_disk_size = if requirements.need_disk_size {
-        loose_store.object_disk_size_hint(&object_id)?
+        store.object_disk_size_hint(&object_id)?
     } else {
         None
     };
@@ -5546,7 +6046,7 @@ fn build_for_each_ref_row(
         peeled_object_id
             .as_ref()
             .map(|id| {
-                loose_store
+                store
                     .packed_first()
                     .read_object(id)
                     .map(|object| object.content)
@@ -5575,7 +6075,12 @@ fn build_for_each_ref_row(
             Some(&object_id)
         };
         let description = target
-            .map(|target| history_commands::describe_for_each_ref(repo, target, atom))
+            .map(|target| {
+                description_context
+                    .and_then(|context| context.value_for(&object_id, atom))
+                    .map(|value| Ok(value.to_owned()))
+                    .unwrap_or_else(|| history_commands::describe_for_each_ref(repo, target, atom))
+            })
             .transpose()?
             .unwrap_or_default();
         descriptions.insert(atom.clone(), description);
@@ -7695,11 +8200,11 @@ fn replace_store_edited_object(
     let content = match original.kind {
         GitObjectKind::Blob => edited,
         GitObjectKind::Commit => {
-            let _ = decode_commit(GitHashAlgorithm::Sha1, &edited)?;
+            let _ = decode_commit(store.algorithm(), &edited)?;
             edited
         }
         GitObjectKind::Tag => {
-            let _ = decode_tag(GitHashAlgorithm::Sha1, &edited)?;
+            let _ = decode_tag(store.algorithm(), &edited)?;
             edited
         }
         GitObjectKind::Tree if raw => edited,
@@ -7897,6 +8402,41 @@ pub(crate) fn commit_patch_id_for_cherry_cached(
     commit_patch_id_cached_with_mode(store, commit_cache, tree_cache, id, PatchIdMode::Unstable)
 }
 
+pub(crate) fn commit_patch_id_for_cherry_links_cached(
+    store: &LooseObjectStore,
+    links_cache: &mut CommitLinksCache<'_, LooseObjectStore>,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    id: &ObjectId,
+) -> Result<Option<String>> {
+    let links = links_cache.read_links(id)?;
+    if links.parents.len() > 1 {
+        return Ok(None);
+    }
+    let parent_tree = links
+        .parents
+        .first()
+        .map(|parent| links_cache.read_links(parent))
+        .transpose()?
+        .map(|parent| parent.tree.clone());
+    let repo = find_repo()?;
+    let mut patch = Vec::new();
+    let mut blob_cache = FormatPatchBlobCache::new(store);
+    write_commit_patch_entries_tree_diff_cached(
+        &mut patch,
+        &repo,
+        store,
+        tree_cache,
+        parent_tree.as_ref(),
+        &links.tree,
+        &mut blob_cache,
+    )?;
+    let mut patch_ids = patch_id_generate(&patch, PatchIdMode::Unstable);
+    let Some((digest, _)) = patch_ids.pop() else {
+        return Ok(None);
+    };
+    Ok(Some(encode_hex(&digest)))
+}
+
 pub(crate) fn commit_patch_id_stable_cached(
     store: &LooseObjectStore,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
@@ -7933,7 +8473,6 @@ fn commit_patch_id_cached_with_mode(
         tree_cache,
         parent_tree.as_ref(),
         &commit.tree,
-        default_abbrev_len(store)?,
         &mut blob_cache,
     )?;
     let mut patch_ids = patch_id_generate(&patch, mode);
@@ -7981,9 +8520,7 @@ pub(crate) fn remote_command(verbose: bool, command: Option<RemoteCommand>) -> R
             master,
             name,
             url,
-        }) => {
-            remote_add(&repo, &name, &url, &branches, master.as_deref())
-        }
+        }) => remote_add(&repo, &name, &url, &branches, master.as_deref()),
         Some(RemoteCommand::GetUrl { name }) => remote_get_url(&repo, &name),
         Some(RemoteCommand::SetUrl {
             push,
@@ -7995,7 +8532,24 @@ pub(crate) fn remote_command(verbose: bool, command: Option<RemoteCommand>) -> R
         }) => remote_set_url(&repo, &name, push, add, delete, &url, old_url.as_deref()),
         Some(RemoteCommand::Remove { name }) => remote_remove(&repo, &name),
         Some(RemoteCommand::Rename { old, new }) => remote_rename(&repo, &old, &new),
-        Some(RemoteCommand::SetHead { name, args }) => remote_set_head(&repo, &name, args),
+        Some(RemoteCommand::SetHead {
+            auto,
+            delete,
+            name,
+            branch,
+        }) => {
+            let mut args = Vec::with_capacity(2);
+            if auto {
+                args.push("-a".to_owned());
+            }
+            if delete {
+                args.push("-d".to_owned());
+            }
+            if let Some(branch) = branch {
+                args.push(branch);
+            }
+            remote_set_head(&repo, &name, args)
+        }
         Some(RemoteCommand::Show { no_query, name }) => {
             remote_show(&repo, verbose, no_query, &name)
         }
@@ -8292,16 +8846,23 @@ fn remote_set_head(repo: &GitRepo, name: &str, args: Vec<String>) -> Result<()> 
     }
     let branch = if auto {
         let url = remote_url(repo, name)?;
-        let Some(source_path) = local_repository_path_from_location(&url)? else {
-            return Err(remote_repository_unavailable_error(name));
-        };
-        let source = local_clone_source(&source_path)
-            .map_err(|_| remote_repository_unavailable_error(name))?;
-        let source_refs = RefStore::new(&source.git_dir, GitHashAlgorithm::Sha1);
-        source_head_branch(&source_refs)?.ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: format!("Cannot determine remote HEAD for {name}"),
-        })?
+        if transport_commands::is_git_daemon_transport_url(&url) {
+            transport_commands::daemon_head_branch(&url)?.ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("Cannot determine remote HEAD for {name}"),
+            })?
+        } else {
+            let Some(source_path) = local_repository_path_from_location(&url)? else {
+                return Err(remote_repository_unavailable_error(name));
+            };
+            let source = local_clone_source(&source_path)
+                .map_err(|_| remote_repository_unavailable_error(name))?;
+            let source_refs = RefStore::new(&source.git_dir, GitHashAlgorithm::Sha1);
+            source_head_branch(&source_refs)?.ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("Cannot determine remote HEAD for {name}"),
+            })?
+        }
     } else {
         let branch = args[0].trim_start_matches("refs/heads/").to_owned();
         if branch.starts_with('-') {
@@ -8321,9 +8882,28 @@ fn remote_set_head(repo: &GitRepo, name: &str, args: Vec<String>) -> Result<()> 
             message: format!("Not a valid ref: {target}"),
         });
     }
-    refs.write_symbolic_ref(&format!("refs/remotes/{name}/HEAD"), &target)?;
+    let head_ref = format!("refs/remotes/{name}/HEAD");
+    let old_target = if auto {
+        symbolic_ref_read_raw(repo, &head_ref)?
+    } else {
+        None
+    };
+    refs.write_symbolic_ref(&head_ref, &target)?;
     if auto {
-        println!("{name}/HEAD set to {branch}");
+        match old_target {
+            None => println!("'{name}/HEAD' is now created and points to '{branch}'"),
+            Some(old_target) if old_target == target => {
+                println!("'{name}/HEAD' is unchanged and points to '{branch}'")
+            }
+            Some(old_target) => {
+                let old_branch = old_target
+                    .strip_prefix(&format!("refs/remotes/{name}/"))
+                    .unwrap_or(&old_target);
+                println!(
+                    "'{name}/HEAD' has changed from '{old_branch}' and now points to '{branch}'"
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -8530,6 +9110,7 @@ fn remote_update(repo: &GitRepo, prune: bool, remotes: Vec<String>) -> Result<()
             false,
             &[],
             None,
+            false,
         )?;
         if prune {
             prune_remote_tracking_refs_silent(repo, &target.name)?;
@@ -8746,6 +9327,203 @@ struct TagOptions {
     format: Option<String>,
     args: Vec<String>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LsTreeAbbrev {
+    Default,
+    Bare,
+    Explicit(usize),
+    NoAbbrev,
+}
+
+impl LsTreeAbbrev {
+    fn resolve(self, repo: &GitRepo) -> Result<LsTreeRenderAbbrev> {
+        let configured = configured_ls_tree_abbrev(repo)?;
+
+        Ok(match self {
+            Self::Default | Self::NoAbbrev => LsTreeRenderAbbrev::Full,
+            Self::Bare => configured,
+            Self::Explicit(length) if length == 0 => LsTreeRenderAbbrev::Full,
+            Self::Explicit(length) => LsTreeRenderAbbrev::Minimum(length),
+        })
+    }
+}
+
+fn configured_ls_tree_abbrev(repo: &GitRepo) -> Result<LsTreeRenderAbbrev> {
+    let entries = read_config_entries(repo)?;
+    configured_ls_tree_abbrev_from_entries(Some(repo), &entries)
+}
+
+fn configured_ls_tree_abbrev_from_entries(
+    repo: Option<&GitRepo>,
+    entries: &[ConfigEntry],
+) -> Result<LsTreeRenderAbbrev> {
+    resolve_core_abbrev_config_state(repo, entries)
+}
+
+pub(crate) fn validate_ls_tree_config_before_help() -> Result<()> {
+    let global_entries = read_early_global_config_entries()?;
+    if let Ok(repo) = find_repo_or_bare() {
+        let entries = read_config_entries(&repo)?;
+        let _ = configured_ls_tree_abbrev_from_entries(Some(&repo), &entries)?;
+    } else {
+        let mut early_entries = global_entries;
+        early_entries.extend(global_config_entries());
+        let _ = configured_ls_tree_abbrev_from_entries(None, &early_entries)?;
+    }
+    Ok(())
+}
+
+type LsTreeRenderAbbrev = CoreAbbrevConfigState;
+
+pub(crate) fn parse_ls_tree_abbrev(
+    raw_args: &[String],
+    explicit: Option<crate::runtime::LsTreeAbbrevArgument>,
+    no_abbrev: bool,
+) -> Result<LsTreeAbbrev> {
+    let mut state = LsTreeAbbrev::Default;
+    let mut skip_value = false;
+    for argument in raw_args.iter().skip(1) {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if argument == "--" {
+            break;
+        }
+        if argument == "--format" {
+            skip_value = true;
+            continue;
+        }
+        state = match argument.as_str() {
+            "--abbrev" => LsTreeAbbrev::Bare,
+            "--no-abbrev" => LsTreeAbbrev::NoAbbrev,
+            value if value.starts_with("--abbrev=") => match explicit.as_ref() {
+                Some(crate::runtime::LsTreeAbbrevArgument::Bare) => LsTreeAbbrev::Bare,
+                Some(crate::runtime::LsTreeAbbrevArgument::Value(value)) => {
+                    LsTreeAbbrev::Explicit(parse_ls_tree_cli_abbrev(value)?)
+                }
+                None => LsTreeAbbrev::Default,
+            },
+            _ => state,
+        };
+    }
+    if matches!(state, LsTreeAbbrev::Default) {
+        if no_abbrev {
+            LsTreeAbbrev::NoAbbrev
+        } else if let Some(explicit) = explicit {
+            match explicit {
+                crate::runtime::LsTreeAbbrevArgument::Bare => LsTreeAbbrev::Bare,
+                crate::runtime::LsTreeAbbrevArgument::Value(value) => {
+                    LsTreeAbbrev::Explicit(parse_ls_tree_cli_abbrev(&value)?)
+                }
+            }
+        } else {
+            state
+        }
+    } else {
+        state
+    };
+    Ok(state)
+}
+
+fn parse_ls_tree_cli_abbrev(value: &str) -> Result<usize> {
+    let parsed = parse_signed_decimal_cli_integer(value).map_err(|_| CliError::Stderr {
+        code: 129,
+        text: "error: option `abbrev' expects a numerical value\n".to_owned(),
+    })?;
+    let parsed = parsed as i32;
+    if parsed == 0 {
+        return Ok(0);
+    }
+    if parsed < 4 {
+        return Ok(4);
+    }
+    usize::try_from(parsed).map_err(|_| CliError::Stderr {
+        code: 129,
+        text: "error: option `abbrev' expects a numerical value\n".to_owned(),
+    })
+}
+
+type NativeCLong = std::os::raw::c_long;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CLongBounds {
+    minimum: i128,
+    maximum: i128,
+}
+
+impl CLongBounds {
+    const fn for_bits(bits: usize) -> Self {
+        let sign_bit = 1_i128 << (bits - 1);
+        Self {
+            minimum: -sign_bit,
+            maximum: sign_bit - 1,
+        }
+    }
+}
+
+fn native_c_long_bounds() -> CLongBounds {
+    CLongBounds::for_bits(std::mem::size_of::<NativeCLong>() * 8)
+}
+
+fn parse_signed_decimal_cli_integer(value: &str) -> std::result::Result<i32, ()> {
+    parse_signed_decimal_cli_integer_with_bounds(value, native_c_long_bounds())
+}
+
+fn parse_signed_decimal_cli_integer_with_bounds(
+    value: &str,
+    bounds: CLongBounds,
+) -> std::result::Result<i32, ()> {
+    let bytes = value.as_bytes();
+    let mut start = 0;
+    while bytes
+        .get(start)
+        .is_some_and(|byte| matches!(*byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c))
+    {
+        start += 1;
+    }
+    let (negative, sign_len) = match bytes.get(start) {
+        Some(b'-') => (true, 1),
+        Some(b'+') => (false, 1),
+        _ => (false, 0),
+    };
+    let digits = &bytes[start + sign_len..];
+    if digits.is_empty() {
+        return Err(());
+    }
+    let mut magnitude = 0i128;
+    let mut overflow = false;
+    let mut digit_count = 0;
+    for digit in digits {
+        if !digit.is_ascii_digit() {
+            break;
+        }
+        digit_count += 1;
+        let digit = i128::from(digit - b'0');
+        if !overflow {
+            let Some(next) = magnitude
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(digit))
+            else {
+                overflow = true;
+                continue;
+            };
+            magnitude = next;
+        }
+    }
+    if digit_count == 0 || start + sign_len + digit_count != bytes.len() {
+        return Err(());
+    }
+    let signed = if overflow {
+        if negative { i128::MIN } else { i128::MAX }
+    } else if negative {
+        -magnitude
+    } else {
+        magnitude
+    };
+    Ok(signed.clamp(bounds.minimum, bounds.maximum) as i32)
+}
+
 struct LsTreeOptions<'a> {
     directory_only: bool,
     recursive: bool,
@@ -8757,7 +9535,7 @@ struct LsTreeOptions<'a> {
     object_only: bool,
     full_name: bool,
     full_tree: bool,
-    abbrev: Option<usize>,
+    abbrev: LsTreeAbbrev,
     format: Option<&'a str>,
     treeish: &'a str,
     paths: Vec<String>,
@@ -8771,11 +9549,17 @@ struct LsTreeRenderOptions<'a> {
     object_only: bool,
     full_name: bool,
     quote_non_ascii: bool,
-    abbrev: Option<usize>,
+    abbrev_lengths: &'a RenderedAbbrevLengths,
     format: Option<&'a str>,
 }
 
 fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
+    let abbrev = options.abbrev.resolve(&repo)?;
     let output_modes = [
         options.long,
         options.name_only,
@@ -8801,13 +9585,11 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
-    let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(
-        repo.objects_dir.clone(),
-        repo_hash_algorithm_from_config(&repo)?,
-    );
     let tree_id = resolve_treeish_or_invalid_object(&repo, &store, options.treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
+    let mut tree_object_ids = Vec::new();
+    ls_tree_collect_object_ids(&tree_cache, &tree_id, &mut tree_object_ids)?;
+    let abbrev_lengths = rendered_abbrev_len_for_ids(&store, abbrev, &tree_object_ids)?;
     let cwd_prefix = if options.full_tree {
         Vec::new()
     } else {
@@ -8823,7 +9605,7 @@ fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
             .as_deref()
             .and_then(parse_git_bool)
             .unwrap_or(true),
-        abbrev: options.abbrev,
+        abbrev_lengths: &abbrev_lengths,
         format: options.format,
     };
     if options.paths.is_empty() && !cwd_prefix.is_empty() && !options.full_tree {
@@ -9009,6 +9791,20 @@ fn ls_tree_print_parent_trees(
             break;
         }
         ls_tree_print_entry(store, &entry, parent_path, cwd_prefix, render_options)?;
+    }
+    Ok(())
+}
+
+fn ls_tree_collect_object_ids(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    tree_id: &ObjectId,
+    ids: &mut Vec<ObjectId>,
+) -> Result<()> {
+    for entry in tree_cache.read_tree(tree_id)?.iter() {
+        ids.push(entry.id.clone());
+        if entry.mode == TreeMode::Tree {
+            ls_tree_collect_object_ids(tree_cache, &entry.id, ids)?;
+        }
     }
     Ok(())
 }
@@ -9199,35 +9995,37 @@ fn ls_tree_print_entry(
     options: LsTreeRenderOptions<'_>,
 ) -> Result<()> {
     let mut display_path = ls_tree_display_path(path, cwd_prefix, options.full_name);
-    if !options.nul_terminated {
+    if options.format.is_some() || !options.nul_terminated {
         display_path = quote_git_path(&display_path, options.quote_non_ascii);
     }
     let record = if let Some(format) = options.format {
-        ls_tree_render_format(format, store, entry, &display_path, options.abbrev)?
+        ls_tree_render_format(format, store, entry, &display_path, options.abbrev_lengths)?
     } else if options.object_only {
-        ls_tree_object_name(&entry.id, options.abbrev).into_bytes()
+        ls_tree_object_name(options.abbrev_lengths, &entry.id).into_bytes()
     } else if options.name_only {
         display_path
     } else if options.long {
         let size = ls_tree_object_size_field(store, entry)?;
-        format!(
-            "{} {} {} {:>7}\t{}",
+        let mut record = format!(
+            "{} {} {} {:>7}\t",
             tree_mode_display(entry.mode),
             tree_entry_kind(entry.mode).as_str(),
-            ls_tree_object_name(&entry.id, options.abbrev),
+            ls_tree_object_name(options.abbrev_lengths, &entry.id),
             size,
-            String::from_utf8_lossy(&display_path)
         )
-        .into_bytes()
+        .into_bytes();
+        record.extend_from_slice(&display_path);
+        record
     } else {
-        format!(
-            "{} {} {}\t{}",
+        let mut record = format!(
+            "{} {} {}\t",
             tree_mode_display(entry.mode),
             tree_entry_kind(entry.mode).as_str(),
-            ls_tree_object_name(&entry.id, options.abbrev),
-            String::from_utf8_lossy(&display_path)
+            ls_tree_object_name(options.abbrev_lengths, &entry.id),
         )
-        .into_bytes()
+        .into_bytes();
+        record.extend_from_slice(&display_path);
+        record
     };
     let terminator = if options.nul_terminated { b'\0' } else { b'\n' };
     let mut stdout = std::io::stdout().lock();
@@ -9318,11 +10116,8 @@ fn relative_pathspec_bytes(from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-fn ls_tree_object_name(id: &ObjectId, abbrev: Option<usize>) -> String {
-    match abbrev {
-        Some(len) => short_object_id_len(id, len.max(1)),
-        None => id.to_hex(),
-    }
+fn ls_tree_object_name(lengths: &RenderedAbbrevLengths, id: &ObjectId) -> String {
+    short_object_id_len(id, lengths.width_for(id))
 }
 
 fn ls_tree_object_size_field(store: &LooseObjectStore, entry: &TreeEntry) -> Result<String> {
@@ -9340,7 +10135,7 @@ fn ls_tree_render_format(
     store: &LooseObjectStore,
     entry: &TreeEntry,
     display_path: &[u8],
-    abbrev: Option<usize>,
+    abbrev_lengths: &RenderedAbbrevLengths,
 ) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut chars = format.chars().peekable();
@@ -9378,9 +10173,9 @@ fn ls_tree_render_format(
                     "objecttype" => {
                         out.extend_from_slice(tree_entry_kind(entry.mode).as_str().as_bytes())
                     }
-                    "objectname" => {
-                        out.extend_from_slice(ls_tree_object_name(&entry.id, abbrev).as_bytes())
-                    }
+                    "objectname" => out.extend_from_slice(
+                        ls_tree_object_name(abbrev_lengths, &entry.id).as_bytes(),
+                    ),
                     "objectsize" => {
                         out.extend_from_slice(ls_tree_object_size_field(store, entry)?.as_bytes())
                     }
@@ -10074,15 +10869,17 @@ fn print_branch_list_format(
     current: Option<&str>,
     omit_empty: bool,
 ) -> Result<()> {
+    let algorithm = symbolic_ref_object_format(repo)?;
     let requirements = for_each_ref_requirements(format, &[])?;
-    let symrefs = load_for_each_ref_symrefs(repo, requirements.need_symref)?;
+    let symrefs = load_for_each_ref_symrefs(repo, requirements.need_symref, algorithm)?;
     let short_names = load_for_each_ref_short_name_context(repo, requirements.need_short_name)?;
     let mailmap = requirements
         .need_mailmap
         .then(|| core_commands::read_mailmap(repo, None, None))
         .transpose()?
         .unwrap_or_default();
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, algorithm);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     for entry in entries {
         let Some(ref_name) = entry.ref_name.as_deref() else {
             continue;
@@ -10093,11 +10890,13 @@ fn print_branch_list_format(
             ref_name,
             &object_id,
             runtime.objects(),
+            &store,
             &requirements,
             &mailmap,
             &symrefs,
             &short_names,
             current,
+            None,
         )?;
         let rendered = render_for_each_ref_row(format, &row)?;
         if !omit_empty || !rendered.is_empty() {
@@ -12133,8 +12932,8 @@ fn tag_message_preview_lines(
     }
     let object = store.read_object(object_id)?;
     let bytes = match object.kind {
-        GitObjectKind::Tag => decode_tag(GitHashAlgorithm::Sha1, &object.content)?.message,
-        GitObjectKind::Commit => decode_commit(GitHashAlgorithm::Sha1, &object.content)?.message,
+        GitObjectKind::Tag => decode_tag(store.algorithm(), &object.content)?.message,
+        GitObjectKind::Commit => decode_commit(store.algorithm(), &object.content)?.message,
         _ => return Ok(Vec::new()),
     };
     Ok(bytes
@@ -12392,6 +13191,42 @@ pub(crate) fn ls_tree_command(
     full_name: bool,
     full_tree: bool,
     abbrev: Option<usize>,
+    format: Option<&str>,
+    treeish: &str,
+    paths: Vec<String>,
+) -> Result<()> {
+    ls_tree_command_with_abbrev(
+        directory_only,
+        recursive,
+        show_trees,
+        long,
+        nul_terminated,
+        name_only,
+        name_status,
+        object_only,
+        full_name,
+        full_tree,
+        abbrev
+            .map(LsTreeAbbrev::Explicit)
+            .unwrap_or(LsTreeAbbrev::Default),
+        format,
+        treeish,
+        paths,
+    )
+}
+
+pub(crate) fn ls_tree_command_with_abbrev(
+    directory_only: bool,
+    recursive: bool,
+    show_trees: bool,
+    long: bool,
+    nul_terminated: bool,
+    name_only: bool,
+    name_status: bool,
+    object_only: bool,
+    full_name: bool,
+    full_tree: bool,
+    abbrev: LsTreeAbbrev,
     format: Option<&str>,
     treeish: &str,
     paths: Vec<String>,
@@ -12860,9 +13695,7 @@ Use 'git <command> -- <path>...' to specify paths that do not exist locally."
         });
     }
     for rev in &options.revs {
-        if rev.contains(":../")
-            && std::env::current_dir().ok().as_ref() == Some(&repo.root)
-        {
+        if rev.contains(":../") && std::env::current_dir().ok().as_ref() == Some(&repo.root) {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "path is outside repository".into(),
@@ -12923,9 +13756,7 @@ Use 'git <command> -- <path>...' to specify paths that do not exist locally."
                     message: format!("unknown revision or path not in the working tree: {rev}"),
                 });
             }
-        } else if has_unescaped_rev_parse_wildcard(rev)
-            && resolve_objectish(&repo, rev).is_err()
-        {
+        } else if has_unescaped_rev_parse_wildcard(rev) && resolve_objectish(&repo, rev).is_err() {
             println!("{rev}");
         } else if options.revs.len() > 1
             && !options.verify
@@ -13054,11 +13885,8 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
         }
         if saw_end_of_options && arg != "--" {
             let resolved_rev = rev_parse_prefix_revision(output_options.prefix, arg);
-            let arg_kind = rev_parse_classify_end_of_options_arg(
-                &mut repo_context,
-                &resolved_rev,
-                options,
-            )?;
+            let arg_kind =
+                rev_parse_classify_end_of_options_arg(&mut repo_context, &resolved_rev, options)?;
             rev_parse_emit_arg(
                 &mut repo_context,
                 &mut outputs,
@@ -13862,9 +14690,7 @@ fn parse_rev_parse_parseopt_specs(
         }
         let token = &line[..help_start];
         let help = line[help_start..].trim_start().to_owned();
-        let flag_start = token
-            .find(['*', '=', '?', '!'])
-            .unwrap_or(token.len());
+        let flag_start = token.find(['*', '=', '?', '!']).unwrap_or(token.len());
         let names = &token[..flag_start];
         if names.is_empty() {
             return Err(CliError::Fatal {
@@ -14048,7 +14874,11 @@ fn rev_parse_parseopt_render(
     }
     let _ = stop_after_non_option;
     out.push("--".to_owned());
-    out.extend(positionals.into_iter().map(|value| shell_single_quote(&value)));
+    out.extend(
+        positionals
+            .into_iter()
+            .map(|value| shell_single_quote(&value)),
+    );
     println!("{}", out.join(" "));
     Ok(())
 }
@@ -14132,7 +14962,10 @@ fn rev_parse_parseopt_find_long<'a>(
     }
     matches.sort_by_key(|(spec, negated)| {
         let long = spec.long.as_deref().unwrap_or_default();
-        (format!("{}{}", if *negated { "no-" } else { "" }, long), *negated)
+        (
+            format!("{}{}", if *negated { "no-" } else { "" }, long),
+            *negated,
+        )
     });
     matches.dedup_by(|a, b| a.0.long == b.0.long && a.1 == b.1);
     if matches.len() > 1 {
@@ -14207,7 +15040,10 @@ fn print_rev_parse_parseopt_help(
     full: bool,
     _error: bool,
 ) {
-    print!("cat <<\\EOF\n{}EOF\n", rev_parse_parseopt_usage_body(usage, specs, full));
+    print!(
+        "cat <<\\EOF\n{}EOF\n",
+        rev_parse_parseopt_usage_body(usage, specs, full)
+    );
 }
 
 fn rev_parse_parseopt_usage_body(
@@ -14296,7 +15132,9 @@ fn rev_parse_parseopt_usage_body(
         if let Some(long) = spec.long.as_deref()
             && !spec.noneg
             && let Some(positive) = long.strip_prefix("no-")
-            && !specs.iter().any(|other| other.long.as_deref() == Some(positive))
+            && !specs
+                .iter()
+                .any(|other| other.long.as_deref() == Some(positive))
         {
             let mut opposite = String::from("    --");
             opposite.push_str(positive);
@@ -15236,6 +16074,41 @@ mod tests {
     use zmin_primitives::git_runtime::GitObjectEnvelope;
 
     #[test]
+    fn ls_tree_cli_abbrev_parser_models_llp64_and_lp64_c_long_widths() {
+        let bounds32 = CLongBounds::for_bits(32);
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("2147483648", bounds32),
+            Ok(i32::MAX)
+        );
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("4294967296", bounds32),
+            Ok(i32::MAX)
+        );
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("-2147483649", bounds32),
+            Ok(i32::MIN)
+        );
+
+        let bounds64 = CLongBounds::for_bits(64);
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("2147483648", bounds64),
+            Ok(i32::MIN)
+        );
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("4294967296", bounds64),
+            Ok(0)
+        );
+        assert_eq!(
+            parse_signed_decimal_cli_integer_with_bounds("-2147483649", bounds64),
+            Ok(i32::MAX)
+        );
+        assert_eq!(
+            native_c_long_bounds(),
+            CLongBounds::for_bits(std::mem::size_of::<NativeCLong>() * 8)
+        );
+    }
+
+    #[test]
     fn for_each_ref_rows_use_loose_ref_over_stale_packed_ref() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let git_dir = dir.path().join(".git");
@@ -15248,6 +16121,8 @@ mod tests {
         let objects =
             OwnedCliObjectStoreAdapter::from_path(&git_dir.join("objects"), GitHashAlgorithm::Sha1);
         let refs = OwnedCliRefsStoreAdapter::from_path(&git_dir, GitHashAlgorithm::Sha1);
+        let store = LooseObjectStore::new(git_dir.join("objects"), GitHashAlgorithm::Sha1);
+        let commit_cache = CommitObjectCache::new(&store);
         fs::create_dir_all(&git_dir.join("objects")).expect("objects dir");
         let stale_id = objects
             .write_object_content(
@@ -15283,7 +16158,9 @@ mod tests {
             &repo,
             &refs,
             &objects,
-            &[],
+            &store,
+            &commit_cache,
+            &ForEachRefPatternSource::Explicit(Vec::new()),
             &[],
             false,
             false,

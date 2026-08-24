@@ -1064,7 +1064,10 @@ pub(crate) fn format_patch(
         });
     }
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let revs = format_patch_effective_revs(revs, one || max_count.is_some());
     if revs.is_empty() && interdiff.is_none() && range_diff.is_none() && base.is_none() {
         if let Some(output) = output {
@@ -1109,11 +1112,11 @@ pub(crate) fn format_patch(
         commits.truncate(1);
     }
     commits.reverse();
-    let abbrev_len = default_abbrev_len(&store)?;
-    let patch_abbrev_len = if full_index {
-        GitHashAlgorithm::Sha1.digest_len() * 2
+    let abbrev_policy = configured_core_abbrev_state(&repo)?;
+    let patch_abbrev_policy = if full_index {
+        CoreAbbrevConfigState::Full
     } else {
-        abbrev_len
+        abbrev_policy
     };
     let unified_context = unified
         .map(|value| parse_diff_context_value("--unified", value))
@@ -1350,8 +1353,9 @@ pub(crate) fn format_patch(
     let format_context = FormatPatchContext {
         repo: &repo,
         store: &store,
-        abbrev_len,
-        patch_abbrev_len,
+        abbrev_policy,
+        patch_abbrev_policy,
+        abbrev_lengths: None,
         total: commits.len(),
         nul_terminated,
         no_numbered,
@@ -1731,6 +1735,7 @@ fn format_patch_filter_ignore_if_in_upstream(
         exclude: Vec::new(),
         extra_objects: Vec::new(),
         symmetric_diff: None,
+        exclude_first_parent_only: false,
     };
     let upstream_commits = collect_commit_objects_with_exclusions_cached(
         repo,
@@ -2452,7 +2457,6 @@ fn render_format_patch_interdiff(
         &tree_cache,
         Some(&previous_commit.tree),
         &current_commit.tree,
-        default_abbrev_len(store)?,
         &mut blob_cache,
     )?;
     let patch = String::from_utf8_lossy(&patch);
@@ -2559,7 +2563,7 @@ fn format_patch_auto_base_information(
         }
     };
     let commit_cache = CommitObjectCache::new(store);
-    let merge_bases = merge_bases_all_cached(&commit_cache, &head, &upstream_id)?;
+    let merge_bases = merge_bases_all_cached(store, &commit_cache, &head, &upstream_id)?;
     let Some(base_commit) = merge_bases.first().cloned() else {
         if when_able {
             return Ok(None);

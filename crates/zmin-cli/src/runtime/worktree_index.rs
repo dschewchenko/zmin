@@ -1,8 +1,9 @@
 use super::*;
+use crate::runtime::PackOperationLock;
 use encoding_rs::{Encoding, SHIFT_JIS};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
-use zmin_git_core::GitObjectStore;
+use zmin_git_core::{CommitLinksCache, GitObjectStore};
 use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::GitRefsStore;
 
@@ -68,27 +69,41 @@ pub(crate) fn refresh_materialized_sparse_index_entries(
     repo: &GitRepo,
     expanded_index: &mut GitIndex,
 ) -> Result<bool> {
+    let changed = refresh_materialized_sparse_index_entries_in_memory(repo, expanded_index)?;
+    if !changed {
+        return Ok(false);
+    }
+    expanded_index.write_to_path(&repo.index_path)?;
+    Ok(true)
+}
+
+pub(crate) fn refresh_materialized_sparse_index_entries_in_memory(
+    repo: &GitRepo,
+    expanded_index: &mut GitIndex,
+) -> Result<bool> {
     let mut changed = false;
     let entries = expanded_index
         .entries()
         .iter()
         .cloned()
-        .map(|mut entry| {
+        .map(|mut entry| -> io::Result<IndexEntry> {
             if entry.stage == 0
                 && entry.skip_worktree()
-                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+                && path_exists(&worktree_path_for_index_entry_checked(
+                    &repo.root,
+                    &entry.path,
+                )?)
             {
                 entry.set_skip_worktree(false);
                 changed = true;
             }
-            entry
+            Ok(entry)
         })
-        .collect::<Vec<_>>();
+        .collect::<io::Result<Vec<_>>>()?;
     if !changed {
         return Ok(false);
     }
     *expanded_index = GitIndex::from_entries(entries)?;
-    expanded_index.write_to_path(&repo.index_path)?;
     Ok(true)
 }
 
@@ -655,11 +670,21 @@ fn try_scan_tracked_regular_files_parallel(
                         };
                         let started = Instant::now();
                         let (id, usable) = if hash_candidate.detect_cr {
-                            let (id, has_cr) =
-                                hash_worktree_file_blob_detect_cr(&candidate.absolute, *size)?;
+                            let (id, has_cr) = hash_worktree_file_blob_detect_cr(
+                                &candidate.absolute,
+                                *size,
+                                candidate.entry.id.algorithm(),
+                            )?;
                             (id, !has_cr)
                         } else {
-                            (hash_worktree_file_blob(&candidate.absolute, *size)?, true)
+                            (
+                                hash_worktree_file_blob_with_algorithm(
+                                    &candidate.absolute,
+                                    *size,
+                                    candidate.entry.id.algorithm(),
+                                )?,
+                                true,
+                            )
                         };
                         result.seconds += started.elapsed().as_secs_f64();
                         result.hashes += 1;
@@ -971,7 +996,8 @@ pub(crate) fn refresh_tracked_index_metadata_matching(
     pathspecs: &[Vec<u8>],
 ) -> Result<()> {
     let symlinks_enabled = repo_symlinks_enabled(repo)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let stage_options = WorktreeStageOptions::load(repo)?;
     let entries = index
         .entries()
@@ -997,9 +1023,10 @@ pub(crate) fn refresh_tracked_index_metadata_matching(
                         &entry.path,
                         fs::read(&absolute)?,
                     )?;
-                    hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) == entry.id
+                    hash_object(algorithm, GitObjectKind::Blob, &content) == entry.id
                 } else {
-                    hash_worktree_file_blob(&absolute, metadata.len())? == entry.id
+                    hash_worktree_file_blob_with_algorithm(&absolute, metadata.len(), algorithm)?
+                        == entry.id
                 }
             }
             IndexMode::Symlink => {
@@ -1131,7 +1158,10 @@ fn worktree_diff_index_snapshot_with_options(
 ) -> Result<GitIndex> {
     let mut snapshot = index.clone();
     let stage_options = WorktreeStageOptions::load(repo)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(repo)?,
+    );
     for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
         if entry.skip_worktree() {
             continue;
@@ -1219,16 +1249,17 @@ fn worktree_gitlink_index_entry(entry: &IndexEntry, path: &std::path::Path) -> R
 pub(crate) fn worktree_index_entry(repo: &GitRepo, path: &std::path::Path) -> Result<IndexEntry> {
     let metadata = fs::symlink_metadata(path)?;
     let relative = repo_relative_path(&repo.root, path)?;
+    let algorithm = repo_hash_algorithm_from_config(repo)?;
     let (id, mode, size) = if metadata.file_type().is_symlink() {
         let content = read_symlink_content(path)?;
         (
-            hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+            hash_object(algorithm, GitObjectKind::Blob, &content),
             IndexMode::Symlink,
             content.len(),
         )
     } else if metadata.is_file() {
         (
-            hash_worktree_file_blob(path, metadata.len())?,
+            hash_worktree_file_blob_with_algorithm(path, metadata.len(), algorithm)?,
             index_mode_for_worktree_metadata(repo, &metadata)?,
             worktree_file_size_usize(metadata.len())?,
         )
@@ -1257,7 +1288,7 @@ fn worktree_index_entry_for_existing_entry(
         let content = fs::read(path)?;
         let mut worktree_entry = IndexEntry::new(
             entry.path.clone(),
-            hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+            hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content),
             IndexMode::Symlink,
             content.len().min(u32::MAX as usize) as u32,
         )?;
@@ -1284,7 +1315,7 @@ fn worktree_diff_index_entry_for_existing_entry(
         let content = fs::read(path)?;
         let mut worktree_entry = IndexEntry::new(
             entry.path.clone(),
-            hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+            hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content),
             IndexMode::Symlink,
             content.len().min(u32::MAX as usize) as u32,
         )?;
@@ -1304,7 +1335,7 @@ fn worktree_diff_index_entry_for_existing_entry(
     )?;
     let mut worktree_entry = IndexEntry::new(
         entry.path.clone(),
-        hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content),
+        hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content),
         stage_options.index_mode_for_metadata(&metadata),
         content.len().min(u32::MAX as usize) as u32,
     )?;
@@ -1550,6 +1581,7 @@ fn stage_single_bulk_checkin_candidate(
         }
         let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
         let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+        let _pack_lock = PackOperationLock::acquire(&pack_dir).map_err(CliError::Io)?;
         if pack_path.exists() {
             remove_file_if_exists(&temp_pack)?;
         } else {
@@ -1692,6 +1724,7 @@ fn write_bulk_checkin_pack(
         file.flush()?;
         let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
         let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+        let _pack_lock = PackOperationLock::acquire(pack_dir).map_err(CliError::Io)?;
         if pack_path.exists() {
             remove_file_if_exists(&temp_pack)?;
         } else {
@@ -1962,8 +1995,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
                 text: "error: cannot add a submodule of a different hash algorithm\n".to_owned(),
             });
         }
-        let head = match RefStore::new(&nested_repo.git_dir, GitHashAlgorithm::Sha1).resolve("HEAD")
-        {
+        let head = match RefStore::new(&nested_repo.git_dir, nested_algorithm).resolve("HEAD") {
             Ok(head) => head,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let display = String::from_utf8_lossy(&relative);
@@ -2305,7 +2337,7 @@ fn stage_resolved_content(
 ) -> Result<()> {
     remove_index_path_dir_conflicts(index, &relative)?;
     if let Some(existing) = find_index_entry(index, &relative) {
-        let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
+        let id = hash_object(store.algorithm(), GitObjectKind::Blob, &content);
         if id == existing.id {
             let mut entry = existing.clone();
             entry.set_mode(mode);
@@ -2371,9 +2403,13 @@ fn path_eq_ignore_ascii_case(left: &[u8], right: &[u8]) -> bool {
             .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
-fn hash_worktree_file_blob(path: &std::path::Path, size: u64) -> Result<ObjectId> {
+fn hash_worktree_file_blob_with_algorithm(
+    path: &std::path::Path,
+    size: u64,
+    algorithm: GitHashAlgorithm,
+) -> Result<ObjectId> {
     let mut file = fs::File::open(path)?;
-    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    let mut hasher = GitObjectHash::new(algorithm);
     hasher.update_object_header(GitObjectKind::Blob, worktree_file_size_usize(size)?);
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -2389,9 +2425,10 @@ fn hash_worktree_file_blob(path: &std::path::Path, size: u64) -> Result<ObjectId
 fn hash_worktree_file_blob_detect_cr(
     path: &std::path::Path,
     size: u64,
+    algorithm: GitHashAlgorithm,
 ) -> Result<(ObjectId, bool)> {
     let mut file = fs::File::open(path)?;
-    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    let mut hasher = GitObjectHash::new(algorithm);
     hasher.update_object_header(GitObjectKind::Blob, worktree_file_size_usize(size)?);
     let mut buffer = [0_u8; 64 * 1024];
     let mut has_cr = false;
@@ -2425,7 +2462,7 @@ pub(crate) fn read_symlink_content(path: &std::path::Path) -> Result<Vec<u8>> {
 }
 
 pub(crate) fn read_head_index(repo: &GitRepo) -> Result<GitIndex> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, repo_hash_algorithm_from_config(repo)?);
     read_head_index_from_primitive_stores(
         runtime.refs_store_adapter(),
         runtime.object_store_adapter(),
@@ -2437,7 +2474,7 @@ pub(crate) fn read_head_index_with_caches(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
 ) -> Result<GitIndex> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
     let head = match refs.resolve("HEAD") {
         Ok(head) => head,
         Err(_) => return Ok(GitIndex::new()),
@@ -2511,7 +2548,7 @@ fn map_primitive_error(error: PrimitiveError, context: &str) -> CliError {
 }
 
 fn is_not_found_ref_error(error: &PrimitiveError) -> bool {
-    let details = error.to_string();
+    let details = error.to_string().to_ascii_lowercase();
     details.contains("not found") || details.contains("no such file")
 }
 
@@ -2613,17 +2650,32 @@ pub(crate) fn worktree_status(repo: &GitRepo, index: &GitIndex) -> Result<Vec<(V
     Ok(statuses)
 }
 
-#[cfg(unix)]
-pub(crate) fn worktree_path_for_index_entry(root: &std::path::Path, path: &[u8]) -> PathBuf {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
+pub(crate) fn worktree_path_for_index_entry_checked(
+    root: &std::path::Path,
+    path: &[u8],
+) -> io::Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
 
-    root.join(std::path::Path::new(OsStr::from_bytes(path)))
+        return Ok(root.join(std::path::Path::new(OsStr::from_bytes(path))));
+    }
+    #[cfg(not(unix))]
+    {
+        let path = std::str::from_utf8(path).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "non-UTF-8 Git pathname is unsupported on this platform",
+            )
+        })?;
+        Ok(root.join(path))
+    }
 }
 
-#[cfg(not(unix))]
 pub(crate) fn worktree_path_for_index_entry(root: &std::path::Path, path: &[u8]) -> PathBuf {
-    root.join(String::from_utf8_lossy(path).as_ref())
+    worktree_path_for_index_entry_checked(root, path)
+        .unwrap_or_else(|error| panic!("invalid Git index pathname: {error}"))
 }
 
 pub(crate) fn worktree_entry_modified(
@@ -2749,7 +2801,8 @@ fn worktree_entry_modified_with_metadata(
             let comparison = stage_options.content_comparison(repo, &entry.path)?;
             if matches!(comparison, WorktreeContentComparison::RawIfNoCr) {
                 let started = trace.as_ref().and_then(|trace| trace.started());
-                let (raw_id, has_cr) = hash_worktree_file_blob_detect_cr(path, metadata.len())?;
+                let (raw_id, has_cr) =
+                    hash_worktree_file_blob_detect_cr(path, metadata.len(), entry.id.algorithm())?;
                 if let Some(trace) = trace.as_deref_mut() {
                     trace.content_hashes += 1;
                     trace.record_content_hash(started);
@@ -2770,11 +2823,13 @@ fn worktree_entry_modified_with_metadata(
                     trace.record_conversion(started);
                 }
                 return Ok(
-                    hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) != entry.id,
+                    hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content) != entry.id,
                 );
             }
             let started = trace.as_ref().and_then(|trace| trace.started());
-            let modified = hash_worktree_file_blob(path, metadata.len())? != entry.id;
+            let modified =
+                hash_worktree_file_blob_with_algorithm(path, metadata.len(), entry.id.algorithm())?
+                    != entry.id;
             if let Some(trace) = trace.as_deref_mut() {
                 trace.content_hashes += 1;
                 trace.record_content_hash(started);
@@ -5647,7 +5702,7 @@ fn symlink_content_matches(path: &std::path::Path, entry: &IndexEntry) -> Result
     }
     let target = fs::read_link(path)?;
     Ok(hash_object(
-        GitHashAlgorithm::Sha1,
+        entry.id.algorithm(),
         GitObjectKind::Blob,
         target.as_os_str().as_bytes(),
     ) == entry.id)
@@ -5656,7 +5711,7 @@ fn symlink_content_matches(path: &std::path::Path, entry: &IndexEntry) -> Result
 #[cfg(not(unix))]
 fn symlink_content_matches(path: &std::path::Path, entry: &IndexEntry) -> Result<bool> {
     let content = fs::read(path)?;
-    Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) == entry.id)
+    Ok(hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content) == entry.id)
 }
 
 #[cfg(unix)]
@@ -5671,14 +5726,14 @@ fn symlink_content_matches_with_mode(
     if metadata.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(hash_object(
-            GitHashAlgorithm::Sha1,
+            entry.id.algorithm(),
             GitObjectKind::Blob,
             target.as_os_str().as_bytes(),
         ) == entry.id);
     }
     if !symlinks_enabled && metadata.is_file() {
         let content = fs::read(path)?;
-        return Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) == entry.id);
+        return Ok(hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content) == entry.id);
     }
     Ok(false)
 }
@@ -5708,7 +5763,7 @@ fn symlink_entry_modified_with_metadata(
         }
         let target = fs::read_link(path)?;
         return Ok(hash_object(
-            GitHashAlgorithm::Sha1,
+            entry.id.algorithm(),
             GitObjectKind::Blob,
             target.as_os_str().as_bytes(),
         ) != entry.id);
@@ -5718,7 +5773,7 @@ fn symlink_entry_modified_with_metadata(
             return Ok(false);
         }
         let content = fs::read(path)?;
-        return Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) != entry.id);
+        return Ok(hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content) != entry.id);
     }
     if !metadata.file_type().is_symlink() {
         return Ok(true);
@@ -5738,7 +5793,7 @@ fn symlink_entry_modified_with_metadata(
         return Ok(true);
     }
     let content = fs::read(path)?;
-    Ok(hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content) != entry.id)
+    Ok(hash_object(entry.id.algorithm(), GitObjectKind::Blob, &content) != entry.id)
 }
 
 pub(crate) fn apply_index_entry_metadata(entry: &mut IndexEntry, metadata: &fs::Metadata) {
@@ -5975,11 +6030,10 @@ pub(crate) fn checkout_worktree_with_metadata(
     target_id: &ObjectId,
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
-    let commit_cache = CommitObjectCache::new(store);
-    let tree_cache = TreeObjectCache::new(store);
-    let target_commit = commit_cache.read_commit(target_id)?;
+    let mut links_cache = CommitLinksCache::new(store);
+    let target_tree = links_cache.read_links(target_id)?.tree.clone();
     let old_index = read_repo_index(repo)?;
-    let mut new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+    let mut new_index = TreeObjectCache::transient(store).read_tree_to_index(&target_tree)?;
     let sparse_checkout = apply_repo_sparse_checkout_bits(repo, &mut new_index)?;
 
     remove_tracked_paths_missing_from_target(repo, &old_index, &new_index)?;
@@ -5987,6 +6041,7 @@ pub(crate) fn checkout_worktree_with_metadata(
         remove_newly_skipped_worktree_paths(repo, &old_index, &new_index)?;
     }
     let checkout_index_entries = sparse_checkout_checkout_index(&new_index)?;
+    prefetch_checkout_index_missing_objects(repo, store, &checkout_index_entries)?;
     checkout_index(
         store,
         &checkout_index_entries,
@@ -5997,6 +6052,37 @@ pub(crate) fn checkout_worktree_with_metadata(
     refresh_tracked_index_metadata_after_checkout(repo, &mut new_index, &[])?;
     new_index.refresh_cache_tree();
     new_index.write_to_path(&repo.index_path)?;
+    Ok(())
+}
+
+pub(crate) fn prefetch_checkout_index_missing_objects(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<()> {
+    if !crate::cli::commands::transport_commands::lazy_fetch_allowed()
+        || !partial_clone_enabled(repo)?
+    {
+        return Ok(());
+    }
+    let object_ids = index
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.stage == 0 && !entry.skip_worktree() && entry.mode != IndexMode::Gitlink
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let mut missing = store
+        .missing_objects(&object_ids)
+        .map_err(CliError::Io)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    crate::cli::commands::admin_commands::backfill_promisor_objects(repo, &missing)?;
     Ok(())
 }
 
@@ -6036,7 +6122,7 @@ pub(crate) fn checkout_fresh_worktree_plain(
     new_index.write_to_path(&repo.index_path)?;
     drop(_trace);
     let _trace = phase_trace("checkout_fresh.smudge_filters");
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
     let checkout_metadata = WorktreeCheckoutMetadata {
         ref_name: current_branch_ref(&refs)?,
         treeish: Some(target_id.clone()),
@@ -6086,7 +6172,7 @@ fn checkout_fresh_worktree_inner(
     new_index.write_to_path(&repo.index_path)?;
     drop(_trace);
     let _trace = phase_trace("checkout_fresh.smudge_filters");
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
     let checkout_metadata = WorktreeCheckoutMetadata {
         ref_name: current_branch_ref(&refs)?,
         treeish: Some(target_id.clone()),
@@ -6224,6 +6310,7 @@ fn checkout_clean_worktree_transition_inner(
         .collect::<Vec<_>>();
     if !checkout_entries.is_empty() {
         let checkout = GitIndex::from_entries(checkout_entries)?;
+        prefetch_checkout_index_missing_objects(repo, store, &checkout)?;
         checkout_index(
             store,
             &checkout,
@@ -6509,6 +6596,7 @@ pub(crate) fn checkout_worktree_updates_to_index_with_metadata(
         return Ok(());
     }
     let checkout = GitIndex::from_entries(checkout_entries)?;
+    prefetch_checkout_index_missing_objects(repo, store, &checkout)?;
     checkout_index(
         store,
         &checkout,
@@ -6553,7 +6641,10 @@ fn sparse_checkout_checkout_index(index: &GitIndex) -> Result<GitIndex> {
     )?)
 }
 
-pub(crate) fn apply_repo_sparse_checkout_bits(repo: &GitRepo, index: &mut GitIndex) -> Result<bool> {
+pub(crate) fn apply_repo_sparse_checkout_bits(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+) -> Result<bool> {
     if !repo_sparse_checkout_active(repo)? {
         return Ok(false);
     }
@@ -6678,6 +6769,32 @@ pub(crate) fn print_sparse_checkout_update_warning(paths: &[Vec<u8>]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_index_path_conversion_preserves_valid_unicode() {
+        let root = Path::new("/tmp/worktree");
+        let path = worktree_path_for_index_entry_checked(root, "src/é".as_bytes())
+            .expect("valid Git pathname");
+        assert_eq!(path, root.join("src/é"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_index_path_conversion_preserves_raw_unix_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = worktree_path_for_index_entry_checked(Path::new("/tmp/worktree"), b"src/\x80")
+            .expect("raw Unix pathname");
+        assert_eq!(path.as_os_str().as_bytes(), b"/tmp/worktree/src/\x80");
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn checked_index_path_conversion_rejects_invalid_non_unix_bytes() {
+        let error = worktree_path_for_index_entry_checked(Path::new("C:\\worktree"), b"src/\x80")
+            .expect_err("invalid non-Unix Git pathname");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId::new(GitHashAlgorithm::Sha1, &[byte; 20])

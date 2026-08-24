@@ -27,6 +27,42 @@ pub fn stock_git_bin() -> &'static Path {
     STOCK_GIT.get_or_init(resolve_stock_git).as_path()
 }
 
+pub fn required_pinned_stock_git() -> PathBuf {
+    // This is non-adversarial local evidence: after canonicalization we cannot
+    // portably retain executable identity across process spawn, so TOCTOU
+    // replacement between validation and invocation is outside this test model.
+    let path = PathBuf::from(
+        std::env::var_os("ZMIN_STOCK_GIT").expect("ZMIN_STOCK_GIT must point to pinned Git 2.55.0"),
+    );
+    assert!(
+        path.is_absolute(),
+        "ZMIN_STOCK_GIT must be absolute: {path:?}"
+    );
+    let metadata = fs::symlink_metadata(&path).expect("stat ZMIN_STOCK_GIT");
+    assert!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "ZMIN_STOCK_GIT must name a regular non-symlink file: {path:?}"
+    );
+    let canonical = fs::canonicalize(&path).expect("canonicalize ZMIN_STOCK_GIT");
+    let canonical_metadata = fs::symlink_metadata(&canonical).expect("stat canonical Git");
+    assert!(
+        canonical_metadata.file_type().is_file() && !canonical_metadata.file_type().is_symlink(),
+        "canonical ZMIN_STOCK_GIT must be a regular file: {canonical:?}"
+    );
+    let output = Command::new(&canonical)
+        .arg("--version")
+        .output()
+        .expect("run pinned stock Git");
+    assert!(output.status.success(), "pinned Git --version failed");
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("pinned Git version is UTF-8")
+            .trim(),
+        "git version 2.55.0"
+    );
+    canonical
+}
+
 fn resolve_stock_git() -> PathBuf {
     for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
         if let Ok(value) = std::env::var(key)
@@ -297,6 +333,45 @@ pub fn git_args(cwd: &std::path::Path, args: &[&str]) -> String {
     command_output("git", cwd, args, "git").1
 }
 
+pub fn pinned_git_args(cwd: &std::path::Path, args: &[&str]) -> String {
+    let path = required_pinned_stock_git();
+    command_output(
+        path.to_str().expect("pinned Git path is UTF-8"),
+        cwd,
+        args,
+        "pinned Git",
+    )
+    .1
+}
+
+pub fn pinned_git_with_env(cwd: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> String {
+    let path = required_pinned_stock_git();
+    command_output_with_env(
+        path.to_str().expect("pinned Git path is UTF-8"),
+        cwd,
+        args,
+        env,
+        "pinned Git",
+    )
+    .1
+}
+
+pub fn pinned_git_init_sha256() -> TempDir {
+    let repo = TempDir::new().expect("temp SHA-256 repo");
+    let path = required_pinned_stock_git();
+    let output = Command::new(path)
+        .args(["init", "--object-format=sha256"])
+        .current_dir(repo.path())
+        .output()
+        .expect("run pinned Git init");
+    assert!(
+        output.status.success(),
+        "pinned Git SHA-256 init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    repo
+}
+
 pub fn run_zmin_status<const N: usize>(cwd: &std::path::Path, args: [&str; N]) -> i32 {
     run_zmin_status_args(cwd, &args)
 }
@@ -438,6 +513,62 @@ pub fn command_any_output(
             .trim_end_matches('\n')
             .to_owned(),
     )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct RawCommandOutput {
+    pub status: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+pub fn command_raw_output(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    label: &str,
+) -> RawCommandOutput {
+    let output = Command::new(test_command_program(command))
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap_or_else(|err| panic!("run {label}: {err}"));
+    RawCommandOutput {
+        status: output.status.code().expect("process exit code"),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    }
+}
+
+pub fn command_raw_output_with_stdin(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    stdin: &[u8],
+    label: &str,
+) -> RawCommandOutput {
+    let mut child = Command::new(test_command_program(command))
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("spawn {label}: {err}"));
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(stdin)
+        .unwrap_or_else(|err| panic!("write {label} stdin: {err}"));
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|err| panic!("wait {label}: {err}"));
+    RawCommandOutput {
+        status: output.status.code().expect("process exit code"),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    }
 }
 
 pub fn command_any_output_with_stdin(

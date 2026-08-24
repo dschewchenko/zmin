@@ -5,11 +5,22 @@ use std::{fs, process::Command};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
-    git_args, git_failure_output, git_init, git_status, git_status_with_stdin, git_with_env,
-    git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_status_with_stdin, run_zmin_with_env, run_zmin_with_stdin, write_file, zmin_bin,
+    clone_repo_fixture, command_any_output, command_failure_output_with_env,
+    command_output_with_env, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status, git_status_with_stdin, git_with_env, git_with_stdin, pinned_git_args,
+    pinned_git_with_env, required_pinned_stock_git, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_status_with_stdin, run_zmin_with_env,
+    run_zmin_with_stdin, write_file, zmin_bin,
 };
+
+const PINNED_STASH_ENV: [(&str, &str); 6] = [
+    ("GIT_AUTHOR_NAME", "Bench"),
+    ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+    ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+    ("GIT_COMMITTER_NAME", "Bench"),
+    ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+    ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+];
 
 fn stash_fixture_repo() -> TempDir {
     let repo = git_init();
@@ -19,6 +30,327 @@ fn stash_fixture_repo() -> TempDir {
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "base"]);
     repo
+}
+
+fn pinned_reftable_stash_pair(sha256: bool) -> (TempDir, TempDir) {
+    let stock = TempDir::new().expect("pinned stock reftable stash repo");
+    let zmin = TempDir::new().expect("zmin reftable stash repo");
+    let stock_init = if sha256 {
+        [
+            "init",
+            "--quiet",
+            "--object-format=sha256",
+            "--ref-format=reftable",
+        ]
+        .as_slice()
+    } else {
+        ["init", "--quiet", "--ref-format=reftable"].as_slice()
+    };
+    pinned_git_args(stock.path(), stock_init);
+    run_zmin_args(zmin.path(), stock_init);
+    for repo in [stock.path(), zmin.path()] {
+        if repo == stock.path() {
+            pinned_git_args(repo, ["config", "user.name", "Bench"].as_slice());
+            pinned_git_args(
+                repo,
+                ["config", "user.email", "bench@example.test"].as_slice(),
+            );
+            pinned_git_args(repo, ["config", "commit.gpgsign", "false"].as_slice());
+            pinned_git_args(repo, ["symbolic-ref", "HEAD", "refs/heads/main"].as_slice());
+        } else {
+            run_zmin_args(repo, ["config", "user.name", "Bench"].as_slice());
+            run_zmin_args(
+                repo,
+                ["config", "user.email", "bench@example.test"].as_slice(),
+            );
+            run_zmin_args(repo, ["config", "commit.gpgsign", "false"].as_slice());
+            run_zmin_args(repo, ["symbolic-ref", "HEAD", "refs/heads/main"].as_slice());
+        }
+        write_file(repo, "tracked.txt", "base\n");
+        if repo == stock.path() {
+            pinned_git_args(repo, ["add", "tracked.txt"].as_slice());
+            pinned_git_with_env(repo, ["commit", "-m", "base"].as_slice(), &PINNED_STASH_ENV);
+        } else {
+            run_zmin_args(repo, ["add", "tracked.txt"].as_slice());
+            command_output_with_env(
+                zmin_bin(),
+                repo,
+                &["commit", "-m", "base"],
+                &PINNED_STASH_ENV,
+                "zmin",
+            );
+        }
+    }
+    (stock, zmin)
+}
+
+fn pinned_failure_output(repo: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    let output = Command::new(required_pinned_stock_git())
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .expect("run pinned Git failure");
+    (
+        output.status.code().expect("pinned Git exit code"),
+        String::from_utf8(output.stdout)
+            .expect("pinned Git stdout")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("pinned Git stderr")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
+fn pinned_sha256_stash_fixture(reftable: bool, zmin_commit: bool) -> TempDir {
+    let repo = TempDir::new().expect("pinned SHA-256 stash repo");
+    if reftable {
+        pinned_git_args(
+            repo.path(),
+            [
+                "init",
+                "--quiet",
+                "--object-format=sha256",
+                "--ref-format=reftable",
+            ]
+            .as_slice(),
+        );
+    } else {
+        pinned_git_args(
+            repo.path(),
+            ["init", "--quiet", "--object-format=sha256"].as_slice(),
+        );
+    }
+    pinned_git_args(repo.path(), ["config", "user.name", "Bench"].as_slice());
+    pinned_git_args(
+        repo.path(),
+        ["config", "user.email", "bench@example.test"].as_slice(),
+    );
+    pinned_git_args(repo.path(), ["symbolic-ref", "HEAD", "refs/heads/main"].as_slice());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    if zmin_commit {
+        run_zmin_args(repo.path(), &["add", "tracked.txt"]);
+        command_output_with_env(
+            zmin_bin(),
+            repo.path(),
+            &["commit", "-m", "base"],
+            &PINNED_STASH_ENV,
+            "zmin SHA-256 fixture commit",
+        );
+    } else {
+        pinned_git_args(repo.path(), ["add", "tracked.txt"].as_slice());
+        pinned_git_with_env(
+            repo.path(),
+            ["commit", "-m", "base"].as_slice(),
+            &PINNED_STASH_ENV,
+        );
+    }
+    repo
+}
+
+#[test]
+fn pinned_sha256_stash_files_and_reftable_propagate_hash_end_to_end() {
+    for reftable in [false, true] {
+        let stock = pinned_sha256_stash_fixture(reftable, false);
+        let zmin = pinned_sha256_stash_fixture(reftable, true);
+        pinned_git_args(
+            stock.path(),
+            ["symbolic-ref", "HEAD", "refs/heads/main"].as_slice(),
+        );
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["symbolic-ref", "HEAD", "refs/heads/main"]),
+            "",
+            "symbolic-ref setup write reftable={reftable}"
+        );
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["symbolic-ref", "HEAD"]),
+            pinned_git_args(stock.path(), &["symbolic-ref", "HEAD"]),
+            "symbolic-ref setup reftable={reftable}"
+        );
+
+        write_file(stock.path(), "tracked.txt", "stash-one\n");
+        write_file(zmin.path(), "tracked.txt", "stash-one\n");
+        pinned_git_args(stock.path(), ["add", "tracked.txt"].as_slice());
+        run_zmin_args(zmin.path(), &["add", "tracked.txt"]);
+        let stock_push = pinned_git_with_env(
+            stock.path(),
+            ["stash", "push", "-m", "one"].as_slice(),
+            &PINNED_STASH_ENV,
+        );
+        let zmin_push = command_output_with_env(
+            zmin_bin(),
+            zmin.path(),
+            &["stash", "push", "-m", "one"],
+            &PINNED_STASH_ENV,
+            "zmin SHA-256 stash push",
+        )
+        .1;
+        assert_eq!(zmin_push, stock_push, "push reftable={reftable}");
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["stash", "list"]),
+            pinned_git_args(stock.path(), &["stash", "list"]),
+            "list reftable={reftable}"
+        );
+
+        if reftable {
+            write_file(zmin.path(), "tracked.txt", "stash-failure\n");
+            run_zmin_args(zmin.path(), &["add", "tracked.txt"]);
+            let failed_push = command_failure_output_with_env(
+                zmin_bin(),
+                zmin.path(),
+                &["stash", "push", "-m", "should-fail"],
+                &[("ZMIN_REFTABLE_FAIL_TABLE_LIST_COMMIT", "1")],
+                "zmin SHA-256 atomic stash push",
+            );
+            assert_ne!(failed_push.0, 0);
+            assert_eq!(
+                run_zmin_args(zmin.path(), &["stash", "list"]),
+                pinned_git_args(stock.path(), &["stash", "list"]),
+                "failed push must not publish a stash reftable={reftable}"
+            );
+        }
+
+        let stock_pop = pinned_git_args(stock.path(), &["stash", "pop"]);
+        let zmin_pop = run_zmin_args(zmin.path(), &["stash", "pop"]);
+        assert_eq!(
+            zmin_pop.split_once("Dropped ").map(|(prefix, _)| prefix),
+            stock_pop.split_once("Dropped ").map(|(prefix, _)| prefix),
+            "pop status reftable={reftable}"
+        );
+        assert!(zmin_pop.contains("Dropped refs/stash@{0} ("));
+
+        write_file(stock.path(), "tracked.txt", "stash-two\n");
+        write_file(zmin.path(), "tracked.txt", "stash-two\n");
+        pinned_git_args(stock.path(), ["add", "tracked.txt"].as_slice());
+        run_zmin_args(zmin.path(), &["add", "tracked.txt"]);
+        pinned_git_with_env(
+            stock.path(),
+            ["stash", "push", "-m", "two"].as_slice(),
+            &PINNED_STASH_ENV,
+        );
+        command_output_with_env(
+            zmin_bin(),
+            zmin.path(),
+            &["stash", "push", "-m", "two"],
+            &PINNED_STASH_ENV,
+            "zmin SHA-256 second stash push",
+        );
+        write_file(stock.path(), "tracked.txt", "local-conflict\n");
+        write_file(zmin.path(), "tracked.txt", "local-conflict\n");
+        let stock_conflict = pinned_failure_output(stock.path(), &["stash", "pop"]);
+        let zmin_conflict = run_zmin_failure_output(zmin.path(), &["stash", "pop"]);
+        assert_ne!(stock_conflict.0, 0);
+        assert_ne!(zmin_conflict.0, 0);
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["stash", "list"]),
+            pinned_git_args(stock.path(), &["stash", "list"]),
+            "conflicting pop preserves stash reftable={reftable}"
+        );
+    }
+}
+
+#[test]
+fn pinned_reftable_stash_sha1_sha256_matrix_is_atomic() {
+    for sha256 in [false, true] {
+        let (stock, zmin) = pinned_reftable_stash_pair(sha256);
+        for message in ["one", "two", "three"] {
+            write_file(stock.path(), "tracked.txt", &format!("{message}\n"));
+            write_file(zmin.path(), "tracked.txt", &format!("{message}\n"));
+            pinned_git_args(stock.path(), ["add", "tracked.txt"].as_slice());
+            run_zmin_args(zmin.path(), ["add", "tracked.txt"].as_slice());
+            let stock_push = pinned_git_with_env(
+                stock.path(),
+                ["stash", "push", "-m", message].as_slice(),
+                &PINNED_STASH_ENV,
+            );
+            let zmin_push = command_output_with_env(
+                zmin_bin(),
+                zmin.path(),
+                &["stash", "push", "-m", message],
+                &PINNED_STASH_ENV,
+                "zmin",
+            )
+            .1;
+            assert_eq!(zmin_push, stock_push, "push output sha256={sha256}");
+            assert_eq!(
+                run_zmin_args(zmin.path(), &["stash", "list"]),
+                pinned_git_args(stock.path(), &["stash", "list"]),
+                "list after push sha256={sha256}"
+            );
+        }
+
+        let tables = zmin.path().join(".git/reftable/tables.list");
+        let table_list_before_failure = fs::read(&tables).expect("read reftable table list");
+        let list_before_failure = run_zmin_args(zmin.path(), &["stash", "list"]);
+        let failure = command_failure_output_with_env(
+            zmin_bin(),
+            zmin.path(),
+            &["stash", "drop", "stash@{1}"],
+            &[("ZMIN_REFTABLE_FAIL_TABLE_LIST_COMMIT", "1")],
+            "zmin injected reftable failure",
+        );
+        assert_ne!(failure.0, 0);
+        assert_eq!(
+            fs::read(&tables).expect("read preserved table list"),
+            table_list_before_failure
+        );
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["stash", "list"]),
+            list_before_failure
+        );
+
+        for selector in ["stash@{1}", "refs/stash@{0}"] {
+            let stock_id = pinned_git_args(stock.path(), &["rev-parse", selector]);
+            let zmin_id = run_zmin_args(zmin.path(), &["rev-parse", selector]);
+            let stock_drop = pinned_git_args(stock.path(), &["stash", "drop", selector]);
+            let zmin_drop = run_zmin_args(zmin.path(), &["stash", "drop", selector]);
+            assert_eq!(stock_drop, format!("Dropped {selector} ({stock_id})"));
+            assert_eq!(zmin_drop, format!("Dropped {selector} ({zmin_id})"));
+            assert_eq!(
+                run_zmin_args(zmin.path(), &["stash", "list"]),
+                pinned_git_args(stock.path(), &["stash", "list"]),
+                "list after drop sha256={sha256}, selector={selector}"
+            );
+        }
+
+        let invalid_args = ["stash", "drop", "stash@{99}"];
+        assert_eq!(
+            run_zmin_failure_output(zmin.path(), &invalid_args),
+            pinned_failure_output(stock.path(), &invalid_args),
+            "invalid selector sha256={sha256}"
+        );
+        let empty_args = ["stash", "drop", ""];
+        assert_eq!(
+            run_zmin_failure_output(zmin.path(), &empty_args),
+            pinned_failure_output(stock.path(), &empty_args),
+            "empty selector sha256={sha256}"
+        );
+
+        let stock_store_id = pinned_git_args(stock.path(), &["rev-parse", "stash@{0}"]);
+        let zmin_store_id = run_zmin_args(zmin.path(), &["rev-parse", "stash@{0}"]);
+        pinned_git_args(stock.path(), &["stash", "clear"]);
+        run_zmin_args(zmin.path(), &["stash", "clear"]);
+        let stock_store = pinned_git_args(
+            stock.path(),
+            &["stash", "store", "-m", "stored", stock_store_id.as_str()],
+        );
+        let zmin_store = run_zmin_args(
+            zmin.path(),
+            &["stash", "store", "-m", "stored", zmin_store_id.as_str()],
+        );
+        assert_eq!(zmin_store, stock_store);
+        assert_eq!(
+            run_zmin_args(zmin.path(), &["stash", "list"]),
+            pinned_git_args(stock.path(), &["stash", "list"]),
+            "list after store sha256={sha256}"
+        );
+
+        pinned_git_args(stock.path(), &["stash", "clear"]);
+        run_zmin_args(zmin.path(), &["stash", "clear"]);
+        assert_eq!(run_zmin_args(zmin.path(), &["stash", "list"]), "");
+        assert_eq!(pinned_git_args(stock.path(), &["stash", "list"]), "");
+    }
 }
 
 fn empty_tree_oid() -> &'static str {

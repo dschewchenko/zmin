@@ -13,9 +13,10 @@ use flate2::write::ZlibEncoder;
 use crate::loose::{LooseObject, record_prefix_candidate, validate_hex_prefix};
 use crate::object::{
     GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object,
-    update_unique_abbrev_len_for_candidate,
+    update_unique_abbrev_lens_for_candidate,
 };
 use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint, PrefixOrFullObject};
+use crate::object_validation::{PackObjectValidationState, PackSemanticValidationError};
 
 const IDX_MAGIC: &[u8; 4] = b"\xfftOc";
 const RIDX_MAGIC: &[u8; 4] = b"RIDX";
@@ -52,6 +53,7 @@ const REPLACEMENT_DELTA_INITIAL_CAPACITY_LIMIT: usize = 64 * 1024;
 const PACK_DELTA_WINDOW_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_OUTPUT_INITIAL_CAPACITY_LIMIT: usize = 64 * 1024;
 const PACK_OUTPUT_OBJECT_BYTES_HINT: usize = 16;
+const PACK_PARSE_INITIAL_CAPACITY_LIMIT: usize = 8192;
 #[cfg(not(test))]
 const PACK_DELTA_WINDOW_CONTENT_BUDGET: usize = 64 * 1024 * 1024;
 #[cfg(test)]
@@ -404,6 +406,59 @@ pub struct UnpackPackStats {
     pub objects: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackValidationMode {
+    FsckObjects,
+    Strict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackValidationReport {
+    pub pack_id: ObjectId,
+    pub object_count: usize,
+    pub validated_objects: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackObjectValidationReason {
+    CommitTreeHeader,
+    OtherSemantic,
+}
+
+#[derive(Debug)]
+pub struct PackObjectValidationError {
+    pub object_id: ObjectId,
+    pub kind: GitObjectKind,
+    pub reason: PackObjectValidationReason,
+    pub source: io::Error,
+}
+
+impl std::fmt::Display for PackObjectValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "pack object {} ({:?}) failed validation: {}",
+            self.object_id.to_hex(),
+            self.kind,
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for PackObjectValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct PackStreamingStats {
+    /// Internal pack delta-base payloads retained by this parse invocation.
+    /// External-base payloads are owned by the object store and are not counted.
+    peak_retained_content_bytes: usize,
+    peak_retained_content_count: usize,
+}
+
 pub fn decode_pack_index(
     algorithm: GitHashAlgorithm,
     bytes: Vec<u8>,
@@ -481,6 +536,23 @@ pub fn pack_index_object_count(path: &Path) -> io::Result<usize> {
     pack_index_object_count_from_header(&header)
 }
 
+/// Read the raw object count from a PACK file's 12-byte header.
+///
+/// The count is the number of objects declared by the incoming pack before
+/// any thin-pack repair adds external bases. This helper intentionally does
+/// not read or map the remainder of the pack.
+pub fn pack_object_count_from_file(path: &Path) -> io::Result<usize> {
+    let mut file = fs::File::open(path)?;
+    let mut header = [0_u8; PACK_HEADER_LEN];
+    file.read_exact(&mut header)?;
+    usize::try_from(parse_pack_header_bytes(&header)?).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "pack object count overflows usize",
+        )
+    })
+}
+
 fn pack_index_path(path: &Path) -> PathBuf {
     if path.extension().and_then(|value| value.to_str()) == Some("pack") {
         path.with_extension("idx")
@@ -500,9 +572,13 @@ fn pack_data_path(path: &Path) -> PathBuf {
 
 fn map_pack_file(path: &Path) -> io::Result<memmap2::Mmap> {
     let file = fs::File::open(pack_data_path(path))?;
+    map_pack_file_from_file(&file)
+}
+
+fn map_pack_file_from_file(file: &fs::File) -> io::Result<memmap2::Mmap> {
     // Mapping keeps large pack files out of the Rust heap while preserving the
     // existing slice parser and checksum validation paths.
-    unsafe { memmap2::Mmap::map(&file) }
+    unsafe { memmap2::Mmap::map(file) }
 }
 
 #[cfg(unix)]
@@ -580,9 +656,16 @@ pub fn validate_pack_index_bytes(algorithm: GitHashAlgorithm, bytes: &[u8]) -> i
 
 pub fn validate_pack_index_file(algorithm: GitHashAlgorithm, path: &Path) -> io::Result<()> {
     let file = fs::File::open(pack_index_path(path))?;
+    validate_pack_index_file_from_file(algorithm, &file)
+}
+
+pub fn validate_pack_index_file_from_file(
+    algorithm: GitHashAlgorithm,
+    file: &fs::File,
+) -> io::Result<()> {
     // Map large index files for validation so callers do not need a heap copy
     // just to check structure and checksum.
-    let bytes = unsafe { memmap2::Mmap::map(&file)? };
+    let bytes = unsafe { memmap2::Mmap::map(file)? };
     validate_pack_index_bytes(algorithm, &bytes)
 }
 
@@ -657,6 +740,7 @@ pub fn index_pack_bytes_with_version(
                 false,
                 Some(retention),
                 validated,
+                PackEntryMode::Indexed,
             )?;
             index_pack_from_entries(algorithm, parsed.pack_id, parsed.entries, version)
         }
@@ -685,6 +769,7 @@ pub fn index_pack_bytes_with_store_and_version<S: GitObjectStore>(
                 false,
                 Some(retention),
                 validated,
+                PackEntryMode::Indexed,
             )?;
             index_pack_from_entries(algorithm, parsed.pack_id, parsed.entries, version)
         }
@@ -735,6 +820,7 @@ pub fn index_pack_bytes_index_only_with_version(
             false,
             Some(retention),
             validated,
+            PackEntryMode::Indexed,
         )?,
     };
     let pack_id = parsed.pack_id;
@@ -781,11 +867,141 @@ pub fn index_pack_file_with_store<S: GitObjectStore>(
     index_pack_file_with_store_and_version(algorithm, path, store, PackIndexVersion::V2)
 }
 
+/// Index a received PACK while validating each reconstructed object in the
+/// same parse that computes its object ID and CRC. Validation errors happen
+/// before an index result is returned; the caller owns publication of the
+/// returned index bytes.
+pub fn index_pack_file_with_store_and_validation(
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+    external_store: &dyn GitObjectStore,
+    mode: PackValidationMode,
+    version: PackIndexVersion,
+) -> io::Result<IndexedPackIndexOnly> {
+    let pack = map_pack_file(path)?;
+    let result = (|| {
+        let (parsed, _) = parse_pack_entries_with_validation(
+            algorithm,
+            &pack,
+            external_store,
+            mode,
+            PackEntryMode::Indexed,
+            false,
+        )?;
+        let pack_id = parsed.pack_id;
+        let objects = parsed.entries.len();
+        let index =
+            encode_pack_index_from_owned_entries(algorithm, &pack_id, parsed.entries, version)?;
+        Ok(IndexedPackIndexOnly {
+            pack_id,
+            index,
+            objects,
+        })
+    })();
+    release_mapped_pack_pages(&pack);
+    result
+}
+
+/// Index a received PACK with object validation and retain the reverse index
+/// from the same parse.  This is the full-result counterpart to
+/// `index_pack_file_with_store_and_validation`; callers can publish the
+/// returned pack, index, and reverse index only after validation succeeds.
+pub fn index_pack_file_with_store_and_validation_full(
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+    external_store: &dyn GitObjectStore,
+    mode: PackValidationMode,
+    version: PackIndexVersion,
+) -> io::Result<IndexedPack> {
+    let pack = map_pack_file(path)?;
+    let result = (|| {
+        let (parsed, _) = parse_pack_entries_with_validation(
+            algorithm,
+            &pack,
+            external_store,
+            mode,
+            PackEntryMode::Indexed,
+            false,
+        )?;
+        let pack_id = parsed.pack_id;
+        let sorted_positions = sorted_pack_index_positions(&parsed.entries)?;
+        let reverse_index = encode_pack_reverse_index_from_positions(
+            algorithm,
+            &pack_id,
+            &parsed.entries,
+            &sorted_positions,
+        )?;
+        let objects = parsed.entries.len();
+        let index =
+            encode_pack_index_from_owned_entries(algorithm, &pack_id, parsed.entries, version)?;
+        Ok(IndexedPack {
+            pack_id,
+            index,
+            reverse_index,
+            objects,
+        })
+    })();
+    release_mapped_pack_pages(&pack);
+    result
+}
+
 pub fn index_pack_file_index_only(
     algorithm: GitHashAlgorithm,
     path_or_bytes: &Path,
 ) -> io::Result<IndexedPackIndexOnly> {
     index_pack_file_index_only_with_version(algorithm, path_or_bytes, PackIndexVersion::V2)
+}
+
+pub fn index_pack_file_index_only_from_file(
+    algorithm: GitHashAlgorithm,
+    file: &fs::File,
+) -> io::Result<IndexedPackIndexOnly> {
+    index_pack_file_index_only_from_file_with_version(algorithm, file, PackIndexVersion::V2)
+}
+
+pub fn index_pack_file_index_only_from_file_with_version(
+    algorithm: GitHashAlgorithm,
+    file: &fs::File,
+    version: PackIndexVersion,
+) -> io::Result<IndexedPackIndexOnly> {
+    let pack = map_pack_file_from_file(file)?;
+    let parsed = parse_pack_entries_index_only_if_base(algorithm, &pack, false)?;
+    let result = match parsed {
+        PackIndexOnlyResult::Fast {
+            pack_id, entries, ..
+        } => {
+            let objects = entries.len();
+            release_mapped_pack_pages(&pack);
+            let index =
+                encode_pack_index_from_owned_entries(algorithm, &pack_id, entries, version)?;
+            return Ok(IndexedPackIndexOnly {
+                pack_id,
+                index,
+                objects,
+            });
+        }
+        PackIndexOnlyResult::RequiresFullParse {
+            retention,
+            validated,
+        } => parse_pack_entries_validated(
+            algorithm,
+            &pack,
+            None,
+            false,
+            false,
+            Some(retention),
+            validated,
+            PackEntryMode::Indexed,
+        )?,
+    };
+    release_mapped_pack_pages(&pack);
+    let pack_id = result.pack_id;
+    let objects = result.entries.len();
+    Ok(IndexedPackIndexOnly {
+        index: encode_pack_index_from_owned_entries(algorithm, &pack_id, result.entries, version)?,
+        pack_id,
+        objects,
+    })
 }
 
 pub fn index_pack_file_index_only_with_version(
@@ -819,6 +1035,7 @@ pub fn index_pack_file_index_only_with_version(
             false,
             Some(retention),
             validated,
+            PackEntryMode::Indexed,
         )?,
     };
     release_mapped_pack_pages(&pack);
@@ -1251,6 +1468,166 @@ pub fn unpack_pack_file_to_loose<S: GitObjectStore + GitObjectSink>(
     unpack_pack_to_loose(store, algorithm, &pack)
 }
 
+/// Stream a PACK file into loose objects while retaining only delta bases.
+///
+/// The current decoded object may be materialized while its deltas are
+/// applied, but completed non-base payloads are released after `write_object`.
+/// Delta bases remain bounded by the parser's retention plan and are released
+/// as soon as no later delta can reference them. The input is memory-mapped,
+/// so this bounds heap payload retention rather than resident file pages.
+/// Objects already emitted remain in the store if a later semantic or sink
+/// error aborts the stream; the API does not provide transactional rollback.
+pub fn unpack_pack_file_to_loose_streaming<S: GitObjectStore + GitObjectSink>(
+    store: &S,
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+) -> io::Result<UnpackPackStats> {
+    unpack_pack_file_to_loose_streaming_inner(store, algorithm, path, None)
+}
+
+#[cfg(test)]
+fn unpack_pack_file_to_loose_streaming_with_stats<S: GitObjectStore + GitObjectSink>(
+    store: &S,
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+) -> io::Result<(UnpackPackStats, PackStreamingStats)> {
+    let mut stream_stats = PackStreamingStats::default();
+    let stats =
+        unpack_pack_file_to_loose_streaming_inner(store, algorithm, path, Some(&mut stream_stats))?;
+    Ok((stats, stream_stats))
+}
+
+fn unpack_pack_file_to_loose_streaming_inner<S: GitObjectStore + GitObjectSink>(
+    store: &S,
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+    stream_stats: Option<&mut PackStreamingStats>,
+) -> io::Result<UnpackPackStats> {
+    let pack = map_pack_file(path)?;
+    let mut write_object = |_: &ObjectId, kind: GitObjectKind, content: &[u8]| {
+        store.write_object(kind, content).map(|_| ())
+    };
+    let parsed = parse_pack_entries_with_sink(
+        algorithm,
+        &pack,
+        Some(store),
+        false,
+        false,
+        None,
+        Some(&mut write_object),
+        stream_stats,
+        PackEntryMode::Indexed,
+    )?;
+    Ok(UnpackPackStats {
+        objects: parsed.entries.len(),
+    })
+}
+
+/// Validate a received PACK without writing any object or index data.
+///
+/// PACK structure, checksum, object hashes, delta reconstruction, and the
+/// selected semantic object rules are checked before the report is returned.
+/// The parser retains only compact per-object metadata plus payloads needed by
+/// live delta bases and the current object; the mapped input itself is not a
+/// heap payload bound. `FsckObjects` validates object syntax without walking
+/// links, while `Strict` additionally checks duplicate received IDs and links
+/// against the received pack or the supplied store.
+pub fn validate_pack_file_with_store(
+    algorithm: GitHashAlgorithm,
+    path: &Path,
+    external_store: &dyn GitObjectStore,
+    mode: PackValidationMode,
+) -> io::Result<PackValidationReport> {
+    let pack = map_pack_file(path)?;
+    let result = (|| {
+        let (parsed, validation) = parse_pack_entries_with_validation(
+            algorithm,
+            &pack,
+            external_store,
+            mode,
+            PackEntryMode::Compact,
+            false,
+        )?;
+        Ok(PackValidationReport {
+            pack_id: parsed.pack_id,
+            object_count: parsed.object_count,
+            validated_objects: validation.validated_objects(),
+        })
+    })();
+    release_mapped_pack_pages(&pack);
+    result
+}
+
+fn parse_pack_entries_with_validation(
+    algorithm: GitHashAlgorithm,
+    pack: &[u8],
+    external_store: &dyn GitObjectStore,
+    mode: PackValidationMode,
+    entry_mode: PackEntryMode,
+    retain_external_bases: bool,
+) -> io::Result<(ParsedPack, PackObjectValidationState)> {
+    let validated = validate_pack_header_and_checksum(algorithm, pack)?;
+    let mut validation = PackObjectValidationState::new(algorithm, mode);
+    let mut visit = |id: &ObjectId, kind: GitObjectKind, content: &[u8]| {
+        let result = validation.validate_object(id, kind, content);
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let semantic = error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackSemanticValidationError>())
+                    .is_some();
+                if !semantic {
+                    return Err(error);
+                }
+                let semantic = error
+                    .into_inner()
+                    .expect("semantic validation marker")
+                    .downcast::<PackSemanticValidationError>()
+                    .expect("semantic validation marker type");
+                let reason = semantic.reason();
+                let source = semantic.into_source();
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    PackObjectValidationError {
+                        object_id: id.clone(),
+                        kind,
+                        reason,
+                        source,
+                    },
+                ))
+            }
+        }
+    };
+    let parsed = parse_pack_entries_validated_with_sink_options(
+        algorithm,
+        pack,
+        Some(external_store),
+        false,
+        false,
+        None,
+        validated,
+        Some(&mut visit),
+        None,
+        entry_mode,
+        retain_external_bases,
+    )
+    .map_err(normalize_pack_validation_error)?;
+    validation.finish(external_store)?;
+    Ok((parsed, validation))
+}
+
+fn normalize_pack_validation_error(error: io::Error) -> io::Error {
+    if error.kind() == io::ErrorKind::NotFound {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "ref-delta external base object not found",
+        )
+    } else {
+        error
+    }
+}
+
 pub fn verify_pack_file(
     algorithm: GitHashAlgorithm,
     path: &Path,
@@ -1291,8 +1668,41 @@ pub fn verify_pack_file_matches_index_with_version(
     index_version: PackIndexVersion,
     include_entries: bool,
 ) -> io::Result<VerifiedPackIndexMatch> {
-    let index = PackIndex::read(idx_path, algorithm)?;
-    let pack = map_pack_file(pack_path)?;
+    let index_file = fs::File::open(idx_path)?;
+    let pack_file = fs::File::open(pack_path)?;
+    verify_pack_file_matches_index_from_files_with_version(
+        algorithm,
+        &pack_file,
+        &index_file,
+        index_version,
+        include_entries,
+    )
+}
+
+pub fn verify_pack_file_matches_index_from_files(
+    algorithm: GitHashAlgorithm,
+    pack_file: &fs::File,
+    idx_file: &fs::File,
+    include_entries: bool,
+) -> io::Result<VerifiedPackIndexMatch> {
+    verify_pack_file_matches_index_from_files_with_version(
+        algorithm,
+        pack_file,
+        idx_file,
+        PackIndexVersion::V2,
+        include_entries,
+    )
+}
+
+pub fn verify_pack_file_matches_index_from_files_with_version(
+    algorithm: GitHashAlgorithm,
+    pack_file: &fs::File,
+    idx_file: &fs::File,
+    index_version: PackIndexVersion,
+    include_entries: bool,
+) -> io::Result<VerifiedPackIndexMatch> {
+    let index = PackIndex::read_file(idx_file, algorithm)?;
+    let pack = map_pack_file_from_file(pack_file)?;
     match parse_pack_entries_index_only_if_base(algorithm, &pack, include_entries)? {
         PackIndexOnlyResult::Fast {
             pack_id,
@@ -1320,6 +1730,7 @@ pub fn verify_pack_file_matches_index_with_version(
                 false,
                 Some(retention),
                 validated,
+                PackEntryMode::Indexed,
             )?;
             verified_pack_index_match_from_entries(
                 &index,
@@ -1373,6 +1784,7 @@ pub fn verify_pack_bytes_with_version(
                 false,
                 Some(retention),
                 validated,
+                PackEntryMode::Indexed,
             )?;
             return verified_pack_from_parsed(algorithm, parsed, index_version, include_entries);
         }
@@ -1557,6 +1969,105 @@ pub fn repair_thin_pack_file_to_path<S: GitObjectStore>(
         },
         fixed_objects,
     })
+}
+
+/// Validate received objects while parsing a thin PACK, then produce the
+/// install-ready repaired PACK/index result.  Validation completes before
+/// `output_path` is opened, so a semantic failure cannot publish a repaired
+/// content-addressed file.  The caller owns `output_path`; an I/O failure
+/// while writing may leave a partial ordinary temporary file for its normal
+/// cleanup guard.
+pub fn repair_thin_pack_file_to_path_with_validation<S: GitObjectStore>(
+    algorithm: GitHashAlgorithm,
+    pack_path: &Path,
+    external_store: &S,
+    output_path: &Path,
+    version: PackIndexVersion,
+    mode: PackValidationMode,
+) -> io::Result<ThinPackFileRepair> {
+    let pack = map_pack_file(pack_path)?;
+    let result = (|| {
+        let (parsed, _) = parse_pack_entries_with_validation(
+            algorithm,
+            &pack,
+            external_store,
+            mode,
+            PackEntryMode::Indexed,
+            true,
+        )?;
+        if parsed.external_bases.is_empty() {
+            fs::copy(pack_path, output_path)?;
+            let sorted_positions = sorted_pack_index_positions(&parsed.entries)?;
+            let index = encode_pack_index_with_positions_version(
+                algorithm,
+                &parsed.pack_id,
+                &parsed.entries,
+                &sorted_positions,
+                version,
+            )?;
+            let reverse_index = encode_pack_reverse_index_from_positions(
+                algorithm,
+                &parsed.pack_id,
+                &parsed.entries,
+                &sorted_positions,
+            )?;
+            return Ok(ThinPackFileRepair {
+                indexed: IndexedPack {
+                    pack_id: parsed.pack_id,
+                    index,
+                    reverse_index,
+                    objects: parsed.entries.len(),
+                },
+                fixed_objects: 0,
+            });
+        }
+
+        let fixed_objects = parsed.external_bases.len();
+        let repaired_pack_id = write_repaired_thin_pack_to_path(
+            algorithm,
+            &pack,
+            &parsed.external_bases,
+            output_path,
+        )?;
+        let repaired_pack = map_pack_file(output_path)?;
+        let repaired_result = (|| {
+            let repaired_parsed =
+                parse_pack_entries(algorithm, &repaired_pack, None, false, false, None)?;
+            if repaired_parsed.pack_id != repaired_pack_id {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "repaired thin pack hash mismatch",
+                ));
+            }
+            let sorted_positions = sorted_pack_index_positions(&repaired_parsed.entries)?;
+            let index = encode_pack_index_with_positions_version(
+                algorithm,
+                &repaired_parsed.pack_id,
+                &repaired_parsed.entries,
+                &sorted_positions,
+                version,
+            )?;
+            let reverse_index = encode_pack_reverse_index_from_positions(
+                algorithm,
+                &repaired_parsed.pack_id,
+                &repaired_parsed.entries,
+                &sorted_positions,
+            )?;
+            Ok(ThinPackFileRepair {
+                indexed: IndexedPack {
+                    pack_id: repaired_parsed.pack_id,
+                    index,
+                    reverse_index,
+                    objects: repaired_parsed.entries.len(),
+                },
+                fixed_objects,
+            })
+        })();
+        release_mapped_pack_pages(&repaired_pack);
+        repaired_result
+    })();
+    release_mapped_pack_pages(&pack);
+    result
 }
 
 pub fn write_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
@@ -2457,10 +2968,64 @@ fn reverse_index_hash_version(algorithm: GitHashAlgorithm) -> u32 {
 struct ParsedPack {
     pack_id: ObjectId,
     pack_data_len: usize,
+    object_count: usize,
     entries: Vec<PackIndexEntry>,
     objects: Vec<PackObjectData>,
     object_metadata: Vec<PackObjectMetadata>,
     external_bases: Vec<LooseObject>,
+}
+
+#[derive(Clone)]
+struct ParsedPackEntry {
+    offset: u64,
+    object_id: ObjectId,
+    crc32: Option<u32>,
+}
+
+impl ParsedPackEntry {
+    fn into_index_entry(self) -> io::Result<PackIndexEntry> {
+        Ok(PackIndexEntry {
+            offset: self.offset,
+            object_id: self.object_id,
+            crc32: self.crc32.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "pack index entry checksum was not collected",
+                )
+            })?,
+        })
+    }
+}
+
+trait PackEntryView {
+    fn offset(&self) -> u64;
+    fn object_id(&self) -> &ObjectId;
+}
+
+impl PackEntryView for PackIndexEntry {
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+}
+
+impl PackEntryView for ParsedPackEntry {
+    fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PackEntryMode {
+    Indexed,
+    Compact,
 }
 
 #[derive(Clone)]
@@ -2492,6 +3057,7 @@ struct PackResolvedBase<'a> {
     kind: GitObjectKind,
     content: &'a [u8],
     internal_index: Option<usize>,
+    external_index: Option<usize>,
 }
 
 struct ParsedPackObjectData(u32);
@@ -2550,14 +3116,16 @@ impl ParsedPackObjectData {
         self.content_slot().is_some()
     }
 
-    fn release_content(&mut self, retained_contents: &mut [Vec<u8>]) {
+    fn release_content(&mut self, retained_contents: &mut [Vec<u8>]) -> Option<usize> {
         let Some(slot) = self.content_slot() else {
-            return;
+            return None;
         };
+        let released_bytes = retained_contents.get(slot).map_or(0, Vec::len);
         if let Some(content) = retained_contents.get_mut(slot) {
             *content = Vec::new();
         }
         self.0 = (self.0 & !PACK_OBJECT_CONTENT_SLOT_MASK) | PACK_OBJECT_CONTENT_NOT_RETAINED;
+        Some(released_bytes)
     }
 }
 
@@ -2610,6 +3178,40 @@ fn pack_object_kind_from_bits(bits: u32) -> GitObjectKind {
 struct PackRetentionPlan {
     offsets: HashMap<u64, usize>,
     ids: HashMap<ObjectId, usize>,
+    ref_delta_references: usize,
+}
+
+#[derive(Debug, Default)]
+struct PackRetainedContentTotals {
+    bytes: usize,
+    count: usize,
+}
+
+impl PackRetainedContentTotals {
+    fn retain(&mut self, bytes: usize) -> io::Result<()> {
+        let total_bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "retained pack content byte count overflows usize",
+            )
+        })?;
+        let total_count = self.count.checked_add(1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "retained pack content count overflows usize",
+            )
+        })?;
+        self.bytes = total_bytes;
+        self.count = total_count;
+        Ok(())
+    }
+
+    fn release(&mut self, bytes: usize) {
+        debug_assert!(self.bytes >= bytes);
+        debug_assert!(self.count > 0);
+        self.bytes -= bytes;
+        self.count -= 1;
+    }
 }
 
 struct ParsedPackObject {
@@ -2619,11 +3221,14 @@ struct ParsedPackObject {
     size: usize,
 }
 
+type PackObjectSink<'a> = dyn FnMut(&ObjectId, GitObjectKind, &[u8]) -> io::Result<()> + 'a;
+
 impl PackRetentionPlan {
     fn empty() -> Self {
         Self {
             offsets: HashMap::new(),
             ids: HashMap::new(),
+            ref_delta_references: 0,
         }
     }
 
@@ -2640,6 +3245,7 @@ impl PackRetentionPlan {
             self.ids
                 .reserve(pack_retention_reserve_capacity(reserve_hint));
         }
+        self.ref_delta_references = self.ref_delta_references.saturating_add(1);
         *self.ids.entry(id).or_insert(0) += 1;
     }
 
@@ -2648,7 +3254,10 @@ impl PackRetentionPlan {
     }
 
     fn consume_id(&mut self, id: &ObjectId) {
-        decrement_pack_retention_count(&mut self.ids, id);
+        if self.ids.contains_key(id) {
+            self.ref_delta_references = self.ref_delta_references.saturating_sub(1);
+            decrement_pack_retention_count(&mut self.ids, id);
+        }
     }
 }
 
@@ -2687,8 +3296,32 @@ fn parse_pack_entries(
     retain_all_objects: bool,
     retention: Option<PackRetentionPlan>,
 ) -> io::Result<ParsedPack> {
+    parse_pack_entries_with_sink(
+        algorithm,
+        bytes,
+        external_store,
+        collect_packed_sizes,
+        retain_all_objects,
+        retention,
+        None,
+        None,
+        PackEntryMode::Indexed,
+    )
+}
+
+fn parse_pack_entries_with_sink(
+    algorithm: GitHashAlgorithm,
+    bytes: &[u8],
+    external_store: Option<&dyn GitObjectStore>,
+    collect_packed_sizes: bool,
+    retain_all_objects: bool,
+    retention: Option<PackRetentionPlan>,
+    object_sink: Option<&mut PackObjectSink<'_>>,
+    stream_stats: Option<&mut PackStreamingStats>,
+    entry_mode: PackEntryMode,
+) -> io::Result<ParsedPack> {
     let validated = validate_pack_header_and_checksum(algorithm, bytes)?;
-    parse_pack_entries_validated(
+    parse_pack_entries_validated_with_sink(
         algorithm,
         bytes,
         external_store,
@@ -2696,6 +3329,9 @@ fn parse_pack_entries(
         retain_all_objects,
         retention,
         validated,
+        object_sink,
+        stream_stats,
+        entry_mode,
     )
 }
 
@@ -2707,6 +3343,61 @@ fn parse_pack_entries_validated(
     retain_all_objects: bool,
     retention: Option<PackRetentionPlan>,
     validated: ValidatedPackHeader,
+    entry_mode: PackEntryMode,
+) -> io::Result<ParsedPack> {
+    parse_pack_entries_validated_with_sink(
+        algorithm,
+        bytes,
+        external_store,
+        collect_packed_sizes,
+        retain_all_objects,
+        retention,
+        validated,
+        None,
+        None,
+        entry_mode,
+    )
+}
+
+fn parse_pack_entries_validated_with_sink(
+    algorithm: GitHashAlgorithm,
+    bytes: &[u8],
+    external_store: Option<&dyn GitObjectStore>,
+    collect_packed_sizes: bool,
+    retain_all_objects: bool,
+    retention: Option<PackRetentionPlan>,
+    validated: ValidatedPackHeader,
+    object_sink: Option<&mut PackObjectSink<'_>>,
+    stream_stats: Option<&mut PackStreamingStats>,
+    entry_mode: PackEntryMode,
+) -> io::Result<ParsedPack> {
+    parse_pack_entries_validated_with_sink_options(
+        algorithm,
+        bytes,
+        external_store,
+        collect_packed_sizes,
+        retain_all_objects,
+        retention,
+        validated,
+        object_sink,
+        stream_stats,
+        entry_mode,
+        false,
+    )
+}
+
+fn parse_pack_entries_validated_with_sink_options(
+    algorithm: GitHashAlgorithm,
+    bytes: &[u8],
+    external_store: Option<&dyn GitObjectStore>,
+    collect_packed_sizes: bool,
+    retain_all_objects: bool,
+    retention: Option<PackRetentionPlan>,
+    validated: ValidatedPackHeader,
+    mut object_sink: Option<&mut PackObjectSink<'_>>,
+    mut stream_stats: Option<&mut PackStreamingStats>,
+    entry_mode: PackEntryMode,
+    retain_external_bases: bool,
 ) -> io::Result<ParsedPack> {
     let ValidatedPackHeader {
         pack_id,
@@ -2727,14 +3418,19 @@ fn parse_pack_entries_validated(
     let mut cursor = std::io::Cursor::new(&bytes[..trailer_start]);
     cursor.set_position(12);
     let use_linear_ref_delta_lookup =
-        pack_ref_delta_uses_linear_lookup(retain_all_objects, retention.ids.len());
+        pack_ref_delta_uses_linear_lookup(retain_all_objects, retention.ref_delta_references);
     let external_base_capacity_hint = pack_external_bases_initial_capacity(retention.ids.len());
     let mut by_id: Option<HashMap<ObjectId, (GitObjectKind, PackObjectRef)>> = None;
     let mut external_bases: Vec<LooseObject> = Vec::new();
     let initial_capacity = pack_parse_initial_capacity(object_count);
-    let mut entries = Vec::with_capacity(initial_capacity);
+    let mut entries: Vec<ParsedPackEntry> = Vec::with_capacity(initial_capacity);
     let mut objects: Vec<ParsedPackObjectData> = Vec::with_capacity(initial_capacity);
     let mut retained_contents: Vec<Vec<u8>> = Vec::new();
+    let mut retained_content_totals = stream_stats
+        .is_some()
+        .then(PackRetainedContentTotals::default);
+    let stream_objects = object_sink.is_some();
+    let release_external_bases = stream_objects && !retain_external_bases;
     let mut object_metadata = if collect_packed_sizes {
         Vec::with_capacity(initial_capacity)
     } else {
@@ -2745,8 +3441,23 @@ fn parse_pack_entries_validated(
         let crc_start = offset as usize;
         let parsed_object = match read_pack_object_header(&mut cursor)? {
             PackObjectHeader::Base { kind, size } => {
-                if pack_can_stream_hash_base_object_content(retain_all_objects, &retention, offset)
-                {
+                if stream_objects {
+                    let content =
+                        read_zlib_content_from_cursor(&mut cursor, 512 * 1024 * 1024, size)?;
+                    validate_packed_inflated_size(size, content.len())?;
+                    let id = hash_object(algorithm, kind, &content);
+                    let size = content.len();
+                    ParsedPackObject {
+                        id,
+                        kind,
+                        content,
+                        size,
+                    }
+                } else if pack_can_stream_hash_base_object_content(
+                    retain_all_objects,
+                    &retention,
+                    offset,
+                ) {
                     let size = usize::try_from(size).map_err(|_| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -2820,7 +3531,22 @@ fn parse_pack_entries_validated(
                     ));
                 }
                 let base_content = base_object.content(&retained_contents);
-                let parsed_object = if pack_can_stream_hash_delta_object_content(
+                let parsed_object = if stream_objects {
+                    let content = apply_zlib_delta_from_cursor(
+                        base_content,
+                        &mut cursor,
+                        size,
+                        512 * 1024 * 1024,
+                    )?;
+                    let id = hash_object(algorithm, kind, &content);
+                    let size = content.len();
+                    ParsedPackObject {
+                        id,
+                        kind,
+                        content,
+                        size,
+                    }
+                } else if pack_can_stream_hash_delta_object_content(
                     retain_all_objects,
                     &retention,
                     offset,
@@ -2873,7 +3599,7 @@ fn parse_pack_entries_validated(
                     }
                 };
                 retention.consume_offset(base_offset);
-                pack_release_internal_base_if_unused(
+                if let Some(released_bytes) = pack_release_internal_base_if_unused(
                     &mut objects,
                     &entries,
                     retain_all_objects,
@@ -2881,14 +3607,18 @@ fn parse_pack_entries_validated(
                     base_index,
                     base_offset,
                     &mut retained_contents,
-                );
+                ) {
+                    if let Some(totals) = retained_content_totals.as_mut() {
+                        totals.release(released_bytes);
+                    }
+                }
                 parsed_object
             }
             PackObjectHeader::RefDelta { size } => {
                 let mut base = [0_u8; 32];
                 cursor.read_exact(&mut base[..digest_len])?;
                 let base_id = ObjectId::new(algorithm, &base[..digest_len]);
-                let (parsed_object, internal_base_index) = {
+                let (parsed_object, internal_base_index, external_base_index) = {
                     let base = if use_linear_ref_delta_lookup {
                         pack_ref_delta_base_linear(
                             &base_id,
@@ -2917,7 +3647,22 @@ fn parse_pack_entries_validated(
                     };
                     let kind = base.kind;
                     let base_content = base.content;
-                    let parsed_object = if pack_can_stream_hash_delta_object_content(
+                    let parsed_object = if stream_objects {
+                        let content = apply_zlib_delta_from_cursor(
+                            base_content,
+                            &mut cursor,
+                            size,
+                            512 * 1024 * 1024,
+                        )?;
+                        let id = hash_object(algorithm, kind, &content);
+                        let size = content.len();
+                        ParsedPackObject {
+                            id,
+                            kind,
+                            content,
+                            size,
+                        }
+                    } else if pack_can_stream_hash_delta_object_content(
                         retain_all_objects,
                         &retention,
                         offset,
@@ -2969,7 +3714,7 @@ fn parse_pack_entries_validated(
                             size,
                         }
                     };
-                    (parsed_object, base.internal_index)
+                    (parsed_object, base.internal_index, base.external_index)
                 };
                 retention.consume_id(&base_id);
                 if !use_linear_ref_delta_lookup
@@ -2980,7 +3725,7 @@ fn parse_pack_entries_validated(
                 }
                 if let Some(base_index) = internal_base_index {
                     let base_offset = entries[base_index].offset;
-                    pack_release_internal_base_if_unused(
+                    if let Some(released_bytes) = pack_release_internal_base_if_unused(
                         &mut objects,
                         &entries,
                         retain_all_objects,
@@ -2988,14 +3733,34 @@ fn parse_pack_entries_validated(
                         base_index,
                         base_offset,
                         &mut retained_contents,
+                    ) {
+                        if let Some(totals) = retained_content_totals.as_mut() {
+                            totals.release(released_bytes);
+                        }
+                    }
+                }
+                if release_external_bases && let Some(base_index) = external_base_index {
+                    pack_release_external_base_if_unused(
+                        &mut external_bases,
+                        &retention,
+                        &base_id,
+                        base_index,
                     );
                 }
                 parsed_object
             }
         };
+        if let Some(sink) = object_sink.as_mut() {
+            sink(
+                &parsed_object.id,
+                parsed_object.kind,
+                &parsed_object.content,
+            )?;
+        }
         let crc_end = cursor.position() as usize;
-        let crc32 = crc32fast::hash(&bytes[crc_start..crc_end]);
-        entries.push(PackIndexEntry {
+        let crc32 = (entry_mode == PackEntryMode::Indexed)
+            .then(|| crc32fast::hash(&bytes[crc_start..crc_end]));
+        entries.push(ParsedPackEntry {
             offset,
             object_id: parsed_object.id.clone(),
             crc32,
@@ -3021,12 +3786,22 @@ fn parse_pack_entries_validated(
         }
         let content_slot = if retain_content || object_size == 0 {
             let slot = retained_contents.len();
+            if let Some(totals) = retained_content_totals.as_mut() {
+                totals.retain(parsed_object.content.len())?;
+            }
             retained_contents.push(parsed_object.content);
             Some(slot)
         } else {
             None
         };
         objects.push(ParsedPackObjectData::new(parsed_object.kind, content_slot)?);
+        if let (Some(stats), Some(totals)) = (
+            stream_stats.as_deref_mut(),
+            retained_content_totals.as_ref(),
+        ) {
+            stats.peak_retained_content_bytes = stats.peak_retained_content_bytes.max(totals.bytes);
+            stats.peak_retained_content_count = stats.peak_retained_content_count.max(totals.count);
+        }
     }
     if cursor.position() != trailer_start as u64 {
         return Err(io::Error::new(
@@ -3039,9 +3814,18 @@ fn parse_pack_entries_validated(
     } else {
         Vec::new()
     };
+    let entries = if entry_mode == PackEntryMode::Indexed {
+        entries
+            .into_iter()
+            .map(ParsedPackEntry::into_index_entry)
+            .collect::<io::Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
     Ok(ParsedPack {
         pack_id,
         pack_data_len: trailer_start,
+        object_count,
         entries,
         objects: returned_objects,
         object_metadata,
@@ -3086,15 +3870,15 @@ fn collect_pack_delta_base_references(
     Ok(retention)
 }
 
-fn pack_object_offset_index(entries: &[PackIndexEntry], offset: u64) -> Option<u32> {
+fn pack_object_offset_index<E: PackEntryView>(entries: &[E], offset: u64) -> Option<u32> {
     entries
-        .binary_search_by_key(&offset, |entry| entry.offset)
+        .binary_search_by_key(&offset, |entry| entry.offset())
         .ok()
         .map(|index| index as u32)
 }
 
-fn pack_object_id_map(
-    entries: &[PackIndexEntry],
+fn pack_object_id_map<E: PackEntryView>(
+    entries: &[E],
     objects: &[ParsedPackObjectData],
     retention: &PackRetentionPlan,
     retain_all_objects: bool,
@@ -3106,7 +3890,7 @@ fn pack_object_id_map(
     };
     let mut by_id = HashMap::with_capacity(pack_delta_lookup_initial_capacity(capacity_hint));
     for (index, object) in objects.iter().enumerate() {
-        let object_id = &entries[index].object_id;
+        let object_id = entries[index].object_id();
         if retain_all_objects || retention.ids.contains_key(object_id) {
             by_id.insert(
                 object_id.clone(),
@@ -3126,7 +3910,7 @@ fn pack_should_return_parsed_objects(retain_all_objects: bool) -> bool {
 }
 
 fn pack_return_parsed_objects(
-    entries: &[PackIndexEntry],
+    entries: &[ParsedPackEntry],
     objects: Vec<ParsedPackObjectData>,
     mut retained_contents: Vec<Vec<u8>>,
 ) -> Vec<PackObjectData> {
@@ -3185,28 +3969,42 @@ fn pack_can_stream_hash_delta_object_content(
     !retain_all_objects && !pack_should_retain_offset(retention, offset)
 }
 
-fn pack_release_internal_base_if_unused(
+fn pack_release_internal_base_if_unused<E: PackEntryView>(
     objects: &mut [ParsedPackObjectData],
-    entries: &[PackIndexEntry],
+    entries: &[E],
     retain_all_objects: bool,
     retention: &PackRetentionPlan,
     index: usize,
     offset: u64,
     retained_contents: &mut [Vec<u8>],
-) {
+) -> Option<usize> {
     if retain_all_objects
         || objects.get(index).is_none_or(|_| {
-            pack_should_retain_content(false, retention, offset, &entries[index].object_id)
+            pack_should_retain_content(false, retention, offset, entries[index].object_id())
         })
     {
-        return;
+        return None;
     }
-    objects[index].release_content(retained_contents);
+    objects[index].release_content(retained_contents)
 }
 
-fn pack_ref_delta_base_linear<'a>(
+fn pack_release_external_base_if_unused(
+    external_bases: &mut [LooseObject],
+    retention: &PackRetentionPlan,
+    id: &ObjectId,
+    index: usize,
+) {
+    if retention.ids.contains_key(id) {
+        return;
+    }
+    if let Some(base) = external_bases.get_mut(index) {
+        base.content = Vec::new();
+    }
+}
+
+fn pack_ref_delta_base_linear<'a, E: PackEntryView>(
     base_id: &ObjectId,
-    entries: &[PackIndexEntry],
+    entries: &[E],
     objects: &'a [ParsedPackObjectData],
     retained_contents: &'a [Vec<u8>],
     retain_all_objects: bool,
@@ -3226,6 +4024,7 @@ fn pack_ref_delta_base_linear<'a>(
             kind: objects[index].kind(),
             content: objects[index].content(retained_contents),
             internal_index: Some(index),
+            external_index: None,
         });
     }
     if let Some(index) = pack_external_base_index(external_bases, base_id) {
@@ -3234,6 +4033,7 @@ fn pack_ref_delta_base_linear<'a>(
             kind: base_object.kind,
             content: base_object.content.as_slice(),
             internal_index: None,
+            external_index: Some(index as usize),
         });
     }
     let store = external_store.ok_or_else(|| {
@@ -3251,6 +4051,7 @@ fn pack_ref_delta_base_linear<'a>(
         kind: base_object.kind,
         content: base_object.content.as_slice(),
         internal_index: None,
+        external_index: Some(external_index),
     })
 }
 
@@ -3277,13 +4078,18 @@ fn pack_ref_delta_base_mapped<'a>(
                 kind: *kind,
                 content: objects[index].content(retained_contents),
                 internal_index: Some(index),
+                external_index: None,
             })
         }
-        Some((kind, PackObjectRef::External(index))) => Ok(PackResolvedBase {
-            kind: *kind,
-            content: external_bases[*index as usize].content.as_slice(),
-            internal_index: None,
-        }),
+        Some((kind, PackObjectRef::External(index))) => {
+            let index = *index as usize;
+            Ok(PackResolvedBase {
+                kind: *kind,
+                content: external_bases[index].content.as_slice(),
+                internal_index: None,
+                external_index: Some(index),
+            })
+        }
         None => {
             let store = external_store.ok_or_else(|| {
                 io::Error::new(
@@ -3304,15 +4110,16 @@ fn pack_ref_delta_base_mapped<'a>(
                 kind: base_object.kind,
                 content: base_object.content.as_slice(),
                 internal_index: None,
+                external_index: Some(external_index as usize),
             })
         }
     }
 }
 
-fn pack_object_id_index(entries: &[PackIndexEntry], id: &ObjectId) -> Option<u32> {
+fn pack_object_id_index<E: PackEntryView>(entries: &[E], id: &ObjectId) -> Option<u32> {
     entries
         .iter()
-        .position(|entry| entry.object_id.as_bytes() == id.as_bytes())
+        .position(|entry| entry.object_id().as_bytes() == id.as_bytes())
         .map(|index| index as u32)
 }
 
@@ -3328,7 +4135,7 @@ fn pack_delta_lookup_initial_capacity(existing_entries: usize) -> usize {
 }
 
 fn pack_parse_initial_capacity(object_count: usize) -> usize {
-    object_count
+    object_count.min(PACK_PARSE_INITIAL_CAPACITY_LIMIT)
 }
 
 fn pack_object_size_metadata(size: usize) -> io::Result<u32> {
@@ -3666,10 +4473,31 @@ fn write_repaired_thin_pack_to_path(
         })?)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack has too many objects"))?;
 
+    validate_thin_repair_external_bases(algorithm, external_bases)?;
+
     let mut file = fs::File::create(output_path)?;
     let mut writer = PackHashWriter::new(&mut file, algorithm);
     writer.write_all(&bytes[..8])?;
     writer.write_all(&repaired_count.to_be_bytes())?;
+    for object in external_bases {
+        write_packed_base_object_to_writer(
+            &mut writer,
+            object.kind,
+            &object.content,
+            PackEncodeOptions::UNDELTIFIED,
+        )?;
+    }
+    writer.write_all(&bytes[12..trailer_start])?;
+    let pack_id = writer.finalize();
+    file.write_all(pack_id.as_bytes())?;
+    file.flush()?;
+    Ok(pack_id)
+}
+
+fn validate_thin_repair_external_bases(
+    algorithm: GitHashAlgorithm,
+    external_bases: &[LooseObject],
+) -> io::Result<()> {
     for object in external_bases {
         if object.id.algorithm() != algorithm {
             return Err(io::Error::new(
@@ -3683,18 +4511,8 @@ fn write_repaired_thin_pack_to_path(
                 "thin pack base object hash mismatch",
             ));
         }
-        write_packed_base_object_to_writer(
-            &mut writer,
-            object.kind,
-            &object.content,
-            PackEncodeOptions::UNDELTIFIED,
-        )?;
     }
-    writer.write_all(&bytes[12..trailer_start])?;
-    let pack_id = writer.finalize();
-    file.write_all(pack_id.as_bytes())?;
-    file.flush()?;
-    Ok(pack_id)
+    Ok(())
 }
 
 fn append_packed_base_object(
@@ -4151,14 +4969,14 @@ impl PackedObjectStore {
         approximate_packed_object_id_count(self.algorithm, &idx_paths)
     }
 
-    pub(crate) fn update_unique_abbrev_len_for_ids(
+    pub(crate) fn update_unique_abbrev_lens_for_ids(
         &self,
         sorted_targets: &[ObjectId],
-        required: &mut usize,
+        required: &mut [usize],
     ) -> io::Result<()> {
         for idx_path in self.idx_paths()?.iter() {
             read_cached_pack_index(idx_path, self.algorithm)?
-                .update_unique_abbrev_len_for_ids(sorted_targets, required);
+                .update_unique_abbrev_lens_for_ids(sorted_targets, required);
         }
         Ok(())
     }
@@ -5708,19 +6526,33 @@ struct PackIndexLayout {
 }
 
 impl PackIndex {
-    fn update_unique_abbrev_len_for_ids(&self, sorted_targets: &[ObjectId], required: &mut usize) {
+    fn update_unique_abbrev_lens_for_ids(
+        &self,
+        sorted_targets: &[ObjectId],
+        required: &mut [usize],
+    ) {
         let layout = self.scan_layout();
         for index in 0..self.count {
-            update_unique_abbrev_len_for_candidate(
+            update_unique_abbrev_lens_for_candidate(
                 sorted_targets,
-                self.object_bytes_at_with_layout(index, layout.digest_len, layout.names_start),
                 required,
+                self.object_bytes_at_with_layout(index, layout.digest_len, layout.names_start),
             );
         }
     }
 
     fn read(path: &Path, algorithm: GitHashAlgorithm) -> io::Result<Self> {
         Self::read_path(path, algorithm, true)
+    }
+
+    fn read_file(file: &fs::File, algorithm: GitHashAlgorithm) -> io::Result<Self> {
+        let len = file.metadata()?.len();
+        let bytes = if len == 0 {
+            PackIndexBytes::Owned(Vec::new())
+        } else {
+            PackIndexBytes::Mapped(unsafe { memmap2::Mmap::map(file)? })
+        };
+        Self::read_index_bytes(bytes, algorithm, true)
     }
 
     fn read_for_lookup(path: &Path, algorithm: GitHashAlgorithm) -> io::Result<Self> {
@@ -6466,7 +7298,16 @@ fn read_delta_base_offset(reader: &mut impl Read, object_offset: u64) -> io::Res
     let mut distance = (byte & 0x7f) as u64;
     while byte & 0x80 != 0 {
         byte = read_byte(reader)?;
-        distance = ((distance + 1) << 7) | (byte & 0x7f) as u64;
+        distance = distance
+            .checked_add(1)
+            .and_then(|distance| distance.checked_mul(1_u64 << 7))
+            .and_then(|distance| distance.checked_add(u64::from(byte & 0x7f)))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ofs-delta base offset encoding overflows u64",
+                )
+            })?;
     }
     object_offset.checked_sub(distance).ok_or_else(|| {
         io::Error::new(
@@ -7349,6 +8190,16 @@ mod tests {
     use super::*;
     use crate::stock_git_support;
     use crate::{InMemoryObjectStore, LooseObjectStore};
+
+    struct InvalidExternalBaseStore {
+        object: LooseObject,
+    }
+
+    impl GitObjectStore for InvalidExternalBaseStore {
+        fn read_object(&self, _id: &ObjectId) -> io::Result<LooseObject> {
+            Ok(self.object.clone())
+        }
+    }
 
     #[test]
     fn writes_undeltified_blob_pack_directly_from_streams() {
@@ -8806,6 +9657,458 @@ mod tests {
     }
 
     #[test]
+    fn pack_object_count_from_file_reads_and_validates_only_the_header() {
+        let temp = TempDir::new().expect("temp dir");
+        let pack_path = temp.path().join("header.pack");
+        let mut header = Vec::from(*PACK_MAGIC);
+        header.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        header.extend_from_slice(&2_u32.to_be_bytes());
+        header.extend_from_slice(b"unread pack body");
+        fs::write(&pack_path, &header).expect("write header");
+
+        assert_eq!(pack_object_count_from_file(&pack_path).expect("count"), 2);
+
+        for (name, bytes, message) in [
+            (
+                "bad-magic.pack",
+                b"NOPE\0\0\0\x02\0\0\0\x01".as_slice(),
+                "pack file signature mismatch",
+            ),
+            (
+                "bad-version.pack",
+                b"PACK\0\0\0\x01\0\0\0\x01".as_slice(),
+                "unsupported pack file version 1",
+            ),
+        ] {
+            let path = temp.path().join(name);
+            fs::write(&path, bytes).expect("write invalid header");
+            assert_eq!(
+                pack_object_count_from_file(&path)
+                    .expect_err("invalid header")
+                    .to_string(),
+                message
+            );
+        }
+
+        let truncated = temp.path().join("truncated.pack");
+        fs::write(&truncated, b"PACK\0\0\0\x02").expect("write truncated header");
+        assert_eq!(
+            pack_object_count_from_file(&truncated)
+                .expect_err("truncated header")
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn streaming_pack_file_to_loose_handles_sha1_and_sha256_base_objects() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let source = InMemoryObjectStore::new(algorithm);
+            let first = source
+                .write_object(GitObjectKind::Blob, b"streamed first\n")
+                .expect("write first");
+            let second = source
+                .write_object(GitObjectKind::Blob, b"streamed second\n")
+                .expect("write second");
+            let third = source
+                .write_object(GitObjectKind::Blob, b"streamed third\n")
+                .expect("write third");
+            let pack = encode_pack_from_store(
+                &source,
+                algorithm,
+                &[first.clone(), second.clone(), third.clone()],
+            )
+            .expect("encode pack");
+            let temp = TempDir::new().expect("temp dir");
+            let pack_path = temp.path().join("stream.pack");
+            fs::write(&pack_path, &pack).expect("write pack");
+
+            let target = InMemoryObjectStore::new(algorithm);
+            let (stats, stream_stats) =
+                unpack_pack_file_to_loose_streaming_with_stats(&target, algorithm, &pack_path)
+                    .expect("stream unpack");
+            let materialized = InMemoryObjectStore::new(algorithm);
+            let materialized_stats =
+                unpack_pack_to_loose(&materialized, algorithm, &pack).expect("materialized unpack");
+
+            assert_eq!(stats.objects, 3);
+            assert_eq!(materialized_stats.objects, stats.objects);
+            assert_eq!(target.object_count().expect("target count"), 3);
+            assert_eq!(
+                stream_stats.peak_retained_content_bytes, 0,
+                "completed non-base payloads must not remain retained"
+            );
+            assert_eq!(stream_stats.peak_retained_content_count, 0);
+            for (id, content) in [
+                (first, b"streamed first\n".as_slice()),
+                (second, b"streamed second\n".as_slice()),
+                (third, b"streamed third\n".as_slice()),
+            ] {
+                assert_eq!(
+                    target.read_object(&id).expect("streamed object").content,
+                    content
+                );
+                assert_eq!(
+                    target.read_object(&id).expect("streamed object"),
+                    materialized.read_object(&id).expect("materialized object")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn streaming_pack_file_to_loose_handles_ofs_and_ref_delta_bases() {
+        let algorithm = GitHashAlgorithm::Sha1;
+        let base = b"stream delta base";
+        let replacement = b"stream delta replacement";
+        let mut ofs_pack = Vec::new();
+        ofs_pack.extend_from_slice(PACK_MAGIC);
+        ofs_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        ofs_pack.extend_from_slice(&2_u32.to_be_bytes());
+        write_pack_object_header(&mut ofs_pack, GitObjectKind::Blob, base.len() as u64);
+        append_zlib(&mut ofs_pack, base);
+        let delta_offset = ofs_pack.len() as u64;
+        let delta = replacement_delta(base, replacement);
+        write_ofs_delta_header(&mut ofs_pack, delta_offset, 12, delta.len() as u64);
+        append_zlib(&mut ofs_pack, &delta);
+        finalize_pack(&mut ofs_pack, algorithm);
+
+        let temp = TempDir::new().expect("temp dir");
+        let ofs_path = temp.path().join("ofs.pack");
+        fs::write(&ofs_path, &ofs_pack).expect("write ofs pack");
+        let ofs_target = InMemoryObjectStore::new(algorithm);
+        let ofs_stats = unpack_pack_file_to_loose_streaming(&ofs_target, algorithm, &ofs_path)
+            .expect("stream ofs delta");
+        assert_eq!(ofs_stats.objects, 2);
+        let replacement_id = hash_object(algorithm, GitObjectKind::Blob, replacement);
+        let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+        assert_eq!(
+            ofs_target
+                .read_object(&replacement_id)
+                .expect("ofs result")
+                .content,
+            replacement
+        );
+        assert_eq!(ofs_target.object_count().expect("ofs object count"), 2);
+        assert_eq!(
+            ofs_target.read_object(&base_id).expect("ofs base").content,
+            base
+        );
+
+        let mut ref_pack = Vec::new();
+        ref_pack.extend_from_slice(PACK_MAGIC);
+        ref_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        ref_pack.extend_from_slice(&1_u32.to_be_bytes());
+        let ref_delta = replacement_delta(base, replacement);
+        write_ref_delta_header(&mut ref_pack, base_id.as_bytes(), ref_delta.len() as u64);
+        append_zlib(&mut ref_pack, &ref_delta);
+        finalize_pack(&mut ref_pack, algorithm);
+        let ref_path = temp.path().join("ref-thin.pack");
+        fs::write(&ref_path, &ref_pack).expect("write ref pack");
+        let ref_target = InMemoryObjectStore::new(algorithm);
+        ref_target
+            .write_object(GitObjectKind::Blob, base)
+            .expect("seed external base");
+        let ref_stats = unpack_pack_file_to_loose_streaming(&ref_target, algorithm, &ref_path)
+            .expect("stream ref delta");
+        assert_eq!(ref_stats.objects, 1);
+        assert_eq!(
+            ref_target
+                .read_object(&replacement_id)
+                .expect("ref result")
+                .content,
+            replacement
+        );
+    }
+
+    #[test]
+    fn streaming_pack_file_to_loose_rejects_checksum_and_truncation() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let source = InMemoryObjectStore::new(algorithm);
+            let id = source
+                .write_object(GitObjectKind::Blob, b"checksum stream")
+                .expect("write source");
+            let pack = encode_pack_from_store(&source, algorithm, std::slice::from_ref(&id))
+                .expect("encode pack");
+            let temp = TempDir::new().expect("temp dir");
+
+            let bad_checksum_path = temp.path().join("bad-checksum.pack");
+            let mut bad_checksum = pack.clone();
+            *bad_checksum.last_mut().expect("pack checksum") ^= 1;
+            fs::write(&bad_checksum_path, bad_checksum).expect("write bad checksum");
+            let checksum_target = InMemoryObjectStore::new(algorithm);
+            let checksum_error = unpack_pack_file_to_loose_streaming(
+                &checksum_target,
+                algorithm,
+                &bad_checksum_path,
+            )
+            .expect_err("checksum mismatch");
+            assert_eq!(checksum_error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(checksum_error.to_string(), "pack checksum mismatch");
+            assert_eq!(
+                checksum_target
+                    .object_count()
+                    .expect("checksum target count"),
+                0
+            );
+
+            let truncated_path = temp.path().join("truncated.pack");
+            fs::write(&truncated_path, &pack[..pack.len() - 1]).expect("write truncated pack");
+            let truncated_target = InMemoryObjectStore::new(algorithm);
+            let truncated_error =
+                unpack_pack_file_to_loose_streaming(&truncated_target, algorithm, &truncated_path)
+                    .expect_err("truncated pack");
+            assert_eq!(truncated_error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(truncated_error.to_string(), "pack checksum mismatch");
+            assert_eq!(
+                truncated_target
+                    .object_count()
+                    .expect("truncated target count"),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn streaming_delta_matrix_covers_sha1_and_sha256_internal_and_external_refs() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let base = b"matrix delta base";
+            let replacement = b"matrix delta replacement";
+            let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+            let replacement_id = hash_object(algorithm, GitObjectKind::Blob, replacement);
+            let temp = TempDir::new().expect("temp dir");
+
+            let mut ofs_pack = Vec::new();
+            ofs_pack.extend_from_slice(PACK_MAGIC);
+            ofs_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ofs_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ofs_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ofs_pack, base);
+            let ofs_offset = ofs_pack.len() as u64;
+            let delta = replacement_delta(base, replacement);
+            write_ofs_delta_header(&mut ofs_pack, ofs_offset, 12, delta.len() as u64);
+            append_zlib(&mut ofs_pack, &delta);
+            finalize_pack(&mut ofs_pack, algorithm);
+            let ofs_path = temp.path().join("ofs.pack");
+            fs::write(&ofs_path, &ofs_pack).expect("write ofs pack");
+            let ofs_target = InMemoryObjectStore::new(algorithm);
+            let ofs_stats = unpack_pack_file_to_loose_streaming(&ofs_target, algorithm, &ofs_path)
+                .expect("sha-aware ofs stream");
+            assert_eq!(ofs_stats.objects, 2);
+            assert_eq!(
+                ofs_target
+                    .read_object(&replacement_id)
+                    .expect("ofs result")
+                    .content,
+                replacement
+            );
+            assert_eq!(ofs_target.object_count().expect("ofs object count"), 2);
+            assert_eq!(
+                ofs_target.read_object(&base_id).expect("ofs base").content,
+                base
+            );
+
+            let mut ref_pack = Vec::new();
+            ref_pack.extend_from_slice(PACK_MAGIC);
+            ref_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ref_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ref_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ref_pack, base);
+            let ref_delta = replacement_delta(base, replacement);
+            write_ref_delta_header(&mut ref_pack, base_id.as_bytes(), ref_delta.len() as u64);
+            append_zlib(&mut ref_pack, &ref_delta);
+            finalize_pack(&mut ref_pack, algorithm);
+            let ref_path = temp.path().join("ref.pack");
+            fs::write(&ref_path, &ref_pack).expect("write ref pack");
+            let ref_target = InMemoryObjectStore::new(algorithm);
+            let ref_stats = unpack_pack_file_to_loose_streaming(&ref_target, algorithm, &ref_path)
+                .expect("sha-aware internal ref stream");
+            assert_eq!(ref_stats.objects, 2);
+            assert_eq!(
+                ref_target
+                    .read_object(&replacement_id)
+                    .expect("ref result")
+                    .content,
+                replacement
+            );
+            assert_eq!(
+                ref_target
+                    .object_count()
+                    .expect("internal ref object count"),
+                2
+            );
+            assert_eq!(
+                ref_target
+                    .read_object(&base_id)
+                    .expect("internal ref base")
+                    .content,
+                base
+            );
+
+            let mut thin_pack = Vec::new();
+            thin_pack.extend_from_slice(PACK_MAGIC);
+            thin_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            thin_pack.extend_from_slice(&1_u32.to_be_bytes());
+            let thin_delta = replacement_delta(base, replacement);
+            write_ref_delta_header(&mut thin_pack, base_id.as_bytes(), thin_delta.len() as u64);
+            append_zlib(&mut thin_pack, &thin_delta);
+            finalize_pack(&mut thin_pack, algorithm);
+            let thin_path = temp.path().join("thin.pack");
+            fs::write(&thin_path, &thin_pack).expect("write thin pack");
+            let thin_target = InMemoryObjectStore::new(algorithm);
+            thin_target
+                .write_object(GitObjectKind::Blob, base)
+                .expect("seed thin base");
+            let thin_stats =
+                unpack_pack_file_to_loose_streaming(&thin_target, algorithm, &thin_path)
+                    .expect("sha-aware external ref stream");
+            assert_eq!(thin_stats.objects, 1);
+            assert_eq!(
+                thin_target
+                    .read_object(&replacement_id)
+                    .expect("thin result")
+                    .content,
+                replacement
+            );
+            assert_eq!(thin_target.object_count().expect("thin object count"), 2);
+            assert_eq!(
+                thin_target
+                    .read_object(&base_id)
+                    .expect("thin external base")
+                    .content,
+                base
+            );
+        }
+    }
+
+    #[test]
+    fn streaming_external_bases_release_payloads_after_final_use() {
+        let algorithm = GitHashAlgorithm::Sha256;
+        let first_base = b"first external base";
+        let second_base = b"second external base";
+        let first_replacement = b"first external replacement";
+        let second_replacement = b"second external replacement";
+        let first_id = hash_object(algorithm, GitObjectKind::Blob, first_base);
+        let second_id = hash_object(algorithm, GitObjectKind::Blob, second_base);
+        let mut pack = Vec::new();
+        pack.extend_from_slice(PACK_MAGIC);
+        pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        pack.extend_from_slice(&2_u32.to_be_bytes());
+        let first_delta = replacement_delta(first_base, first_replacement);
+        write_ref_delta_header(&mut pack, first_id.as_bytes(), first_delta.len() as u64);
+        append_zlib(&mut pack, &first_delta);
+        let second_delta = replacement_delta(second_base, second_replacement);
+        write_ref_delta_header(&mut pack, second_id.as_bytes(), second_delta.len() as u64);
+        append_zlib(&mut pack, &second_delta);
+        finalize_pack(&mut pack, algorithm);
+        let external_store = InMemoryObjectStore::new(algorithm);
+        external_store
+            .write_object(GitObjectKind::Blob, first_base)
+            .expect("seed first base");
+        external_store
+            .write_object(GitObjectKind::Blob, second_base)
+            .expect("seed second base");
+        let mut emitted = 0_usize;
+        let mut sink = |_: &ObjectId, _: GitObjectKind, _: &[u8]| {
+            emitted += 1;
+            Ok(())
+        };
+        let parsed = parse_pack_entries_with_sink(
+            algorithm,
+            &pack,
+            Some(&external_store),
+            false,
+            false,
+            None,
+            Some(&mut sink),
+            None,
+            PackEntryMode::Indexed,
+        )
+        .expect("parse external bases");
+        assert_eq!(emitted, 2);
+        assert_eq!(parsed.external_bases.len(), 2);
+        assert!(
+            parsed
+                .external_bases
+                .iter()
+                .all(|base| base.content.is_empty())
+        );
+        assert!(parse_pack_entries(algorithm, &pack, None, false, false, None).is_err());
+    }
+
+    #[test]
+    fn huge_declared_pack_count_does_not_eagerly_allocate_from_the_header() {
+        assert_eq!(
+            pack_parse_initial_capacity(u32::MAX as usize),
+            PACK_PARSE_INITIAL_CAPACITY_LIMIT
+        );
+        let algorithm = GitHashAlgorithm::Sha1;
+        let mut pack = Vec::new();
+        pack.extend_from_slice(PACK_MAGIC);
+        pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        pack.extend_from_slice(&u32::MAX.to_be_bytes());
+        finalize_pack(&mut pack, algorithm);
+        assert!(parse_pack_entries(algorithm, &pack, None, false, false, None).is_err());
+    }
+
+    #[test]
+    fn malformed_ofs_delta_distance_overflow_is_invalid_data() {
+        let direct = read_delta_base_offset(&mut Cursor::new([0x80; 20]), 1)
+            .err()
+            .expect("direct ofs distance overflow");
+        assert_eq!(direct.kind(), io::ErrorKind::InvalidData);
+        let algorithm = GitHashAlgorithm::Sha1;
+        let mut pack = Vec::new();
+        pack.extend_from_slice(PACK_MAGIC);
+        pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        pack.extend_from_slice(&1_u32.to_be_bytes());
+        pack.push(0x60);
+        pack.extend_from_slice(&[0x80; 20]);
+        finalize_pack(&mut pack, algorithm);
+        let error = parse_pack_entries(algorithm, &pack, None, false, false, None)
+            .err()
+            .expect("ofs distance overflow");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "error={error}");
+        assert_eq!(
+            error.to_string(),
+            "ofs-delta base offset encoding overflows u64"
+        );
+    }
+
+    #[test]
+    fn streaming_semantic_failure_preserves_earlier_emitted_loose_objects() {
+        let algorithm = GitHashAlgorithm::Sha1;
+        let base = b"valid object before semantic failure";
+        let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+        let mut pack = Vec::new();
+        pack.extend_from_slice(PACK_MAGIC);
+        pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+        pack.extend_from_slice(&2_u32.to_be_bytes());
+        write_pack_object_header(&mut pack, GitObjectKind::Blob, base.len() as u64);
+        append_zlib(&mut pack, base);
+        let invalid_offset = pack.len() as u64;
+        let delta = replacement_delta(base, b"unreachable result");
+        write_ofs_delta_header(&mut pack, invalid_offset, 13, delta.len() as u64);
+        append_zlib(&mut pack, &delta);
+        finalize_pack(&mut pack, algorithm);
+        let temp = TempDir::new().expect("temp dir");
+        let path = temp.path().join("late-error.pack");
+        fs::write(&path, pack).expect("write late-error pack");
+        let target = InMemoryObjectStore::new(algorithm);
+        let error = unpack_pack_file_to_loose_streaming(&target, algorithm, &path)
+            .expect_err("late semantic error");
+        assert_eq!(error.to_string(), "ofs-delta base object not found");
+        assert_eq!(target.object_count().expect("partial target count"), 1);
+        assert_eq!(
+            target
+                .read_object(&base_id)
+                .expect("earlier object")
+                .content,
+            base
+        );
+    }
+
+    #[test]
     fn index_pack_bytes_index_only_matches_full_index_for_base_only_pack() {
         let source = InMemoryObjectStore::new(GitHashAlgorithm::Sha1);
         let first = source
@@ -9853,6 +11156,25 @@ mod tests {
     }
 
     #[test]
+    fn repeated_ref_delta_base_uses_total_reference_multiplicity_for_lookup_choice() {
+        let base_id = ObjectId::new(GitHashAlgorithm::Sha1, &[0x11; 20]);
+        let mut retention = PackRetentionPlan::empty();
+        for _ in 0..=PACK_REF_DELTA_LINEAR_LOOKUP_LIMIT {
+            retention.insert_id(base_id.clone(), PACK_REF_DELTA_LINEAR_LOOKUP_LIMIT + 1);
+        }
+
+        assert_eq!(retention.ids.len(), 1);
+        assert_eq!(
+            retention.ref_delta_references,
+            PACK_REF_DELTA_LINEAR_LOOKUP_LIMIT + 1
+        );
+        assert!(!pack_ref_delta_uses_linear_lookup(
+            false,
+            retention.ref_delta_references
+        ));
+    }
+
+    #[test]
     fn pack_should_retain_content_skips_empty_retention_sets() {
         let id = ObjectId::new(GitHashAlgorithm::Sha1, &[0x11; 20]);
         let mut retention = PackRetentionPlan::empty();
@@ -10129,7 +11451,10 @@ mod tests {
 
     #[test]
     fn pack_parse_initial_capacity_matches_object_count() {
-        assert_eq!(pack_parse_initial_capacity(usize::MAX), usize::MAX);
+        assert_eq!(
+            pack_parse_initial_capacity(usize::MAX),
+            PACK_PARSE_INITIAL_CAPACITY_LIMIT
+        );
         assert_eq!(pack_parse_initial_capacity(2), 2);
         assert_eq!(pack_parse_initial_capacity(0), 0);
     }
@@ -10289,6 +11614,1361 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn validates_base_objects_and_links_for_sha1_and_sha256() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let source = InMemoryObjectStore::new(algorithm);
+            let blob = source
+                .write_object(GitObjectKind::Blob, b"validated blob\n")
+                .expect("blob");
+            let tree_bytes = crate::encode_tree(&[crate::TreeEntry::new(
+                crate::TreeMode::File,
+                b"file".to_vec(),
+                blob.clone(),
+            )
+            .expect("tree entry")])
+            .expect("tree");
+            let tree = source
+                .write_object(GitObjectKind::Tree, &tree_bytes)
+                .expect("tree object");
+            let signature = crate::Signature::new(
+                "Pack Validator",
+                "validator@example.invalid",
+                1_700_000_001,
+                "+0000",
+            )
+            .expect("signature");
+            let commit_bytes =
+                crate::encode_commit(&tree, &[], &signature, &signature, b"validated commit\n")
+                    .expect("commit");
+            let commit = source
+                .write_object(GitObjectKind::Commit, &commit_bytes)
+                .expect("commit object");
+            let tag_bytes = crate::encode_tag(
+                &commit,
+                GitObjectKind::Commit,
+                "v1",
+                &signature,
+                b"validated tag\n",
+            )
+            .expect("tag");
+            let tag = source
+                .write_object(GitObjectKind::Tag, &tag_bytes)
+                .expect("tag object");
+            let ids = vec![blob, tree, commit, tag];
+            let pack = encode_pack_from_store(&source, algorithm, &ids).expect("pack");
+            let mut pack_hasher = GitObjectHash::new(algorithm);
+            pack_hasher.update(&pack[..pack.len() - algorithm.digest_len()]);
+            let expected_pack_id = pack_hasher.finalize();
+            let temp = TempDir::new().expect("temp dir");
+            let path = temp.path().join("validated.pack");
+            fs::write(&path, pack).expect("write pack");
+            let external = InMemoryObjectStore::new(algorithm);
+            let report = validate_pack_file_with_store(
+                algorithm,
+                &path,
+                &external,
+                PackValidationMode::Strict,
+            )
+            .expect("strict validation");
+            assert_eq!(report.object_count, 4);
+            assert_eq!(report.validated_objects, 4);
+            assert_eq!(external.object_count().expect("external count"), 0);
+            assert_eq!(report.pack_id.algorithm(), algorithm);
+            assert_eq!(report.pack_id, expected_pack_id);
+        }
+    }
+
+    #[test]
+    fn fsck_mode_accepts_missing_links_but_strict_rejects_them() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let source = InMemoryObjectStore::new(algorithm);
+            let missing_tree = ObjectId::new(algorithm, &[0x42; 32][..algorithm.digest_len()]);
+            let signature = crate::Signature::new(
+                "Pack Validator",
+                "validator@example.invalid",
+                1_700_000_001,
+                "+0000",
+            )
+            .expect("signature");
+            let commit_bytes = crate::encode_commit(
+                &missing_tree,
+                &[],
+                &signature,
+                &signature,
+                b"missing link\n",
+            )
+            .expect("commit");
+            let commit = source
+                .write_object(GitObjectKind::Commit, &commit_bytes)
+                .expect("commit object");
+            let pack = encode_pack_from_store(&source, algorithm, &[commit]);
+            let temp = TempDir::new().expect("temp dir");
+            let path = temp.path().join("missing-link.pack");
+            fs::write(&path, pack.expect("pack")).expect("write pack");
+            let external = InMemoryObjectStore::new(algorithm);
+            assert!(
+                validate_pack_file_with_store(
+                    algorithm,
+                    &path,
+                    &external,
+                    PackValidationMode::FsckObjects,
+                )
+                .is_ok()
+            );
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &path,
+                &external,
+                PackValidationMode::Strict,
+            )
+            .expect_err("strict missing link");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(external.object_count().expect("external count"), 0);
+
+            let wrong_external = InMemoryObjectStore::new(algorithm);
+            let wrong_tree_id = wrong_external
+                .write_object(GitObjectKind::Blob, b"not a tree")
+                .expect("wrong external kind");
+            let wrong_kind_commit = crate::encode_commit(
+                &wrong_tree_id,
+                &[],
+                &signature,
+                &signature,
+                b"wrong external kind\n",
+            )
+            .expect("wrong-kind commit");
+            let wrong_kind_commit_id = source
+                .write_object(GitObjectKind::Commit, &wrong_kind_commit)
+                .expect("wrong-kind commit object");
+            let wrong_kind_pack =
+                encode_pack_from_store(&source, algorithm, &[wrong_kind_commit_id])
+                    .expect("wrong-kind pack");
+            let wrong_kind_path = temp.path().join("wrong-kind.pack");
+            fs::write(&wrong_kind_path, wrong_kind_pack).expect("write wrong-kind pack");
+            validate_pack_file_with_store(
+                algorithm,
+                &wrong_kind_path,
+                &wrong_external,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("fsck does not walk wrong-kind external links");
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &wrong_kind_path,
+                &wrong_external,
+                PackValidationMode::Strict,
+            )
+            .expect_err("strict wrong external kind");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(wrong_external.object_count().expect("wrong-kind writes"), 1);
+        }
+    }
+
+    #[test]
+    fn validates_ofs_internal_ref_and_external_thin_deltas_without_writes() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let base = b"validator base";
+            let replacement = b"validator replacement";
+            let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+            let temp = TempDir::new().expect("temp dir");
+
+            let mut ofs_pack = Vec::new();
+            ofs_pack.extend_from_slice(PACK_MAGIC);
+            ofs_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ofs_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ofs_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ofs_pack, base);
+            let ofs_offset = ofs_pack.len() as u64;
+            let ofs_delta = replacement_delta(base, replacement);
+            write_ofs_delta_header(&mut ofs_pack, ofs_offset, 12, ofs_delta.len() as u64);
+            append_zlib(&mut ofs_pack, &ofs_delta);
+            finalize_pack(&mut ofs_pack, algorithm);
+            let ofs_path = temp.path().join("validator-ofs.pack");
+            fs::write(&ofs_path, ofs_pack).expect("write ofs");
+            let external = InMemoryObjectStore::new(algorithm);
+            let report = validate_pack_file_with_store(
+                algorithm,
+                &ofs_path,
+                &external,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("ofs validation");
+            assert_eq!(report.object_count, 2);
+            assert_eq!(report.validated_objects, 2);
+            assert_eq!(external.object_count().expect("ofs writes"), 0);
+
+            let mut ref_pack = Vec::new();
+            ref_pack.extend_from_slice(PACK_MAGIC);
+            ref_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ref_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ref_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ref_pack, base);
+            let ref_delta = replacement_delta(base, replacement);
+            write_ref_delta_header(&mut ref_pack, base_id.as_bytes(), ref_delta.len() as u64);
+            append_zlib(&mut ref_pack, &ref_delta);
+            finalize_pack(&mut ref_pack, algorithm);
+            let ref_path = temp.path().join("validator-ref.pack");
+            fs::write(&ref_path, ref_pack).expect("write ref");
+            let report = validate_pack_file_with_store(
+                algorithm,
+                &ref_path,
+                &external,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("internal ref validation");
+            assert_eq!(report.object_count, 2);
+            assert_eq!(report.validated_objects, 2);
+
+            let mut thin_pack = Vec::new();
+            thin_pack.extend_from_slice(PACK_MAGIC);
+            thin_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            thin_pack.extend_from_slice(&1_u32.to_be_bytes());
+            let thin_delta = replacement_delta(base, replacement);
+            write_ref_delta_header(&mut thin_pack, base_id.as_bytes(), thin_delta.len() as u64);
+            append_zlib(&mut thin_pack, &thin_delta);
+            finalize_pack(&mut thin_pack, algorithm);
+            let thin_path = temp.path().join("validator-thin.pack");
+            fs::write(&thin_path, thin_pack).expect("write thin");
+            external
+                .write_object(GitObjectKind::Blob, base)
+                .expect("seed external base");
+            let report = validate_pack_file_with_store(
+                algorithm,
+                &thin_path,
+                &external,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("thin validation");
+            assert_eq!(report.object_count, 1);
+            assert_eq!(report.validated_objects, 1);
+            assert_eq!(external.object_count().expect("thin object count"), 1);
+
+            let missing = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &thin_path,
+                &missing,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("missing thin base");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(missing.object_count().expect("missing writes"), 0);
+        }
+    }
+
+    #[test]
+    fn validation_aware_index_matches_ordinary_index_and_visits_each_object_once() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let base = b"index validation base";
+            let replacement = b"index validation replacement";
+            let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+
+            let source = InMemoryObjectStore::new(algorithm);
+            let base_object = source
+                .write_object(GitObjectKind::Blob, base)
+                .expect("base object");
+            let base_pack =
+                encode_pack_from_store(&source, algorithm, &[base_object]).expect("base pack");
+            let base_path = temp.path().join("base.pack");
+            fs::write(&base_path, base_pack).expect("write base pack");
+
+            let ordinary = index_pack_file_index_only_with_version(
+                algorithm,
+                &base_path,
+                PackIndexVersion::V2,
+            )
+            .expect("ordinary base index");
+            let external = InMemoryObjectStore::new(algorithm);
+            let validated = index_pack_file_with_store_and_validation(
+                algorithm,
+                &base_path,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect("validated base index");
+            assert_eq!(validated.pack_id, ordinary.pack_id);
+            assert_eq!(validated.index, ordinary.index);
+            assert_eq!(validated.objects, 1);
+
+            let base_bytes = fs::read(&base_path).expect("read base pack");
+            let (parsed, validation) = parse_pack_entries_with_validation(
+                algorithm,
+                &base_bytes,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackEntryMode::Indexed,
+                false,
+            )
+            .expect("one-pass validation");
+            assert_eq!(parsed.object_count, 1);
+            assert_eq!(validation.validated_objects(), parsed.object_count);
+
+            let mut ofs_pack = Vec::new();
+            ofs_pack.extend_from_slice(PACK_MAGIC);
+            ofs_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ofs_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ofs_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ofs_pack, base);
+            let delta_offset = ofs_pack.len() as u64;
+            let ofs_delta = replacement_delta(base, replacement);
+            write_ofs_delta_header(&mut ofs_pack, delta_offset, 12, ofs_delta.len() as u64);
+            append_zlib(&mut ofs_pack, &ofs_delta);
+            finalize_pack(&mut ofs_pack, algorithm);
+            let ofs_path = temp.path().join("ofs.pack");
+            fs::write(&ofs_path, ofs_pack).expect("write ofs pack");
+            let ordinary =
+                index_pack_file_index_only_with_version(algorithm, &ofs_path, PackIndexVersion::V2)
+                    .expect("ordinary ofs index");
+            let validated = index_pack_file_with_store_and_validation(
+                algorithm,
+                &ofs_path,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect("validated ofs index");
+            assert_eq!(validated.pack_id, ordinary.pack_id);
+            assert_eq!(validated.index, ordinary.index);
+            assert_eq!(validated.objects, 2);
+            let ofs_bytes = fs::read(&ofs_path).expect("read ofs pack");
+            let (ofs_parsed, ofs_validation) = parse_pack_entries_with_validation(
+                algorithm,
+                &ofs_bytes,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackEntryMode::Indexed,
+                false,
+            )
+            .expect("one-pass ofs validation");
+            assert_eq!(ofs_parsed.object_count, 2);
+            assert_eq!(ofs_validation.validated_objects(), 2);
+
+            let mut ref_pack = Vec::new();
+            ref_pack.extend_from_slice(PACK_MAGIC);
+            ref_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            ref_pack.extend_from_slice(&2_u32.to_be_bytes());
+            write_pack_object_header(&mut ref_pack, GitObjectKind::Blob, base.len() as u64);
+            append_zlib(&mut ref_pack, base);
+            let ref_delta = replacement_delta(base, replacement);
+            write_ref_delta_header(&mut ref_pack, base_id.as_bytes(), ref_delta.len() as u64);
+            append_zlib(&mut ref_pack, &ref_delta);
+            finalize_pack(&mut ref_pack, algorithm);
+            let ref_path = temp.path().join("ref.pack");
+            fs::write(&ref_path, ref_pack).expect("write ref pack");
+            let ordinary =
+                index_pack_file_index_only_with_version(algorithm, &ref_path, PackIndexVersion::V2)
+                    .expect("ordinary ref index");
+            let validated = index_pack_file_with_store_and_validation(
+                algorithm,
+                &ref_path,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect("validated ref index");
+            assert_eq!(validated.pack_id, ordinary.pack_id);
+            assert_eq!(validated.index, ordinary.index);
+            assert_eq!(validated.objects, 2);
+            let ref_bytes = fs::read(&ref_path).expect("read ref pack");
+            let (ref_parsed, ref_validation) = parse_pack_entries_with_validation(
+                algorithm,
+                &ref_bytes,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackEntryMode::Indexed,
+                false,
+            )
+            .expect("one-pass ref validation");
+            assert_eq!(ref_parsed.object_count, 2);
+            assert_eq!(ref_validation.validated_objects(), 2);
+        }
+    }
+
+    #[test]
+    fn validation_aware_index_rejects_semantics_before_returning_index() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let mut malformed = Vec::new();
+            malformed.extend_from_slice(PACK_MAGIC);
+            malformed.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            malformed.extend_from_slice(&1_u32.to_be_bytes());
+            let bad_commit = format!(
+                "xree {}\ncommitter Name <name@example.invalid> 1 +0000\n\n",
+                "0".repeat(algorithm.digest_len() * 2)
+            )
+            .into_bytes();
+            write_pack_object_header(
+                &mut malformed,
+                GitObjectKind::Commit,
+                bad_commit.len() as u64,
+            );
+            append_zlib(&mut malformed, &bad_commit);
+            finalize_pack(&mut malformed, algorithm);
+            let malformed_path = temp.path().join("malformed-index.pack");
+            fs::write(&malformed_path, malformed).expect("write malformed pack");
+            let ordinary = index_pack_file_index_only_with_version(
+                algorithm,
+                &malformed_path,
+                PackIndexVersion::V2,
+            )
+            .expect("ordinary index does not fsck semantics");
+            assert_eq!(ordinary.objects, 1);
+            let external = InMemoryObjectStore::new(algorithm);
+            let error = index_pack_file_with_store_and_validation(
+                algorithm,
+                &malformed_path,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect_err("semantic validation");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            let bad_commit_id = hash_object(algorithm, GitObjectKind::Commit, &bad_commit);
+            let validation = error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                .expect("typed semantic validation error");
+            assert_eq!(validation.object_id, bad_commit_id);
+            assert_eq!(validation.kind, GitObjectKind::Commit);
+            assert_eq!(
+                validation.reason,
+                PackObjectValidationReason::CommitTreeHeader
+            );
+            assert_eq!(
+                validation.source.to_string(),
+                "commit tree header is malformed"
+            );
+            assert_eq!(external.object_count().expect("no writes"), 0);
+
+            let valid_tree_id = ObjectId::new(algorithm, &[0x11; 32][..algorithm.digest_len()]);
+            for (name, content, expected_source) in [
+                (
+                    "invalid-tree-hex",
+                    format!(
+                        "tree {}\nauthor Name <name@example.invalid> 1 +0000\ncommitter Name <name@example.invalid> 1 +0000\n\n",
+                        "z".repeat(algorithm.digest_len() * 2)
+                    )
+                    .into_bytes(),
+                    "commit tree object ID is invalid",
+                ),
+                (
+                    "malformed-author",
+                    format!(
+                        "tree {}\ncommitter Name <name@example.invalid> 1 +0000\n\n",
+                        valid_tree_id.to_hex()
+                    )
+                    .into_bytes(),
+                    "commit author line is malformed",
+                ),
+            ] {
+                let source = InMemoryObjectStore::new(algorithm);
+                let id = source
+                    .write_object(GitObjectKind::Commit, &content)
+                    .expect("negative commit object");
+                let path = temp.path().join(format!("{name}.pack"));
+                fs::write(
+                    &path,
+                    encode_pack_from_store(&source, algorithm, &[id.clone()]).expect("pack"),
+                )
+                .expect("write negative commit pack");
+                let external = InMemoryObjectStore::new(algorithm);
+                let error = index_pack_file_with_store_and_validation(
+                    algorithm,
+                    &path,
+                    &external,
+                    PackValidationMode::FsckObjects,
+                    PackIndexVersion::V2,
+                )
+                .expect_err("negative commit semantic error");
+                let validation = error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .expect("typed negative commit validation error");
+                assert_eq!(validation.object_id, id);
+                assert_eq!(validation.kind, GitObjectKind::Commit);
+                assert_eq!(validation.reason, PackObjectValidationReason::OtherSemantic);
+                assert_eq!(validation.source.to_string(), expected_source);
+            }
+
+            let other_algorithm = match algorithm {
+                GitHashAlgorithm::Sha1 => GitHashAlgorithm::Sha256,
+                GitHashAlgorithm::Sha256 => GitHashAlgorithm::Sha1,
+            };
+            let wrong_hash_id =
+                ObjectId::new(other_algorithm, &[0x71; 32][..other_algorithm.digest_len()]);
+            let mut direct_validation =
+                PackObjectValidationState::new(algorithm, PackValidationMode::FsckObjects);
+            let wrong_hash_error = direct_validation
+                .validate_object(&wrong_hash_id, GitObjectKind::Blob, b"wrong algorithm")
+                .expect_err("wrong-hash validation error");
+            assert!(
+                wrong_hash_error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .is_none(),
+                "wrong-hash errors must not use semantic validation wrapper"
+            );
+            let missing_io_error = validate_pack_file_with_store(
+                algorithm,
+                &temp.path().join("missing-semantic.pack"),
+                &InMemoryObjectStore::new(algorithm),
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("unrelated pack I/O error");
+            assert!(
+                missing_io_error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .is_none(),
+                "unrelated I/O errors must not use semantic validation wrapper"
+            );
+
+            let missing_tree = ObjectId::new(algorithm, &[0x52; 32][..algorithm.digest_len()]);
+            let signature = crate::Signature::new(
+                "Pack Validator",
+                "validator@example.invalid",
+                1_700_000_001,
+                "+0000",
+            )
+            .expect("signature");
+            let commit = crate::encode_commit(
+                &missing_tree,
+                &[],
+                &signature,
+                &signature,
+                b"missing link\n",
+            )
+            .expect("commit");
+            let source = InMemoryObjectStore::new(algorithm);
+            let commit_id = source
+                .write_object(GitObjectKind::Commit, &commit)
+                .expect("commit object");
+            let missing_path = temp.path().join("missing-index.pack");
+            fs::write(
+                &missing_path,
+                encode_pack_from_store(&source, algorithm, &[commit_id]).expect("pack"),
+            )
+            .expect("write missing pack");
+            let empty = InMemoryObjectStore::new(algorithm);
+            index_pack_file_with_store_and_validation(
+                algorithm,
+                &missing_path,
+                &empty,
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect("fsck accepts missing link");
+            let error = index_pack_file_with_store_and_validation(
+                algorithm,
+                &missing_path,
+                &empty,
+                PackValidationMode::Strict,
+                PackIndexVersion::V2,
+            )
+            .expect_err("strict rejects missing link");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(
+                error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .is_none(),
+                "strict-link errors must not use semantic validation wrapper"
+            );
+
+            let combined_bad_header = format!(
+                "xree {}\0committer Name <name@example.invalid> 1 +0000\n\n",
+                "0".repeat(algorithm.digest_len() * 2)
+            )
+            .into_bytes();
+            let combined_source = InMemoryObjectStore::new(algorithm);
+            let combined_id = combined_source
+                .write_object(GitObjectKind::Commit, &combined_bad_header)
+                .expect("combined malformed commit");
+            let combined_path = temp.path().join("malformed-header-with-nul.pack");
+            fs::write(
+                &combined_path,
+                encode_pack_from_store(&combined_source, algorithm, &[combined_id.clone()])
+                    .expect("combined malformed pack"),
+            )
+            .expect("write combined malformed pack");
+            let combined_error = index_pack_file_with_store_and_validation(
+                algorithm,
+                &combined_path,
+                &InMemoryObjectStore::new(algorithm),
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect_err("malformed tree header precedes NUL");
+            let combined_validation = combined_error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                .expect("typed combined malformed commit error");
+            assert_eq!(combined_validation.object_id, combined_id);
+            assert_eq!(combined_validation.kind, GitObjectKind::Commit);
+            assert_eq!(
+                combined_validation.reason,
+                PackObjectValidationReason::CommitTreeHeader
+            );
+            assert_eq!(
+                combined_validation.source.to_string(),
+                "commit tree header is malformed"
+            );
+
+            let valid_header_with_nul = format!(
+                "tree {}\nauthor Name <name@example.invalid> 1 +0000\ncommitter Name <name@example.invalid> 1 +0000\n\nmessage\0",
+                valid_tree_id.to_hex()
+            )
+            .into_bytes();
+            let valid_header_source = InMemoryObjectStore::new(algorithm);
+            let valid_header_id = valid_header_source
+                .write_object(GitObjectKind::Commit, &valid_header_with_nul)
+                .expect("valid-header NUL commit");
+            let valid_header_path = temp.path().join("valid-header-with-nul.pack");
+            fs::write(
+                &valid_header_path,
+                encode_pack_from_store(&valid_header_source, algorithm, &[valid_header_id.clone()])
+                    .expect("valid-header NUL pack"),
+            )
+            .expect("write valid-header NUL pack");
+            let valid_header_error = index_pack_file_with_store_and_validation(
+                algorithm,
+                &valid_header_path,
+                &InMemoryObjectStore::new(algorithm),
+                PackValidationMode::FsckObjects,
+                PackIndexVersion::V2,
+            )
+            .expect_err("valid tree header still rejects later NUL");
+            let valid_header_validation = valid_header_error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                .expect("typed valid-header NUL error");
+            assert_eq!(valid_header_validation.object_id, valid_header_id);
+            assert_eq!(valid_header_validation.kind, GitObjectKind::Commit);
+            assert_eq!(
+                valid_header_validation.reason,
+                PackObjectValidationReason::OtherSemantic
+            );
+            assert_eq!(
+                valid_header_validation.source.to_string(),
+                "commit contains a NUL byte"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_aware_thin_repair_matches_and_rejects_before_output() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let base = b"thin repair base";
+            let replacement = b"thin repair replacement";
+            let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+            let delta = replacement_delta(base, replacement);
+            let mut thin = Vec::new();
+            thin.extend_from_slice(PACK_MAGIC);
+            thin.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            thin.extend_from_slice(&1_u32.to_be_bytes());
+            write_ref_delta_header(&mut thin, base_id.as_bytes(), delta.len() as u64);
+            append_zlib(&mut thin, &delta);
+            finalize_pack(&mut thin, algorithm);
+            let thin_path = temp.path().join("thin.pack");
+            fs::write(&thin_path, thin).expect("write thin pack");
+            let external = InMemoryObjectStore::new(algorithm);
+            external
+                .write_object(GitObjectKind::Blob, base)
+                .expect("external base");
+            let ordinary_path = temp.path().join("ordinary-repaired.pack");
+            let validated_path = temp.path().join("validated-repaired.pack");
+            let ordinary = repair_thin_pack_file_to_path(
+                algorithm,
+                &thin_path,
+                &external,
+                &ordinary_path,
+                PackIndexVersion::V2,
+            )
+            .expect("ordinary repair");
+            let validated = repair_thin_pack_file_to_path_with_validation(
+                algorithm,
+                &thin_path,
+                &external,
+                &validated_path,
+                PackIndexVersion::V2,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("validated repair");
+            assert_eq!(validated.fixed_objects, 1);
+            assert_eq!(validated.indexed.pack_id, ordinary.indexed.pack_id);
+            assert_eq!(validated.indexed.index, ordinary.indexed.index);
+            assert_eq!(
+                validated.indexed.reverse_index,
+                ordinary.indexed.reverse_index
+            );
+            assert_eq!(validated.indexed.objects, 2);
+            assert_eq!(
+                fs::read(&validated_path).expect("validated repaired pack"),
+                fs::read(&ordinary_path).expect("ordinary repaired pack")
+            );
+            let thin_bytes = fs::read(&thin_path).expect("read thin pack");
+            let (thin_parsed, thin_validation) = parse_pack_entries_with_validation(
+                algorithm,
+                &thin_bytes,
+                &external,
+                PackValidationMode::FsckObjects,
+                PackEntryMode::Indexed,
+                true,
+            )
+            .expect("one-pass thin validation");
+            assert_eq!(thin_parsed.object_count, 1);
+            assert_eq!(thin_validation.validated_objects(), 1);
+            assert_eq!(validated.fixed_objects, 1);
+
+            let missing_path = temp.path().join("missing-repaired.pack");
+            let missing = InMemoryObjectStore::new(algorithm);
+            let error = repair_thin_pack_file_to_path_with_validation(
+                algorithm,
+                &thin_path,
+                &missing,
+                &missing_path,
+                PackIndexVersion::V2,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("missing thin base");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(!missing_path.exists());
+
+            let missing_tree = ObjectId::new(algorithm, &[0x61; 32][..algorithm.digest_len()]);
+            let signature = crate::Signature::new(
+                "Pack Validator",
+                "validator@example.invalid",
+                1_700_000_001,
+                "+0000",
+            )
+            .expect("signature");
+            let base_commit = crate::encode_commit(
+                &missing_tree,
+                &[],
+                &signature,
+                &signature,
+                b"thin base commit\n",
+            )
+            .expect("base commit");
+            let bad_commit = format!(
+                "xree {}\ncommitter Name <name@example.invalid> 1 +0000\n\n",
+                "0".repeat(algorithm.digest_len() * 2)
+            )
+            .into_bytes();
+            let bad_commit_id = hash_object(algorithm, GitObjectKind::Commit, &bad_commit);
+            let commit_id = hash_object(algorithm, GitObjectKind::Commit, &base_commit);
+            let bad_delta = replacement_delta(&base_commit, &bad_commit);
+            let mut malformed_thin = Vec::new();
+            malformed_thin.extend_from_slice(PACK_MAGIC);
+            malformed_thin.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            malformed_thin.extend_from_slice(&1_u32.to_be_bytes());
+            write_ref_delta_header(
+                &mut malformed_thin,
+                commit_id.as_bytes(),
+                bad_delta.len() as u64,
+            );
+            append_zlib(&mut malformed_thin, &bad_delta);
+            finalize_pack(&mut malformed_thin, algorithm);
+            let malformed_path = temp.path().join("malformed-thin.pack");
+            fs::write(&malformed_path, malformed_thin).expect("write malformed thin");
+            let malformed_store = InMemoryObjectStore::new(algorithm);
+            malformed_store
+                .write_object(GitObjectKind::Commit, &base_commit)
+                .expect("external base commit");
+            let ordinary_bad_path = temp.path().join("ordinary-bad-repaired.pack");
+            repair_thin_pack_file_to_path(
+                algorithm,
+                &malformed_path,
+                &malformed_store,
+                &ordinary_bad_path,
+                PackIndexVersion::V2,
+            )
+            .expect("ordinary repair accepts semantic input");
+            assert!(ordinary_bad_path.exists());
+            let validated_bad_path = temp.path().join("validated-bad-repaired.pack");
+            let error = repair_thin_pack_file_to_path_with_validation(
+                algorithm,
+                &malformed_path,
+                &malformed_store,
+                &validated_bad_path,
+                PackIndexVersion::V2,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("validated repair semantic error");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            let validation = error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                .expect("typed thin semantic validation error");
+            assert_eq!(validation.object_id, bad_commit_id);
+            assert_eq!(validation.kind, GitObjectKind::Commit);
+            assert_eq!(
+                validation.reason,
+                PackObjectValidationReason::CommitTreeHeader
+            );
+            assert_eq!(
+                validation.source.to_string(),
+                "commit tree header is malformed"
+            );
+            assert!(!validated_bad_path.exists());
+        }
+    }
+
+    #[test]
+    fn validation_aware_thin_repair_preflights_external_base_identity() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let base = b"preflight thin base";
+            let replacement = b"preflight thin replacement";
+            let base_id = hash_object(algorithm, GitObjectKind::Blob, base);
+            let delta = replacement_delta(base, replacement);
+            let mut thin = Vec::new();
+            thin.extend_from_slice(PACK_MAGIC);
+            thin.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            thin.extend_from_slice(&1_u32.to_be_bytes());
+            write_ref_delta_header(&mut thin, base_id.as_bytes(), delta.len() as u64);
+            append_zlib(&mut thin, &delta);
+            finalize_pack(&mut thin, algorithm);
+            let thin_path = temp.path().join("preflight-thin.pack");
+            fs::write(&thin_path, thin).expect("write thin pack");
+
+            let other_algorithm = match algorithm {
+                GitHashAlgorithm::Sha1 => GitHashAlgorithm::Sha256,
+                GitHashAlgorithm::Sha256 => GitHashAlgorithm::Sha1,
+            };
+            let wrong_algorithm_id =
+                ObjectId::new(other_algorithm, &[0xa1; 32][..other_algorithm.digest_len()]);
+            let wrong_id = ObjectId::new(algorithm, &[0xa2; 32][..algorithm.digest_len()]);
+            for (name, object_id, expected_kind) in [
+                (
+                    "wrong-algorithm",
+                    wrong_algorithm_id,
+                    io::ErrorKind::InvalidInput,
+                ),
+                ("wrong-id", wrong_id, io::ErrorKind::InvalidData),
+            ] {
+                let store = InvalidExternalBaseStore {
+                    object: LooseObject {
+                        id: object_id,
+                        kind: GitObjectKind::Blob,
+                        content: base.to_vec(),
+                    },
+                };
+                let output_path = temp.path().join(format!("{name}.repaired.pack"));
+                fs::write(&output_path, b"sentinel output").expect("write sentinel");
+                let error = repair_thin_pack_file_to_path_with_validation(
+                    algorithm,
+                    &thin_path,
+                    &store,
+                    &output_path,
+                    PackIndexVersion::V2,
+                    PackValidationMode::FsckObjects,
+                )
+                .expect_err("invalid external base identity");
+                assert_eq!(error.kind(), expected_kind);
+                assert_eq!(
+                    fs::read(&output_path).expect("read unchanged output"),
+                    b"sentinel output"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_semantic_errors_and_checksum_or_truncated_input_without_callbacks() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let mut malformed = Vec::new();
+            malformed.extend_from_slice(PACK_MAGIC);
+            malformed.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            malformed.extend_from_slice(&1_u32.to_be_bytes());
+            let bad_commit = b"tree 0000000000000000000000000000000000000000\nauthor missing-email\ncommitter Name <name@example.invalid> 1 +0000\n\n";
+            write_pack_object_header(
+                &mut malformed,
+                GitObjectKind::Commit,
+                bad_commit.len() as u64,
+            );
+            append_zlib(&mut malformed, bad_commit);
+            finalize_pack(&mut malformed, algorithm);
+            let path = temp.path().join("malformed.pack");
+            fs::write(&path, malformed.clone()).expect("write malformed");
+            let target = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &path,
+                &target,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("semantic error");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(target.object_count().expect("semantic writes"), 0);
+
+            let checksum_byte = malformed.len() - 1;
+            malformed[checksum_byte] ^= 1;
+            let checksum_path = temp.path().join("checksum.pack");
+            fs::write(&checksum_path, malformed).expect("write checksum");
+            let target = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &checksum_path,
+                &target,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("checksum error");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert_eq!(target.object_count().expect("checksum writes"), 0);
+
+            let source = InMemoryObjectStore::new(algorithm);
+            let object = source
+                .write_object(GitObjectKind::Blob, b"truncated zlib body")
+                .expect("truncated source object");
+            let mut truncated = encode_pack_from_store(&source, algorithm, &[object])
+                .expect("truncated source pack");
+            truncated.truncate(truncated.len() - algorithm.digest_len() - 8);
+            finalize_pack(&mut truncated, algorithm);
+            let truncated_path = temp.path().join("truncated-body.pack");
+            fs::write(&truncated_path, truncated).expect("write truncated body");
+            let target = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &truncated_path,
+                &target,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("valid outer checksum with truncated body");
+            assert!(matches!(
+                error.kind(),
+                io::ErrorKind::InvalidData | io::ErrorKind::UnexpectedEof
+            ));
+            assert_eq!(target.object_count().expect("truncated body writes"), 0);
+
+            let mut huge_count = PACK_MAGIC.to_vec();
+            huge_count.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            huge_count.extend_from_slice(&u32::MAX.to_be_bytes());
+            finalize_pack(&mut huge_count, algorithm);
+            let huge_path = temp.path().join("huge-count.pack");
+            fs::write(&huge_path, huge_count).expect("write huge count");
+            let target = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &huge_path,
+                &target,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("truncated huge count");
+            assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+            assert_eq!(target.object_count().expect("huge writes"), 0);
+        }
+    }
+
+    #[test]
+    fn strict_validation_rejects_duplicate_received_object_ids() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let source = InMemoryObjectStore::new(algorithm);
+            let id = source
+                .write_object(GitObjectKind::Blob, b"duplicate\n")
+                .expect("blob");
+            let pack = encode_pack_from_store(&source, algorithm, &[id.clone(), id]);
+            let temp = TempDir::new().expect("temp dir");
+            let path = temp.path().join("duplicate.pack");
+            fs::write(&path, pack.expect("pack")).expect("write pack");
+            let external = InMemoryObjectStore::new(algorithm);
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &path,
+                &external,
+                PackValidationMode::Strict,
+            )
+            .expect_err("duplicate IDs");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(
+                error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .is_none(),
+                "duplicate-ID errors must not use semantic validation wrapper"
+            );
+            assert_eq!(external.object_count().expect("external writes"), 0);
+        }
+    }
+
+    #[test]
+    fn validates_tree_rules_and_accepts_legacy_tag_without_tagger() {
+        for algorithm in [GitHashAlgorithm::Sha1, GitHashAlgorithm::Sha256] {
+            let temp = TempDir::new().expect("temp dir");
+            let store = InMemoryObjectStore::new(algorithm);
+            let object_id = store
+                .write_object(GitObjectKind::Blob, b"tag target")
+                .expect("tag target");
+            let valid_tag = format!(
+                "object {}\ntype blob\ntag v1\n\nlegacy tag\n",
+                object_id.to_hex()
+            )
+            .into_bytes();
+            let tag_path = temp.path().join("tag-without-tagger.pack");
+            let mut tag_pack = Vec::new();
+            tag_pack.extend_from_slice(PACK_MAGIC);
+            tag_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            tag_pack.extend_from_slice(&1_u32.to_be_bytes());
+            write_pack_object_header(&mut tag_pack, GitObjectKind::Tag, valid_tag.len() as u64);
+            append_zlib(&mut tag_pack, &valid_tag);
+            finalize_pack(&mut tag_pack, algorithm);
+            fs::write(&tag_path, tag_pack).expect("write tag pack");
+            validate_pack_file_with_store(
+                algorithm,
+                &tag_path,
+                &store,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("tag without tagger is accepted");
+            validate_pack_file_with_store(algorithm, &tag_path, &store, PackValidationMode::Strict)
+                .expect("strict tag without tagger is accepted");
+
+            let malformed_tag = format!(
+                "object {}\ntype blob\ntag v1\nextra-header yes\n\nlegacy tag\n",
+                object_id.to_hex()
+            )
+            .into_bytes();
+            let malformed_tag_path = temp.path().join("malformed-tag.pack");
+            let mut malformed_tag_pack = Vec::new();
+            malformed_tag_pack.extend_from_slice(PACK_MAGIC);
+            malformed_tag_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            malformed_tag_pack.extend_from_slice(&1_u32.to_be_bytes());
+            write_pack_object_header(
+                &mut malformed_tag_pack,
+                GitObjectKind::Tag,
+                malformed_tag.len() as u64,
+            );
+            append_zlib(&mut malformed_tag_pack, &malformed_tag);
+            finalize_pack(&mut malformed_tag_pack, algorithm);
+            fs::write(&malformed_tag_path, malformed_tag_pack).expect("write malformed tag");
+            validate_pack_file_with_store(
+                algorithm,
+                &malformed_tag_path,
+                &store,
+                PackValidationMode::FsckObjects,
+            )
+            .expect("extra tag header is ignored by fsck");
+            validate_pack_file_with_store(
+                algorithm,
+                &malformed_tag_path,
+                &store,
+                PackValidationMode::Strict,
+            )
+            .expect("extra tag header is ignored by strict fsck");
+
+            let malformed_tag =
+                format!("object {}\ntype invalid\ntag v1\n\n", object_id.to_hex()).into_bytes();
+            let mut malformed_tag_pack = Vec::new();
+            malformed_tag_pack.extend_from_slice(PACK_MAGIC);
+            malformed_tag_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            malformed_tag_pack.extend_from_slice(&1_u32.to_be_bytes());
+            write_pack_object_header(
+                &mut malformed_tag_pack,
+                GitObjectKind::Tag,
+                malformed_tag.len() as u64,
+            );
+            append_zlib(&mut malformed_tag_pack, &malformed_tag);
+            finalize_pack(&mut malformed_tag_pack, algorithm);
+            let malformed_tag_path = temp.path().join("typed-malformed-tag.pack");
+            fs::write(&malformed_tag_path, malformed_tag_pack).expect("write typed malformed tag");
+            let error = validate_pack_file_with_store(
+                algorithm,
+                &malformed_tag_path,
+                &store,
+                PackValidationMode::FsckObjects,
+            )
+            .expect_err("typed malformed tag");
+            let validation = error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                .expect("typed tag validation error");
+            assert_eq!(
+                validation.object_id,
+                hash_object(algorithm, GitObjectKind::Tag, &malformed_tag)
+            );
+            assert_eq!(validation.kind, GitObjectKind::Tag);
+            assert_eq!(validation.reason, PackObjectValidationReason::OtherSemantic);
+            assert_eq!(validation.source.to_string(), "tag type is invalid");
+
+            for (index, tag) in [
+                format!(
+                    "object {}\ntype blob\ntag v1\ntagger\nextra-header yes\n\nlegacy tag\n",
+                    object_id.to_hex()
+                ),
+                format!(
+                    "object {}\ntype blob\ntag v1\ngpgsig signature\n continuation\nextra-header yes\n\nlegacy tag\n",
+                    object_id.to_hex()
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut tag_pack = Vec::new();
+                tag_pack.extend_from_slice(PACK_MAGIC);
+                tag_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+                tag_pack.extend_from_slice(&1_u32.to_be_bytes());
+                write_pack_object_header(&mut tag_pack, GitObjectKind::Tag, tag.len() as u64);
+                append_zlib(&mut tag_pack, tag.as_bytes());
+                finalize_pack(&mut tag_pack, algorithm);
+                let tag_path = temp.path().join(format!("ignored-tag-header-{index}.pack"));
+                fs::write(&tag_path, tag_pack).expect("write ignored tag header pack");
+                for mode in [PackValidationMode::FsckObjects, PackValidationMode::Strict] {
+                    validate_pack_file_with_store(algorithm, &tag_path, &store, mode)
+                        .expect("ignored tag header is accepted in both modes");
+                }
+            }
+
+            for (index, name) in [
+                b"v~1".as_slice(),
+                b"bad@{name".as_slice(),
+                b"bad.lock".as_slice(),
+                b"@".as_slice(),
+                b"bad\x01".as_slice(),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut tag = Vec::new();
+                tag.extend_from_slice(
+                    format!("object {}\ntype blob\ntag ", object_id.to_hex()).as_bytes(),
+                );
+                tag.extend_from_slice(name);
+                tag.extend_from_slice(b"\n\ninfo-only tag\n");
+                let mut tag_pack = Vec::new();
+                tag_pack.extend_from_slice(PACK_MAGIC);
+                tag_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+                tag_pack.extend_from_slice(&1_u32.to_be_bytes());
+                write_pack_object_header(&mut tag_pack, GitObjectKind::Tag, tag.len() as u64);
+                append_zlib(&mut tag_pack, &tag);
+                finalize_pack(&mut tag_pack, algorithm);
+                let tag_path = temp.path().join(format!("info-tag-{index}.pack"));
+                fs::write(&tag_path, tag_pack).expect("write info-only tag");
+                validate_pack_file_with_store(
+                    algorithm,
+                    &tag_path,
+                    &store,
+                    PackValidationMode::Strict,
+                )
+                .expect("bad tag name remains info-only");
+            }
+
+            let trailing_tree_id = store
+                .write_object(GitObjectKind::Tree, &[])
+                .expect("trailing commit tree");
+            let trailing_commit = format!(
+                "tree {}\nauthor Name <name@example.invalid> 1 +0000\ncommitter Name <name@example.invalid> 1 +0000\nextra-header yes\ncontinuation bytes\n\nmessage\n",
+                trailing_tree_id.to_hex()
+            );
+            let trailing_commit_id = store
+                .write_object(GitObjectKind::Commit, trailing_commit.as_bytes())
+                .expect("trailing commit");
+            let trailing_commit_pack =
+                encode_pack_from_store(&store, algorithm, &[trailing_commit_id])
+                    .expect("trailing commit pack");
+            let trailing_commit_path = temp.path().join("trailing-commit.pack");
+            fs::write(&trailing_commit_path, trailing_commit_pack)
+                .expect("write trailing commit pack");
+            validate_pack_file_with_store(
+                algorithm,
+                &trailing_commit_path,
+                &store,
+                PackValidationMode::Strict,
+            )
+            .expect("commit trailing bytes are accepted");
+
+            let names = [b"a".as_slice(), b"a".as_slice()];
+            let mut duplicate_tree = Vec::new();
+            for (idx, name) in names.into_iter().enumerate() {
+                duplicate_tree.extend_from_slice(b"100644 ");
+                duplicate_tree.extend_from_slice(name);
+                duplicate_tree.push(0);
+                duplicate_tree
+                    .extend(std::iter::repeat(idx as u8 + 1).take(algorithm.digest_len()));
+            }
+            let mut unordered_tree = Vec::new();
+            for name in [b"b".as_slice(), b"a".as_slice()] {
+                unordered_tree.extend_from_slice(b"100644 ");
+                unordered_tree.extend_from_slice(name);
+                unordered_tree.push(0);
+                unordered_tree.extend(std::iter::repeat(0x22).take(algorithm.digest_len()));
+            }
+            let mut forbidden_tree = b"100644 .git\0".to_vec();
+            forbidden_tree.extend(std::iter::repeat(0x33).take(algorithm.digest_len()));
+            let mut uppercase_git_tree = b"100644 .GIT\0".to_vec();
+            uppercase_git_tree.extend(std::iter::repeat(0x34).take(algorithm.digest_len()));
+            let mut backslash_git_tree = b"100644 .git\\foobar\0".to_vec();
+            backslash_git_tree.extend(std::iter::repeat(0x35).take(algorithm.digest_len()));
+            let mut null_tree = b"100644 file\0".to_vec();
+            null_tree.extend(std::iter::repeat(0).take(algorithm.digest_len()));
+            let mut zero_padded_tree = b"040000 file\0".to_vec();
+            zero_padded_tree.extend(std::iter::repeat(0x36).take(algorithm.digest_len()));
+            for (name, tree_content) in [
+                ("duplicate", duplicate_tree),
+                ("unordered", unordered_tree),
+                ("forbidden", forbidden_tree),
+                ("uppercase-git", uppercase_git_tree),
+                ("backslash-git", backslash_git_tree),
+                ("null", null_tree),
+                ("zero-padded", zero_padded_tree),
+            ] {
+                let mut tree_pack = Vec::new();
+                tree_pack.extend_from_slice(PACK_MAGIC);
+                tree_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+                tree_pack.extend_from_slice(&1_u32.to_be_bytes());
+                write_pack_object_header(
+                    &mut tree_pack,
+                    GitObjectKind::Tree,
+                    tree_content.len() as u64,
+                );
+                append_zlib(&mut tree_pack, &tree_content);
+                finalize_pack(&mut tree_pack, algorithm);
+                let tree_path = temp.path().join(format!("{name}.pack"));
+                fs::write(&tree_path, tree_pack).expect("write tree pack");
+                let result = validate_pack_file_with_store(
+                    algorithm,
+                    &tree_path,
+                    &store,
+                    PackValidationMode::FsckObjects,
+                );
+                let error = match result {
+                    Ok(report) => panic!("malformed tree {name} unexpectedly passed: {report:?}"),
+                    Err(error) => error,
+                };
+                assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                let validation = error
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<PackObjectValidationError>())
+                    .expect("typed tree validation error");
+                assert_eq!(
+                    validation.object_id,
+                    hash_object(algorithm, GitObjectKind::Tree, &tree_content)
+                );
+                assert_eq!(validation.kind, GitObjectKind::Tree);
+                assert_eq!(validation.reason, PackObjectValidationReason::OtherSemantic);
+                if name == "zero-padded" {
+                    assert!(error.to_string().contains("zero-padded"));
+                }
+            }
+
+            for (index, mode) in [
+                b"100664".as_slice(),
+                b"100000".as_slice(),
+                b"123456".as_slice(),
+                b"120644".as_slice(),
+                b"160001".as_slice(),
+                b"140000".as_slice(),
+                b"170000".as_slice(),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let unknown_link_mode = mode == b"140000" || mode == b"170000";
+                let mut tree_content = Vec::new();
+                tree_content.extend_from_slice(mode);
+                tree_content.push(b' ');
+                tree_content.extend_from_slice(b"mode-file\0");
+                if mode == b"160001" {
+                    tree_content.extend(std::iter::repeat(0x37).take(algorithm.digest_len()));
+                } else {
+                    tree_content.extend_from_slice(object_id.as_bytes());
+                }
+                let mut tree_pack = Vec::new();
+                tree_pack.extend_from_slice(PACK_MAGIC);
+                tree_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+                tree_pack.extend_from_slice(&1_u32.to_be_bytes());
+                write_pack_object_header(
+                    &mut tree_pack,
+                    GitObjectKind::Tree,
+                    tree_content.len() as u64,
+                );
+                append_zlib(&mut tree_pack, &tree_content);
+                finalize_pack(&mut tree_pack, algorithm);
+                let tree_path = temp.path().join(format!("mode-{index}.pack"));
+                fs::write(&tree_path, tree_pack).expect("write noncanonical mode tree");
+                for validation_mode in [PackValidationMode::FsckObjects, PackValidationMode::Strict]
+                {
+                    let result = validate_pack_file_with_store(
+                        algorithm,
+                        &tree_path,
+                        &store,
+                        validation_mode,
+                    );
+                    if unknown_link_mode && validation_mode == PackValidationMode::Strict {
+                        let error = result.expect_err("strict rejects unknown tree file types");
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    } else {
+                        result.expect("tree mode follows Git's default severity");
+                    }
+                }
+            }
+
+            for name_len in [4095, 4096, 4097] {
+                let mut tree_content = b"100644 ".to_vec();
+                tree_content.extend(std::iter::repeat(b'x').take(name_len));
+                tree_content.push(0);
+                tree_content.extend_from_slice(object_id.as_bytes());
+                let mut tree_pack = Vec::new();
+                tree_pack.extend_from_slice(PACK_MAGIC);
+                tree_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+                tree_pack.extend_from_slice(&1_u32.to_be_bytes());
+                write_pack_object_header(
+                    &mut tree_pack,
+                    GitObjectKind::Tree,
+                    tree_content.len() as u64,
+                );
+                append_zlib(&mut tree_pack, &tree_content);
+                finalize_pack(&mut tree_pack, algorithm);
+                let tree_path = temp.path().join(format!("large-name-{name_len}.pack"));
+                fs::write(&tree_path, tree_pack).expect("write large-name tree");
+                for validation_mode in [PackValidationMode::FsckObjects, PackValidationMode::Strict]
+                {
+                    let result = validate_pack_file_with_store(
+                        algorithm,
+                        &tree_path,
+                        &store,
+                        validation_mode,
+                    );
+                    if name_len > 4096 {
+                        let error = result.expect_err("pathname above Git's threshold");
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        assert!(error.to_string().contains("4096"));
+                    } else {
+                        result.expect("pathname at or below Git's threshold");
+                    }
+                }
+            }
+
+            let gitlink_id = ObjectId::new(algorithm, &[0x37; 32][..algorithm.digest_len()]);
+            let mut gitlink_tree = b"160000 submodule\0".to_vec();
+            gitlink_tree.extend_from_slice(gitlink_id.as_bytes());
+            let mut gitlink_pack = Vec::new();
+            gitlink_pack.extend_from_slice(PACK_MAGIC);
+            gitlink_pack.extend_from_slice(&PACK_VERSION_2.to_be_bytes());
+            gitlink_pack.extend_from_slice(&1_u32.to_be_bytes());
+            write_pack_object_header(
+                &mut gitlink_pack,
+                GitObjectKind::Tree,
+                gitlink_tree.len() as u64,
+            );
+            append_zlib(&mut gitlink_pack, &gitlink_tree);
+            finalize_pack(&mut gitlink_pack, algorithm);
+            let gitlink_path = temp.path().join("unwalked-gitlink.pack");
+            fs::write(&gitlink_path, gitlink_pack).expect("write gitlink tree");
+            validate_pack_file_with_store(
+                algorithm,
+                &gitlink_path,
+                &store,
+                PackValidationMode::Strict,
+            )
+            .expect("strict fsck does not walk gitlinks");
+        }
+    }
+
     fn empty_cached_pack_index() -> CachedPackIndex {
         cached_pack_index_with_len(0)
     }
@@ -10347,6 +13027,12 @@ mod tests {
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(content).expect("write zlib content");
         out.extend_from_slice(&encoder.finish().expect("finish zlib"));
+    }
+
+    fn finalize_pack(pack: &mut Vec<u8>, algorithm: GitHashAlgorithm) {
+        let mut hasher = GitObjectHash::new(algorithm);
+        hasher.update(pack);
+        pack.extend_from_slice(hasher.finalize().as_bytes());
     }
 
     fn write_ref_delta_header(out: &mut Vec<u8>, base_id: &[u8], mut size: u64) {

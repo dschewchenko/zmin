@@ -2,7 +2,8 @@ mod common;
 
 use std::fs;
 use std::io::{BufRead, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use common::{
     command_failure_output, command_output, command_output_with_env, configure_identity, git,
@@ -23,8 +24,22 @@ fn local_file_url(path: &Path) -> String {
 struct FakeImapServer {
     port: u16,
     messages: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    transcript: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    list_wire_transcript: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
+
+#[derive(Debug, Eq, PartialEq)]
+struct ProcessCapture {
+    status: i32,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+const PINNED_STOCK_GIT: &str = "/private/tmp/skron-git-w51-stock.vr2JAX/git-2.55.0/git";
+const PINNED_STOCK_VERSION: &[u8] = b"git version 2.55.0\n";
+const STOCK_IMAP_COMMAND_ERROR: &[u8] =
+    b"git: 'imap-send' is not a git command. See 'git --help'.\n";
 
 struct FakeSmtpServer {
     port: u16,
@@ -70,20 +85,42 @@ impl FakeImapServer {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind fake imap");
         let port = listener.local_addr().expect("local addr").port();
         let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let transcript = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let list_wire_transcript = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let thread_messages = messages.clone();
+        let thread_transcript = transcript.clone();
+        let thread_list_wire_transcript = list_wire_transcript.clone();
         let handle = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept fake imap");
-            serve_fake_imap(stream, thread_messages);
+            serve_fake_imap(
+                stream,
+                thread_messages,
+                thread_transcript,
+                thread_list_wire_transcript,
+            );
         });
         Self {
             port,
             messages,
+            transcript,
+            list_wire_transcript,
             handle: Some(handle),
         }
     }
 
     fn appended_messages(&self) -> Vec<Vec<u8>> {
         self.messages.lock().expect("messages lock").clone()
+    }
+
+    fn transcript(&self) -> Vec<String> {
+        self.transcript.lock().expect("transcript lock").clone()
+    }
+
+    fn list_wire_transcript(&self) -> Vec<Vec<u8>> {
+        self.list_wire_transcript
+            .lock()
+            .expect("list wire transcript lock")
+            .clone()
     }
 }
 
@@ -154,6 +191,8 @@ fn serve_fake_smtp(
 fn serve_fake_imap(
     stream: std::net::TcpStream,
     messages: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    transcript: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    list_wire_transcript: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
 ) {
     let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone fake imap"));
     let mut writer = stream;
@@ -166,6 +205,10 @@ fn serve_fake_imap(
             return;
         }
         let line = line.trim_end_matches(['\r', '\n']).to_owned();
+        transcript
+            .lock()
+            .expect("transcript lock")
+            .push(line.clone());
         let tag = line.split_whitespace().next().unwrap_or("A0000").to_owned();
         if line.contains(" LOGIN ") {
             writeln!(writer, "{tag} OK LOGIN completed\r").expect("login response");
@@ -185,10 +228,16 @@ fn serve_fake_imap(
             messages.lock().expect("messages lock").push(message);
             writeln!(writer, "{tag} OK APPEND completed\r").expect("append response");
         } else if line.contains(" LIST ") {
-            writer
-                .write_all(b"* LIST () \"/\" \"INBOX.Drafts\"\r\n")
-                .expect("list row");
-            writeln!(writer, "{tag} OK LIST completed\r").expect("list response");
+            let mut wire = list_wire_transcript
+                .lock()
+                .expect("list wire transcript lock");
+            wire.push(format!("{line}\r\n").into_bytes());
+            let list_row = b"* LIST () \"/\" \"INBOX.Drafts\"\r\n";
+            wire.push(list_row.to_vec());
+            writer.write_all(list_row).expect("list row");
+            let list_response = format!("{tag} OK LIST completed\r\n").into_bytes();
+            wire.push(list_response.clone());
+            writer.write_all(&list_response).expect("list response");
         } else if line.contains(" LOGOUT") {
             writer.write_all(b"* BYE logging out\r\n").expect("bye");
             writeln!(writer, "{tag} OK LOGOUT completed\r").expect("logout response");
@@ -197,6 +246,62 @@ fn serve_fake_imap(
             writeln!(writer, "{tag} BAD unsupported\r").expect("bad response");
         }
     }
+}
+
+fn pinned_stock_git() -> PathBuf {
+    let configured = std::env::var_os("ZMIN_STOCK_GIT")
+        .expect("ZMIN_STOCK_GIT must point to the pinned Git v2.55.0 binary");
+    let configured = PathBuf::from(configured);
+    assert_eq!(configured, Path::new(PINNED_STOCK_GIT));
+    let output = Command::new(&configured)
+        .arg("--version")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .output()
+        .expect("run pinned stock Git");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, PINNED_STOCK_VERSION);
+    assert!(output.stderr.is_empty());
+    configured
+}
+
+fn run_capture(command: &Path, cwd: &Path, args: &[&str], stdin: &[u8]) -> ProcessCapture {
+    let mut child = Command::new(command)
+        .args(args)
+        .current_dir(cwd)
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn captured command");
+    child
+        .stdin
+        .as_mut()
+        .expect("captured stdin")
+        .write_all(stdin)
+        .expect("write captured stdin");
+    let output = child.wait_with_output().expect("wait for captured command");
+    ProcessCapture {
+        status: output.status.code().expect("captured exit code"),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    }
+}
+
+fn configure_imap(repo: &Path, port: u16) {
+    git(
+        repo,
+        ["config", "imap.host", &format!("imap://127.0.0.1:{port}")],
+    );
+    git(repo, ["config", "imap.user", "user"]);
+    git(repo, ["config", "imap.pass", "pass"]);
+    git(repo, ["config", "imap.folder", "INBOX.Configured"]);
+}
+
+fn run_zmin_capture(cwd: &Path, args: &[&str], stdin: &[u8]) -> ProcessCapture {
+    run_capture(Path::new(zmin_bin()), cwd, args, stdin)
 }
 
 fn normalize_send_email_patch_output(text: &str) -> String {
@@ -1142,6 +1247,116 @@ fn imap_send_appends_mbox_messages_to_plain_imap_server() {
     assert_eq!(appends.len(), 2);
     assert!(String::from_utf8_lossy(&appends[0]).contains("Subject: one"));
     assert!(String::from_utf8_lossy(&appends[1]).contains("Subject: two"));
+}
+
+#[test]
+fn imap_send_zmin_options_are_rejected_by_pinned_stock_git() {
+    let stock = pinned_stock_git();
+    let cwd = TempDir::new().expect("stock imap rejection cwd");
+    let cases: &[&[&str]] = &[
+        &["imap-send", "--folder", "INBOX.Custom"],
+        &["imap-send", "-f", "INBOX.Short"],
+        &["imap-send", "--list"],
+    ];
+
+    for args in cases {
+        let capture = run_capture(&stock, cwd.path(), args, b"");
+        assert_eq!(capture.status, 1, "args: {args:?}");
+        assert!(capture.stdout.is_empty(), "args: {args:?}");
+        assert_eq!(capture.stderr, STOCK_IMAP_COMMAND_ERROR, "args: {args:?}");
+    }
+}
+
+fn run_zmin_imap_append_case(
+    args: &[&str],
+    mbox: &[u8],
+) -> (ProcessCapture, Vec<Vec<u8>>, Vec<String>) {
+    let repo = git_init();
+    let server = FakeImapServer::new();
+    configure_imap(repo.path(), server.port);
+    let capture = run_zmin_capture(repo.path(), args, mbox);
+    let messages = server.appended_messages();
+    let transcript = server.transcript();
+    (capture, messages, transcript)
+}
+
+#[test]
+fn imap_send_folder_and_short_alias_have_exact_mailbox_state() {
+    let mbox = b"From sender@example.test Mon Sep 17 00:00:00 2001\nFrom: Sender <sender@example.test>\nSubject: folder override\n\nbody\n";
+    let (folder_capture, folder_messages, folder_transcript) =
+        run_zmin_imap_append_case(&["imap-send", "--quiet", "--folder", "INBOX.Custom"], mbox);
+    let (short_capture, short_messages, short_transcript) =
+        run_zmin_imap_append_case(&["imap-send", "--quiet", "-f", "INBOX.Short"], mbox);
+
+    for capture in [&folder_capture, &short_capture] {
+        assert_eq!(capture.status, 0);
+        assert!(capture.stdout.is_empty());
+        assert!(capture.stderr.is_empty());
+    }
+    assert_eq!(folder_messages, vec![mbox.to_vec()]);
+    assert_eq!(short_messages, vec![mbox.to_vec()]);
+    assert_eq!(
+        folder_transcript,
+        vec![
+            "A0001 LOGIN \"user\" \"pass\"".to_owned(),
+            format!("A0002 APPEND \"INBOX.Custom\" {{{}}}", mbox.len()),
+            "A0003 LOGOUT".to_owned(),
+        ]
+    );
+    assert_eq!(
+        short_transcript,
+        vec![
+            "A0001 LOGIN \"user\" \"pass\"".to_owned(),
+            format!("A0002 APPEND \"INBOX.Short\" {{{}}}", mbox.len()),
+            "A0003 LOGOUT".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn imap_send_list_has_exact_output_and_transcript() {
+    let repo = git_init();
+    let server = FakeImapServer::new();
+    configure_imap(repo.path(), server.port);
+    let capture = run_zmin_capture(repo.path(), &["imap-send", "--list"], b"");
+    let messages = server.appended_messages();
+    let transcript = server.transcript();
+    let list_wire_transcript = server.list_wire_transcript();
+
+    assert_eq!(capture.status, 0);
+    assert_eq!(capture.stdout, b"() \"/\" \"INBOX.Drafts\"\n");
+    assert!(capture.stderr.is_empty());
+    assert!(messages.is_empty());
+    assert_eq!(
+        transcript,
+        vec![
+            "A0001 LOGIN \"user\" \"pass\"".to_owned(),
+            "A0002 LIST \"\" \"*\"".to_owned(),
+            "A0003 LOGOUT".to_owned(),
+        ]
+    );
+    assert_eq!(
+        list_wire_transcript,
+        vec![
+            b"A0002 LIST \"\" \"*\"\r\n".to_vec(),
+            b"* LIST () \"/\" \"INBOX.Drafts\"\r\n".to_vec(),
+            b"A0002 OK LIST completed\r\n".to_vec(),
+        ]
+    );
+}
+
+#[test]
+fn imap_send_folder_reports_missing_host_without_network_side_effects() {
+    let repo = git_init();
+    let capture = run_zmin_capture(
+        repo.path(),
+        &["imap-send", "--quiet", "--folder", "INBOX.Custom"],
+        b"",
+    );
+
+    assert_eq!(capture.status, 1);
+    assert!(capture.stdout.is_empty());
+    assert_eq!(capture.stderr, b"fatal: no imap host specified\n");
 }
 
 #[test]

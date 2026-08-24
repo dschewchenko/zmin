@@ -1,3 +1,4 @@
+use crate::cli::schema::DiskUsageValue;
 use crate::runtime;
 
 fn normalize_show_similarity_operand(option: &mut Option<String>, args: &mut Vec<String>) {
@@ -579,7 +580,7 @@ pub(crate) fn dispatch(
             count,
             dense,
             full_history,
-            glob: glob.as_deref(),
+            glob: glob.last().map(String::as_str),
             in_commit_order,
             expand_tabs,
             show_linear_break,
@@ -865,7 +866,7 @@ pub(crate) fn dispatch(
                     exclude_first_parent_only,
                     exclude_hidden,
                     exclude_promisor_objects,
-                    tags,
+                    tags: _tags,
                     author,
                     committer,
                     alternate_refs,
@@ -914,6 +915,7 @@ pub(crate) fn dispatch(
                     children,
                     root,
                     patch,
+                    no_patch,
                     patch_with_stat,
                     combined,
                     dense_combined,
@@ -1016,7 +1018,7 @@ pub(crate) fn dispatch(
             bisect_vars,
             cherry,
             count,
-            glob: glob.as_deref(),
+            glob: glob.last().map(String::as_str),
             skip,
             max_parents: max_parents.as_deref(),
             no_max_parents,
@@ -1055,6 +1057,7 @@ pub(crate) fn dispatch(
             boundary,
             root,
             patch,
+            no_patch,
             patch_with_stat,
             combined,
             dense_combined,
@@ -1142,7 +1145,7 @@ pub(crate) fn dispatch(
             filter_print_omitted,
             filter_provided_objects,
             raw_args,
-            revs: extend_history_ref_selector_revs(revs, Vec::new(), tags, Vec::new()),
+            revs,
         }),
         runtime::Command::Whatchanged {
             oneline,
@@ -1234,6 +1237,7 @@ pub(crate) fn dispatch(
                 children: false,
                 root,
                 patch: patch || combined || dense_combined,
+                no_patch: false,
                 patch_with_stat,
                 combined,
                 dense_combined,
@@ -1385,8 +1389,7 @@ pub(crate) fn dispatch(
             normalize_show_similarity_operand(&mut find_renames, &mut args);
             normalize_show_similarity_operand(&mut find_copies, &mut args);
             super::history_commands::show(super::history_commands::ShowOptions {
-                no_patch,
-                patch,
+                patch_mode: runtime::LogPatchMode::from_raw_args(raw_args, patch, no_patch),
                 oneline,
                 zero,
                 stat,
@@ -1437,6 +1440,7 @@ pub(crate) fn dispatch(
             header,
             graph,
             all,
+            not: _not,
             exclude,
             exclude_first_parent_only,
             exclude_hidden,
@@ -1470,9 +1474,9 @@ pub(crate) fn dispatch(
             count,
             glob,
             skip,
-            branches,
-            tags,
-            remotes,
+            branches: _branches,
+            tags: _tags,
+            remotes: _remotes,
             max_parents,
             max_age,
             no_max_parents,
@@ -1578,7 +1582,7 @@ pub(crate) fn dispatch(
             bisect_vars,
             cherry,
             count,
-            glob: glob.as_deref(),
+            glob: glob.last().map(String::as_str),
             skip,
             max_parents: max_parents.as_deref(),
             max_age: max_age.as_deref(),
@@ -1629,7 +1633,7 @@ pub(crate) fn dispatch(
             cherry_pick,
             cherry_mark,
             boundary,
-            max_count,
+            max_count: super::history_commands::parse_log_max_count(max_count.as_deref())?,
             since: since.as_deref(),
             since_as_filter: since_as_filter.as_deref(),
             until: until.as_deref(),
@@ -1640,7 +1644,6 @@ pub(crate) fn dispatch(
             single_worktree,
             commit_header,
             no_commit_header,
-            disk_usage,
             progress,
             no_filter,
             missing: missing.as_deref(),
@@ -1648,8 +1651,22 @@ pub(crate) fn dispatch(
             quiet,
             format: format.as_deref(),
             pretty: pretty.as_deref(),
+            disk_usage: disk_usage
+                .map(|value| match value {
+                    None => Ok(super::history_commands::RevListDiskUsageMode::Bytes),
+                    Some(DiskUsageValue::Human) => {
+                        Ok(super::history_commands::RevListDiskUsageMode::Human)
+                    }
+                    Some(DiskUsageValue::Invalid(value)) => Err(runtime::CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "invalid value for '--disk-usage=<format>': '{value}', the only allowed format is 'human'"
+                        ),
+                    }),
+                })
+                .transpose()?,
             raw_args,
-            revs: extend_history_ref_selector_revs(revs, branches, tags, remotes),
+            revs,
         }),
         runtime::Command::MergeBase {
             all,

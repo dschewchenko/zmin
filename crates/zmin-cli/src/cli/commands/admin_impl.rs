@@ -43,6 +43,8 @@ const UNTRACKED_CACHE_BODY_TAIL: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2e,
     0x67, 0x69, 0x74, 0x69, 0x67, 0x6e, 0x6f, 0x72, 0x65, 0x00, 0x00,
 ];
+const PROMISOR_BACKFILL_MAX_ROOTS: usize = 1024;
+const PROMISOR_BACKFILL_MAX_REMOTES: usize = 64;
 
 #[derive(Clone)]
 struct SyntheticIndexExtension {
@@ -1399,7 +1401,8 @@ fn managed_hook_path_matches_extensions(path: &[u8], extensions: &[String]) -> b
 }
 
 fn managed_hook_staged_entries(repo: &GitRepo) -> Result<Vec<ManagedHookStagedEntry>> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_hash_algorithm_from_config(repo).map_err(CliError::Io)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     if !repo.index_path.exists() {
         return Ok(Vec::new());
     }
@@ -2275,10 +2278,8 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
         .any(|window| window == LINK_EXTENSION_SIGNATURE)
     {
         let merged = read_index(index_path).map_err(CliError::Io)?;
-        let temporary_path = index_path.with_file_name(format!(
-            ".zmin-split-source-{}",
-            std::process::id()
-        ));
+        let temporary_path =
+            index_path.with_file_name(format!(".zmin-split-source-{}", std::process::id()));
         merged
             .write_to_path_without_split(&temporary_path)
             .map_err(CliError::Io)?;
@@ -2396,27 +2397,30 @@ fn prune_expired_shared_indexes(index_path: &Path) -> Result<()> {
         .unwrap_or(0);
     let age = Duration::from_secs(days.saturating_mul(86_400));
     let now = SystemTime::now();
-    let active_shared_name = fs::read(index_path)
-        .ok()
-        .and_then(|data| {
-            let link = data.windows(LINK_EXTENSION_SIGNATURE.len()).position(|window| {
-                window == LINK_EXTENSION_SIGNATURE
-            })?;
-            let body_start = link.checked_add(8)?;
-            let hash_end = body_start.checked_add(INDEX_FILE_CHECKSUM_LEN)?;
-            (hash_end <= data.len()).then(|| {
-                format!(
-                    "sharedindex.{}",
-                    data[body_start..hash_end]
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>()
-                )
-            })
-        });
+    let active_shared_name = fs::read(index_path).ok().and_then(|data| {
+        let link = data
+            .windows(LINK_EXTENSION_SIGNATURE.len())
+            .position(|window| window == LINK_EXTENSION_SIGNATURE)?;
+        let body_start = link.checked_add(8)?;
+        let hash_end = body_start.checked_add(INDEX_FILE_CHECKSUM_LEN)?;
+        (hash_end <= data.len()).then(|| {
+            format!(
+                "sharedindex.{}",
+                data[body_start..hash_end]
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            )
+        })
+    });
     let shared_entries = fs::read_dir(parent)?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("sharedindex."))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sharedindex.")
+        })
         .collect::<Vec<_>>();
     let newest_non_active = shared_entries
         .iter()
@@ -3460,7 +3464,8 @@ fn backfill(
     }
     let promisor_remotes = promisor_remote_names(&repo)?;
     if !revs.is_empty() {
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let algorithm = repo_hash_algorithm_from_config(&repo).map_err(CliError::Io)?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
         let revs = collect_rev_list_revs(&repo, &store, false, revs)?;
         if !promisor_remotes.is_empty() {
             backfill_from_promisor_remotes(&repo, &store, &revs, &promisor_remotes)?;
@@ -3471,22 +3476,24 @@ fn backfill(
 }
 
 pub(crate) fn promisor_remote_names(repo: &GitRepo) -> Result<Vec<String>> {
-    let mut remotes = BTreeSet::new();
+    let mut remotes = Vec::new();
     for entry in read_config_entries(repo)? {
         if entry.section.eq_ignore_ascii_case("remote")
             && entry.key.eq_ignore_ascii_case("promisor")
             && entry.bool_value().unwrap_or(false)
+            && !remotes.iter().any(|remote| remote == &entry.subsection)
         {
-            remotes.insert(entry.subsection);
+            remotes.push(entry.subsection);
         }
     }
     if let Some(remote) = read_config_value(repo, "extensions.partialclone")? {
         let remote = remote.trim();
         if !remote.is_empty() {
-            remotes.insert(remote.to_owned());
+            remotes.retain(|entry| entry != remote);
+            remotes.push(remote.to_owned());
         }
     }
-    Ok(remotes.into_iter().collect())
+    Ok(remotes)
 }
 
 fn backfill_from_promisor_remotes(
@@ -3518,55 +3525,70 @@ fn backfill_promisor_objects_with_remotes(
     remotes: &[String],
     filter: Option<&str>,
 ) -> Result<bool> {
+    if roots.len() > PROMISOR_BACKFILL_MAX_ROOTS {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "promisor backfill requested {} objects, limit is {}",
+                roots.len(),
+                PROMISOR_BACKFILL_MAX_ROOTS
+            ),
+        });
+    }
+    if remotes.len() > PROMISOR_BACKFILL_MAX_REMOTES {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "promisor backfill has {} remotes, limit is {}",
+                remotes.len(),
+                PROMISOR_BACKFILL_MAX_REMOTES
+            ),
+        });
+    }
     if roots.is_empty() {
         return Ok(!remotes.is_empty());
     }
     if remotes.is_empty() {
         return Ok(false);
     }
+    let algorithm = repo_hash_algorithm_from_config(repo).map_err(CliError::Io)?;
+    let destination_store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     for remote in remotes {
-        let existing_packs = promisor_pack_names(&repo.objects_dir)?;
         let url = remote_url(repo, remote)?;
         if transport_commands::is_http_transport_url(&url) {
             match backfill_http_promisor_remote(repo, &url, roots) {
-                Ok(()) => {}
+                Ok(()) if promisor_roots_present(&destination_store, roots)? => return Ok(true),
+                Ok(()) => continue,
                 Err(error) if promisor_remote_missing_object_error(&error) => continue,
                 Err(error) => return Err(error),
             }
-            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
-            continue;
         }
-        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-        let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
         let upload_pack = read_config_section_value(repo, "remote", remote, "uploadpack")?;
         if transport_commands::is_git_daemon_transport_url(&url) {
-            match transport_commands::daemon_fetch_pack_with_haves(
+            match transport_commands::daemon_fetch_pack_with_haves_for_promisor(
                 &url,
                 &repo.objects_dir,
                 roots,
-                &haves,
+                &[],
             ) {
-                Ok(()) => {}
+                Ok(()) if promisor_roots_present(&destination_store, roots)? => return Ok(true),
+                Ok(()) => continue,
                 Err(error) if promisor_remote_missing_object_error(&error) => continue,
                 Err(error) => return Err(error),
             }
-            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
-            continue;
         }
         if transport_commands::is_ssh_transport_url(&url) {
-            match transport_commands::ssh_fetch_pack_with_haves(
+            match transport_commands::ssh_fetch_pack_with_haves_for_promisor(
                 &url,
                 &repo.objects_dir,
                 roots,
-                &haves,
+                &[],
             ) {
-                Ok(()) => {}
+                Ok(()) if promisor_roots_present(&destination_store, roots)? => return Ok(true),
+                Ok(()) => continue,
                 Err(error) if promisor_remote_missing_object_error(&error) => continue,
                 Err(error) => return Err(error),
             }
-            write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
-            continue;
         }
         let Some(source_path) = local_repository_path_from_location(&url)? else {
             return Err(CliError::Fatal {
@@ -3578,6 +3600,7 @@ fn backfill_promisor_objects_with_remotes(
         };
         if filter.is_none() {
             match transport_commands::copy_local_promisor_objects(repo, &source_path, roots) {
+                Ok(()) if promisor_roots_present(&destination_store, roots)? => return Ok(true),
                 Ok(()) => continue,
                 Err(_) => {}
             }
@@ -3587,15 +3610,26 @@ fn backfill_promisor_objects_with_remotes(
             remote,
             &source_path,
             roots,
-            &haves,
+            &[],
             upload_pack.as_deref(),
             filter,
         ) {
-            Ok(()) => {}
+            Ok(()) if promisor_roots_present(&destination_store, roots)? => return Ok(true),
+            Ok(()) => continue,
             Err(error) if promisor_remote_missing_object_error(&error) => continue,
             Err(error) => return Err(error),
         }
-        write_promisor_markers_for_new_packs(&repo.objects_dir, &existing_packs)?;
+    }
+    Ok(false)
+}
+
+fn promisor_roots_present(store: &LooseObjectStore, roots: &[ObjectId]) -> io::Result<bool> {
+    for root in roots {
+        match store.read_object(root) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
     }
     Ok(true)
 }
@@ -3615,54 +3649,6 @@ fn promisor_remote_missing_object_error(error: &CliError) -> bool {
         }
         CliError::Exit(_) | CliError::Message(_) => false,
     }
-}
-
-fn promisor_pack_names(objects_dir: &Path) -> Result<HashSet<String>> {
-    let pack_dir = objects_dir.join("pack");
-    let entries = match fs::read_dir(&pack_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashSet::new()),
-        Err(error) => return Err(CliError::Io(error)),
-    };
-    let mut names = HashSet::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) == Some("pack")
-            && let Some(name) = path.file_name().and_then(|value| value.to_str())
-        {
-            names.insert(name.to_owned());
-        }
-    }
-    Ok(names)
-}
-
-fn write_promisor_markers_for_new_packs(
-    objects_dir: &Path,
-    existing_packs: &HashSet<String>,
-) -> Result<()> {
-    let pack_dir = objects_dir.join("pack");
-    let entries = match fs::read_dir(&pack_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(CliError::Io(error)),
-    };
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("pack") {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if existing_packs.contains(name) {
-            continue;
-        }
-        let promisor_path = path.with_extension("promisor");
-        if !promisor_path.exists() {
-            fs::write(promisor_path, b"").map_err(CliError::Io)?;
-        }
-    }
-    Ok(())
 }
 
 fn backfill_root_ids(
@@ -3703,17 +3689,16 @@ fn backfill_local_promisor_remote(
     write_local_promisor_lazy_fetch_trace_if_needed(repo)?;
     let options = filter
         .map(transport_commands::UploadPackShallowOptions::filter)
-        .unwrap_or_else(|| transport_commands::UploadPackShallowOptions::depth(None));
-    let result = transport_commands::fetch_pack_with_local_upload_pack_command_with_options(
-        &command,
-        source_path.to_string_lossy().as_ref(),
-        &repo.objects_dir,
-        roots,
-        haves,
-        options,
-        true,
-    )
-    .map(|_| ());
+        .unwrap_or_else(|| transport_commands::UploadPackShallowOptions::filter("blob:none"));
+    let result =
+        transport_commands::fetch_pack_with_local_upload_pack_command_with_options_for_promisor(
+            &command,
+            source_path.to_string_lossy().as_ref(),
+            &repo.objects_dir,
+            roots,
+            haves,
+            options,
+        );
     if result.is_ok() {
         write_packet_trace_line_if_needed("fetch> done")?;
     }
@@ -3768,7 +3753,16 @@ fn write_packet_trace_line_if_needed(line: &str) -> Result<()> {
 fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) -> Result<()> {
     let parsed_url = transport_commands::ParsedHttpUrl::parse(url)?;
     let mut helper = transport_commands::RemoteHttpHelperSession::spawn_for_url(url)?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let pack_policy = transport_commands::FetchPackPolicy::resolve(
+        repo,
+        transport_commands::ForceIndexReasons::default(),
+    )?;
+    let pack_hash = transport_commands::SmartTransportHash::for_objects_dir_with_policy(
+        &repo.objects_dir,
+        pack_policy,
+    )?;
+    let algorithm = repo_hash_algorithm_from_config(repo).map_err(CliError::Io)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let fetch_options = transport_commands::HttpFetchOptions {
         commit: false,
         tags: false,
@@ -3799,12 +3793,13 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
 
     let roots_are_advertised = roots.iter().all(|id| advertised_ids.contains(id));
     if roots_are_advertised
-        && transport_commands::http_fetch_smart_pack_with_helper(
+        && transport_commands::http_fetch_smart_pack_with_helper_with_hash_for_promisor(
             &parsed_url,
             &mut helper,
             &repo.objects_dir,
             roots,
             &[],
+            pack_hash,
         )?
     {
         return Ok(());
@@ -3816,12 +3811,13 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
             .filter(|id| !store.contains_object(id).unwrap_or(false))
             .collect::<Vec<_>>();
         if !request_roots.is_empty()
-            && transport_commands::http_fetch_smart_pack_with_helper(
+            && transport_commands::http_fetch_smart_pack_with_helper_with_hash_for_promisor(
                 &parsed_url,
                 &mut helper,
                 &repo.objects_dir,
                 &request_roots,
                 &[],
+                pack_hash,
             )?
         {
             if roots
@@ -3847,7 +3843,17 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
     for id in roots {
         transport_commands::http_fetch_object_recursive(&mut fetch_context, id)?;
     }
-    Ok(())
+    if roots
+        .iter()
+        .all(|id| store.contains_object(id).unwrap_or(false))
+    {
+        Ok(())
+    } else {
+        Err(CliError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "promisor backfill did not obtain every requested object",
+        )))
+    }
 }
 
 fn diagnose_log(repo: &GitRepo) -> Result<String> {

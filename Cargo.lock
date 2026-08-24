@@ -1636,6 +1636,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+ "sha2-asm",
+]
+
+[[package]]
+name = "sha2-asm"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b845214d6175804686b2bd482bcffe96651bb2d1200742b712003504a2dac1ab"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -2705,6 +2715,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "sha1",
+ "sha2",
  "similar",
  "syn",
  "tempfile",
@@ -2712,6 +2723,7 @@ dependencies = [
  "zmin-cli-runtime",
  "zmin-cli-schema",
  "zmin-git-core",
+ "zmin-http-transport",
  "zmin-primitives",
 ]
 
@@ -2773,6 +2785,31 @@ dependencies = [
  "rustls-webpki",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "zmin-http-transport"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ipnet",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustls",
+ "rustls-platform-verifier",
+ "sha2",
+ "tokio",
+ "tokio-rustls",
+ "tower-service",
+ "url",
+ "zeroize",
 ]
 
 [[package]]

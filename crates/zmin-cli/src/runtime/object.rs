@@ -1,25 +1,24 @@
 use std::collections::HashSet;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 
 use regex::bytes::Regex;
 use zmin_git_core::{
-    CommitObjectCache, GitHashAlgorithm, GitObjectKind, GitObjectStore, LooseObjectStore, ObjectId,
-    RefStore, RefTarget, decode_pack_index_object_ids_from_path, decode_tag, find_tree_entry,
+    CommitObjectCache, GitHashAlgorithm, GitObjectKind, LooseObjectStore, ObjectId, RefStore,
+    RefTarget, decode_pack_index_object_ids_from_path, decode_tag, find_tree_entry,
     read_index_with_algorithm,
 };
 
 use super::{
-    CliError, ConfigScope, GitRepo, Result, current_branch_ref, current_unix_timestamp,
-    expand_repo_sparse_index, is_per_worktree_ref, parse_git_date, partial_clone_enabled,
+    CliError, GitRepo, Result, auto_abbrev_len_from_object_count, current_branch_ref,
+    current_unix_timestamp, expand_repo_sparse_index, is_per_worktree_ref,
+    parse_git_config_integer, parse_git_date, partial_clone_enabled,
     previous_checkout_syntax_index, previous_checkout_target_from_repo, read_branch_upstream,
-    read_common_git_dir, read_config_entry, read_config_value, repo_hash_algorithm_from_config,
+    read_common_git_dir, read_config_value, repo_hash_algorithm_from_config, repo_relative_path,
     resolve_commitish_io, resolve_previous_checkout_expression, resolve_previous_checkout_name,
     signature_timestamp, sparse_index_path_requires_expansion, trace2_region,
 };
-
-const DEFAULT_ABBREV_OBJECT_ID_INITIAL_CAPACITY_LIMIT: usize = 8192;
 
 pub(crate) enum BatchCommand<'a> {
     Object(&'a str, &'a str, bool),
@@ -87,6 +86,12 @@ fn rev_parse_failure_message(repo: &GitRepo, rev: &str, error: &io::Error) -> St
     if error_text == "HEAD is not a branch" {
         return "HEAD does not point to a branch".to_owned();
     }
+    if error_text.starts_with("reflog for ") && error_text.ends_with(" does not exist") {
+        return "Needed a single revision".to_owned();
+    }
+    if error_text.starts_with("log for ") && error_text.ends_with(" is empty") {
+        return error_text;
+    }
     if let Some((base, path)) = split_objectish_path(rev) {
         let stage = path.as_bytes().first().and_then(|byte| {
             (b'0'..=b'3')
@@ -115,10 +120,7 @@ fn rev_parse_failure_message(repo: &GitRepo, rev: &str, error: &io::Error) -> St
             ) {
                 if stage.is_none()
                     && let Some(entry) = index.entries().iter().find(|entry| {
-                        entry
-                            .path
-                            .strip_prefix(display_path.as_bytes())
-                            .is_none()
+                        entry.path.strip_prefix(display_path.as_bytes()).is_none()
                             && entry.path.ends_with(display_path.as_bytes())
                             && entry.path.len() > display_path.len()
                     })
@@ -199,15 +201,10 @@ hint: Did you mean ':0:{candidate_display}' aka ':0:./{display_path}'?"
                 }
                 if let Ok(cwd) = std::env::current_dir()
                     && let Some(component) = cwd.file_name().and_then(|name| name.to_str())
-                    && cwd
-                        .parent()
-                        .is_some_and(|parent| {
-                            parent.join(&display_path).is_file()
-                                || parent
-                                    .join(component)
-                                    .join(&display_path)
-                                    .is_file()
-                        })
+                    && cwd.parent().is_some_and(|parent| {
+                        parent.join(&display_path).is_file()
+                            || parent.join(component).join(&display_path).is_file()
+                    })
                 {
                     let candidate_display = format!("{component}/{display_path}");
                     return format!(
@@ -529,28 +526,8 @@ fn resolve_plain_objectish_with_reflog_warnings(
             reflog_warnings,
         );
     }
-    match objectish.len() {
-        40 => {
-            if let Ok(id) = ObjectId::from_hex(GitHashAlgorithm::Sha1, objectish) {
-                if store.contains_object(&id)? {
-                    return Ok(id);
-                }
-                if promisor_pack_contains_object(repo, &id)? {
-                    return Ok(id);
-                }
-                if partial_clone_enabled(repo).map_err(cli_error_to_io)? {
-                    return Ok(id);
-                }
-            }
-        }
-        64 => {
-            if let Ok(id) = ObjectId::from_hex(GitHashAlgorithm::Sha256, objectish) {
-                if store.object_kind_hint(&id)?.is_some() {
-                    return Ok(id);
-                }
-            }
-        }
-        _ => {}
+    if let Some(id) = resolve_full_objectish(repo, store, objectish)? {
+        return Ok(id);
     }
 
     if let Some(base) = split_upstream_suffix(objectish) {
@@ -590,6 +567,29 @@ fn resolve_plain_objectish_with_reflog_warnings(
         return Ok(id);
     }
     store.resolve_prefix(objectish)
+}
+
+fn resolve_full_objectish(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    objectish: &str,
+) -> io::Result<Option<ObjectId>> {
+    let algorithm = store.algorithm();
+    if objectish.len() != algorithm.digest_len() * 2 {
+        return Ok(None);
+    }
+    let Ok(id) = ObjectId::from_hex(algorithm, objectish) else {
+        return Ok(None);
+    };
+    let available = match algorithm {
+        GitHashAlgorithm::Sha1 => {
+            store.contains_object(&id)?
+                || promisor_pack_contains_object(repo, &id)?
+                || partial_clone_enabled(repo).map_err(cli_error_to_io)?
+        }
+        GitHashAlgorithm::Sha256 => store.object_kind_hint(&id)?.is_some(),
+    };
+    Ok(available.then_some(id))
 }
 
 fn resolve_worktree_ref_expression(
@@ -664,7 +664,8 @@ fn promisor_pack_contains_object(repo: &GitRepo, id: &ObjectId) -> io::Result<bo
 fn split_upstream_suffix(objectish: &str) -> Option<&str> {
     let base = objectish.strip_suffix('}')?;
     let (base, selector) = base.rsplit_once("@{")?;
-    selector.eq_ignore_ascii_case("u")
+    selector
+        .eq_ignore_ascii_case("u")
         .then_some(base)
         .or_else(|| selector.eq_ignore_ascii_case("upstream").then_some(base))
 }
@@ -832,7 +833,7 @@ fn resolve_pseudoref(repo: &GitRepo, store: &LooseObjectStore, name: &str) -> io
             format!("pseudo-ref {name} has no object id"),
         )
     })?;
-    let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, hex)
+    let id = ObjectId::from_hex(store.algorithm(), hex)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
     if store.contains_object(&id)? {
         Ok(id)
@@ -850,7 +851,7 @@ fn resolve_fetch_head(repo: &GitRepo, store: &LooseObjectStore) -> io::Result<Ob
         let Some(hex) = line.split_whitespace().next() else {
             continue;
         };
-        let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, hex)
+        let id = ObjectId::from_hex(store.algorithm(), hex)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
         if store.contains_object(&id)? {
             return Ok(id);
@@ -874,13 +875,37 @@ enum ReflogSelector<'a> {
 fn split_reflog_selector_suffix(objectish: &str) -> Option<(&str, ReflogSelector<'_>)> {
     let base = objectish.strip_suffix('}')?;
     let (base, selector) = base.rsplit_once("@{")?;
-    if selector.starts_with('-') || selector.contains("@{") {
+    if selector.contains("@{") {
         return None;
     }
-    if let Ok(index) = selector.parse::<usize>() {
-        return Some((base, ReflogSelector::Index(index)));
+    Some((base, classify_reflog_selector(selector)))
+}
+
+fn classify_reflog_selector(raw: &str) -> ReflogSelector<'_> {
+    const MAX_ORDINAL: u64 = 100_000_000;
+    let mut value = 0_u64;
+    let mut all_digits = !raw.is_empty();
+    for byte in raw.bytes() {
+        let Some(digit) = byte.checked_sub(b'0').filter(|digit| *digit <= 9) else {
+            all_digits = false;
+            break;
+        };
+        let Some(next) = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u64::from(digit)))
+        else {
+            return ReflogSelector::Date(raw);
+        };
+        value = next;
+        if value >= MAX_ORDINAL {
+            return ReflogSelector::Date(raw);
+        }
     }
-    Some((base, ReflogSelector::Date(selector)))
+    if all_digits && value <= usize::MAX as u64 {
+        ReflogSelector::Index(value as usize)
+    } else {
+        ReflogSelector::Date(raw)
+    }
 }
 
 fn resolve_reflog_selector(
@@ -909,117 +934,281 @@ fn resolve_reflog_selector(
             algorithm,
             zmin_git_core::refs::RefStorageKind::Reftable,
         );
-        let mut records = refs
-            .reftable_logs()?
-            .into_iter()
-            .filter(|record| record.ref_name == reflog_name)
-            .collect::<Vec<_>>();
-        records.sort_by_key(|record| record.update_index);
         return match selector {
-            ReflogSelector::Index(index) => records
-                .into_iter()
-                .rev()
-                .nth(index)
-                .map(|record| record.new_id)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")),
+            ReflogSelector::Index(index) => {
+                let mut scan = ReflogOrdinalScan::default();
+                refs.for_each_reftable_log_newest_first(&reflog_name, |record| {
+                    scan.observe(record.old_id, record.new_id, index)
+                })?;
+                if let Some(selected) = scan.selected {
+                    return Ok(selected);
+                }
+                if scan.count == 0 {
+                    return if refs.reftable_log_exists(&reflog_name)? {
+                        resolve_empty_reflog(repo, store, &reflog_name, index)
+                    } else {
+                        Err(reflog_missing_error(&reflog_name))
+                    };
+                }
+                if index == scan.count
+                    && let Some(oldest_old_id) = scan.oldest_old_id
+                    && !is_zero_object_id(&oldest_old_id)
+                {
+                    return Ok(oldest_old_id);
+                }
+                Err(reflog_count_error(base, scan.count))
+            }
             ReflogSelector::Date(raw) => {
                 let timestamp = parse_reflog_selector_timestamp(raw)?;
-                records
-                    .into_iter()
-                    .rev()
-                    .find(|record| i64::try_from(record.timestamp).unwrap_or(i64::MAX) <= timestamp)
-                    .map(|record| record.new_id)
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::NotFound, "reflog entry not found")
-                    })
+                let mut scan = ReflogNewestFirstDateScan::new(timestamp);
+                refs.for_each_reftable_log_newest_first(&reflog_name, |record| {
+                    scan.observe(ReflogEntrySummary {
+                        old_id: record.old_id,
+                        new_id: record.new_id,
+                        timestamp: i64::try_from(record.timestamp).unwrap_or(i64::MAX),
+                        timezone: format_reflog_timezone(record.timezone_offset),
+                    });
+                    Ok(())
+                })?;
+                if scan.oldest.is_none() && !refs.reftable_log_exists(&reflog_name)? {
+                    return Err(reflog_missing_error(&reflog_name));
+                }
+                finish_reflog_newest_first_scan(repo, store, base, &reflog_name, scan, warnings)
             }
         };
     }
-    let path = repo.git_dir.join("logs").join(&reflog_name);
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error)
-            if error.kind() == io::ErrorKind::NotFound
-                && matches!(selector, ReflogSelector::Index(0))
-                && (base.is_empty() || base == "HEAD" || base.ends_with('@')) =>
-        {
-            let fallback = if base.is_empty() { "HEAD" } else { base };
-            return resolve_plain_objectish(repo, store, fallback);
-        }
-        Err(error) => return Err(error),
+    let log_root = if is_per_worktree_ref(&reflog_name) {
+        repo.git_dir.clone()
+    } else {
+        common_dir.clone()
     };
+    let path = log_root.join("logs").join(&reflog_name);
     match selector {
         ReflogSelector::Index(index) => {
-            let entries = contents.lines().filter_map(parse_reflog_line).collect::<Vec<_>>();
-            if let Some(entry) = entries.iter().rev().nth(index) {
-                return Ok(entry.new_id.clone());
-            }
-            if index == 0 {
-                return resolve_plain_objectish(repo, store, &reflog_name);
-            }
-            Err(io::Error::new(io::ErrorKind::NotFound, "reflog entry not found"))
+            resolve_file_reflog_ordinal(repo, store, &path, algorithm, base, &reflog_name, index)
         }
         ReflogSelector::Date(raw) => {
-            resolve_reflog_date_selector(repo, store, base, &reflog_name, &contents, raw, warnings)
+            let file = File::open(path).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    reflog_missing_error(&reflog_name)
+                } else {
+                    error
+                }
+            })?;
+            let mut cursor = FileReflogCursor::new(file, algorithm);
+            resolve_reflog_date_cursor(repo, store, base, &reflog_name, &mut cursor, raw, warnings)
         }
     }
 }
 
-fn resolve_reflog_date_selector(
+fn resolve_reflog_date_cursor(
     repo: &GitRepo,
     store: &LooseObjectStore,
     base: &str,
     reflog_name: &str,
-    contents: &str,
+    cursor: &mut FileReflogCursor,
     raw: &str,
     warnings: bool,
 ) -> io::Result<ObjectId> {
     let timestamp = parse_reflog_selector_timestamp(raw)?;
-    let entries = contents
-        .lines()
-        .filter_map(parse_reflog_line)
-        .collect::<Vec<_>>();
-    let Some(first) = entries.first() else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "reflog entry not found",
-        ));
+    let mut scan = ReflogDateScan::new(timestamp);
+    while let Some(entry) = cursor.next_entry()? {
+        scan.observe(entry);
+    }
+    finish_reflog_date_scan(repo, store, base, reflog_name, scan, warnings)
+}
+
+fn resolve_file_reflog_ordinal(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    path: &std::path::Path,
+    algorithm: GitHashAlgorithm,
+    base: &str,
+    reflog_name: &str,
+    index: usize,
+) -> io::Result<ObjectId> {
+    let scan = match scan_file_reflog_ordinal(path, algorithm) {
+        Ok(scan) => scan,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(reflog_missing_error(reflog_name));
+        }
+        Err(error) => return Err(error),
     };
-    if timestamp < first.timestamp {
+    if scan.count == 0 {
+        return resolve_empty_reflog(repo, store, reflog_name, index);
+    }
+    if index < scan.count {
+        let target_from_oldest = scan.count - 1 - index;
+        let file = File::open(path)?;
+        let mut cursor = FileReflogCursor::new(file, algorithm);
+        let mut current = 0;
+        while let Some(entry) = cursor.next_entry()? {
+            if current == target_from_oldest {
+                return Ok(entry.new_id);
+            }
+            current += 1;
+        }
+        return Err(io::Error::other("reflog changed during ordinal resolution"));
+    }
+    if index == scan.count
+        && let Some(oldest_old_id) = scan.oldest_old_id
+        && !is_zero_object_id(&oldest_old_id)
+    {
+        return Ok(oldest_old_id);
+    }
+    Err(reflog_count_error(base, scan.count))
+}
+
+fn scan_file_reflog_ordinal(
+    path: &std::path::Path,
+    algorithm: GitHashAlgorithm,
+) -> io::Result<ReflogOrdinalScan> {
+    let file = File::open(path)?;
+    let mut cursor = FileReflogCursor::new(file, algorithm);
+    let mut scan = ReflogOrdinalScan::default();
+    while let Some(entry) = cursor.next_entry()? {
+        scan.observe(entry.old_id, entry.new_id, usize::MAX)?;
+    }
+    Ok(scan)
+}
+
+fn resolve_empty_reflog(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    reflog_name: &str,
+    index: usize,
+) -> io::Result<ObjectId> {
+    if index == 0 {
+        return resolve_plain_objectish(repo, store, reflog_name);
+    }
+    Err(reflog_empty_error(reflog_name))
+}
+
+fn reflog_empty_error(reflog_name: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("log for {reflog_name} is empty"),
+    )
+}
+
+fn reflog_missing_error(reflog_name: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("reflog for {reflog_name} does not exist"),
+    )
+}
+
+fn reflog_count_error(base: &str, count: usize) -> io::Error {
+    let display_name = if base.is_empty() { "HEAD" } else { base };
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("log for '{display_name}' only has {count} entries"),
+    )
+}
+
+fn is_zero_object_id(id: &ObjectId) -> bool {
+    id.as_bytes().iter().all(|byte| *byte == 0)
+}
+
+fn finish_reflog_date_scan(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    base: &str,
+    reflog_name: &str,
+    scan: ReflogDateScan,
+    warnings: bool,
+) -> io::Result<ObjectId> {
+    let Some(first) = scan.first else {
+        return Err(reflog_empty_error(reflog_name));
+    };
+    if scan.target < first.timestamp {
         let display_name = if base.is_empty() { "HEAD" } else { base };
         if warnings {
             eprintln!(
                 "warning: log for '{display_name}' only goes back to {}",
-                format_reflog_timestamp(first)
+                format_reflog_timestamp(&first)
             );
         }
-        return Ok(first.new_id.clone());
+        return Ok(if is_zero_object_id(&first.old_id) {
+            first.new_id
+        } else {
+            first.old_id
+        });
     }
 
-    let selected_index = entries
-        .iter()
-        .rposition(|entry| entry.timestamp <= timestamp)
-        .unwrap_or(0);
-    let selected = &entries[selected_index];
-    if let Some(next) = entries.get(selected_index + 1) {
-        if warnings && next.old_id != selected.new_id {
+    let selected = scan.latest_eligible.unwrap_or(first);
+    if let Some(next) = scan.immediate_successor {
+        if warnings && next.old_id != selected.new_id && !is_zero_object_id(&next.old_id) {
             eprintln!(
                 "warning: log for ref {reflog_name} has gap after {}",
-                format_reflog_timestamp(selected)
+                format_reflog_timestamp(&selected)
             );
         }
-        return Ok(selected.new_id.clone());
+        return Ok(selected.new_id);
     }
-    if timestamp == selected.timestamp {
-        return Ok(selected.new_id.clone());
+    if scan.target == selected.timestamp {
+        return Ok(selected.new_id);
     }
 
+    let newest = scan.newest.as_ref().unwrap_or(&selected);
+    let current_name = if base.is_empty() { "HEAD" } else { base };
+    let current = resolve_plain_objectish(repo, store, current_name)?;
+    if warnings && current != newest.new_id {
+        eprintln!(
+            "warning: log for ref {reflog_name} unexpectedly ended on {}",
+            format_reflog_timestamp(newest)
+        );
+    }
+    Ok(current)
+}
+
+fn finish_reflog_newest_first_scan(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    base: &str,
+    reflog_name: &str,
+    scan: ReflogNewestFirstDateScan,
+    warnings: bool,
+) -> io::Result<ObjectId> {
+    let Some(oldest) = scan.oldest else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("log for {reflog_name} is empty"),
+        ));
+    };
+    let Some(selected) = scan.selected else {
+        let display_name = if base.is_empty() { "HEAD" } else { base };
+        if warnings {
+            eprintln!(
+                "warning: log for '{display_name}' only goes back to {}",
+                format_reflog_timestamp(&oldest)
+            );
+        }
+        return Ok(if is_zero_object_id(&oldest.old_id) {
+            oldest.new_id
+        } else {
+            oldest.old_id
+        });
+    };
+    if let Some(successor) = scan.successor {
+        if warnings && successor.old_id != selected.new_id && !is_zero_object_id(&successor.old_id)
+        {
+            eprintln!(
+                "warning: log for ref {reflog_name} has gap after {}",
+                format_reflog_timestamp(&selected)
+            );
+        }
+        return Ok(selected.new_id);
+    }
+    if scan.target == selected.timestamp {
+        return Ok(selected.new_id);
+    }
     let current_name = if base.is_empty() { "HEAD" } else { base };
     let current = resolve_plain_objectish(repo, store, current_name)?;
     if warnings && current != selected.new_id {
         eprintln!(
             "warning: log for ref {reflog_name} unexpectedly ended on {}",
-            format_reflog_timestamp(selected)
+            format_reflog_timestamp(&selected)
         );
     }
     Ok(current)
@@ -1033,7 +1222,7 @@ pub(crate) fn parse_reflog_selector_timestamp(raw: &str) -> io::Result<i64> {
     if let Ok((timestamp, _)) = parse_git_date(normalized) {
         return Ok(timestamp);
     }
-    let dotted = normalized.replace('.', " ");
+    let dotted = normalized.replace('.', "-");
     if let Ok((timestamp, _)) = parse_git_date(&dotted) {
         return Ok(timestamp);
     }
@@ -1048,32 +1237,321 @@ pub(crate) fn parse_reflog_selector_timestamp(raw: &str) -> io::Result<i64> {
     ))
 }
 
-fn parse_reflog_line(line: &str) -> Option<ParsedReflogLine> {
-    let header = line
-        .split_once('\t')
-        .map(|(header, _)| header)
-        .unwrap_or(line);
-    let mut fields = header.split_whitespace();
-    let old_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
-    let new_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
-    let timezone = fields.next_back()?.to_owned();
-    let timestamp = fields.next_back()?.parse().ok()?;
-    Some(ParsedReflogLine {
-        old_id,
-        new_id,
-        timestamp,
-        timezone,
-    })
-}
-
-struct ParsedReflogLine {
+#[derive(Clone)]
+struct ReflogEntrySummary {
     old_id: ObjectId,
     new_id: ObjectId,
     timestamp: i64,
     timezone: String,
 }
 
-fn format_reflog_timestamp(entry: &ParsedReflogLine) -> String {
+struct ReflogDateScan {
+    target: i64,
+    first: Option<ReflogEntrySummary>,
+    newest: Option<ReflogEntrySummary>,
+    latest_eligible: Option<ReflogEntrySummary>,
+    immediate_successor: Option<ReflogEntrySummary>,
+}
+
+#[derive(Default)]
+struct ReflogOrdinalScan {
+    count: usize,
+    oldest_old_id: Option<ObjectId>,
+    selected: Option<ObjectId>,
+}
+
+impl ReflogOrdinalScan {
+    fn observe(&mut self, old_id: ObjectId, new_id: ObjectId, wanted: usize) -> io::Result<()> {
+        let index = self.count;
+        self.count = self
+            .count
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("reflog entry count overflow"))?;
+        self.oldest_old_id = Some(old_id);
+        if index == wanted {
+            self.selected = Some(new_id);
+        }
+        Ok(())
+    }
+}
+
+struct ReflogNewestFirstDateScan {
+    target: i64,
+    newest: Option<ReflogEntrySummary>,
+    oldest: Option<ReflogEntrySummary>,
+    previous_newer: Option<ReflogEntrySummary>,
+    selected: Option<ReflogEntrySummary>,
+    successor: Option<ReflogEntrySummary>,
+}
+
+impl ReflogNewestFirstDateScan {
+    fn new(target: i64) -> Self {
+        Self {
+            target,
+            newest: None,
+            oldest: None,
+            previous_newer: None,
+            selected: None,
+            successor: None,
+        }
+    }
+
+    fn observe(&mut self, entry: ReflogEntrySummary) {
+        if self.newest.is_none() {
+            self.newest = Some(entry.clone());
+        }
+        if self.selected.is_none() && entry.timestamp <= self.target {
+            self.selected = Some(entry.clone());
+            self.successor = self.previous_newer.clone();
+        }
+        self.oldest = Some(entry);
+        self.previous_newer = self.oldest.clone();
+    }
+}
+
+impl ReflogDateScan {
+    fn new(target: i64) -> Self {
+        Self {
+            target,
+            first: None,
+            newest: None,
+            latest_eligible: None,
+            immediate_successor: None,
+        }
+    }
+
+    fn observe(&mut self, entry: ReflogEntrySummary) {
+        if self.first.is_none() {
+            self.first = Some(entry.clone());
+        }
+        if entry.timestamp <= self.target {
+            self.latest_eligible = Some(entry.clone());
+            self.immediate_successor = None;
+        } else if self.latest_eligible.is_some() && self.immediate_successor.is_none() {
+            self.immediate_successor = Some(entry.clone());
+        }
+        self.newest = Some(entry);
+    }
+}
+
+struct FileReflogCursor {
+    reader: BufReader<File>,
+    algorithm: GitHashAlgorithm,
+    finished: bool,
+}
+
+impl FileReflogCursor {
+    fn new(file: File, algorithm: GitHashAlgorithm) -> Self {
+        Self {
+            reader: BufReader::with_capacity(64 * 1024, file),
+            algorithm,
+            finished: false,
+        }
+    }
+
+    fn next_entry(&mut self) -> io::Result<Option<ReflogEntrySummary>> {
+        if self.finished {
+            return Ok(None);
+        }
+        loop {
+            let mut parser = ReflogHeaderParser::new(self.algorithm);
+            let mut in_message = false;
+            loop {
+                let chunk = self.reader.fill_buf()?;
+                if chunk.is_empty() {
+                    self.finished = true;
+                    return Ok(if parser.has_data() {
+                        parser.finish()
+                    } else {
+                        None
+                    });
+                }
+                let mut consumed = 0;
+                let mut record_finished = false;
+                for byte in chunk {
+                    consumed += 1;
+                    if in_message {
+                        if *byte == b'\n' {
+                            record_finished = true;
+                            break;
+                        }
+                    } else if *byte == b'\t' {
+                        in_message = true;
+                    } else if *byte == b'\n' {
+                        record_finished = true;
+                        break;
+                    } else {
+                        parser.push_header_byte(*byte);
+                    }
+                }
+                self.reader.consume(consumed);
+                if record_finished {
+                    if let Some(entry) = parser.finish() {
+                        return Ok(Some(entry));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct ReflogTailToken {
+    bytes: [u8; 32],
+    len: usize,
+    oversized: bool,
+}
+
+impl ReflogTailToken {
+    fn clear(&mut self) {
+        self.len = 0;
+        self.oversized = false;
+    }
+
+    fn push(&mut self, byte: u8) {
+        if self.len == self.bytes.len() {
+            self.oversized = true;
+        } else {
+            self.bytes[self.len] = byte;
+            self.len += 1;
+        }
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        (!self.oversized).then_some(&self.bytes[..self.len])
+    }
+}
+
+struct ReflogHeaderParser {
+    algorithm: GitHashAlgorithm,
+    field_index: usize,
+    current_id: [u8; 64],
+    current_id_len: usize,
+    current_id_oversized: bool,
+    old_id: [u8; 64],
+    old_id_len: usize,
+    old_id_oversized: bool,
+    new_id: [u8; 64],
+    new_id_len: usize,
+    new_id_oversized: bool,
+    current_tail: ReflogTailToken,
+    previous_tail: ReflogTailToken,
+    last_tail: ReflogTailToken,
+}
+
+impl ReflogHeaderParser {
+    fn new(algorithm: GitHashAlgorithm) -> Self {
+        Self {
+            algorithm,
+            field_index: 0,
+            current_id: [0; 64],
+            current_id_len: 0,
+            current_id_oversized: false,
+            old_id: [0; 64],
+            old_id_len: 0,
+            old_id_oversized: false,
+            new_id: [0; 64],
+            new_id_len: 0,
+            new_id_oversized: false,
+            current_tail: ReflogTailToken::default(),
+            previous_tail: ReflogTailToken::default(),
+            last_tail: ReflogTailToken::default(),
+        }
+    }
+
+    fn has_data(&self) -> bool {
+        self.field_index != 0
+            || self.current_id_len != 0
+            || self.current_id_oversized
+            || self.current_tail.len != 0
+            || self.current_tail.oversized
+    }
+
+    fn push_header_byte(&mut self, byte: u8) {
+        if byte.is_ascii_whitespace() {
+            self.finish_token();
+        } else if self.field_index < 2 {
+            if self.current_id_len == self.current_id.len() {
+                self.current_id_oversized = true;
+            } else {
+                self.current_id[self.current_id_len] = byte;
+                self.current_id_len += 1;
+            }
+        } else {
+            self.current_tail.push(byte);
+        }
+    }
+
+    fn finish_token(&mut self) {
+        let has_current = if self.field_index < 2 {
+            self.current_id_len != 0 || self.current_id_oversized
+        } else {
+            self.current_tail.len != 0 || self.current_tail.oversized
+        };
+        if !has_current {
+            return;
+        }
+        match self.field_index {
+            0 => {
+                self.old_id = self.current_id;
+                self.old_id_len = self.current_id_len;
+                self.old_id_oversized = self.current_id_oversized;
+                self.current_id = [0; 64];
+                self.current_id_len = 0;
+                self.current_id_oversized = false;
+            }
+            1 => {
+                self.new_id = self.current_id;
+                self.new_id_len = self.current_id_len;
+                self.new_id_oversized = self.current_id_oversized;
+                self.current_id = [0; 64];
+                self.current_id_len = 0;
+                self.current_id_oversized = false;
+            }
+            _ => {
+                self.previous_tail = self.last_tail;
+                self.last_tail = self.current_tail;
+                self.current_tail.clear();
+            }
+        }
+        self.field_index += 1;
+    }
+
+    fn finish(mut self) -> Option<ReflogEntrySummary> {
+        self.finish_token();
+        if self.field_index < 4
+            || self.old_id_oversized
+            || self.new_id_oversized
+            || self.old_id_len == 0
+            || self.new_id_len == 0
+        {
+            return None;
+        }
+        let old_id = std::str::from_utf8(&self.old_id[..self.old_id_len])
+            .ok()
+            .and_then(|hex| ObjectId::from_hex(self.algorithm, hex).ok())?;
+        let new_id = std::str::from_utf8(&self.new_id[..self.new_id_len])
+            .ok()
+            .and_then(|hex| ObjectId::from_hex(self.algorithm, hex).ok())?;
+        let timestamp = std::str::from_utf8(self.previous_tail.as_bytes()?)
+            .ok()?
+            .parse()
+            .ok()?;
+        let timezone = std::str::from_utf8(self.last_tail.as_bytes()?)
+            .ok()?
+            .to_owned();
+        parse_reflog_timezone_offset(&timezone)?;
+        Some(ReflogEntrySummary {
+            old_id,
+            new_id,
+            timestamp,
+            timezone,
+        })
+    }
+}
+
+fn format_reflog_timestamp(entry: &ReflogEntrySummary) -> String {
     use chrono::{FixedOffset, TimeZone};
 
     let offset = parse_reflog_timezone_offset(&entry.timezone)
@@ -1084,6 +1562,13 @@ fn format_reflog_timestamp(entry: &ParsedReflogLine) -> String {
         .single()
         .map(|date| date.format("%a, %-d %b %Y %H:%M:%S %z").to_string())
         .unwrap_or_else(|| entry.timestamp.to_string())
+}
+
+fn format_reflog_timezone(offset: i16) -> String {
+    let offset = i32::from(offset);
+    let sign = if offset < 0 { '-' } else { '+' };
+    let minutes = offset.unsigned_abs();
+    format!("{sign}{:02}{:02}", minutes / 60, minutes % 60)
 }
 
 fn parse_reflog_timezone_offset(value: &str) -> Option<i32> {
@@ -1192,7 +1677,7 @@ fn resolve_typed_objectish(
                 let object = store.read_object(&id)?;
                 match object.kind {
                     GitObjectKind::Tag => {
-                        id = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+                        id = decode_tag(store.algorithm(), &object.content)?.target;
                     }
                     GitObjectKind::Blob if peel == "^{blob}" || peel == "^{}" => {
                         return Ok(id);
@@ -1246,7 +1731,7 @@ pub(crate) fn resolve_treeish(
                 return Ok(commit_cache.read_commit(&id)?.tree.clone());
             }
             GitObjectKind::Tag => {
-                id = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+                id = decode_tag(store.algorithm(), &object.content)?.target;
             }
             GitObjectKind::Blob => {
                 return Err(io::Error::new(
@@ -1426,155 +1911,6 @@ pub(crate) fn short_object_id_len(id: &ObjectId, len: usize) -> String {
     id.short_hex(len.min(id.hex_len()))
 }
 
-pub(crate) fn default_abbrev_len(store: &LooseObjectStore) -> Result<usize> {
-    default_abbrev_len_for_store(store)
-}
-
-pub(crate) fn configured_default_abbrev_len(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-) -> Result<usize> {
-    let Some(minimum) = configured_abbrev_minimum(repo, store)? else {
-        return Ok(GitHashAlgorithm::Sha1.digest_len() * 2);
-    };
-    default_abbrev_len_for_store_with_minimum(store, minimum)
-}
-
-pub(crate) fn configured_default_abbrev_len_for_ids(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    ids: &[ObjectId],
-) -> Result<usize> {
-    let Some(minimum) = configured_abbrev_minimum(repo, store)? else {
-        return Ok(GitHashAlgorithm::Sha1.digest_len() * 2);
-    };
-    default_abbrev_len_for_ids_with_minimum(store, ids, minimum)
-}
-
-fn configured_abbrev_minimum(repo: &GitRepo, store: &LooseObjectStore) -> Result<Option<usize>> {
-    const MINIMUM_ABBREV: usize = 4;
-
-    let Some(entry) = read_config_entry(repo, "core.abbrev")? else {
-        return Ok(Some(default_auto_abbrev_len(store)?));
-    };
-    let value = &entry.value;
-    if value.eq_ignore_ascii_case("auto") {
-        return Ok(Some(default_auto_abbrev_len(store)?));
-    }
-    if value.is_empty()
-        || value.eq_ignore_ascii_case("no")
-        || value.eq_ignore_ascii_case("false")
-        || value.eq_ignore_ascii_case("off")
-    {
-        return Ok(None);
-    }
-    let minimum = value.parse::<usize>().map_err(|_| CliError::Fatal {
-        code: 128,
-        message: format!(
-            "bad numeric config value '{}' for 'core.abbrev': invalid unit",
-            value
-        ),
-    })?;
-    if minimum < MINIMUM_ABBREV {
-        let command_line_suffix = if entry.scope == ConfigScope::Command {
-            "fatal: unable to parse 'core.abbrev' from command-line config\n"
-        } else {
-            ""
-        };
-        return Err(CliError::Stderr {
-            code: 128,
-            text: format!("error: abbrev length out of range: {minimum}\n{command_line_suffix}"),
-        });
-    }
-    Ok(Some(minimum))
-}
-
-pub(crate) fn auto_abbrev_len_from_object_count(object_count: usize) -> usize {
-    const MIN_ABBREV: usize = 7;
-    if object_count == 0 {
-        return MIN_ABBREV;
-    }
-    let squared = (object_count as u128).saturating_mul(object_count as u128);
-    let hex_digits = ((u128::BITS as usize) - squared.leading_zeros() as usize).div_ceil(4);
-    MIN_ABBREV.max(hex_digits)
-}
-
-pub(crate) fn default_auto_abbrev_len(store: &impl GitObjectStore) -> Result<usize> {
-    Ok(auto_abbrev_len_from_object_count(
-        store.object_id_capacity_hint()?,
-    ))
-}
-
-pub(crate) fn default_abbrev_len_for_ids(
-    store: &LooseObjectStore,
-    ids: &[ObjectId],
-) -> Result<usize> {
-    default_abbrev_len_for_ids_with_minimum(store, ids, default_auto_abbrev_len(store)?)
-}
-
-fn default_abbrev_len_for_ids_with_minimum(
-    store: &LooseObjectStore,
-    ids: &[ObjectId],
-    minimum: usize,
-) -> Result<usize> {
-    store
-        .minimum_unique_abbrev_len_for_ids(ids, minimum)
-        .map_err(CliError::Io)
-}
-
-fn default_abbrev_len_for_store(store: &impl GitObjectStore) -> Result<usize> {
-    default_abbrev_len_for_store_with_minimum(store, default_auto_abbrev_len(store)?)
-}
-
-fn default_abbrev_len_for_store_with_minimum(
-    store: &impl GitObjectStore,
-    minimum: usize,
-) -> Result<usize> {
-    let full_len = GitHashAlgorithm::Sha1.digest_len() * 2;
-    if minimum >= full_len {
-        return Ok(full_len);
-    }
-    let mut ids = Vec::with_capacity(default_abbrev_object_id_initial_capacity(
-        store.object_id_capacity_hint()?,
-    ));
-    store.for_each_object_id(&mut |id| {
-        ids.push(id.clone());
-        Ok(())
-    })?;
-    ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-
-    let mut required = minimum;
-    for pair in ids.windows(2) {
-        let [left, right] = pair else {
-            continue;
-        };
-        if left.as_bytes() == right.as_bytes() {
-            continue;
-        }
-        required = required.max(object_hex_common_prefix_len(left, right) + 1);
-    }
-    Ok(required.min(full_len))
-}
-
-fn default_abbrev_object_id_initial_capacity(object_hint: usize) -> usize {
-    object_hint.min(DEFAULT_ABBREV_OBJECT_ID_INITIAL_CAPACITY_LIMIT)
-}
-
-fn object_hex_common_prefix_len(left: &ObjectId, right: &ObjectId) -> usize {
-    let mut len = 0_usize;
-    for (left, right) in left.as_bytes().iter().zip(right.as_bytes()) {
-        if left == right {
-            len += 2;
-            continue;
-        }
-        if left >> 4 == right >> 4 {
-            len += 1;
-        }
-        break;
-    }
-    len
-}
-
 pub(crate) fn parse_object_kind(value: &str) -> Result<GitObjectKind> {
     match value {
         "blob" => Ok(GitObjectKind::Blob),
@@ -1591,23 +1927,6 @@ pub(crate) fn parse_object_kind(value: &str) -> Result<GitObjectKind> {
 mod tests {
     use super::*;
 
-    fn sha1_id(hex: &str) -> ObjectId {
-        ObjectId::from_hex(GitHashAlgorithm::Sha1, hex).expect("sha1 id")
-    }
-
-    #[test]
-    fn object_hex_common_prefix_len_handles_odd_and_even_lengths() {
-        let left = sha1_id("a012345678901234567890123456789012345678");
-        let same_first_nibble = sha1_id("af12345678901234567890123456789012345678");
-        let different_first_nibble = sha1_id("b012345678901234567890123456789012345678");
-
-        assert_eq!(object_hex_common_prefix_len(&left, &same_first_nibble), 1);
-        assert_eq!(
-            object_hex_common_prefix_len(&left, &different_first_nibble),
-            0
-        );
-    }
-
     #[test]
     fn auto_abbrev_len_stays_at_minimum_for_small_object_counts() {
         assert_eq!(auto_abbrev_len_from_object_count(0), 7);
@@ -1617,74 +1936,146 @@ mod tests {
 
     #[test]
     fn auto_abbrev_len_grows_with_repo_object_count() {
+        assert_eq!(auto_abbrev_len_from_object_count(16_383), 7);
         assert_eq!(auto_abbrev_len_from_object_count(16_384), 8);
         assert_eq!(auto_abbrev_len_from_object_count(27_688), 8);
         assert_eq!(auto_abbrev_len_from_object_count(1_000_000), 10);
     }
 
-    struct CountingObjectStore {
-        ids: Vec<ObjectId>,
-        calls: std::cell::Cell<usize>,
+    #[test]
+    fn parse_git_config_integer_matches_git_base_zero_and_int_range() {
+        for (value, expected) in [
+            ("0", 0),
+            ("+0", 0),
+            ("-0", 0),
+            ("010", 8),
+            ("+010", 8),
+            ("+0x10", 16),
+            ("-0x10", -16),
+            ("1k", 1024),
+            ("1M", 1024 * 1024),
+            ("1G", 1024 * 1024 * 1024),
+            ("2147483647", i32::MAX),
+            ("-2147483648", i32::MIN),
+        ] {
+            assert_eq!(
+                parse_git_config_integer(value),
+                Ok(expected),
+                "value={value:?}"
+            );
+        }
+        for value in [
+            "", "+", "-", "0x", "08", "09", "0b1", "00x10", "bogus", "1z",
+        ] {
+            assert_eq!(
+                parse_git_config_integer(value),
+                Err("invalid unit"),
+                "value={value:?}"
+            );
+        }
+        for value in [
+            "2147483648",
+            "-2147483649",
+            "2G",
+            "999999999999999999999999",
+        ] {
+            assert_eq!(
+                parse_git_config_integer(value),
+                Err("out of range"),
+                "value={value:?}"
+            );
+        }
     }
 
-    impl GitObjectStore for CountingObjectStore {
-        fn read_object(&self, _id: &ObjectId) -> io::Result<zmin_git_core::LooseObject> {
-            Err(io::Error::new(io::ErrorKind::NotFound, "test store"))
-        }
+    #[test]
+    fn auto_abbrev_len_for_store_does_not_materialize_object_ids() {
+        struct HintOnlyStore;
 
-        fn object_id_capacity_hint(&self) -> io::Result<usize> {
-            Ok(self.ids.len())
-        }
-
-        fn for_each_object_id(
-            &self,
-            for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
-        ) -> io::Result<()> {
-            self.calls.set(self.calls.get() + 1);
-            for id in &self.ids {
-                for_each(id)?;
+        impl zmin_git_core::GitObjectStore for HintOnlyStore {
+            fn read_object(&self, _id: &ObjectId) -> io::Result<zmin_git_core::LooseObject> {
+                Err(io::Error::new(io::ErrorKind::NotFound, "test store"))
             }
-            Ok(())
+
+            fn object_id_capacity_hint(&self) -> io::Result<usize> {
+                Ok(16_384)
+            }
+
+            fn for_each_object_id(
+                &self,
+                _for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
+            ) -> io::Result<()> {
+                panic!("auto abbreviation must not enumerate object IDs")
+            }
         }
-    }
 
-    #[test]
-    fn default_abbrev_len_scans_object_ids_once() {
-        let store = CountingObjectStore {
-            ids: vec![
-                sha1_id("abc0000000000000000000000000000000000000"),
-                sha1_id("abc0001000000000000000000000000000000000"),
-                sha1_id("def0000000000000000000000000000000000000"),
-            ],
-            calls: std::cell::Cell::new(0),
-        };
-
-        assert_eq!(default_abbrev_len_for_store(&store).unwrap(), 7);
-        assert_eq!(store.calls.get(), 1);
-    }
-
-    #[test]
-    fn default_abbrev_len_extends_only_for_real_collisions() {
-        let store = CountingObjectStore {
-            ids: vec![
-                sha1_id("1234567000000000000000000000000000000000"),
-                sha1_id("1234567100000000000000000000000000000000"),
-                sha1_id("1234567100000000000000000000000000000000"),
-            ],
-            calls: std::cell::Cell::new(0),
-        };
-
-        assert_eq!(default_abbrev_len_for_store(&store).unwrap(), 8);
-        assert_eq!(store.calls.get(), 1);
-    }
-
-    #[test]
-    fn default_abbrev_initial_capacity_is_bounded() {
         assert_eq!(
-            default_abbrev_object_id_initial_capacity(usize::MAX),
-            DEFAULT_ABBREV_OBJECT_ID_INITIAL_CAPACITY_LIMIT
+            crate::runtime::auto_abbrev_len_for_store(&HintOnlyStore).unwrap(),
+            8
         );
-        assert_eq!(default_abbrev_object_id_initial_capacity(2), 2);
-        assert_eq!(default_abbrev_object_id_initial_capacity(0), 0);
+    }
+
+    #[test]
+    fn reflog_numeric_selector_switches_to_date_at_git_threshold() {
+        assert!(matches!(
+            classify_reflog_selector("1"),
+            ReflogSelector::Index(1)
+        ));
+        assert!(matches!(
+            classify_reflog_selector("99999999"),
+            ReflogSelector::Index(99_999_999)
+        ));
+        assert!(matches!(
+            classify_reflog_selector("100000000"),
+            ReflogSelector::Date("100000000")
+        ));
+        assert!(matches!(
+            classify_reflog_selector("1700000200"),
+            ReflogSelector::Date("1700000200")
+        ));
+        assert!(matches!(
+            classify_reflog_selector("999999999999999999999999"),
+            ReflogSelector::Date(_)
+        ));
+        assert!(matches!(
+            classify_reflog_selector("-1"),
+            ReflogSelector::Date("-1")
+        ));
+    }
+
+    #[test]
+    fn file_reflog_cursor_discards_long_and_non_utf8_messages() {
+        let directory = tempfile::TempDir::new().expect("temp directory");
+        let log_file = directory.path().join("HEAD");
+        let old_id = "0000000000000000000000000000000000000000";
+        let first_id = "1111111111111111111111111111111111111111";
+        let second_id = "2222222222222222222222222222222222222222";
+        let mut bytes =
+            format!("{old_id} {first_id} Bench <bench@example.test> 1700000000 +0000\t")
+                .into_bytes();
+        bytes.extend(std::iter::repeat_n(b'x', 128 * 1024));
+        bytes.push(0xff);
+        bytes.push(b'\n');
+        bytes.extend_from_slice(
+            format!("{first_id} {second_id} Bench <bench@example.test> 1700000100 +0000\tsecond\n")
+                .as_bytes(),
+        );
+        fs::write(&log_file, bytes).expect("write reflog fixture");
+        let file = File::open(log_file).expect("open reflog fixture");
+        let mut cursor = FileReflogCursor::new(file, GitHashAlgorithm::Sha1);
+        let first = cursor
+            .next_entry()
+            .expect("read first entry")
+            .expect("first entry");
+        let second = cursor
+            .next_entry()
+            .expect("read second entry")
+            .expect("second entry");
+        assert_eq!(first.timestamp, 1_700_000_000);
+        assert_eq!(second.timestamp, 1_700_000_100);
+        assert_eq!(
+            second.new_id,
+            ObjectId::from_hex(GitHashAlgorithm::Sha1, second_id).unwrap()
+        );
+        assert!(cursor.next_entry().expect("read EOF").is_none());
     }
 }

@@ -44,16 +44,9 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tag="${ZMIN_UPSTREAM_GIT_TAG:-v2.55.0}"
 cache_root="${ZMIN_UPSTREAM_GIT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/zmin/git-upstream}"
-source_dir="$cache_root/git-$tag"
 legacy_excludes="${ZMIN_UPSTREAM_LEGACY_EXCLUDES:-$repo_root/tools/git-upstream-compat-tests-legacy-excludes.tsv}"
 file_excludes="${ZMIN_UPSTREAM_FILE_EXCLUDES:-$repo_root/tools/git-upstream-compat-tests-file-excludes.tsv}"
 deprecated_tool="$repo_root/tools/git-upstream-deprecated-audit.sh"
-
-if [[ ! -d "$source_dir/t" ]]; then
-  echo "missing upstream Git source tree: $source_dir" >&2
-  echo "run tools/git-upstream-compat-suite.sh once or populate ZMIN_UPSTREAM_GIT_CACHE first" >&2
-  exit 2
-fi
 
 if [[ ! -f "$legacy_excludes" ]]; then
   echo "missing legacy exclude manifest: $legacy_excludes" >&2
@@ -63,7 +56,10 @@ fi
 legacy_pattern_file="$(mktemp "${TMPDIR:-/tmp}/zmin-upstream-legacy-patterns.XXXXXX")"
 file_pattern_file="$(mktemp "${TMPDIR:-/tmp}/zmin-upstream-file-patterns.XXXXXX")"
 deprecated_pattern_file="$(mktemp "${TMPDIR:-/tmp}/zmin-upstream-deprecated-patterns.XXXXXX")"
-trap 'rm -f "$legacy_pattern_file" "$file_pattern_file" "$deprecated_pattern_file"' EXIT
+direct_tests_tmp="$(mktemp "${TMPDIR:-/tmp}/zmin-upstream-direct-tests.XXXXXX")"
+trap 'rm -f "$legacy_pattern_file" "$file_pattern_file" "$deprecated_pattern_file" "$direct_tests_tmp"' EXIT
+
+"$deprecated_tool" source-files >"$direct_tests_tmp"
 
 awk -F '\t' '
   /^#/ || NF < 2 { next }
@@ -92,10 +88,7 @@ else
 fi
 
 echo '# mode<TAB>test<TAB>reason'
-find "$source_dir/t" -maxdepth 1 -type f -name 't[0-9][0-9][0-9][0-9]-*.sh' -print |
-  sed 's#^.*/##' |
-  LC_ALL=C sort |
-  while IFS= read -r test_name; do
+while IFS= read -r test_name; do
     case "$mode" in
       all-top-level)
         printf 'all-top-level\t%s\t%s\n' \
@@ -125,4 +118,4 @@ find "$source_dir/t" -maxdepth 1 -type f -name 't[0-9][0-9][0-9][0-9]-*.sh' -pri
           'full upstream shell suite minus explicit legacy/external excludes'
         ;;
     esac
-  done
+done <"$direct_tests_tmp"

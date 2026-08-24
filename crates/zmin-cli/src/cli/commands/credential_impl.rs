@@ -1497,6 +1497,27 @@ fn connect_credential_cache_daemon(
 }
 
 #[cfg(unix)]
+struct CredentialCacheSocketCleanup {
+    path: PathBuf,
+}
+
+#[cfg(unix)]
+impl CredentialCacheSocketCleanup {
+    fn new(path: &std::path::Path) -> Self {
+        Self {
+            path: path.to_owned(),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CredentialCacheSocketCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(unix)]
 fn credential_cache_daemon(socket: Option<PathBuf>, timeout: Option<u64>) -> Result<()> {
     let socket = credential_cache_socket_path(socket)?;
     if let Some(parent) = socket.parent()
@@ -1505,9 +1526,19 @@ fn credential_cache_daemon(socket: Option<PathBuf>, timeout: Option<u64>) -> Res
         fs::create_dir_all(parent)?;
     }
     if socket.exists() {
+        if unix_stream_connect_with_long_path_support(&socket).is_ok() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "credential-cache daemon socket is already in use: {}",
+                    socket.display()
+                ),
+            });
+        }
         fs::remove_file(&socket)?;
     }
     let listener = unix_listener_bind_with_long_path_support(&socket)?;
+    let _socket_cleanup = CredentialCacheSocketCleanup::new(&socket);
     let mut rows = Vec::new();
     let timeout = std::time::Duration::from_secs(timeout.unwrap_or(900));
     for stream in listener.incoming() {
@@ -1529,18 +1560,12 @@ fn credential_cache_daemon(socket: Option<PathBuf>, timeout: Option<u64>) -> Res
             break;
         }
     }
-    let _ = fs::remove_file(socket);
     Ok(())
 }
 
 #[cfg(unix)]
 fn unix_socket_path_limit() -> usize {
-    let sample = libc::sockaddr_un {
-        sun_len: 0,
-        sun_family: 0,
-        sun_path: [0; 104],
-    };
-    sample.sun_path.len()
+    std::mem::size_of::<libc::sockaddr_un>() - std::mem::offset_of!(libc::sockaddr_un, sun_path) - 1
 }
 
 #[cfg(unix)]
@@ -1557,19 +1582,19 @@ fn with_unix_socket_path_for_stdlib<T>(
     let Some(parent) = path.parent() else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path must be shorter than SUN_LEN",
+            "path exceeds Unix socket address capacity",
         ));
     };
     let Some(file_name) = path.file_name() else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path must be shorter than SUN_LEN",
+            "path exceeds Unix socket address capacity",
         ));
     };
     if file_name.as_bytes().len() >= unix_socket_path_limit() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path must be shorter than SUN_LEN",
+            "path exceeds Unix socket address capacity",
         ));
     }
 
@@ -1839,4 +1864,26 @@ fn credential_store_row_matches(row: &CredentialStoreRow, query: &[(String, Stri
         }
     }
     true
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_socket_path_limit_excludes_terminating_nul() {
+        let socket_storage_bytes = std::mem::size_of::<libc::sockaddr_un>()
+            - std::mem::offset_of!(libc::sockaddr_un, sun_path);
+        assert!(socket_storage_bytes > 1);
+        assert_eq!(unix_socket_path_limit(), socket_storage_bytes - 1);
+    }
+
+    #[test]
+    fn unix_socket_path_limit_rejects_capacity_without_touching_filesystem() {
+        let filename = "x".repeat(unix_socket_path_limit());
+        let path = PathBuf::from("/").join(filename);
+        let error = with_unix_socket_path_for_stdlib(&path, |_| Ok(()))
+            .expect_err("path at socket capacity should be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
 }

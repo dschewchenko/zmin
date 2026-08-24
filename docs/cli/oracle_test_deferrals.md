@@ -1,5 +1,11 @@
 # Oracle Test Deferrals
 
+> Historical evidence note: this document retains Git v2.47.1
+> inventory/evidence only. It is not the current compatibility denominator or
+> a drop-in claim; current scope is defined by
+> `docs/git/upstream_compatibility_baseline.md` and
+> `tools/git-upstream-compat-contract.tsv`.
+
 This inventory is for focused tests that look like stock-oracle coverage but
 must not be imported into Git `2.47.1` behavior matrices yet.
 
@@ -29,13 +35,9 @@ it is not a closed Git `2.47.1` row.
   guard. It is documented and intentionally kept outside the Git `2.47.1`
   exact behavior denominator until a dedicated invalid-repository parity row
   exists.
-- `"unsupported built-in zmin lfs pull remote: {url}"` in
-  `crates/zmin-cli/src/cli/commands/lfs_impl.rs` is a deliberate local-scope
-  guard on the current built-in Git LFS foundation. The covered LFS replace-git
-  surface currently includes discovery commands, hook takeover, pointer
-  checkout, and local/file-based pull lanes, but not general network,
-  authenticated, or custom-transfer Git LFS transport parity. Keep this guard
-  outside the Git `2.47.1` denominator and classify the broader non-local LFS
-  work under the deferred `git lfs` surface in
-  `docs/cli/zmin_extensions_inventory.md` until that transport scope is
-  implemented and verified.
+- `"configured LFS TLS client identity is not supported yet"` in
+  `crates/zmin-cli/src/runtime/lfs_http_policy.rs` is the explicit mTLS/client-
+  identity boundary of the stable `command.lfs` extension slice. A selected
+  identity fails before network access. This transport exclusion does not
+  remove anything from the Git `2.47.1` or current-v2.55.0 denominators and
+  does not turn the bounded LFS slice into an arbitrary ecosystem-parity claim.

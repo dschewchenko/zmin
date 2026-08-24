@@ -21,6 +21,20 @@ pub enum CliError {
     Io(io::Error),
 }
 
+#[derive(Debug)]
+pub struct RawStderrBytes {
+    pub code: i32,
+    pub bytes: Vec<u8>,
+}
+
+impl std::fmt::Display for RawStderrBytes {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("raw stderr")
+    }
+}
+
+impl std::error::Error for RawStderrBytes {}
+
 impl From<io::Error> for CliError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)

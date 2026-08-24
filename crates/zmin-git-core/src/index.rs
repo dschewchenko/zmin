@@ -465,6 +465,36 @@ impl GitIndex {
         Ok(true)
     }
 
+    /// Remove a fast-import D path without applying ordinary index path
+    /// validation. Git's fast-import tree_content_remove accepts the parsed
+    /// byte path and treats it as a tree operation; callers must complete
+    /// parsing before invoking this deliberate unchecked operation.
+    pub fn remove_fast_import_path(&mut self, path: impl AsRef<[u8]>) -> bool {
+        let path = path.as_ref();
+        if path.is_empty() {
+            let changed = !self.entries.is_empty();
+            if changed {
+                self.entries.clear();
+                self.cache_tree = None;
+            }
+            return changed;
+        }
+        let mut prefix = path.to_vec();
+        prefix.push(b'/');
+        let start = self
+            .entries
+            .partition_point(|entry| entry.path.as_slice() < path);
+        let end = self.entries[start..].partition_point(|entry| {
+            entry.path.as_slice() == path || entry.path.starts_with(&prefix)
+        }) + start;
+        if start == end {
+            return false;
+        }
+        self.entries.drain(start..end);
+        invalidate_cache_tree_path(self.cache_tree.as_mut(), path);
+        true
+    }
+
     pub fn write_to_path(&self, path: impl AsRef<Path>) -> io::Result<()> {
         write_index(path, self)
     }
@@ -3212,6 +3242,31 @@ mod tests {
         );
         assert!(!index.remove_path(b"missing").expect("missing path"));
         assert!(!index.remove_dir(b"missing").expect("missing dir"));
+    }
+
+    #[test]
+    fn fast_import_remove_path_removes_exact_path_and_descendants_without_validation() {
+        let id = ObjectId::new(GitHashAlgorithm::Sha1, &[1; 20]);
+        let mut index = GitIndex::from_entries(vec![
+            IndexEntry::new("docs", id.clone(), IndexMode::File, 0).expect("docs entry"),
+            IndexEntry::new("docs/a.md", id.clone(), IndexMode::File, 0).expect("a entry"),
+            IndexEntry::new("docs/nested/b.md", id.clone(), IndexMode::File, 0).expect("b entry"),
+            IndexEntry::new("docs2/a.md", id, IndexMode::File, 0).expect("sibling entry"),
+        ])
+        .expect("index");
+
+        assert!(index.remove_fast_import_path(b"docs"));
+        assert_eq!(
+            index
+                .entries()
+                .iter()
+                .map(|entry| entry.path.as_slice())
+                .collect::<Vec<_>>(),
+            vec![b"docs2/a.md".as_slice()]
+        );
+        assert!(!index.remove_fast_import_path(b"docs/child"));
+        assert!(index.remove_fast_import_path(b""));
+        assert!(index.entries().is_empty());
     }
 
     #[test]

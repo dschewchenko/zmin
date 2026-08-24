@@ -7,9 +7,9 @@ use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin,
     command_any_output_with_stdin_bytes, command_stdout_bytes, command_stdout_bytes_with_stdin,
     configure_identity, git, git_args, git_init, git_status, git_status_args, git_with_env,
-    git_with_stdin, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args, run_zmin_with_stdin_bytes,
-    write_file, zmin_bin,
+    git_with_stdin, git_with_stdin_args, git_with_stdin_bytes, pinned_git_args,
+    pinned_git_init_sha256, required_pinned_stock_git, run_zmin, run_zmin_args, run_zmin_status,
+    run_zmin_with_env, run_zmin_with_stdin_args, run_zmin_with_stdin_bytes, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
@@ -3686,6 +3686,54 @@ fn bundle_create_list_heads_and_unbundle_are_stock_readable() {
 }
 
 #[test]
+fn bundle_create_and_unbundle_preserve_sha1_and_sha256_object_formats() {
+    for (sha256, expected_version, expected_width) in [
+        (false, "# v2 git bundle", 40),
+        (true, "# v3 git bundle", 64),
+    ] {
+        let source = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        configure_identity(source.path());
+        write_file(source.path(), "a.txt", "bundle object-format fixture\n");
+        git(source.path(), ["add", "a.txt"]);
+        git_with_env(source.path(), ["commit", "-m", "bundle"]);
+        let head = git(source.path(), ["rev-parse", "HEAD"]);
+
+        let bundle_dir = TempDir::new().expect("bundle dir");
+        let bundle_path = bundle_dir.path().join(if sha256 {
+            "sha256.bundle"
+        } else {
+            "sha1.bundle"
+        });
+        let bundle = bundle_path.to_str().expect("bundle path");
+        run_zmin_args(source.path(), &["bundle", "create", bundle, "HEAD"]);
+        let bytes = fs::read(&bundle_path).expect("read bundle");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.starts_with(expected_version));
+        assert!(
+            text.lines()
+                .any(|line| { line.starts_with(&head) && line.len() >= expected_width + 2 })
+        );
+
+        let target = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        run_zmin_args(target.path(), &["bundle", "unbundle", bundle]);
+        assert_eq!(
+            git_status_args(target.path(), &["cat-file", "-e", &head]),
+            0,
+            "unbundle must install the {} object format pack",
+            if sha256 { "SHA-256" } else { "SHA-1" }
+        );
+    }
+}
+
+#[test]
 fn bundle_create_accepts_version_option_for_upstream_fetch_suite() {
     let source = git_init();
     configure_identity(source.path());
@@ -4609,64 +4657,207 @@ fn bundle_create_accepts_since_option_for_upstream_fetch_suite() {
 
 #[test]
 fn bundle_unbundle_accepts_prerequisite_bundles() {
-    let source = git_init();
-    configure_identity(source.path());
-    write_file(source.path(), "a.txt", "one\n");
-    git(source.path(), ["add", "-A"]);
-    git_with_env(source.path(), ["commit", "-m", "one"]);
-    let base = git(source.path(), ["rev-parse", "HEAD"]);
+    for sha256 in [false, true] {
+        let source = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        configure_identity(source.path());
+        write_file(source.path(), "a.txt", "one\n");
+        git(source.path(), ["add", "-A"]);
+        git_with_env(source.path(), ["commit", "-m", "one"]);
+        let base = git(source.path(), ["rev-parse", "HEAD"]);
 
-    let git_target = clone_repo_fixture(source.path());
-    let zmin_target = clone_repo_fixture(source.path());
+        let git_target = clone_repo_fixture(source.path());
+        let zmin_target = clone_repo_fixture(source.path());
 
-    write_file(source.path(), "a.txt", "two\n");
-    write_file(source.path(), "b.txt", "bee\n");
-    git(source.path(), ["add", "-A"]);
-    git_with_env(source.path(), ["commit", "-m", "two"]);
-    let head = git(source.path(), ["rev-parse", "HEAD"]);
+        write_file(source.path(), "a.txt", "two\n");
+        write_file(source.path(), "b.txt", "bee\n");
+        git(source.path(), ["add", "-A"]);
+        git_with_env(source.path(), ["commit", "-m", "two"]);
+        let head = git(source.path(), ["rev-parse", "HEAD"]);
 
-    let bundle_dir = TempDir::new().expect("bundle dir");
-    let bundle_path = bundle_dir.path().join("incremental.bundle");
-    let bundle = bundle_path.to_str().expect("bundle path");
-    git(
-        source.path(),
-        ["bundle", "create", bundle, &format!("{base}..HEAD")],
-    );
+        let bundle_dir = TempDir::new().expect("bundle dir");
+        let bundle_path = bundle_dir.path().join(if sha256 {
+            "incremental-sha256.bundle"
+        } else {
+            "incremental-sha1.bundle"
+        });
+        let bundle = bundle_path.to_str().expect("bundle path");
+        git(
+            source.path(),
+            ["bundle", "create", bundle, &format!("{base}..HEAD")],
+        );
 
-    assert_eq!(
-        command_any_output(
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                zmin_target.path(),
+                &["bundle", "verify", bundle],
+                "zmin"
+            )
+            .0,
+            0
+        );
+        assert_eq!(
+            run_zmin_args(zmin_target.path(), &["bundle", "unbundle", bundle]),
+            git_args(git_target.path(), &["bundle", "unbundle", bundle])
+        );
+        assert_eq!(
+            git(zmin_target.path(), ["cat-file", "-p", &head]),
+            git(source.path(), ["cat-file", "-p", &head])
+        );
+
+        let missing_base = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        let zmin_missing = command_any_output(
+            zmin_bin(),
+            missing_base.path(),
+            &["bundle", "unbundle", bundle],
+            "zmin",
+        );
+        let git_missing = command_any_output(
+            "git",
+            missing_base.path(),
+            &["bundle", "unbundle", bundle],
+            "git",
+        );
+        assert_eq!(zmin_missing.0, git_missing.0);
+        assert_ne!(zmin_missing.0, 0);
+    }
+}
+
+#[test]
+fn filtered_full_ref_bundles_keep_filter_metadata_for_both_hashes() {
+    for sha256 in [false, true] {
+        let source = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        configure_identity(source.path());
+        write_file(source.path(), "a.txt", "one\n");
+        git(source.path(), ["add", "a.txt"]);
+        git_with_env(source.path(), ["commit", "-m", "one"]);
+
+        let bundle_dir = TempDir::new().expect("bundle dir");
+        let bundle_path = bundle_dir.path().join(if sha256 {
+            "filtered-sha256.bundle"
+        } else {
+            "filtered-sha1.bundle"
+        });
+        let bundle = bundle_path.to_str().expect("bundle path");
+        pinned_git_args(
+            source.path(),
+            &["bundle", "create", bundle, "--all", "--filter=blob:none"],
+        );
+
+        let target = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        let (status, stdout, stderr) = command_any_output(
+            zmin_bin(),
+            target.path(),
+            &["bundle", "verify", bundle],
+            "zmin",
+        );
+        assert_eq!(status, 0, "filtered bundle verify failed: {stderr}");
+        assert!(stdout.contains("The bundle uses this filter: blob:none"));
+    }
+}
+
+#[test]
+fn bundle_unbundle_rejects_present_but_disconnected_prerequisites_without_installing_pack() {
+    for sha256 in [false, true] {
+        let source = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        configure_identity(source.path());
+        write_file(source.path(), "a.txt", "one\n");
+        git(source.path(), ["add", "a.txt"]);
+        git_with_env(source.path(), ["commit", "-m", "one"]);
+        let base = git(source.path(), ["rev-parse", "HEAD"]);
+
+        let git_target = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        let zmin_target = if sha256 {
+            pinned_git_init_sha256()
+        } else {
+            git_init()
+        };
+        let base_commit = command_stdout_bytes("git", source.path(), &["cat-file", "-p", &base]);
+        for target in [git_target.path(), zmin_target.path()] {
+            git_with_stdin_bytes(
+                target,
+                [
+                    "hash-object",
+                    "--literally",
+                    "-t",
+                    "commit",
+                    "-w",
+                    "--stdin",
+                ],
+                &base_commit,
+            );
+            assert_eq!(git_status_args(target, &["cat-file", "-e", &base]), 0);
+        }
+
+        write_file(source.path(), "b.txt", "two\n");
+        git(source.path(), ["add", "b.txt"]);
+        git_with_env(source.path(), ["commit", "-m", "two"]);
+        let bundle_dir = TempDir::new().expect("bundle dir");
+        let bundle_path = bundle_dir.path().join("disconnected.bundle");
+        let bundle = bundle_path.to_str().expect("bundle path");
+        git(
+            source.path(),
+            ["bundle", "create", bundle, &format!("{base}..HEAD")],
+        );
+
+        let pack_files = |repo: &Path| {
+            let mut files = fs::read_dir(repo.join(".git/objects/pack"))
+                .expect("read pack directory")
+                .map(|entry| {
+                    entry
+                        .expect("pack directory entry")
+                        .file_name()
+                        .into_string()
+                        .expect("pack filename")
+                })
+                .collect::<Vec<_>>();
+            files.sort();
+            files
+        };
+        let before_git = pack_files(git_target.path());
+        let before_zmin = pack_files(zmin_target.path());
+        let pinned = required_pinned_stock_git();
+        let stock = command_any_output(
+            pinned.to_str().expect("pinned Git path"),
+            git_target.path(),
+            &["bundle", "unbundle", bundle],
+            "pinned Git",
+        );
+        let zmin = command_any_output(
             zmin_bin(),
             zmin_target.path(),
-            &["bundle", "verify", bundle],
-            "zmin"
-        )
-        .0,
-        0
-    );
-    assert_eq!(
-        run_zmin_args(zmin_target.path(), &["bundle", "unbundle", bundle]),
-        git_args(git_target.path(), &["bundle", "unbundle", bundle])
-    );
-    assert_eq!(
-        git(zmin_target.path(), ["cat-file", "-p", &head]),
-        git(source.path(), ["cat-file", "-p", &head])
-    );
-
-    let missing_base = git_init();
-    let zmin_missing = command_any_output(
-        zmin_bin(),
-        missing_base.path(),
-        &["bundle", "unbundle", bundle],
-        "zmin",
-    );
-    let git_missing = command_any_output(
-        "git",
-        missing_base.path(),
-        &["bundle", "unbundle", bundle],
-        "git",
-    );
-    assert_eq!(zmin_missing.0, git_missing.0);
-    assert_ne!(zmin_missing.0, 0);
+            &["bundle", "unbundle", bundle],
+            "zmin",
+        );
+        assert_ne!(stock.0, 0, "stock accepted disconnected prerequisite");
+        assert_eq!(zmin.0, stock.0, "SHA-256={sha256}: status mismatch");
+        assert_eq!(pack_files(git_target.path()), before_git);
+        assert_eq!(pack_files(zmin_target.path()), before_zmin);
+    }
 }
 
 fn committed_repo() -> TempDir {

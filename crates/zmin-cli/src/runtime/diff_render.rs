@@ -13,7 +13,6 @@ const PARALLEL_DIFF_STAT_MIN_ENTRIES: usize = 16;
 const PARALLEL_DIFF_STAT_SHARED_PRELOAD_MIN_ENTRIES: usize = 16;
 const PARALLEL_DIFF_STAT_MAX_WORKERS: usize = 8;
 const DIFF_LINE_COUNT_INTERN_MIN_LINES: usize = 512;
-const ZERO_SHA1_HEX: &str = "0000000000000000000000000000000000000000";
 const BREAK_REWRITE_MIN_LINES: usize = 100;
 
 pub(crate) fn parse_find_renames_option(value: Option<&str>) -> Result<Option<u8>> {
@@ -716,10 +715,12 @@ pub(crate) struct RootTreeRenderOptions<'a> {
     pub(crate) skip_to: Option<&'a str>,
     pub(crate) rotate_to: Option<&'a str>,
     pub(crate) relative_prefix: Option<&'a [u8]>,
+    pub(crate) abbrev_policy: CoreAbbrevConfigState,
     pub(crate) options: &'a DiffRenderOptions,
 }
 
 pub(crate) fn diff_no_index(options: &DiffOptions) -> Result<()> {
+    let algorithm = no_index_hash_algorithm()?;
     let mut paths = options.paths.clone();
     if let Some(separator) = paths.iter().position(|path| path == Path::new("--")) {
         paths.remove(separator);
@@ -762,7 +763,14 @@ pub(crate) fn diff_no_index(options: &DiffOptions) -> Result<()> {
     if entries.is_empty() {
         return Ok(());
     }
-    render_no_index_entries(options, entries)
+    render_no_index_entries(options, entries, algorithm)
+}
+
+fn no_index_hash_algorithm() -> Result<GitHashAlgorithm> {
+    match find_repo() {
+        Ok(repo) => Ok(repo_hash_algorithm_from_config(&repo)?),
+        Err(_) => Ok(GitHashAlgorithm::Sha1),
+    }
 }
 
 pub(crate) fn collect_no_index_entries(
@@ -971,6 +979,7 @@ pub(crate) fn collect_no_index_relative_files(
 pub(crate) fn render_no_index_entries(
     options: &DiffOptions,
     mut entries: Vec<NoIndexDiffEntry>,
+    algorithm: GitHashAlgorithm,
 ) -> Result<()> {
     if options.quiet {
         return Err(CliError::Exit(1));
@@ -1043,8 +1052,8 @@ pub(crate) fn render_no_index_entries(
         return Err(CliError::Exit(1));
     }
     if options.raw {
-        let abbrev_len = parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev)?;
-        print_no_index_raw(&rows, abbrev_len);
+        let abbrev_lengths = no_index_abbrev_lengths(options, &rows, algorithm, false)?;
+        print_no_index_raw(&rows, &abbrev_lengths, algorithm);
         return Err(CliError::Exit(1));
     }
     let stat_rows = rows
@@ -1077,6 +1086,7 @@ pub(crate) fn render_no_index_entries(
     if options.no_patch {
         return Err(CliError::Exit(1));
     }
+    let abbrev_lengths = no_index_abbrev_lengths(options, &rows, algorithm, true)?;
     if options.patch_with_stat {
         print_no_index_stat_rows(&stat_rows);
         if options.summary {
@@ -1084,11 +1094,17 @@ pub(crate) fn render_no_index_entries(
         }
         println!();
     } else if options.patch_with_raw {
-        let abbrev_len = parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev)?;
-        print_no_index_raw(&rows, abbrev_len);
+        print_no_index_raw(&rows, &abbrev_lengths, algorithm);
         println!();
     }
-    write_no_index_patches(options, &rows, &ignore_matching_lines, whitespace_mode)?;
+    write_no_index_patches(
+        options,
+        &rows,
+        &ignore_matching_lines,
+        whitespace_mode,
+        &abbrev_lengths,
+        algorithm,
+    )?;
     Err(CliError::Exit(1))
 }
 
@@ -1118,9 +1134,9 @@ pub(crate) fn reverse_no_index_entry(entry: &mut NoIndexDiffEntry) {
 
 pub(crate) fn print_no_index_raw(
     rows: &[(&NoIndexDiffEntry, bool, usize, usize)],
-    abbrev_len: Option<usize>,
+    abbrev_lengths: &RenderedAbbrevLengths,
+    algorithm: GitHashAlgorithm,
 ) {
-    let abbrev_len = abbrev_len.unwrap_or(7);
     for (entry, _, _, _) in rows {
         let old_mode = if entry.old_is_null {
             "000000"
@@ -1133,14 +1149,20 @@ pub(crate) fn print_no_index_raw(
             "100644"
         };
         let old_hash = if entry.status == IndexDiffStatus::Deleted && entry.new_root_has_files {
-            no_index_raw_blob_hash(&entry.old_content, abbrev_len)
+            no_index_raw_blob_hash(&entry.old_content, abbrev_lengths, algorithm)
         } else {
-            diff_raw_zero_object_id_len(abbrev_len)
+            diff_raw_zero_object_id_len_for_algorithm(
+                no_index_zero_width(entry, true, abbrev_lengths, algorithm),
+                algorithm,
+            )
         };
         let new_hash = if entry.status == IndexDiffStatus::Added && entry.old_root_has_files {
-            no_index_raw_blob_hash(&entry.new_content, abbrev_len)
+            no_index_raw_blob_hash(&entry.new_content, abbrev_lengths, algorithm)
         } else {
-            diff_raw_zero_object_id_len(abbrev_len)
+            diff_raw_zero_object_id_len_for_algorithm(
+                no_index_zero_width(entry, false, abbrev_lengths, algorithm),
+                algorithm,
+            )
         };
         println!(
             ":{old_mode} {new_mode} {old_hash} {new_hash} {}\t{}",
@@ -1150,9 +1172,105 @@ pub(crate) fn print_no_index_raw(
     }
 }
 
-fn no_index_raw_blob_hash(content: &[u8], abbrev_len: usize) -> String {
-    let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, content);
-    diff_raw_object_id_len(&id, abbrev_len)
+fn no_index_raw_blob_hash(
+    content: &[u8],
+    abbrev_lengths: &RenderedAbbrevLengths,
+    algorithm: GitHashAlgorithm,
+) -> String {
+    let id = hash_object(algorithm, GitObjectKind::Blob, content);
+    diff_raw_object_id_len(&id, abbrev_lengths.width_for(&id))
+}
+
+fn no_index_abbrev_lengths(
+    options: &DiffOptions,
+    rows: &[(&NoIndexDiffEntry, bool, usize, usize)],
+    algorithm: GitHashAlgorithm,
+    patch_output: bool,
+) -> Result<RenderedAbbrevLengths> {
+    let ids = rows
+        .iter()
+        .flat_map(|(entry, _, _, _)| {
+            [
+                (!entry.old_is_null)
+                    .then(|| hash_object(algorithm, GitObjectKind::Blob, &entry.old_content)),
+                (!entry.new_is_null)
+                    .then(|| hash_object(algorithm, GitObjectKind::Blob, &entry.new_content)),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect::<Vec<_>>();
+    if patch_output && options.no_abbrev && !(options.full_index && !options.no_full_index) {
+        return Ok(RenderedAbbrevLengths::fixed(&ids, 7));
+    }
+    let policy = no_index_abbrev_policy(options, algorithm, patch_output)?;
+    Ok(match policy {
+        CoreAbbrevConfigState::Auto => RenderedAbbrevLengths::fixed(&ids, 7),
+        CoreAbbrevConfigState::Full => {
+            RenderedAbbrevLengths::fixed(&ids, full_abbrev_len(algorithm))
+        }
+        CoreAbbrevConfigState::Minimum(minimum) => {
+            RenderedAbbrevLengths::from_ids_minimum(&ids, minimum, algorithm)
+        }
+    })
+}
+
+fn no_index_abbrev_policy(
+    options: &DiffOptions,
+    algorithm: GitHashAlgorithm,
+    patch_output: bool,
+) -> Result<CoreAbbrevConfigState> {
+    if options.full_index && !options.no_full_index {
+        return Ok(CoreAbbrevConfigState::Full);
+    }
+    if options.no_abbrev {
+        return Ok(if patch_output {
+            CoreAbbrevConfigState::Minimum(7)
+        } else {
+            CoreAbbrevConfigState::Full
+        });
+    }
+    if options.abbrev.is_some() {
+        let minimum =
+            parse_diff_abbrev_len(options.abbrev.as_deref(), false, algorithm)?.unwrap_or(7);
+        return Ok(CoreAbbrevConfigState::Minimum(minimum));
+    }
+    match find_repo() {
+        Ok(repo) => configured_core_abbrev_state(&repo),
+        Err(_) => Ok(CoreAbbrevConfigState::Auto),
+    }
+}
+
+fn no_index_zero_width(
+    entry: &NoIndexDiffEntry,
+    old_side: bool,
+    abbrev_lengths: &RenderedAbbrevLengths,
+    algorithm: GitHashAlgorithm,
+) -> usize {
+    let (is_null, content, counterpart_is_null, counterpart_content) = if old_side {
+        (
+            entry.old_is_null,
+            &entry.old_content,
+            entry.new_is_null,
+            &entry.new_content,
+        )
+    } else {
+        (
+            entry.new_is_null,
+            &entry.new_content,
+            entry.old_is_null,
+            &entry.old_content,
+        )
+    };
+    if !is_null {
+        let id = hash_object(algorithm, GitObjectKind::Blob, content);
+        abbrev_lengths.width_for(&id)
+    } else if !counterpart_is_null {
+        let id = hash_object(algorithm, GitObjectKind::Blob, counterpart_content);
+        abbrev_lengths.width_for(&id)
+    } else {
+        abbrev_lengths.empty_width()
+    }
 }
 
 pub(crate) fn print_no_index_summary(rows: &[(&NoIndexDiffEntry, bool, usize, usize)]) {
@@ -1170,6 +1288,8 @@ pub(crate) fn write_no_index_patches(
     rows: &[(&NoIndexDiffEntry, bool, usize, usize)],
     ignore_matching_lines: &[Regex],
     whitespace_mode: DiffWhitespaceMode,
+    abbrev_lengths: &RenderedAbbrevLengths,
+    algorithm: GitHashAlgorithm,
 ) -> Result<()> {
     let mut out = io::stdout().lock();
     for (entry, is_binary, _, _) in rows {
@@ -1183,19 +1303,39 @@ pub(crate) fn write_no_index_patches(
             "diff --git {old_prefix}{} {new_prefix}{}",
             entry.old_display, entry.new_display
         )?;
-        let full_index = options.binary && *is_binary;
-        let left_hash = blob_hash_for_diff(&entry.old_content, entry.old_is_null, full_index);
-        let right_hash = blob_hash_for_diff(&entry.new_content, entry.new_is_null, full_index);
+        let full_index =
+            (options.binary && *is_binary) || (options.full_index && !options.no_full_index);
+        let full_width = full_abbrev_len(algorithm);
+        let left_width = if full_index {
+            full_width
+        } else {
+            no_index_zero_width(entry, true, abbrev_lengths, algorithm)
+        };
+        let right_width = if full_index {
+            full_width
+        } else {
+            no_index_zero_width(entry, false, abbrev_lengths, algorithm)
+        };
+        let old_id = (!entry.old_is_null)
+            .then(|| hash_object(algorithm, GitObjectKind::Blob, &entry.old_content));
+        let new_id = (!entry.new_is_null)
+            .then(|| hash_object(algorithm, GitObjectKind::Blob, &entry.new_content));
         if entry.old_is_null {
             writeln!(out, "new file mode 100644")?;
         } else if entry.new_is_null {
             writeln!(out, "deleted file mode 100644")?;
         }
-        if entry.old_is_null || entry.new_is_null {
-            writeln!(out, "index {left_hash}..{right_hash}")?;
-        } else {
-            writeln!(out, "index {left_hash}..{right_hash} 100644")?;
-        }
+        write_patch_index_line(
+            &mut out,
+            false,
+            old_id.as_ref(),
+            new_id.as_ref(),
+            left_width,
+            right_width,
+            options.binary && *is_binary,
+            algorithm,
+            (entry.old_is_null == entry.new_is_null).then_some("100644"),
+        )?;
         if *is_binary {
             if options.binary {
                 write_git_binary_patch(&mut out, &entry.new_content, &entry.old_content)?;
@@ -1300,19 +1440,6 @@ pub(crate) fn no_index_rewrite_stat_path(old_display: &str, new_display: &str) -
 
 pub(crate) fn is_null_diff_path(path: &std::path::Path) -> bool {
     path == std::path::Path::new("/dev/null")
-}
-
-pub(crate) fn blob_hash_for_diff(content: &[u8], is_null: bool, full: bool) -> String {
-    if is_null {
-        if full {
-            zero_object_id().to_hex()
-        } else {
-            "0000000".to_owned()
-        }
-    } else {
-        let hash = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, content).to_hex();
-        if full { hash } else { hash[..7].to_owned() }
-    }
 }
 
 pub(crate) fn print_no_index_stat_rows(rows: &[DiffStatRow]) {
@@ -1450,6 +1577,7 @@ pub(crate) struct DiffRenderOptions {
     pub(crate) quiet: bool,
     pub(crate) exit_code: bool,
     pub(crate) raw_abbrev_len: Option<usize>,
+    pub(crate) raw_abbrev_policy: Option<CoreAbbrevConfigState>,
     pub(crate) word_diff: WordDiffMode,
     pub(crate) word_diff_regex: Option<String>,
     pub(crate) patch_abbrev_len: Option<usize>,
@@ -1747,6 +1875,7 @@ pub(crate) fn render_diff(
     };
     let raw_options = RawPrintOptions {
         abbrev_len: options.raw_abbrev_len,
+        abbrev_policy: options.raw_abbrev_policy,
         relative_prefix: options.relative_prefix.as_deref(),
         nul_terminated: options.nul_terminated,
     };
@@ -1920,6 +2049,7 @@ pub(crate) fn print_render_patch_entries(
             word_diff: options.word_diff,
             word_diff_regex: options.word_diff_regex.clone(),
             abbrev_len: options.patch_abbrev_len,
+            abbrev_lengths: None,
             old_prefix: options.old_prefix.clone(),
             new_prefix: options.new_prefix.clone(),
             unified_context: options.unified_context,
@@ -2053,6 +2183,7 @@ pub(crate) fn render_diff_tree_root_entries(
         skip_to,
         rotate_to,
         relative_prefix,
+        abbrev_policy,
         options,
     } = render;
     let mut entries = apply_root_tree_diff_filter(entries, diff_filter);
@@ -2096,6 +2227,7 @@ pub(crate) fn render_diff_tree_root_entries(
     } else {
         print_root_tree_raw_entries(
             store,
+            abbrev_policy,
             &entries,
             options.raw_abbrev_len,
             relative_prefix,
@@ -2317,25 +2449,52 @@ pub(crate) fn print_root_tree_name_status_entries(
 
 pub(crate) fn print_root_tree_raw_entries(
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     entries: &[RootTreeDiffEntry],
     abbrev_len: Option<usize>,
     relative_prefix: Option<&[u8]>,
     nul_terminated: bool,
 ) -> Result<()> {
-    let abbrev_len = abbrev_len.unwrap_or(default_abbrev_len(store)?);
+    let ids = entries
+        .iter()
+        .flat_map(|entry| entry.old_id.iter().chain(entry.new_id.iter()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let abbrev_lengths = match abbrev_len {
+        Some(width) => RenderedAbbrevLengths::from_store_minimum(store, &ids, width)?,
+        None => rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?,
+    };
     for entry in entries {
         let old_mode = entry.old_mode.map(tree_mode_octal).unwrap_or("000000");
         let new_mode = entry.new_mode.map(tree_mode_octal).unwrap_or("000000");
         let old_id = entry
             .old_id
             .as_ref()
-            .map(|id| diff_raw_object_id_len(id, abbrev_len))
-            .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
+            .map(|id| diff_raw_object_id_len(id, abbrev_lengths.width_for(id)))
+            .unwrap_or_else(|| {
+                diff_raw_zero_object_id_len_for_algorithm(
+                    entry
+                        .new_id
+                        .as_ref()
+                        .map(|id| abbrev_lengths.width_for(id))
+                        .unwrap_or_else(|| abbrev_lengths.empty_width()),
+                    store.algorithm(),
+                )
+            });
         let new_id = entry
             .new_id
             .as_ref()
-            .map(|id| diff_raw_object_id_len(id, abbrev_len))
-            .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
+            .map(|id| diff_raw_object_id_len(id, abbrev_lengths.width_for(id)))
+            .unwrap_or_else(|| {
+                diff_raw_zero_object_id_len_for_algorithm(
+                    entry
+                        .old_id
+                        .as_ref()
+                        .map(|id| abbrev_lengths.width_for(id))
+                        .unwrap_or_else(|| abbrev_lengths.empty_width()),
+                    store.algorithm(),
+                )
+            });
         if nul_terminated {
             print!(
                 ":{old_mode} {new_mode} {old_id} {new_id} {}\0{}\0",
@@ -2355,6 +2514,7 @@ pub(crate) fn print_root_tree_raw_entries(
 
 pub(crate) fn print_tree_raw_entries(
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     old_tree: Option<&ObjectId>,
     new_tree: &ObjectId,
     pathspecs: &[Vec<u8>],
@@ -2364,52 +2524,6 @@ pub(crate) fn print_tree_raw_entries(
 ) -> Result<()> {
     let _trace = phase_trace("show.raw.print_tree_raw_entries");
     let tree_cache = TreeObjectCache::new(store);
-    if let Some(abbrev_len) = abbrev_len {
-        let _trace = phase_trace("show.raw.print_tree_raw_entries.stream");
-        return Ok(zmin_git_core::for_each_tree_diff(
-            &tree_cache,
-            old_tree,
-            new_tree,
-            |entry| {
-                if !pathspecs.is_empty() && !pathspec_matches(&entry.path, pathspecs) {
-                    return Ok(());
-                }
-                let old_mode = entry
-                    .old_entry
-                    .as_ref()
-                    .map(|entry| index_mode_octal(entry.mode))
-                    .unwrap_or("000000");
-                let new_mode = entry
-                    .new_entry
-                    .as_ref()
-                    .map(|entry| index_mode_octal(entry.mode))
-                    .unwrap_or("000000");
-                let old_id = entry
-                    .old_entry
-                    .as_ref()
-                    .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-                    .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
-                let new_id = entry
-                    .new_entry
-                    .as_ref()
-                    .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-                    .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
-                let path = diff_display_path(&entry.path, relative_prefix);
-                if nul_terminated {
-                    print!(
-                        ":{old_mode} {new_mode} {old_id} {new_id} {}\0{path}\0",
-                        entry.status.name_status()
-                    );
-                } else {
-                    println!(
-                        ":{old_mode} {new_mode} {old_id} {new_id} {}\t{path}",
-                        entry.status.name_status()
-                    );
-                }
-                Ok(())
-            },
-        )?);
-    }
     let entries = {
         let _trace = phase_trace("show.raw.print_tree_raw_entries.collect");
         zmin_git_core::diff_trees(&tree_cache, old_tree, new_tree)?
@@ -2417,9 +2531,21 @@ pub(crate) fn print_tree_raw_entries(
             .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
             .collect::<Vec<_>>()
     };
-    let abbrev_len = {
+    let abbrev_lengths = if let Some(minimum) = abbrev_len {
+        let ids = entries
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .old_entry
+                    .iter()
+                    .chain(entry.new_entry.iter())
+                    .map(|entry| entry.id.clone())
+            })
+            .collect::<Vec<_>>();
+        RenderedAbbrevLengths::from_store_minimum(store, &ids, minimum)?
+    } else {
         let _trace = phase_trace("show.raw.print_tree_raw_entries.auto_abbrev");
-        default_raw_abbrev_len_for_tree_entries(store, &entries)?
+        default_raw_abbrev_lengths_for_tree_entries(store, abbrev_policy, &entries)?
     };
     let _trace = phase_trace("show.raw.print_tree_raw_entries.render");
     for entry in entries {
@@ -2436,13 +2562,31 @@ pub(crate) fn print_tree_raw_entries(
         let old_id = entry
             .old_entry
             .as_ref()
-            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-            .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
+            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id)))
+            .unwrap_or_else(|| {
+                diff_raw_zero_object_id_len_for_algorithm(
+                    entry
+                        .new_entry
+                        .as_ref()
+                        .map(|entry| abbrev_lengths.width_for(&entry.id))
+                        .unwrap_or_else(|| abbrev_lengths.empty_width()),
+                    store.algorithm(),
+                )
+            });
         let new_id = entry
             .new_entry
             .as_ref()
-            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_len))
-            .unwrap_or_else(|| diff_raw_zero_object_id_len(abbrev_len));
+            .map(|entry| diff_raw_object_id_len(&entry.id, abbrev_lengths.width_for(&entry.id)))
+            .unwrap_or_else(|| {
+                diff_raw_zero_object_id_len_for_algorithm(
+                    entry
+                        .old_entry
+                        .as_ref()
+                        .map(|entry| abbrev_lengths.width_for(&entry.id))
+                        .unwrap_or_else(|| abbrev_lengths.empty_width()),
+                    store.algorithm(),
+                )
+            });
         let path = diff_display_path(&entry.path, relative_prefix);
         if nul_terminated {
             print!(
@@ -2776,11 +2920,20 @@ pub(crate) fn filtered_diff_entries_pathspecs(
     .collect())
 }
 
-pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<DiffRenderOptions> {
-    let explicit_abbrev_len = parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev)?;
-    let raw_abbrev_len = explicit_abbrev_len.or(Some(GitHashAlgorithm::Sha1.digest_len() * 2));
+pub(crate) fn plumbing_render_options(
+    options: &PlumbingDiffOptions,
+    algorithm: GitHashAlgorithm,
+) -> Result<DiffRenderOptions> {
+    let explicit_abbrev_len = options.abbrev.as_deref().map(|value| {
+        if value.is_empty() {
+            7
+        } else {
+            parse_revision_abbrev(value, algorithm)
+        }
+    });
+    let raw_abbrev_len = explicit_abbrev_len.or(Some(algorithm.digest_len() * 2));
     let patch_abbrev_len = if options.full_index && !options.no_full_index {
-        Some(GitHashAlgorithm::Sha1.digest_len() * 2)
+        Some(algorithm.digest_len() * 2)
     } else {
         explicit_abbrev_len
     };
@@ -2871,6 +3024,7 @@ pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<D
         quiet: options.quiet,
         exit_code: options.quiet || options.exit_code,
         raw_abbrev_len,
+        raw_abbrev_policy: None,
         word_diff,
         word_diff_regex: word_diff_regex.map(str::to_owned),
         patch_abbrev_len,
@@ -3301,16 +3455,20 @@ pub(crate) fn parse_stash_show_abbrev(value: &str) -> Result<usize> {
         })
 }
 
-pub(crate) fn parse_diff_abbrev_len(value: Option<&str>, no_abbrev: bool) -> Result<Option<usize>> {
+pub(crate) fn parse_diff_abbrev_len(
+    value: Option<&str>,
+    no_abbrev: bool,
+    algorithm: GitHashAlgorithm,
+) -> Result<Option<usize>> {
     if no_abbrev {
-        return Ok(Some(GitHashAlgorithm::Sha1.digest_len() * 2));
+        return Ok(Some(full_abbrev_len(algorithm)));
     }
     value
         .map(|value| {
             if value.is_empty() {
                 Ok(7)
             } else {
-                parse_stash_show_abbrev(value)
+                Ok(parse_revision_abbrev(value, algorithm))
             }
         })
         .transpose()
@@ -3748,6 +3906,17 @@ fn write_format_patch_prelude<W: Write>(
         compact_summary: false,
         color: context.word_diff == WordDiffMode::Color,
     };
+    let prelude_ids = entries
+        .iter()
+        .flat_map(|entry| {
+            let old = find_index_entry(old_index, diff_entry_old_path(entry));
+            let new = find_index_entry(new_index, &entry.path);
+            old.into_iter().chain(new)
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let prelude_abbrev_lengths =
+        rendered_abbrev_len_for_ids(context.store, context.abbrev_policy, &prelude_ids)?;
     match context.prelude_mode {
         FormatPatchPreludeMode::Diffstat => {
             writeln!(out, "---")?;
@@ -3761,7 +3930,7 @@ fn write_format_patch_prelude<W: Write>(
         }
         FormatPatchPreludeMode::Raw => {
             write_format_patch_note_blocks(out, notes, false)?;
-            write_raw_entries_to(out, &diff_context, entries, context.abbrev_len, None)?;
+            write_raw_entries_to(out, &diff_context, entries, &prelude_abbrev_lengths, None)?;
             write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::Numstat => {
@@ -3858,12 +4027,25 @@ fn write_format_patch_entries<W: Write>(
     _blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
     validate_word_diff_regex(context.word_diff_regex)?;
+    let ids = entries
+        .iter()
+        .flat_map(|entry| {
+            let old = find_index_entry(old_index, diff_entry_old_path(entry));
+            let new = find_index_entry(new_index, &entry.path);
+            old.into_iter().chain(new)
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let patch_abbrev_lengths = if let Some(lengths) = context.abbrev_lengths.clone() {
+        lengths
+    } else {
+        rendered_abbrev_len_for_ids(context.store, context.patch_abbrev_policy, &ids)?
+    };
     let (mut old_prefix, mut new_prefix) = diff_prefixes(context.no_prefix, false, None, None);
     if context.reverse {
         std::mem::swap(&mut old_prefix, &mut new_prefix);
     }
     let mut format = PatchFormatOptions::cached()
-        .with_abbrev_len(Some(context.patch_abbrev_len))
         .with_prefixes(old_prefix, new_prefix)
         .with_context(context.unified_context, 0)
         .with_binary(true)
@@ -3873,6 +4055,7 @@ fn write_format_patch_entries<W: Write>(
             DiffColorMode::Never
         })
         .with_submodule_format(context.submodule_format);
+    format = format.with_abbrev_lengths(Some(patch_abbrev_lengths));
     format.word_diff = context.word_diff;
     format.word_diff_regex = context.word_diff_regex.map(str::to_owned);
     format.relative_prefix = context.relative_prefix.clone();
@@ -4348,15 +4531,22 @@ pub(crate) fn write_commit_patch_entries_tree_diff_cached<W: Write, S: GitObject
     tree_cache: &TreeObjectCache<'_, S>,
     old_tree: Option<&ObjectId>,
     new_tree: &ObjectId,
-    abbrev_len: usize,
     blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
+    let entries = zmin_git_core::diff_trees(tree_cache, old_tree, new_tree)?;
+    let ids = entries
+        .iter()
+        .flat_map(|entry| entry.old_entry.iter().chain(entry.new_entry.iter()))
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let abbrev_policy = configured_core_abbrev_state(repo)?;
+    let abbrev_lengths = rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?;
     write_patch_entries_streaming_from_tree_diff(
         out,
         tree_cache,
         old_tree,
         new_tree,
-        cached_patch_write_context(repo, store, abbrev_len),
+        cached_patch_write_context(repo, store, abbrev_lengths),
         WordDiffMode::None,
         blob_cache,
     )
@@ -4810,14 +5000,14 @@ fn write_format_patch_appendix<W: Write>(
 fn cached_patch_write_context<'a>(
     repo: &'a GitRepo,
     store: &'a LooseObjectStore,
-    abbrev_len: usize,
+    abbrev_lengths: RenderedAbbrevLengths,
 ) -> PatchWriteContext<'a> {
     PatchWriteContext {
         repo,
         store,
         old_source: DiffSideSource::Index,
         new_source: DiffSideSource::Index,
-        abbrev_len,
+        abbrev_lengths,
         old_prefix: "a/",
         new_prefix: "b/",
         unified_context: 3,
@@ -5269,10 +5459,13 @@ pub(crate) fn print_raw_entries(
     entries: &[zmin_git_core::IndexDiffEntry],
     options: RawPrintOptions<'_>,
 ) -> Result<()> {
+    let abbrev_policy = options
+        .abbrev_policy
+        .unwrap_or(configured_core_abbrev_state(context.repo)?);
     let stdout = io::stdout();
     let stdout = stdout.lock();
     let mut out = io::BufWriter::new(stdout);
-    write_raw_entries_buffered(&mut out, context, entries, options)
+    write_raw_entries_buffered(&mut out, context, entries, options, abbrev_policy)
 }
 
 fn write_raw_entries_buffered<W: Write>(
@@ -5280,15 +5473,21 @@ fn write_raw_entries_buffered<W: Write>(
     context: &DiffIndexContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
     options: RawPrintOptions<'_>,
+    abbrev_policy: CoreAbbrevConfigState,
 ) -> Result<()> {
     let RawPrintOptions {
         abbrev_len,
+        abbrev_policy: requested_policy,
         relative_prefix,
         nul_terminated,
     } = options;
-    let abbrev_len = match abbrev_len {
-        Some(length) => length,
-        None => default_raw_abbrev_len_for_index_entries(context, entries)?,
+    let ids = raw_index_entry_ids(context, entries);
+    let abbrev_lengths = match requested_policy {
+        Some(policy) => rendered_abbrev_len_for_ids(context.store, policy, &ids)?,
+        None => match abbrev_len {
+            Some(length) => RenderedAbbrevLengths::from_store_minimum(context.store, &ids, length)?,
+            None => rendered_abbrev_len_for_ids(context.store, abbrev_policy, &ids)?,
+        },
     };
     let worktree_index = (context.old_source == DiffSideSource::WorktreeOrIndex
         || context.new_source == DiffSideSource::WorktreeOrIndex)
@@ -5303,19 +5502,29 @@ fn write_raw_entries_buffered<W: Write>(
         let new_mode = new_entry
             .map(|entry| index_mode_octal(entry.mode))
             .unwrap_or("000000");
-        let old_id = diff_raw_side_object_id(
+        let old_width = old_entry
+            .map(|entry| abbrev_lengths.width_for(&entry.id))
+            .or_else(|| new_entry.map(|entry| abbrev_lengths.width_for(&entry.id)))
+            .unwrap_or_else(|| abbrev_lengths.empty_width());
+        let new_width = new_entry
+            .map(|entry| abbrev_lengths.width_for(&entry.id))
+            .or_else(|| old_entry.map(|entry| abbrev_lengths.width_for(&entry.id)))
+            .unwrap_or_else(|| abbrev_lengths.empty_width());
+        let old_id = diff_raw_side_object_id_with_lengths(
             context,
             context.old_source,
             old_entry,
             worktree_index.as_ref(),
-            abbrev_len,
+            &abbrev_lengths,
+            old_width,
         )?;
-        let new_id = diff_raw_side_object_id(
+        let new_id = diff_raw_side_object_id_with_lengths(
             context,
             context.new_source,
             new_entry,
             worktree_index.as_ref(),
-            abbrev_len,
+            &abbrev_lengths,
+            new_width,
         )?;
         if matches!(
             entry.status,
@@ -5367,16 +5576,10 @@ fn write_raw_entries_buffered<W: Write>(
     Ok(())
 }
 
-fn default_raw_abbrev_len_for_index_entries(
+fn raw_index_entry_ids(
     context: &DiffIndexContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
-) -> Result<usize> {
-    let _trace = phase_trace("show.raw.default_raw_abbrev_len_for_index_entries");
-    if !matches!(context.old_source, DiffSideSource::Index)
-        || !matches!(context.new_source, DiffSideSource::Index)
-    {
-        return default_abbrev_len(context.store);
-    }
+) -> Vec<ObjectId> {
     let mut ids = Vec::with_capacity(entries.len().saturating_mul(2));
     for entry in entries {
         if let Some(old_entry) = find_index_entry(context.old_index, diff_entry_old_path(entry)) {
@@ -5386,13 +5589,14 @@ fn default_raw_abbrev_len_for_index_entries(
             ids.push(new_entry.id.clone());
         }
     }
-    default_abbrev_len_for_ids(context.store, &ids)
+    ids
 }
 
-fn default_raw_abbrev_len_for_tree_entries(
+fn default_raw_abbrev_lengths_for_tree_entries(
     store: &LooseObjectStore,
+    abbrev_policy: CoreAbbrevConfigState,
     entries: &[zmin_git_core::TreeDiffEntry],
-) -> Result<usize> {
+) -> Result<RenderedAbbrevLengths> {
     let _trace = phase_trace("show.raw.default_raw_abbrev_len_for_tree_entries");
     let mut ids = Vec::with_capacity(entries.len().saturating_mul(2));
     for entry in entries {
@@ -5403,16 +5607,17 @@ fn default_raw_abbrev_len_for_tree_entries(
             ids.push(new_entry.id.clone());
         }
     }
-    default_abbrev_len_for_ids(store, &ids)
+    rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)
 }
 
 fn write_raw_entries_to<W: Write>(
     out: &mut W,
     context: &DiffIndexContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
-    abbrev_len: usize,
+    abbrev_lengths: &RenderedAbbrevLengths,
     relative_prefix: Option<&[u8]>,
 ) -> Result<()> {
+    let zero_width = abbrev_lengths.empty_width();
     let worktree_index = (context.old_source == DiffSideSource::WorktreeOrIndex
         || context.new_source == DiffSideSource::WorktreeOrIndex)
         .then(|| read_repo_index(context.repo))
@@ -5426,19 +5631,21 @@ fn write_raw_entries_to<W: Write>(
         let new_mode = new_entry
             .map(|entry| index_mode_octal(entry.mode))
             .unwrap_or("000000");
-        let old_id = diff_raw_side_object_id(
+        let old_id = diff_raw_side_object_id_with_lengths(
             context,
             context.old_source,
             old_entry,
             worktree_index.as_ref(),
-            abbrev_len,
+            abbrev_lengths,
+            zero_width,
         )?;
-        let new_id = diff_raw_side_object_id(
+        let new_id = diff_raw_side_object_id_with_lengths(
             context,
             context.new_source,
             new_entry,
             worktree_index.as_ref(),
-            abbrev_len,
+            abbrev_lengths,
+            zero_width,
         )?;
         if matches!(
             entry.status,
@@ -5468,32 +5675,45 @@ fn write_raw_entries_to<W: Write>(
     Ok(())
 }
 
-fn diff_raw_side_object_id(
+fn diff_raw_side_object_id_with_lengths(
     context: &DiffIndexContext<'_>,
     source: DiffSideSource,
     entry: Option<&IndexEntry>,
     worktree_index: Option<&GitIndex>,
-    abbrev_len: usize,
+    abbrev_lengths: &RenderedAbbrevLengths,
+    zero_width: usize,
 ) -> Result<String> {
     let Some(entry) = entry else {
-        return Ok(diff_raw_zero_object_id_len(abbrev_len));
+        return Ok(diff_raw_zero_object_id_len_for_algorithm(
+            zero_width,
+            context.store.algorithm(),
+        ));
     };
     if source == DiffSideSource::Index || entry.mode == IndexMode::Gitlink {
-        return Ok(diff_raw_object_id_len(&entry.id, abbrev_len));
+        return Ok(diff_raw_object_id_len(
+            &entry.id,
+            abbrev_lengths.width_for(&entry.id),
+        ));
     }
     let content = read_diff_side_content(context.repo, context.store, entry, source)?;
-    let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
+    let id = hash_object(context.store.algorithm(), GitObjectKind::Blob, &content);
     let Some(index_entry) = worktree_index.and_then(|index| find_index_entry(index, &entry.path))
     else {
-        return Ok(diff_raw_zero_object_id_len(abbrev_len));
+        return Ok(diff_raw_zero_object_id_len_for_algorithm(
+            zero_width,
+            context.store.algorithm(),
+        ));
     };
     let index_matches_worktree = index_entry.id == id
         && index_entry.mode == entry.mode
         && worktree_index_entry_stat_matches(context.repo, index_entry)?;
     if index_matches_worktree {
-        Ok(diff_raw_object_id_len(&id, abbrev_len))
+        Ok(diff_raw_object_id_len(&id, abbrev_lengths.width_for(&id)))
     } else {
-        Ok(diff_raw_zero_object_id_len(abbrev_len))
+        Ok(diff_raw_zero_object_id_len_for_algorithm(
+            zero_width,
+            context.store.algorithm(),
+        ))
     }
 }
 
@@ -5520,9 +5740,12 @@ pub(crate) fn diff_raw_object_id_len(id: &ObjectId, len: usize) -> String {
     value
 }
 
-pub(crate) fn diff_raw_zero_object_id_len(len: usize) -> String {
+pub(crate) fn diff_raw_zero_object_id_len_for_algorithm(
+    len: usize,
+    algorithm: GitHashAlgorithm,
+) -> String {
     let mut value = short_zero_object_id_len(len);
-    if diff_print_sha1_ellipsis_enabled() && len < GitHashAlgorithm::Sha1.digest_len() * 2 {
+    if diff_print_sha1_ellipsis_enabled() && len < full_abbrev_len(algorithm) {
         value.push_str("...");
     }
     value
@@ -5773,8 +5996,9 @@ fn preload_diff_stat_shared_blobs(
 pub(crate) struct FormatPatchContext<'a> {
     pub(crate) repo: &'a GitRepo,
     pub(crate) store: &'a LooseObjectStore,
-    pub(crate) abbrev_len: usize,
-    pub(crate) patch_abbrev_len: usize,
+    pub(crate) abbrev_policy: CoreAbbrevConfigState,
+    pub(crate) patch_abbrev_policy: CoreAbbrevConfigState,
+    pub(crate) abbrev_lengths: Option<RenderedAbbrevLengths>,
     pub(crate) total: usize,
     pub(crate) nul_terminated: bool,
     pub(crate) no_prefix: bool,
@@ -5863,6 +6087,7 @@ pub(crate) struct FormatPatchEntry<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct RawPrintOptions<'a> {
     pub(crate) abbrev_len: Option<usize>,
+    pub(crate) abbrev_policy: Option<CoreAbbrevConfigState>,
     pub(crate) relative_prefix: Option<&'a [u8]>,
     pub(crate) nul_terminated: bool,
 }
@@ -7100,6 +7325,7 @@ pub(crate) struct PatchFormatOptions {
     pub(crate) word_diff: WordDiffMode,
     pub(crate) word_diff_regex: Option<String>,
     pub(crate) abbrev_len: Option<usize>,
+    pub(crate) abbrev_lengths: Option<RenderedAbbrevLengths>,
     pub(crate) old_prefix: String,
     pub(crate) new_prefix: String,
     pub(crate) unified_context: usize,
@@ -7128,6 +7354,7 @@ impl PatchFormatOptions {
             word_diff: WordDiffMode::None,
             word_diff_regex: None,
             abbrev_len: None,
+            abbrev_lengths: None,
             old_prefix: "a/".to_owned(),
             new_prefix: "b/".to_owned(),
             unified_context: 3,
@@ -7156,6 +7383,7 @@ impl PatchFormatOptions {
             word_diff: WordDiffMode::None,
             word_diff_regex: None,
             abbrev_len: None,
+            abbrev_lengths: None,
             old_prefix: "a/".to_owned(),
             new_prefix: "b/".to_owned(),
             unified_context: 3,
@@ -7179,6 +7407,14 @@ impl PatchFormatOptions {
 
     pub(crate) fn with_abbrev_len(mut self, abbrev_len: Option<usize>) -> Self {
         self.abbrev_len = abbrev_len;
+        self
+    }
+
+    pub(crate) fn with_abbrev_lengths(
+        mut self,
+        abbrev_lengths: Option<RenderedAbbrevLengths>,
+    ) -> Self {
+        self.abbrev_lengths = abbrev_lengths;
         self
     }
 
@@ -7248,6 +7484,7 @@ pub(crate) fn write_patch_entries<W: Write>(
     entries: &[zmin_git_core::IndexDiffEntry],
     format: PatchFormatOptions,
 ) -> Result<()> {
+    let abbrev_policy = configured_core_abbrev_state(repo)?;
     if let Some(prefix) = format.line_prefix.clone() {
         let mut prefixed = LinePrefixWriter::new(out, prefix.as_bytes());
         return write_patch_entries_unprefixed(
@@ -7258,9 +7495,19 @@ pub(crate) fn write_patch_entries<W: Write>(
             new_index,
             entries,
             format.with_line_prefix(None),
+            abbrev_policy,
         );
     }
-    write_patch_entries_unprefixed(out, repo, store, old_index, new_index, entries, format)
+    write_patch_entries_unprefixed(
+        out,
+        repo,
+        store,
+        old_index,
+        new_index,
+        entries,
+        format,
+        abbrev_policy,
+    )
 }
 
 fn write_patch_entries_unprefixed<W: Write>(
@@ -7271,14 +7518,31 @@ fn write_patch_entries_unprefixed<W: Write>(
     new_index: &GitIndex,
     entries: &[zmin_git_core::IndexDiffEntry],
     format: PatchFormatOptions,
+    abbrev_policy: CoreAbbrevConfigState,
 ) -> Result<()> {
-    let abbrev_len = format.abbrev_len.unwrap_or(default_auto_abbrev_len(store)?);
+    let abbrev_lengths = if let Some(lengths) = format.abbrev_lengths {
+        lengths
+    } else {
+        let ids = entries
+            .iter()
+            .flat_map(|entry| {
+                let old = find_index_entry(old_index, diff_entry_old_path(entry));
+                let new = find_index_entry(new_index, &entry.path);
+                old.into_iter().chain(new)
+            })
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        match format.abbrev_len {
+            Some(length) => RenderedAbbrevLengths::from_store_minimum(store, &ids, length)?,
+            None => rendered_abbrev_len_for_ids(store, abbrev_policy, &ids)?,
+        }
+    };
     let context = PatchWriteContext {
         repo,
         store,
         old_source: format.old_source,
         new_source: format.new_source,
-        abbrev_len,
+        abbrev_lengths,
         old_prefix: &format.old_prefix,
         new_prefix: &format.new_prefix,
         unified_context: format.unified_context,
@@ -7364,7 +7628,8 @@ fn write_patch_entries_streaming_from_tree_diff<W: Write, S: GitObjectStore + ?S
     word_diff: WordDiffMode,
     blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
-    for entry in zmin_git_core::diff_trees(tree_cache, old_tree, new_tree)? {
+    let entries = zmin_git_core::diff_trees(tree_cache, old_tree, new_tree)?;
+    for entry in entries {
         let _trace = phase_trace("format_patch.write_tree_diff.entry");
         let old_entry = entry
             .old_entry
@@ -7467,6 +7732,8 @@ fn write_patch_entry_binary_summary<W: Write>(
         IndexDiffStatus::Modified => {}
         IndexDiffStatus::Copied | IndexDiffStatus::Renamed => unreachable!(),
     }
+    let (old_abbrev_len, new_abbrev_len) =
+        context.entry_abbrev_lengths(summary.old_entry, summary.new_entry)?;
     if matches!(summary.entry.status, IndexDiffStatus::Modified) {
         if let Some(dissimilarity) = summary.entry.similarity {
             writeln!(out, "dissimilarity index {dissimilarity}%")?;
@@ -7476,8 +7743,10 @@ fn write_patch_entry_binary_summary<W: Write>(
             context.color,
             summary.old_entry.map(|entry| &entry.id),
             summary.new_entry.map(|entry| &entry.id),
-            context.abbrev_len,
+            old_abbrev_len,
+            new_abbrev_len,
             context.binary,
+            context.store.algorithm(),
             Some(summary.mode),
         )?;
     } else {
@@ -7486,8 +7755,10 @@ fn write_patch_entry_binary_summary<W: Write>(
             context.color,
             summary.old_entry.map(|entry| &entry.id),
             summary.new_entry.map(|entry| &entry.id),
-            context.abbrev_len,
+            old_abbrev_len,
+            new_abbrev_len,
             context.binary,
+            context.store.algorithm(),
             None,
         )?;
     }
@@ -7511,7 +7782,7 @@ pub(crate) struct PatchWriteContext<'a> {
     pub(crate) store: &'a LooseObjectStore,
     pub(crate) old_source: DiffSideSource,
     pub(crate) new_source: DiffSideSource,
-    pub(crate) abbrev_len: usize,
+    pub(crate) abbrev_lengths: RenderedAbbrevLengths,
     pub(crate) old_prefix: &'a str,
     pub(crate) new_prefix: &'a str,
     pub(crate) unified_context: usize,
@@ -7531,6 +7802,23 @@ pub(crate) struct PatchWriteContext<'a> {
     pub(crate) color: bool,
     pub(crate) emit_hunk_headers: bool,
     pub(crate) word_diff_regex: Option<&'a str>,
+}
+
+impl PatchWriteContext<'_> {
+    fn entry_abbrev_lengths(
+        &self,
+        old_entry: Option<&IndexEntry>,
+        new_entry: Option<&IndexEntry>,
+    ) -> Result<(usize, usize)> {
+        let lengths = &self.abbrev_lengths;
+        let old_width = old_entry.map(|entry| lengths.width_for(&entry.id));
+        let new_width = new_entry.map(|entry| lengths.width_for(&entry.id));
+        let fallback = lengths.empty_width();
+        Ok((
+            old_width.or(new_width).unwrap_or(fallback),
+            new_width.or(old_width).unwrap_or(fallback),
+        ))
+    }
 }
 
 pub(crate) fn write_patch_entry<W: Write>(
@@ -7577,6 +7865,7 @@ fn write_patch_entry_view<W: Write>(
     let new_mode = new_entry.map(|entry| index_mode_octal(entry.mode));
     let old_mode = old_entry.map(|entry| index_mode_octal(entry.mode));
     let mode = new_mode.or(old_mode).unwrap_or("100644");
+    let (old_abbrev_len, new_abbrev_len) = context.entry_abbrev_lengths(old_entry, new_entry)?;
     if (old_entry.is_some_and(|entry| entry.mode == IndexMode::Gitlink)
         || new_entry.is_some_and(|entry| entry.mode == IndexMode::Gitlink))
         && context.submodule_format != SubmoduleDiffFormat::Short
@@ -7920,8 +8209,10 @@ fn write_patch_entry_view<W: Write>(
                 context.color,
                 old_entry.map(|entry| &entry.id),
                 new_entry.map(|entry| &entry.id),
-                context.abbrev_len,
+                old_abbrev_len,
+                new_abbrev_len,
                 context.binary && binary,
+                context.store.algorithm(),
                 Some(mode),
             )?;
         } else {
@@ -7930,8 +8221,10 @@ fn write_patch_entry_view<W: Write>(
                 context.color,
                 old_entry.map(|entry| &entry.id),
                 new_entry.map(|entry| &entry.id),
-                context.abbrev_len,
+                old_abbrev_len,
+                new_abbrev_len,
                 context.binary && binary,
+                context.store.algorithm(),
                 None,
             )?;
         }
@@ -8724,17 +9017,19 @@ fn write_patch_index_line<W: Write>(
     color: bool,
     old_id: Option<&ObjectId>,
     new_id: Option<&ObjectId>,
-    abbrev_len: usize,
+    old_abbrev_len: usize,
+    new_abbrev_len: usize,
     binary: bool,
+    algorithm: GitHashAlgorithm,
     mode: Option<&str>,
 ) -> Result<()> {
     if color {
         out.write_all(b"\x1b[1m")?;
     }
     out.write_all(b"index ")?;
-    write_patch_index_object_id(out, old_id, abbrev_len, binary)?;
+    write_patch_index_object_id(out, old_id, old_abbrev_len, binary, algorithm)?;
     out.write_all(b"..")?;
-    write_patch_index_object_id(out, new_id, abbrev_len, binary)?;
+    write_patch_index_object_id(out, new_id, new_abbrev_len, binary, algorithm)?;
     if let Some(mode) = mode {
         out.write_all(b" ")?;
         out.write_all(mode.as_bytes())?;
@@ -8751,13 +9046,12 @@ fn write_patch_index_object_id<W: Write>(
     id: Option<&ObjectId>,
     abbrev_len: usize,
     binary: bool,
+    algorithm: GitHashAlgorithm,
 ) -> Result<()> {
     match (id, binary) {
         (Some(id), true) => id.write_hex_io(out).map_err(CliError::Io),
         (Some(id), false) => write_short_object_id_len(out, id, abbrev_len),
-        (None, true) => out
-            .write_all(ZERO_SHA1_HEX.as_bytes())
-            .map_err(CliError::Io),
+        (None, true) => write_zero_object_id_len(out, full_abbrev_len(algorithm)),
         (None, false) => write_zero_object_id_len(out, abbrev_len),
     }
 }
@@ -8784,10 +9078,6 @@ fn write_short_object_id_len<W: Write>(out: &mut W, id: &ObjectId, len: usize) -
 }
 
 fn write_zero_object_id_len<W: Write>(out: &mut W, len: usize) -> Result<()> {
-    if len <= ZERO_SHA1_HEX.len() {
-        out.write_all(&ZERO_SHA1_HEX.as_bytes()[..len])?;
-        return Ok(());
-    }
     for _ in 0..len {
         out.write_all(b"0")?;
     }
@@ -17654,8 +17944,9 @@ fn second() {
         let context = FormatPatchContext {
             repo: &repo,
             store: &store,
-            abbrev_len: 7,
-            patch_abbrev_len: 7,
+            abbrev_policy: CoreAbbrevConfigState::Auto,
+            patch_abbrev_policy: CoreAbbrevConfigState::Auto,
+            abbrev_lengths: None,
             total: 3,
             nul_terminated: false,
             no_prefix: false,

@@ -43,6 +43,9 @@ const PLAIN_HTTP1_REQUEST_HEAD_INITIAL_CAPACITY: usize = 1024;
 const PLAIN_HTTP1_REQUEST_HEAD_RETAIN_CAPACITY_LIMIT: usize = 64 * 1024;
 const DEFAULT_TLS_VERIFICATION_IDENTITY: &str = "platform";
 const NONE_IDENTITY: &str = "<none>";
+thread_local! {
+    static MAX_RESPONSE_BYTES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 const PROXY_ENV_VARS: &[&str] = &[
     "HTTPS_PROXY",
     "https_proxy",
@@ -122,6 +125,12 @@ struct Args {
 
     #[arg(long)]
     output_file: Option<String>,
+
+    #[arg(long)]
+    max_response_bytes: Option<u64>,
+
+    #[arg(long)]
+    request_timeout_ms: Option<u64>,
 
     #[arg(long)]
     ca_file: Option<String>,
@@ -534,12 +543,14 @@ fn copy_stream_with_buffer<R: Read, W: Write>(
 }
 
 fn checked_stream_copy_len(current: u64, len: usize) -> io::Result<u64> {
-    current
+    let next = current
         .checked_add(
             u64::try_from(len)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "stream too large"))?,
         )
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "stream length overflow"))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "stream length overflow"))?;
+    ensure_response_body_len(next)?;
+    Ok(next)
 }
 
 struct TransportRequest {
@@ -889,6 +900,13 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args = Args::parse();
+    MAX_RESPONSE_BYTES.with(|limit| limit.set(0));
+    if let Some(max_response_bytes) = args.max_response_bytes {
+        if max_response_bytes == 0 {
+            return Err("--max-response-bytes must be positive".into());
+        }
+        MAX_RESPONSE_BYTES.with(|limit| limit.set(max_response_bytes));
+    }
     if args.batch {
         if args.http_version == HttpVersion::Http3 {
             return run_http3_batch(&args);
@@ -1236,7 +1254,10 @@ fn plain_http1_batch_candidate(url: &str) -> bool {
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case(b"http://"))
 }
 
-fn direct_http1_batch_candidate(url: &str, proxy_free: &mut Option<bool>, _args: &Args) -> bool {
+fn direct_http1_batch_candidate(url: &str, proxy_free: &mut Option<bool>, args: &Args) -> bool {
+    if args.max_response_bytes.is_some() || args.request_timeout_ms.is_some() {
+        return false;
+    }
     if plain_http1_batch_candidate(url) {
         return true;
     }
@@ -1362,6 +1383,12 @@ fn build_client_for_version(
         .redirect(Policy::none())
         .tcp_nodelay(true)
         .user_agent(concat!("zmin-git-remote-http/", env!("CARGO_PKG_VERSION")));
+    if let Some(timeout_ms) = args.request_timeout_ms {
+        if timeout_ms == 0 {
+            return Err("--request-timeout-ms must be positive".into());
+        }
+        builder = builder.timeout(Duration::from_millis(timeout_ms));
+    }
     builder = match version {
         HttpVersion::Auto => builder,
         HttpVersion::Http1 => builder.http1_only(),
@@ -2363,6 +2390,7 @@ fn read_content_length_body_with_buffer<R: Read>(
 ) -> io::Result<ResponseBody> {
     let content_length_u64 = u64::try_from(content_length)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "content length too large"))?;
+    ensure_response_body_len(content_length_u64)?;
     if content_length_u64 > AUTO_RESPONSE_FILE_THRESHOLD {
         let mut file = temp_response_file()?;
         let len = {
@@ -2406,6 +2434,10 @@ fn copy_content_length_body_with_buffer<R: Read, W: Write>(
     content_length: usize,
     buffer: &mut [u8; STREAM_BUFFER_SIZE],
 ) -> io::Result<u64> {
+    ensure_response_body_len(
+        u64::try_from(content_length)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "content length too large"))?,
+    )?;
     let mut remaining = content_length;
     let copied = u64::try_from(content_length)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "content length too large"))?;
@@ -3360,6 +3392,9 @@ fn request_once_with_buffer(
         }
     };
     let expected_content_length = response.content_length();
+    if let Some(expected_content_length) = expected_content_length {
+        ensure_response_body_len(expected_content_length)?;
+    }
     let empty_body_response =
         empty_body_request || http_status_code_allows_empty_body(status_code.as_u16());
     let body = {
@@ -3819,6 +3854,9 @@ where
     S: h3::quic::RecvStream,
 {
     let content_length = http_content_length(headers)?;
+    if let Some(content_length) = content_length {
+        ensure_response_body_len(content_length)?;
+    }
     let empty_body_status =
         empty_body_request || http_status_code_allows_empty_body(status.as_u16());
     if let Some(output_file) = output_file {
@@ -3946,7 +3984,19 @@ fn checked_http_body_len(current: u64, len: usize, expected: Option<u64>) -> io:
             "HTTP response body exceeded Content-Length",
         ));
     }
+    ensure_response_body_len(next)?;
     Ok(next)
+}
+
+fn ensure_response_body_len(len: u64) -> io::Result<()> {
+    let max = MAX_RESPONSE_BYTES.with(std::cell::Cell::get);
+    if max != 0 && len > max {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "HTTP response body exceeds configured maximum",
+        ));
+    }
+    Ok(())
 }
 
 fn write_http_body_bytes_checked<W: Write>(
@@ -4715,7 +4765,7 @@ mod tests {
         let mut reader = io::Cursor::new(b"zmin".to_vec());
         let mut buffer = [0_u8; STREAM_BUFFER_SIZE];
         let body =
-            read_content_length_request_body_with_buffer(&mut reader, 5, &mut buffer).unwrap();
+            read_content_length_request_body_with_buffer(&mut reader, 4, &mut buffer).unwrap();
         match body {
             RequestBody::Memory(body) => assert_eq!(body.as_ref(), b"zmin"),
             _ => panic!("small inline request body should stay in memory"),
@@ -5358,7 +5408,7 @@ mod tests {
         let mut reader = io::Cursor::new(b"zmin-next".to_vec());
         let mut buffer = [0_u8; STREAM_BUFFER_SIZE];
 
-        let body = read_exact_len_to_vec_with_buffer(&mut reader, 5, &mut buffer).unwrap();
+        let body = read_exact_len_to_vec_with_buffer(&mut reader, 4, &mut buffer).unwrap();
 
         assert_eq!(body, b"zmin");
         let mut rest = Vec::new();
@@ -6342,6 +6392,8 @@ mod tests {
             headers: Vec::new(),
             body_file: None,
             output_file: None,
+            max_response_bytes: None,
+            request_timeout_ms: None,
             ca_file: None,
             client_cert_file: None,
             client_key_file: None,
@@ -7173,6 +7225,8 @@ mod tests {
             headers: Vec::new(),
             body_file: None,
             output_file: None,
+            max_response_bytes: None,
+            request_timeout_ms: None,
             ca_file: None,
             client_cert_file: None,
             client_key_file: None,
@@ -7205,6 +7259,8 @@ mod tests {
             headers: Vec::new(),
             body_file: None,
             output_file: None,
+            max_response_bytes: None,
+            request_timeout_ms: None,
             ca_file: Some("ca.pem".to_owned()),
             client_cert_file: None,
             client_key_file: None,
@@ -7230,6 +7286,8 @@ mod tests {
             headers: Vec::new(),
             body_file: None,
             output_file: None,
+            max_response_bytes: None,
+            request_timeout_ms: None,
             ca_file: Some("ca.pem".to_owned()),
             client_cert_file: Some("client.pem".to_owned()),
             client_key_file: None,
@@ -8052,6 +8110,8 @@ mod tests {
             headers: Vec::new(),
             body_file: None,
             output_file: None,
+            max_response_bytes: None,
+            request_timeout_ms: None,
             ca_file: None,
             client_cert_file: None,
             client_key_file: None,

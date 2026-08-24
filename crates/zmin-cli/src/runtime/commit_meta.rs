@@ -190,7 +190,7 @@ pub(crate) fn parse_timezone_offset(timezone: &str) -> Option<chrono::FixedOffse
 }
 
 pub(crate) fn porcelain_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<String> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
     match refs.read_head()? {
         RefTarget::Symbolic(target) if target.starts_with("refs/heads/") => {
             let branch = target.strip_prefix("refs/heads/").unwrap_or(&target);
@@ -224,7 +224,7 @@ pub(crate) fn porcelain_branch_header(repo: &GitRepo, ahead_behind: bool) -> Res
 }
 
 pub(crate) fn upstream_differs_from_head(repo: &GitRepo, upstream_ref: &str) -> Result<bool> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
     let head = refs.resolve("HEAD")?;
     let upstream = refs.resolve(upstream_ref)?;
     Ok(head != upstream)
@@ -284,14 +284,10 @@ fn refspec_maps_ref(refspec: &str, source: &str, destination: &str) -> bool {
         return false;
     };
     match (from.split_once('*'), to.split_once('*')) {
-        (Some((from_prefix, from_suffix)), Some((to_prefix, to_suffix))) => {
-            source
-                .strip_prefix(from_prefix)
-                .and_then(|wildcard| wildcard.strip_suffix(from_suffix))
-                .is_some_and(|wildcard| {
-                    destination == format!("{to_prefix}{wildcard}{to_suffix}")
-                })
-        }
+        (Some((from_prefix, from_suffix)), Some((to_prefix, to_suffix))) => source
+            .strip_prefix(from_prefix)
+            .and_then(|wildcard| wildcard.strip_suffix(from_suffix))
+            .is_some_and(|wildcard| destination == format!("{to_prefix}{wildcard}{to_suffix}")),
         _ => from == source && to == destination,
     }
 }
@@ -308,11 +304,12 @@ pub(crate) fn upstream_counts_from_ref(
     local_ref: &str,
     upstream_ref: &str,
 ) -> Result<Option<(usize, usize)>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(repo)?;
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     if refs.resolve(upstream_ref).is_err() {
         return Ok(None);
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1)
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm)
         .with_transient_packed_object_reads()
         .with_trusted_packed_object_reads()
         .with_buffered_pack_reads()

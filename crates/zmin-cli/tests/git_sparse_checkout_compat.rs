@@ -1,6 +1,10 @@
 mod common;
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use tempfile::TempDir;
 
@@ -25,7 +29,362 @@ fn sparse_checkout_fixture_repo() -> TempDir {
 }
 
 fn git_config_get(repo: &Path, key: &str) -> (i32, String, String) {
-    command_any_output("git", repo, &["config", "--get", key], "git")
+    let (status, stdout, stderr) = pinned_git_exact_output(repo, &["config", "--get", key]);
+    (
+        status,
+        String::from_utf8(stdout).expect("pinned Git config stdout is UTF-8"),
+        String::from_utf8(stderr).expect("pinned Git config stderr is UTF-8"),
+    )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SparseCheckoutCleanState {
+    index: Vec<u8>,
+    patterns: Vec<u8>,
+    config: Vec<(i32, String, String)>,
+    files: Vec<String>,
+    staged: Vec<u8>,
+}
+
+fn pinned_git_path() -> PathBuf {
+    let path = std::env::var_os("ZMIN_STOCK_GIT")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .expect("set ZMIN_STOCK_GIT to the pinned Git v2.55.0 comparator");
+    assert!(
+        path.is_absolute(),
+        "ZMIN_STOCK_GIT must be an absolute path to the pinned comparator"
+    );
+    let output = Command::new(&path)
+        .arg("--version")
+        .output()
+        .expect("run pinned Git --version");
+    assert!(output.status.success(), "pinned Git --version failed");
+    assert_eq!(
+        std::str::from_utf8(&output.stdout)
+            .expect("pinned Git version is UTF-8")
+            .trim(),
+        "git version 2.55.0",
+        "ZMIN_STOCK_GIT must be the pinned Git v2.55.0 comparator"
+    );
+    path
+}
+
+fn require_pinned_git_v2_55() {
+    let _ = pinned_git_path();
+}
+
+fn exact_command_output(command: &Path, cwd: &Path, args: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+    let output = Command::new(command)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("run exact command");
+    (
+        output.status.code().expect("process exit code"),
+        output.stdout,
+        output.stderr,
+    )
+}
+
+fn pinned_git_exact_output(cwd: &Path, args: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+    exact_command_output(&pinned_git_path(), cwd, args)
+}
+
+fn zmin_exact_output(cwd: &Path, args: &[&str]) -> (i32, Vec<u8>, Vec<u8>) {
+    exact_command_output(Path::new(zmin_bin()), cwd, args)
+}
+
+fn sparse_checkout_clean_state(repo: &Path) -> SparseCheckoutCleanState {
+    let config = [
+        "core.sparseCheckout",
+        "core.sparseCheckoutCone",
+        "index.sparse",
+        "clean.requireForce",
+    ]
+    .into_iter()
+    .map(|key| git_config_get(repo, key))
+    .collect();
+    SparseCheckoutCleanState {
+        index: fs::read(repo.join(".git/index")).expect("read index"),
+        patterns: fs::read(repo.join(".git/info/sparse-checkout")).expect("read patterns"),
+        config,
+        files: visible_worktree_files(repo),
+        staged: pinned_git_exact_output(repo, &["ls-files", "--stage"]).1,
+    }
+}
+
+fn assert_sparse_checkout_metadata_unchanged(
+    before: &SparseCheckoutCleanState,
+    after: &SparseCheckoutCleanState,
+) {
+    assert_eq!(before.index, after.index, "clean mutated the index");
+    assert_eq!(
+        before.patterns, after.patterns,
+        "clean mutated sparse patterns"
+    );
+    assert_eq!(before.config, after.config, "clean mutated sparse config");
+    assert_eq!(before.staged, after.staged, "clean mutated staged entries");
+}
+
+fn add_sparse_checkout_clean_candidates(repo: &Path) {
+    write_file(repo, "src/untracked.txt", "untracked\n");
+    write_file(repo, "src/ignored.txt", "ignored\n");
+    fs::write(repo.join(".git/info/exclude"), "src/ignored.txt\n").expect("write excludes");
+}
+
+#[test]
+fn sparse_checkout_clean_matches_pinned_git() {
+    require_pinned_git_v2_55();
+    let git_repo = sparse_checkout_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    git(git_repo.path(), ["sparse-checkout", "set", "docs"]);
+    run_zmin(zmin_repo.path(), ["sparse-checkout", "set", "docs"]);
+    add_sparse_checkout_clean_candidates(git_repo.path());
+    add_sparse_checkout_clean_candidates(zmin_repo.path());
+
+    let initial_git = sparse_checkout_clean_state(git_repo.path());
+    let initial_zmin = sparse_checkout_clean_state(zmin_repo.path());
+
+    for args in [
+        ["sparse-checkout", "clean"].as_slice(),
+        ["sparse-checkout", "clean", "--dry-run"].as_slice(),
+        ["sparse-checkout", "clean", "-n", "-v"].as_slice(),
+        ["sparse-checkout", "clean", "-n", "extra"].as_slice(),
+        ["sparse-checkout", "clean", "-n", "--", "extra"].as_slice(),
+        ["sparse-checkout", "clean", "--no-dry-run", "-n"].as_slice(),
+        ["sparse-checkout", "clean", "-n", "-v", "--no-verbose"].as_slice(),
+    ] {
+        assert_eq!(
+            zmin_exact_output(zmin_repo.path(), args),
+            pinned_git_exact_output(git_repo.path(), args)
+        );
+        assert_sparse_checkout_metadata_unchanged(
+            &initial_zmin,
+            &sparse_checkout_clean_state(zmin_repo.path()),
+        );
+        assert_sparse_checkout_metadata_unchanged(
+            &initial_git,
+            &sparse_checkout_clean_state(git_repo.path()),
+        );
+    }
+
+    assert_eq!(
+        zmin_exact_output(zmin_repo.path(), &["sparse-checkout", "clean", "-f"]),
+        pinned_git_exact_output(git_repo.path(), &["sparse-checkout", "clean", "-f"])
+    );
+    let zmin_after = sparse_checkout_clean_state(zmin_repo.path());
+    let git_after = sparse_checkout_clean_state(git_repo.path());
+    assert_sparse_checkout_metadata_unchanged(&initial_zmin, &zmin_after);
+    assert_sparse_checkout_metadata_unchanged(&initial_git, &git_after);
+    assert_eq!(zmin_after.files, git_after.files);
+    assert!(!zmin_repo.path().join("src").exists());
+    assert!(!git_repo.path().join("src").exists());
+}
+
+#[test]
+fn sparse_checkout_clean_matches_without_sparse_index_and_without_force_config() {
+    require_pinned_git_v2_55();
+    let git_repo = sparse_checkout_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    git(
+        git_repo.path(),
+        ["sparse-checkout", "set", "--no-sparse-index", "docs"],
+    );
+    run_zmin(
+        zmin_repo.path(),
+        ["sparse-checkout", "set", "--no-sparse-index", "docs"],
+    );
+    git(git_repo.path(), ["config", "clean.requireForce", "false"]);
+    run_zmin(zmin_repo.path(), ["config", "clean.requireForce", "false"]);
+    add_sparse_checkout_clean_candidates(git_repo.path());
+    add_sparse_checkout_clean_candidates(zmin_repo.path());
+    let initial_git = sparse_checkout_clean_state(git_repo.path());
+    let initial_zmin = sparse_checkout_clean_state(zmin_repo.path());
+
+    assert_eq!(
+        zmin_exact_output(zmin_repo.path(), &["sparse-checkout", "clean"]),
+        pinned_git_exact_output(git_repo.path(), &["sparse-checkout", "clean"])
+    );
+    let zmin_after = sparse_checkout_clean_state(zmin_repo.path());
+    let git_after = sparse_checkout_clean_state(git_repo.path());
+    assert_sparse_checkout_metadata_unchanged(&initial_zmin, &zmin_after);
+    assert_sparse_checkout_metadata_unchanged(&initial_git, &git_after);
+    assert_eq!(zmin_after.files, git_after.files);
+    assert!(!zmin_repo.path().join("src").exists());
+    assert!(!git_repo.path().join("src").exists());
+}
+
+#[test]
+fn sparse_checkout_clean_preserves_vivified_tracked_paths() {
+    require_pinned_git_v2_55();
+    let git_repo = sparse_checkout_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    git(git_repo.path(), ["sparse-checkout", "set", "docs"]);
+    run_zmin(zmin_repo.path(), ["sparse-checkout", "set", "docs"]);
+    write_file(git_repo.path(), "src/main.rs", "modified\n");
+    write_file(zmin_repo.path(), "src/main.rs", "modified\n");
+    write_file(git_repo.path(), "src/untracked.txt", "untracked\n");
+    write_file(zmin_repo.path(), "src/untracked.txt", "untracked\n");
+    let initial_git = sparse_checkout_clean_state(git_repo.path());
+    let initial_zmin = sparse_checkout_clean_state(zmin_repo.path());
+
+    let git_output = pinned_git_exact_output(git_repo.path(), &["sparse-checkout", "clean", "-f"]);
+    let zmin_output = zmin_exact_output(zmin_repo.path(), &["sparse-checkout", "clean", "-f"]);
+    assert_eq!(zmin_output, git_output);
+    assert!(git_repo.path().join("src/main.rs").exists());
+    assert!(zmin_repo.path().join("src/main.rs").exists());
+    let zmin_after = sparse_checkout_clean_state(zmin_repo.path());
+    let git_after = sparse_checkout_clean_state(git_repo.path());
+    assert_sparse_checkout_metadata_unchanged(&initial_zmin, &zmin_after);
+    assert_sparse_checkout_metadata_unchanged(&initial_git, &git_after);
+    assert_eq!(zmin_after.files, git_after.files);
+}
+
+#[cfg(target_os = "linux")]
+fn raw_worktree_path(repo: &Path, path: &[u8]) -> std::path::PathBuf {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    repo.join(Path::new(OsStr::from_bytes(path)))
+}
+
+#[cfg(target_os = "linux")]
+fn write_raw_worktree_file(repo: &Path, path: &[u8], contents: &[u8]) {
+    let path = raw_worktree_path(repo, path);
+    fs::create_dir_all(path.parent().expect("raw pathname has a parent"))
+        .expect("create raw pathname parent");
+    fs::write(path, contents).expect("write raw pathname");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn sparse_checkout_clean_prints_non_utf8_pathname_bytes_exactly() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    require_pinned_git_v2_55();
+    let git_repo = sparse_checkout_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    git(git_repo.path(), ["sparse-checkout", "set", "docs"]);
+    run_zmin(zmin_repo.path(), ["sparse-checkout", "set", "docs"]);
+
+    let raw_path = b"src/\x80-name.txt";
+    write_raw_worktree_file(git_repo.path(), raw_path, b"untracked\n");
+    write_raw_worktree_file(zmin_repo.path(), raw_path, b"untracked\n");
+
+    let args = ["sparse-checkout", "clean", "-f", "-v"];
+    let git_output = pinned_git_exact_output(git_repo.path(), &args);
+    let zmin_output = zmin_exact_output(zmin_repo.path(), &args);
+    assert_eq!(zmin_output, git_output);
+    assert!(
+        git_output
+            .1
+            .windows(raw_path.len())
+            .any(|window| window == raw_path),
+        "pinned Git did not emit the expected raw pathname bytes"
+    );
+    assert!(
+        !git_repo
+            .path()
+            .join(Path::new(OsStr::from_bytes(raw_path)))
+            .exists()
+    );
+    assert!(
+        !zmin_repo
+            .path()
+            .join(Path::new(OsStr::from_bytes(raw_path)))
+            .exists()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn sparse_checkout_set_and_reapply_preserve_raw_collision_path() {
+    require_pinned_git_v2_55();
+    let git_repo = sparse_checkout_fixture_repo();
+    write_file(git_repo.path(), "src/�.txt", "tracked replacement\n");
+    git(git_repo.path(), ["add", "src/�.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "add replacement"]);
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    let raw_path = b"src/\x80.txt";
+    write_raw_worktree_file(git_repo.path(), raw_path, b"raw untracked\n");
+    write_raw_worktree_file(zmin_repo.path(), raw_path, b"raw untracked\n");
+
+    for args in [
+        ["sparse-checkout", "set", "docs"].as_slice(),
+        ["sparse-checkout", "reapply"].as_slice(),
+    ] {
+        assert_eq!(
+            zmin_exact_output(zmin_repo.path(), args),
+            pinned_git_exact_output(git_repo.path(), args)
+        );
+        assert!(
+            raw_worktree_path(git_repo.path(), raw_path).exists(),
+            "pinned Git removed the raw untracked pathname"
+        );
+        assert!(
+            raw_worktree_path(zmin_repo.path(), raw_path).exists(),
+            "Zmin removed the raw untracked pathname"
+        );
+        assert!(
+            !git_repo.path().join("src/�.txt").exists(),
+            "pinned Git retained the excluded tracked pathname"
+        );
+        assert!(
+            !zmin_repo.path().join("src/�.txt").exists(),
+            "Zmin retained the excluded tracked pathname"
+        );
+    }
+}
+
+#[test]
+fn sparse_checkout_clean_preconditions_and_usage_match_pinned_git() {
+    require_pinned_git_v2_55();
+    let non_sparse_git = sparse_checkout_fixture_repo();
+    let non_sparse_zmin = clone_repo_fixture(non_sparse_git.path());
+    let non_sparse_args = ["sparse-checkout", "clean", "--dry-run"];
+    assert_eq!(
+        zmin_exact_output(non_sparse_zmin.path(), &non_sparse_args),
+        pinned_git_exact_output(non_sparse_git.path(), &non_sparse_args)
+    );
+
+    let non_cone_git = sparse_checkout_fixture_repo();
+    let non_cone_zmin = clone_repo_fixture(non_cone_git.path());
+    git(
+        non_cone_git.path(),
+        ["sparse-checkout", "set", "--no-cone", "docs"],
+    );
+    run_zmin(
+        non_cone_zmin.path(),
+        ["sparse-checkout", "set", "--no-cone", "docs"],
+    );
+    for args in [
+        ["sparse-checkout", "clean", "--dry-run"].as_slice(),
+        ["sparse-checkout", "clean", "-h"].as_slice(),
+        ["sparse-checkout", "clean", "--bad"].as_slice(),
+    ] {
+        assert_eq!(
+            zmin_exact_output(non_cone_zmin.path(), args),
+            pinned_git_exact_output(non_cone_git.path(), args)
+        );
+    }
+
+    let enabled_git = sparse_checkout_fixture_repo();
+    let enabled_zmin = clone_repo_fixture(enabled_git.path());
+    git(enabled_git.path(), ["sparse-checkout", "set", "docs"]);
+    run_zmin(enabled_zmin.path(), ["sparse-checkout", "set", "docs"]);
+    for args in [
+        ["sparse-checkout", "clean", "-h"].as_slice(),
+        ["sparse-checkout", "clean", "--bad"].as_slice(),
+    ] {
+        assert_eq!(
+            zmin_exact_output(enabled_zmin.path(), args),
+            pinned_git_exact_output(enabled_git.path(), args)
+        );
+    }
 }
 
 #[test]

@@ -3,7 +3,9 @@ use chrono::{Datelike, Timelike};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
+use std::sync::OnceLock;
 use zmin_git_core::commit::CommitObjectCache;
+use zmin_git_core::refs::{ReftableLogUpdate, ReftableTransaction};
 use zmin_primitives::git_runtime::GitPrimitiveRuntime;
 
 pub(crate) struct TrackedPathSet<'a> {
@@ -14,6 +16,7 @@ pub(crate) struct TrackedPathSet<'a> {
     tracked_directories: Vec<&'a [u8]>,
     folded_directories: HashSet<Vec<u8>>,
     ignore_case: bool,
+    native_paths: OnceLock<std::result::Result<NativeTrackedPathSet, String>>,
 }
 
 impl<'a> TrackedPathSet<'a> {
@@ -41,6 +44,33 @@ impl<'a> TrackedPathSet<'a> {
                     &self.folded_directory_paths,
                     path,
                 ))
+    }
+
+    fn native_paths(&self) -> io::Result<&NativeTrackedPathSet> {
+        match self.native_paths.get_or_init(|| {
+            NativeTrackedPathSet::from_byte_paths(
+                &self.exact_paths,
+                &self.directory_paths,
+                &self.tracked_directories,
+                self.ignore_case,
+            )
+            .map_err(|error| error.to_string())
+        }) {
+            Ok(paths) => Ok(paths),
+            Err(error) => Err(io::Error::new(io::ErrorKind::InvalidInput, error.clone())),
+        }
+    }
+
+    fn contains_native(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.native_paths()?.contains(path))
+    }
+
+    fn has_tracked_descendants_native(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.native_paths()?.has_tracked_descendants(path))
+    }
+
+    fn contains_directory_native(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.native_paths()?.contains_directory(path))
     }
 }
 
@@ -108,6 +138,7 @@ pub(crate) fn tracked_path_set_with_ignore_case(
         tracked_directories,
         folded_directories,
         ignore_case,
+        native_paths: OnceLock::new(),
     }
 }
 
@@ -146,17 +177,321 @@ fn folded_tracked_directory_contains(
     }
 }
 
-fn relative_child_path(relative_dir: &[u8], entry_name: &std::ffi::OsStr) -> Vec<u8> {
-    let entry = entry_name.to_string_lossy();
-    let mut relative = Vec::with_capacity(
-        relative_dir.len() + usize::from(!relative_dir.is_empty()) + entry.len(),
-    );
-    relative.extend_from_slice(relative_dir);
-    if !relative_dir.is_empty() {
-        relative.push(b'/');
+fn native_path_from_git_bytes(path: &[u8]) -> io::Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        return Ok(PathBuf::from(OsStr::from_bytes(path)));
     }
-    relative.extend_from_slice(entry.as_bytes());
+    #[cfg(not(unix))]
+    {
+        let path = std::str::from_utf8(path).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "non-UTF-8 Git pathname is unsupported on this platform",
+            )
+        })?;
+        Ok(PathBuf::from(path))
+    }
+}
+
+fn relative_child_path(relative_dir: &Path, entry_name: &std::ffi::OsStr) -> PathBuf {
+    let mut relative = relative_dir.to_path_buf();
+    relative.push(entry_name);
     relative
+}
+
+fn relative_child_os_path(relative_dir: &Path, entry_name: &std::ffi::OsStr) -> PathBuf {
+    let mut relative = relative_dir.to_path_buf();
+    relative.push(entry_name);
+    relative
+}
+
+fn relative_path_bytes(path: &Path) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        if !bytes.is_empty() {
+            bytes.push(b'/');
+        }
+        bytes.extend_from_slice(name.as_encoded_bytes());
+    }
+    bytes
+}
+
+fn native_relative_path(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    path.strip_prefix(root)
+        .map(Path::to_path_buf)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))
+}
+
+#[derive(Debug, Default, Clone)]
+struct NativeTrackedPathSet {
+    exact_paths: HashSet<PathBuf>,
+    folded_paths: HashSet<PathBuf>,
+    directory_paths: HashSet<PathBuf>,
+    folded_directory_paths: HashSet<PathBuf>,
+    tracked_directories: HashSet<PathBuf>,
+    folded_directories: HashSet<PathBuf>,
+    ignore_case: bool,
+}
+
+impl NativeTrackedPathSet {
+    fn from_byte_paths(
+        exact_paths: &[&[u8]],
+        directory_paths: &[&[u8]],
+        tracked_directories: &[&[u8]],
+        ignore_case: bool,
+    ) -> io::Result<Self> {
+        let mut tracked = Self {
+            ignore_case,
+            ..Self::default()
+        };
+        for path in exact_paths {
+            let path = native_path_from_git_bytes(path)?;
+            if ignore_case {
+                tracked.folded_paths.insert(fold_native_path(&path));
+            }
+            tracked.exact_paths.insert(path);
+        }
+        for path in directory_paths {
+            let path = native_path_from_git_bytes(path)?;
+            if ignore_case {
+                tracked
+                    .folded_directory_paths
+                    .insert(fold_native_path(&path));
+            }
+            tracked.directory_paths.insert(path);
+        }
+        for path in tracked_directories {
+            let path = native_path_from_git_bytes(path)?;
+            if ignore_case {
+                tracked.folded_directories.insert(fold_native_path(&path));
+            }
+            tracked.tracked_directories.insert(path);
+        }
+        Ok(tracked)
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        self.exact_paths.contains(path)
+            || (self.ignore_case && self.folded_paths.contains(&fold_native_path(path)))
+    }
+
+    fn contains_directory(&self, path: &Path) -> bool {
+        self.directory_paths.contains(path)
+            || (self.ignore_case
+                && self
+                    .folded_directory_paths
+                    .contains(&fold_native_path(path)))
+    }
+
+    fn has_tracked_descendants(&self, path: &Path) -> bool {
+        self.tracked_directories.contains(path)
+            || (self.ignore_case && self.folded_directories.contains(&fold_native_path(path)))
+    }
+}
+
+fn fold_native_path(path: &Path) -> PathBuf {
+    let mut folded = PathBuf::new();
+    for component in path.components() {
+        let mut name = component.as_os_str().to_os_string();
+        name.make_ascii_lowercase();
+        folded.push(name);
+    }
+    folded
+}
+
+fn native_tracked_path_set_for_repo(
+    repo: &GitRepo,
+    index: &GitIndex,
+) -> Result<NativeTrackedPathSet> {
+    let ignore_case = repo_ignore_case(repo)?;
+    let exact_paths = index
+        .entries()
+        .iter()
+        .map(|entry| entry.path.as_slice())
+        .collect::<Vec<_>>();
+    let directory_paths = index
+        .entries()
+        .iter()
+        .filter(|entry| matches!(entry.mode, IndexMode::Gitlink | IndexMode::Tree))
+        .map(|entry| entry.path.as_slice())
+        .collect::<Vec<_>>();
+    let tracked_directories = index
+        .entries()
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .path
+                .iter()
+                .enumerate()
+                .filter_map(|(index, byte)| (*byte == b'/').then_some(&entry.path[..index]))
+        })
+        .collect::<Vec<_>>();
+    Ok(NativeTrackedPathSet::from_byte_paths(
+        &exact_paths,
+        &directory_paths,
+        &tracked_directories,
+        ignore_case,
+    )?)
+}
+
+#[cfg(test)]
+mod sparse_path_identity_tests {
+    use super::*;
+
+    #[test]
+    fn native_tracked_paths_use_exact_os_identity() {
+        let tracked_path = native_path_from_git_bytes("src/é".as_bytes()).unwrap();
+        let different_path = native_path_from_git_bytes("src/raw".as_bytes()).unwrap();
+        let tracked =
+            NativeTrackedPathSet::from_byte_paths(&[&b"src/\xc3\xa9"[..]], &[], &[], false)
+                .unwrap();
+
+        assert!(tracked.contains(&tracked_path));
+        assert!(!tracked.contains(&different_path));
+        assert_eq!(
+            relative_child_path(Path::new("src"), std::ffi::OsStr::new("é")),
+            tracked_path
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_git_bytes_preserve_raw_unix_identity() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = native_path_from_git_bytes(b"src/\x80.txt").unwrap();
+        assert_eq!(path.as_os_str().as_bytes(), b"src/\x80.txt");
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn native_git_bytes_reject_invalid_non_unix_identity() {
+        assert!(native_path_from_git_bytes(b"src/\x80.txt").is_err());
+    }
+
+    #[test]
+    fn status_stash_count_discards_partial_sha1_and_sha256_reftable_counts() {
+        for object_format in ["sha1", "sha256"] {
+            let repo_dir = tempfile::tempdir().expect("status reftable tempdir");
+            let mut init_args = vec!["init", "--ref-format=reftable"];
+            if object_format == "sha256" {
+                init_args.push("--object-format=sha256");
+            }
+            let output = std::process::Command::new("git")
+                .args(&init_args)
+                .current_dir(repo_dir.path())
+                .output()
+                .expect("run git init");
+            assert!(output.status.success(), "git init failed: {output:?}");
+            for args in [
+                ["config", "user.name", "Status Test"].as_slice(),
+                ["config", "user.email", "status@example.test"].as_slice(),
+            ] {
+                let output = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(repo_dir.path())
+                    .output()
+                    .expect("configure status test repository");
+                assert!(output.status.success(), "git config failed: {output:?}");
+            }
+            fs::write(repo_dir.path().join("tracked.txt"), b"status\n")
+                .expect("write status test file");
+            for args in [
+                ["add", "tracked.txt"].as_slice(),
+                ["commit", "-m", "initial"].as_slice(),
+            ] {
+                let output = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(repo_dir.path())
+                    .output()
+                    .expect("populate status test repository");
+                assert!(
+                    output.status.success(),
+                    "git repository setup failed: {output:?}"
+                );
+            }
+
+            for (content, message) in [
+                (&b"first stash\n"[..], "first"),
+                (&b"second stash\n"[..], "second"),
+            ] {
+                fs::write(repo_dir.path().join("tracked.txt"), content)
+                    .expect("write status stash change");
+                let output = std::process::Command::new("git")
+                    .args(["stash", "push", "-m", message])
+                    .current_dir(repo_dir.path())
+                    .output()
+                    .expect("create status stash");
+                assert!(output.status.success(), "git stash failed: {output:?}");
+            }
+
+            let reftable_dir = repo_dir.path().join(".git/reftable");
+            let git_dir = repo_dir.path().join(".git");
+            let algorithm = if object_format == "sha256" {
+                GitHashAlgorithm::Sha256
+            } else {
+                GitHashAlgorithm::Sha1
+            };
+            let refs = RefStore::new(&git_dir, algorithm);
+            let mut callback_count = 0;
+            let result = refs.for_each_reftable_log_newest_first(stash_ref_name(), |_| {
+                callback_count += 1;
+                if callback_count == 1 {
+                    Ok(())
+                } else {
+                    Err(io::Error::other("injected later stash-log failure"))
+                }
+            });
+            assert!(
+                result.is_err(),
+                "injected later stash-log failure should propagate"
+            );
+            assert_eq!(
+                callback_count, 2,
+                "fixture must exercise a partial callback"
+            );
+
+            let tables_list = reftable_dir.join("tables.list");
+            let tables_content =
+                fs::read_to_string(&tables_list).expect("read status test tables.list");
+            let table_name = tables_content
+                .lines()
+                .next()
+                .expect("status test reftable table");
+            let table_path = reftable_dir.join(table_name);
+            let table_len = fs::metadata(&table_path)
+                .expect("stat status test reftable table")
+                .len();
+            assert!(
+                table_len > 0,
+                "status test reftable table should not be empty"
+            );
+            fs::OpenOptions::new()
+                .write(true)
+                .open(table_path)
+                .expect("open status test reftable table")
+                .set_len(table_len - 1)
+                .expect("truncate status test reftable table");
+
+            let repo = GitRepo {
+                root: repo_dir.path().to_path_buf(),
+                index_path: git_dir.join("index"),
+                objects_dir: git_dir.join("objects"),
+                git_dir,
+            };
+            assert_eq!(
+                status_stash_count(&repo, algorithm).expect("count status stashes"),
+                0
+            );
+        }
+    }
 }
 
 fn tracked_path_set_for_repo<'a>(
@@ -560,14 +895,15 @@ fn collect_clean_untracked_files(
             continue;
         }
         let metadata = fs::symlink_metadata(&path)?;
-        let relative = repo_relative_path(root, &path)?;
+        let relative_path = native_relative_path(root, &path)?;
+        let relative = relative_path_bytes(&relative_path);
         let is_dir = metadata.is_dir();
         let is_ignored = ignore.is_ignored(&relative, is_dir);
         if is_dir {
             if mode == CleanIgnoredMode::Normal && is_ignored {
                 continue;
             }
-            if tracked_paths_under(tracked_paths, &relative) {
+            if tracked_paths.has_tracked_descendants_native(&relative_path)? {
                 collect_clean_untracked_files(
                     root,
                     &path,
@@ -598,7 +934,7 @@ fn collect_clean_untracked_files(
                 )?;
             }
         } else if (metadata.is_file() || metadata.file_type().is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
             && clean_mode_removes_path(mode, is_ignored)
         {
             files.push(relative);
@@ -629,8 +965,11 @@ fn clean_directory_fully_removable(
         let entry = entry?;
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path)?;
-        let relative = repo_relative_path(root, &path)?;
-        if tracked_paths.contains(&relative) || tracked_paths_under(tracked_paths, &relative) {
+        let relative_path = native_relative_path(root, &path)?;
+        let relative = relative_path_bytes(&relative_path);
+        if tracked_paths.contains_native(&relative_path)?
+            || tracked_paths.has_tracked_descendants_native(&relative_path)?
+        {
             return Ok(false);
         }
         let is_dir = metadata.is_dir();
@@ -692,20 +1031,44 @@ pub(crate) fn status(
             message: "this operation must be run in a work tree".into(),
         });
     }
-    {
+    let repository_object_format = {
         let _trace = phase_trace("status.repo_object_format");
-        repo_object_format(&repo)?;
-    }
+        repo_object_format(&repo)?
+    };
+    status_validate_reftable_filesystem_head(&repo, repository_object_format)?;
     let machine_readable = porcelain.is_some() || short || null;
+    let stash_count = if show_stash {
+        let _trace = phase_trace("status.stash_count");
+        Some(status_stash_count(&repo, repository_object_format)?)
+    } else {
+        None
+    };
+
+    let runtime = {
+        let _trace = phase_trace("status.runtime_init");
+        CliPrimitiveRuntime::new_from_repo(&repo, repository_object_format)
+    };
+    let active_reftable_stack = status_reftable_stack_is_active(&repo)?;
+    let head_tree = {
+        let _trace = phase_trace("status.read_head_tree");
+        match read_head_tree_id_from_primitive_stores(
+            runtime.refs(),
+            runtime.object_store_adapter(),
+        ) {
+            Ok(head_tree) => head_tree,
+            Err(error) if active_reftable_stack && status_head_ref_storage_error(&error) => None,
+            Err(CliError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(status_bad_head_object_error());
+            }
+            Err(error) if status_bad_head_reference_error(&error) => {
+                return Err(status_bad_repository_error(&repo));
+            }
+            Err(error) => return Err(error),
+        }
+    };
     let column_untracked = {
         let _trace = phase_trace("status.column_config");
         status_column_untracked(&repo, column, no_column)?
-    };
-    let stash_count = if show_stash {
-        let _trace = phase_trace("status.stash_count");
-        Some(status_stash_count(&repo)?)
-    } else {
-        None
     };
     if machine_readable && branch {
         let _trace = phase_trace("status.branch_header");
@@ -714,21 +1077,13 @@ pub(crate) fn status(
                 write_status_record(&row, null)?;
             }
         } else {
-            write_status_record(&porcelain_branch_header(&repo, ahead_behind)?, null)?;
+            let header = porcelain_v1_branch_header(&repo, repository_object_format, ahead_behind)?;
+            write_porcelain_v1_branch_header(&header, null)?;
         }
     }
-
-    let runtime = {
-        let _trace = phase_trace("status.runtime_init");
-        CliPrimitiveRuntime::new_default(&repo)
-    };
-    let head_tree = {
-        let _trace = phase_trace("status.read_head_tree");
-        read_head_tree_id_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?
-    };
     let index = {
         let _trace = phase_trace("status.read_index");
-        if config_bool_enabled(&repo, "core.splitIndex")?
+        if status_config_bool_enabled(&repo, "core.splitIndex")?
             && fs::read(&repo.index_path)
                 .map(|bytes| !bytes.windows(4).any(|window| window == b"link"))
                 .unwrap_or(false)
@@ -737,12 +1092,18 @@ pub(crate) fn status(
         }
         let raw_index = read_repo_index_raw(&repo)?;
         let raw_sparse = index_has_sparse_directories(&raw_index);
-        let sparse_index_enabled = config_bool_enabled(&repo, "index.sparse")?;
-        let materialized_sparse_directory = raw_index.entries().iter().any(|entry| {
-            entry.stage == 0
-                && entry.mode == IndexMode::Tree
-                && path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
-        });
+        let sparse_index_enabled = status_config_bool_enabled(&repo, "index.sparse")?;
+        let mut materialized_sparse_directory = false;
+        for entry in raw_index.entries() {
+            if entry.stage == 0 && entry.mode == IndexMode::Tree {
+                let path = worktree_path_for_index_entry_checked(&repo.root, &entry.path)
+                    .map_err(CliError::Io)?;
+                if path_exists(&path) {
+                    materialized_sparse_directory = true;
+                    break;
+                }
+            }
+        }
         let mut index = {
             let _region = (raw_sparse && (!sparse_index_enabled || materialized_sparse_directory))
                 .then(|| trace2_region("index", "ensure_full_index"));
@@ -900,6 +1261,12 @@ directory contents. Running 'git clean' may assist in this cleanup."
     if !machine_readable {
         let _trace = phase_trace("status.render_human");
         let display_comment_prefix = status_display_comment_prefix(&repo)?;
+        let verbose_has_staged = verbose > 0
+            && paths.iter().any(|(path, state)| {
+                state.index_status != ' '
+                    && (pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
+            });
+        let verbose_status_ends_with_blank = verbose_has_staged && stash_count.unwrap_or(0) == 0;
         print_human_status(
             &repo,
             &paths,
@@ -912,7 +1279,12 @@ directory contents. Running 'git clean' may assist in this cleanup."
             column_untracked,
             display_comment_prefix,
         )?;
-        print_status_verbose_diff(verbose, diff_paths)?;
+        print_status_verbose_diff(
+            verbose,
+            diff_paths,
+            verbose_has_staged,
+            verbose_status_ends_with_blank,
+        )?;
         return Ok(());
     }
 
@@ -1207,10 +1579,10 @@ fn status_v2_metadata(
     let head_id = head
         .as_ref()
         .map(|entry| entry.id.to_string())
-        .unwrap_or_else(|| status_zero_object_id().to_owned());
+        .unwrap_or_else(|| status_zero_object_id(index.hash_algorithm()));
     let index_id = entry
         .map(|entry| entry.id.to_string())
-        .unwrap_or_else(|| status_zero_object_id().to_owned());
+        .unwrap_or_else(|| status_zero_object_id(index.hash_algorithm()));
     Ok(StatusV2Metadata {
         head_mode,
         index_mode,
@@ -1260,21 +1632,101 @@ fn status_v2_code(code: char) -> char {
     if code == ' ' { '.' } else { code }
 }
 
-fn status_zero_object_id() -> &'static str {
-    "0000000000000000000000000000000000000000"
+fn status_zero_object_id(algorithm: GitHashAlgorithm) -> String {
+    "0".repeat(algorithm.digest_len() * 2)
+}
+
+fn status_validate_reftable_filesystem_head(
+    repo: &GitRepo,
+    object_format: GitHashAlgorithm,
+) -> Result<()> {
+    let refs = RefStore::new(repo.git_dir.clone(), object_format);
+    if refs.storage_kind()? != zmin_git_core::refs::RefStorageKind::Reftable {
+        return Ok(());
+    }
+    let raw = match fs::read(repo.git_dir.join("HEAD")) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
+    let symbolic = raw.strip_prefix(b"ref: ").is_some_and(|target| {
+        target.starts_with(b"refs/")
+            && target.len() > b"refs/".len()
+            && target.iter().all(|byte| {
+                !byte.is_ascii_control()
+                    && !matches!(
+                        *byte,
+                        b' ' | b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\'
+                    )
+            })
+            && !target
+                .windows(2)
+                .any(|window| window == b".." || window == b"@{")
+            && !target.ends_with(b"/")
+            && !target.ends_with(b".")
+    });
+    let direct =
+        raw.len() == object_format.digest_len() * 2 && raw.iter().all(u8::is_ascii_hexdigit);
+    if symbolic || direct {
+        Ok(())
+    } else {
+        Err(status_bad_repository_error(repo))
+    }
+}
+
+fn porcelain_v1_branch_header(
+    repo: &GitRepo,
+    object_format: GitHashAlgorithm,
+    ahead_behind: bool,
+) -> Result<String> {
+    match porcelain_branch_header(repo, ahead_behind) {
+        Ok(header) => Ok(header),
+        Err(error) => {
+            let refs = RefStore::new(repo.git_dir.clone(), object_format);
+            if refs.storage_kind().ok() != Some(zmin_git_core::refs::RefStorageKind::Reftable) {
+                return Err(error);
+            }
+            match &error {
+                CliError::Io(error) if error.kind() == io::ErrorKind::NotFound => {
+                    Ok("## No commits yet on HEAD (no branch)".to_owned())
+                }
+                CliError::Io(error) if error.kind() == io::ErrorKind::InvalidData => {
+                    Ok("## ".to_owned())
+                }
+                _ => Err(error),
+            }
+        }
+    }
+}
+
+fn write_porcelain_v1_branch_header(header: &str, null: bool) -> Result<()> {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    if header == "## " {
+        out.write_all(header.as_bytes())?;
+    } else {
+        write_status_record_to(&mut out, header, null)?;
+    }
+    Ok(())
 }
 
 fn porcelain_v2_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<Vec<String>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let head = refs.read_head()?;
+    let refs = RefStore::new(&repo.git_dir, repo_object_format(repo)?);
+    let head = status_head_state(repo, &refs)?;
     let mut rows = Vec::new();
-    let oid = refs
-        .resolve("HEAD")
-        .map(|id| id.to_string())
-        .unwrap_or_else(|_| "(initial)".to_owned());
+    let oid = match &head {
+        StatusHeadState::Target(_) => refs
+            .resolve("HEAD")
+            .map(|id| id.to_string())
+            .unwrap_or_else(|_| "(initial)".to_owned()),
+        StatusHeadState::Missing | StatusHeadState::Corrupt => "(initial)".to_owned(),
+    };
     rows.push(format!("# branch.oid {oid}"));
     match head {
-        RefTarget::Symbolic(target) if target.starts_with("refs/heads/") => {
+        StatusHeadState::Target(RefTarget::Symbolic(target))
+            if target.starts_with("refs/heads/") =>
+        {
             let branch = target.strip_prefix("refs/heads/").unwrap_or(&target);
             rows.push(format!("# branch.head {branch}"));
             if let Some(upstream) = read_branch_upstream(repo, branch)? {
@@ -1290,8 +1742,10 @@ fn porcelain_v2_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<Vec<
                 }
             }
         }
-        RefTarget::Direct(_) => rows.push("# branch.head (detached)".to_owned()),
-        RefTarget::Symbolic(target) => rows.push(format!(
+        StatusHeadState::Target(RefTarget::Direct(_)) | StatusHeadState::Missing => {
+            rows.push("# branch.head (detached)".to_owned())
+        }
+        StatusHeadState::Target(RefTarget::Symbolic(target)) => rows.push(format!(
             "# branch.head {}",
             target
                 .strip_prefix("refs/")
@@ -1299,20 +1753,21 @@ fn porcelain_v2_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<Vec<
                 .strip_prefix("heads/")
                 .unwrap_or(target.as_str())
         )),
+        StatusHeadState::Corrupt => rows.push("# branch.head (unknown)".to_owned()),
     }
     Ok(rows)
 }
 
 fn status_excludes(repo: &GitRepo, tracked_paths: &TrackedPathSet<'_>) -> Result<GitIgnore> {
     let mut ignore = GitIgnore::default();
-    if let Some(path) = ls_files_global_excludes_file(repo)? {
+    if let Some(path) = status_global_excludes_file(repo)? {
         append_ignore_file(&mut ignore, &path, "")?;
     }
     append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
     append_per_directory_excludes_pruned(
         &repo.root,
         &repo.root,
-        b"",
+        Path::new(""),
         ".gitignore",
         &mut ignore,
         tracked_paths,
@@ -1320,13 +1775,123 @@ fn status_excludes(repo: &GitRepo, tracked_paths: &TrackedPathSet<'_>) -> Result
     Ok(ignore)
 }
 
-fn status_stash_count(repo: &GitRepo) -> Result<usize> {
+fn status_global_excludes_file(repo: &GitRepo) -> Result<Option<PathBuf>> {
+    if let Some(path) = status_config_value(repo, "core.excludesFile")? {
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(expand_user_path(&path)));
+    }
+    if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Ok(Some(PathBuf::from(config_home).join("git/ignore")));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(Some(PathBuf::from(home).join(".config/git/ignore")));
+    }
+    Ok(None)
+}
+
+fn status_config_value(repo: &GitRepo, name: &str) -> Result<Option<String>> {
+    read_config_value(repo, name).map_err(CliError::Io)
+}
+
+#[derive(Debug)]
+enum StatusHeadState {
+    Missing,
+    Corrupt,
+    Target(RefTarget),
+}
+
+fn status_head_state(repo: &GitRepo, refs: &RefStore) -> Result<StatusHeadState> {
+    let active_reftable_stack = status_reftable_stack_is_active(repo)?;
+    match refs.read_head() {
+        Ok(target) => Ok(StatusHeadState::Target(target)),
+        Err(error)
+            if active_reftable_stack
+                && matches!(
+                    error.kind(),
+                    io::ErrorKind::InvalidData | io::ErrorKind::NotFound
+                ) =>
+        {
+            Ok(StatusHeadState::Corrupt)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(StatusHeadState::Missing),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            Err(status_bad_repository_error(repo))
+        }
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn status_reftable_stack_is_active(repo: &GitRepo) -> Result<bool> {
+    let refs = RefStore::new(repo.git_dir.clone(), repo_object_format(repo)?);
+    if refs.storage_kind().ok() != Some(zmin_git_core::refs::RefStorageKind::Reftable) {
+        return Ok(false);
+    }
+    let Ok(storage_root) = refs.storage_root_path() else {
+        return Ok(false);
+    };
+    Ok(
+        fs::read_to_string(storage_root.join("reftable/tables.list"))
+            .map(|content| content.lines().any(|line| !line.trim().is_empty()))
+            .unwrap_or(false),
+    )
+}
+
+fn status_head_ref_storage_error(error: &CliError) -> bool {
+    matches!(
+        error,
+        CliError::Fatal { message, .. }
+            if message.starts_with("read HEAD reference for status head tree: ")
+    )
+}
+
+fn status_bad_head_object_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "bad object HEAD".to_owned(),
+    }
+}
+
+fn status_bad_head_reference_error(error: &CliError) -> bool {
+    matches!(
+        error,
+        CliError::Fatal { message, .. }
+            if message.starts_with("read HEAD reference for status head tree: storage error:")
+                && message.ends_with("reference broken")
+    )
+}
+
+fn status_bad_repository_error(repo: &GitRepo) -> CliError {
+    let git_dir = repo
+        .git_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(".git");
+    CliError::Fatal {
+        code: 128,
+        message: format!("not a git repository (or any of the parent directories): {git_dir}"),
+    }
+}
+
+fn status_stash_count(repo: &GitRepo, object_format: GitHashAlgorithm) -> Result<usize> {
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let refs = RefStore::new(&common_git_dir, object_format);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let mut candidate_count = 0;
+        let scan_result = refs.for_each_reftable_log_newest_first(stash_ref_name(), |_| {
+            candidate_count += 1;
+            Ok(())
+        });
+        if scan_result.is_ok() {
+            return Ok(candidate_count);
+        }
+        return Ok(0);
+    }
     let path = common_git_dir.join("logs").join(stash_ref_name());
     match fs::read_to_string(path) {
         Ok(content) => Ok(content.lines().count()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
             match refs.resolve(stash_ref_name()) {
                 Ok(_) => Ok(1),
                 Err(_) => Ok(0),
@@ -1342,12 +1907,21 @@ fn status_column_untracked(repo: &GitRepo, column: Option<&str>, no_column: bool
     }
     match column {
         Some(value) => parse_status_column_value(value),
-        None => read_config_value(repo, "column.status")?
-            .as_deref()
-            .map(parse_status_column_value)
-            .transpose()
-            .map(|value| value.unwrap_or(false)),
+        None => match status_config_value(repo, "column.status") {
+            Ok(value) => value
+                .as_deref()
+                .map(parse_status_column_value)
+                .transpose()
+                .map(|value| value.unwrap_or(false)),
+            Err(error) => Err(error),
+        },
     }
+}
+
+fn status_config_bool_enabled(repo: &GitRepo, name: &str) -> Result<bool> {
+    Ok(status_config_value(repo, name)?
+        .as_deref()
+        .is_some_and(config_bool_value_enabled))
 }
 
 fn parse_status_column_value(value: &str) -> Result<bool> {
@@ -1417,10 +1991,11 @@ fn status_submodule_state(
     let Some(submodule_repo) = exact_repo_at(submodule_path) else {
         return Ok(None);
     };
-    let refs = RefStore::new(&submodule_repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&submodule_repo)?;
+    let refs = RefStore::new(&submodule_repo.git_dir, algorithm);
     let commit_changed = refs.resolve("HEAD").is_ok_and(|head| head != entry.id);
     let submodule_index = read_repo_index(&submodule_repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(&submodule_repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(&submodule_repo, algorithm);
     let head_tree =
         read_head_tree_id_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     let index_dirty = !status_head_index_diff(
@@ -1464,11 +2039,21 @@ fn status_submodule_state(
     Ok((state.commit_changed || state.modified || state.untracked).then_some(state))
 }
 
-fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
+fn print_status_verbose_diff(
+    verbose: u8,
+    paths: Vec<PathBuf>,
+    has_staged: bool,
+    status_ends_with_blank: bool,
+) -> Result<()> {
     match verbose {
         0 => Ok(()),
         1 => {
-            println!();
+            if !has_staged {
+                return Ok(());
+            }
+            if !status_ends_with_blank {
+                println!();
+            }
             super::diff_commands::diff(DiffOptions {
                 cached: true,
                 paths,
@@ -1476,7 +2061,9 @@ fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
             })
         }
         _ => {
-            println!();
+            if !status_ends_with_blank {
+                println!();
+            }
             println!("Changes to be committed:");
             super::diff_commands::diff(DiffOptions {
                 cached: true,
@@ -1633,9 +2220,13 @@ fn print_human_status(
 
     let status_hints_enabled = advice_status_hints_enabled(repo)?;
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-    let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
-    let head_has_commit = refs.resolve("HEAD").is_ok();
-    status_line!("{}", human_status_branch_header(&refs)?);
+    let refs = RefStore::new(&common_git_dir, repo_object_format(repo)?);
+    let head_state = status_head_state(repo, &refs)?;
+    let head_has_commit =
+        matches!(&head_state, StatusHeadState::Target(_)) && refs.resolve("HEAD").is_ok();
+    if let Some(header) = human_status_branch_header(&head_state) {
+        status_line!("{header}");
+    }
     if !head_has_commit {
         status_line!();
         status_line!("No commits yet");
@@ -1817,7 +2408,7 @@ fn print_human_status(
         } else {
             status_line!("nothing to commit (create/copy files and use \"git add\" to track)");
         }
-    } else if worktree.is_empty() && untracked.is_empty() {
+    } else {
         status_line!();
     }
     if stash_count > 0 {
@@ -1915,14 +2506,20 @@ fn print_status_path_columns(paths: &[Vec<u8>], display_comment_prefix: bool) {
     }
 }
 
-fn human_status_branch_header(refs: &RefStore) -> Result<String> {
-    match refs.read_head()? {
-        RefTarget::Symbolic(target) if target.starts_with("refs/heads/") => Ok(format!(
-            "On branch {}",
-            target.strip_prefix("refs/heads/").unwrap_or(&target)
-        )),
-        RefTarget::Direct(id) => Ok(format!("HEAD detached at {}", short_object_id(&id))),
-        RefTarget::Symbolic(target) => Ok(format!(
+fn human_status_branch_header(head: &StatusHeadState) -> Option<String> {
+    match head {
+        StatusHeadState::Target(RefTarget::Symbolic(target))
+            if target.starts_with("refs/heads/") =>
+        {
+            Some(format!(
+                "On branch {}",
+                target.strip_prefix("refs/heads/").unwrap_or(&target)
+            ))
+        }
+        StatusHeadState::Target(RefTarget::Direct(id)) => {
+            Some(format!("HEAD detached at {}", short_object_id(id)))
+        }
+        StatusHeadState::Target(RefTarget::Symbolic(target)) => Some(format!(
             "On branch {}",
             target
                 .strip_prefix("refs/")
@@ -1930,6 +2527,8 @@ fn human_status_branch_header(refs: &RefStore) -> Result<String> {
                 .strip_prefix("heads/")
                 .unwrap_or(target.as_str())
         )),
+        StatusHeadState::Missing => Some("Not currently on any branch.".to_owned()),
+        StatusHeadState::Corrupt => None,
     }
 }
 
@@ -2044,7 +2643,7 @@ fn ignored_untracked_files_with_mode(
     let _ = collect_ignored_untracked_files(
         root,
         root,
-        b"",
+        Path::new(""),
         tracked_paths,
         ignore,
         mode,
@@ -2063,7 +2662,15 @@ pub(crate) fn ignored_untracked_files_for_status(
     ignore: &GitIgnore,
 ) -> Result<Vec<Vec<u8>>> {
     let mut files = Vec::new();
-    collect_ignored_untracked_status(root, root, b"", tracked_paths, ignore, false, &mut files)?;
+    collect_ignored_untracked_status(
+        root,
+        root,
+        Path::new(""),
+        tracked_paths,
+        ignore,
+        false,
+        &mut files,
+    )?;
     files.sort();
     Ok(files)
 }
@@ -2080,7 +2687,7 @@ pub(crate) fn status_untracked_and_ignored_files(
     let _ = collect_status_untracked_and_ignored(
         root,
         root,
-        b"",
+        Path::new(""),
         tracked_paths,
         ignore,
         mode,
@@ -2098,7 +2705,7 @@ pub(crate) fn status_untracked_and_ignored_files(
 fn collect_ignored_untracked_status(
     root: &std::path::Path,
     dir: &std::path::Path,
-    relative_dir: &[u8],
+    relative_dir: &Path,
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     parent_ignored: bool,
@@ -2111,11 +2718,12 @@ fn collect_ignored_untracked_status(
             continue;
         }
         let file_type = entry.file_type()?;
-        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let relative_path = relative_child_path(relative_dir, &entry.file_name());
+        let relative = relative_path_bytes(&relative_path);
         let is_dir = file_type.is_dir();
         let is_ignored = parent_ignored || ignore.is_ignored(&relative, is_dir);
         if is_dir {
-            if is_ignored && !tracked_paths_under(tracked_paths, &relative) {
+            if is_ignored && !tracked_paths.has_tracked_descendants_native(&relative_path)? {
                 let mut dir = relative;
                 dir.push(b'/');
                 files.push(dir);
@@ -2123,7 +2731,7 @@ fn collect_ignored_untracked_status(
                 collect_ignored_untracked_status(
                     root,
                     &path,
-                    &relative,
+                    &relative_path,
                     tracked_paths,
                     ignore,
                     is_ignored,
@@ -2132,7 +2740,7 @@ fn collect_ignored_untracked_status(
             }
         } else if is_ignored
             && (file_type.is_file() || file_type.is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
         {
             files.push(relative);
         }
@@ -2143,7 +2751,7 @@ fn collect_ignored_untracked_status(
 fn collect_status_untracked_and_ignored(
     root: &std::path::Path,
     dir: &std::path::Path,
-    relative_dir: &[u8],
+    relative_dir: &Path,
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
@@ -2161,16 +2769,17 @@ fn collect_status_untracked_and_ignored(
             continue;
         }
         let file_type = entry.file_type()?;
-        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let relative_path = relative_child_path(relative_dir, &entry.file_name());
+        let relative = relative_path_bytes(&relative_path);
         let is_dir = file_type.is_dir();
         let is_ignored = parent_ignored || ignore.is_ignored(&relative, is_dir);
         if is_ignored {
             if is_dir {
-                if tracked_paths_under(tracked_paths, &relative) {
+                if tracked_paths.has_tracked_descendants_native(&relative_path)? {
                     let child_has_reportable_untracked = collect_status_untracked_and_ignored(
                         root,
                         &path,
-                        &relative,
+                        &relative_path,
                         tracked_paths,
                         ignore,
                         mode,
@@ -2189,15 +2798,15 @@ fn collect_status_untracked_and_ignored(
                     ignored.push(ignored_dir);
                 }
             } else if (file_type.is_file() || file_type.is_symlink())
-                && !tracked_paths.contains(relative.as_slice())
+                && !tracked_paths.contains_native(&relative_path)?
             {
                 ignored.push(relative);
             }
             continue;
         }
         if is_dir {
-            let tracked_directory = tracked_paths.contains_directory(&relative)
-                || (mode != UntrackedMode::All && tracked_paths.contains(&relative));
+            let tracked_directory = tracked_paths.contains_directory_native(&relative_path)?
+                || (mode != UntrackedMode::All && tracked_paths.contains_native(&relative_path)?);
             if is_nested_worktree(&path) && !tracked_directory {
                 if !collapse_untracked_dirs {
                     let mut directory = relative;
@@ -2210,7 +2819,8 @@ fn collect_status_untracked_and_ignored(
             if tracked_directory {
                 continue;
             }
-            let has_tracked_descendants = tracked_paths_under(tracked_paths, &relative);
+            let has_tracked_descendants =
+                tracked_paths.has_tracked_descendants_native(&relative_path)?;
             let collapse_child_dir =
                 !collapse_untracked_dirs && mode != UntrackedMode::All && !has_tracked_descendants;
             let child_has_reportable_untracked = if collapse_child_dir
@@ -2222,7 +2832,7 @@ fn collect_status_untracked_and_ignored(
                 collect_status_untracked_and_ignored(
                     root,
                     &path,
-                    &relative,
+                    &relative_path,
                     tracked_paths,
                     ignore,
                     mode,
@@ -2247,7 +2857,7 @@ fn collect_status_untracked_and_ignored(
                 has_reportable_untracked = true;
             }
         } else if (file_type.is_file() || file_type.is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
         {
             has_reportable_untracked = true;
             if !collapse_untracked_dirs {
@@ -2315,11 +2925,12 @@ fn collect_killed_files_under_dir(
             continue;
         }
         let metadata = fs::symlink_metadata(&path)?;
-        let relative = repo_relative_path(root, &path)?;
+        let relative_path = native_relative_path(root, &path)?;
+        let relative = relative_path_bytes(&relative_path);
         if metadata.is_dir() {
             collect_killed_files_under_dir(root, &path, tracked_paths, killed)?;
         } else if (metadata.is_file() || metadata.file_type().is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
         {
             killed.insert(relative);
         }
@@ -2338,7 +2949,7 @@ fn index_path_ancestors(path: &[u8]) -> Vec<Vec<u8>> {
 fn collect_ignored_untracked_files(
     root: &std::path::Path,
     dir: &std::path::Path,
-    relative_dir: &[u8],
+    relative_dir: &Path,
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
@@ -2355,19 +2966,20 @@ fn collect_ignored_untracked_files(
             continue;
         }
         let metadata = entry.metadata()?;
-        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let relative_path = relative_child_path(relative_dir, &entry.file_name());
+        let relative = relative_path_bytes(&relative_path);
         let is_ignored = parent_ignored || ignore.is_ignored(&relative, metadata.is_dir());
         if metadata.is_dir() {
             let collapse_child = mode == UntrackedMode::Directory
                 && is_ignored
-                && !tracked_paths_under(tracked_paths, &relative);
+                && !tracked_paths.has_tracked_descendants_native(&relative_path)?;
             let child_has_reportable_ignored = if collapse_child && include_empty_directories {
                 true
             } else {
                 collect_ignored_untracked_files(
                     root,
                     &path,
-                    &relative,
+                    &relative_path,
                     tracked_paths,
                     ignore,
                     mode,
@@ -2385,7 +2997,7 @@ fn collect_ignored_untracked_files(
             has_reportable_ignored |= child_has_reportable_ignored;
         } else if is_ignored
             && (metadata.is_file() || metadata.file_type().is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
         {
             has_reportable_ignored = true;
             if !collapse_ignored_dirs {
@@ -2406,7 +3018,7 @@ pub(crate) fn untracked_files_with_mode(
     let mut files = Vec::new();
     let _ = collect_untracked_files(
         root,
-        b"",
+        Path::new(""),
         tracked_paths,
         ignore,
         mode,
@@ -2637,7 +3249,8 @@ fn collect_untracked_pathspec_target(
     if pathspec == b".git" || pathspec.starts_with(b".git/") {
         return Ok(());
     }
-    let absolute = root.join(String::from_utf8_lossy(pathspec).as_ref());
+    let pathspec_path = native_path_from_git_bytes(pathspec)?;
+    let absolute = root.join(&pathspec_path);
     let metadata = match fs::symlink_metadata(&absolute) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -2645,8 +3258,8 @@ fn collect_untracked_pathspec_target(
     };
     let file_type = metadata.file_type();
     if file_type.is_dir() {
-        let tracked_directory = tracked_paths.contains_directory(pathspec)
-            || (mode != UntrackedMode::All && tracked_paths.contains(pathspec));
+        let tracked_directory = tracked_paths.contains_directory_native(&pathspec_path)?
+            || (mode != UntrackedMode::All && tracked_paths.contains_native(&pathspec_path)?);
         if ignore.is_ignored(pathspec, true) || tracked_directory {
             return Ok(());
         }
@@ -2658,7 +3271,8 @@ fn collect_untracked_pathspec_target(
             }
             return Ok(());
         }
-        let has_tracked_descendants = tracked_paths_under(tracked_paths, pathspec);
+        let has_tracked_descendants =
+            tracked_paths.has_tracked_descendants_native(&pathspec_path)?;
         let collapse_root_dir = mode != UntrackedMode::All && !has_tracked_descendants;
         let child_has_reportable_entries =
             if collapse_root_dir && mode == UntrackedMode::Directory && include_empty_directories {
@@ -2666,7 +3280,7 @@ fn collect_untracked_pathspec_target(
             } else {
                 collect_untracked_files(
                     &absolute,
-                    pathspec,
+                    &pathspec_path,
                     tracked_paths,
                     ignore,
                     mode,
@@ -2686,7 +3300,7 @@ fn collect_untracked_pathspec_target(
     }
     if (file_type.is_file() || file_type.is_symlink())
         && !ignore.is_ignored(pathspec, false)
-        && !tracked_paths.contains(pathspec)
+        && !tracked_paths.contains_native(&pathspec_path)?
         && seen.insert(pathspec.to_vec())
     {
         files.push(pathspec.to_vec());
@@ -2696,7 +3310,7 @@ fn collect_untracked_pathspec_target(
 
 fn collect_untracked_files(
     dir: &std::path::Path,
-    relative_dir: &[u8],
+    relative_dir: &Path,
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
@@ -2712,14 +3326,15 @@ fn collect_untracked_files(
             continue;
         }
         let file_type = entry.file_type()?;
-        let relative = relative_child_path(relative_dir, &entry.file_name());
+        let relative_path = relative_child_path(relative_dir, &entry.file_name());
+        let relative = relative_path_bytes(&relative_path);
         let is_dir = file_type.is_dir();
         if ignore.is_ignored(&relative, is_dir) {
             continue;
         }
         if is_dir {
-            let tracked_directory = tracked_paths.contains_directory(&relative)
-                || (mode != UntrackedMode::All && tracked_paths.contains(&relative));
+            let tracked_directory = tracked_paths.contains_directory_native(&relative_path)?
+                || (mode != UntrackedMode::All && tracked_paths.contains_native(&relative_path)?);
             if is_nested_worktree(&path) && !tracked_directory {
                 if !collapse_untracked_dirs {
                     let mut directory = relative;
@@ -2732,7 +3347,8 @@ fn collect_untracked_files(
             if tracked_directory {
                 continue;
             }
-            let has_tracked_descendants = tracked_paths_under(tracked_paths, &relative);
+            let has_tracked_descendants =
+                tracked_paths.has_tracked_descendants_native(&relative_path)?;
             let collapse_child_dir =
                 !collapse_untracked_dirs && mode != UntrackedMode::All && !has_tracked_descendants;
             let child_has_reportable_entries = if collapse_child_dir
@@ -2743,7 +3359,7 @@ fn collect_untracked_files(
             } else {
                 collect_untracked_files(
                     &path,
-                    &relative,
+                    &relative_path,
                     tracked_paths,
                     ignore,
                     mode,
@@ -2766,7 +3382,7 @@ fn collect_untracked_files(
                 has_reportable_entries = true;
             }
         } else if (file_type.is_file() || file_type.is_symlink())
-            && !tracked_paths.contains(relative.as_slice())
+            && !tracked_paths.contains_native(&relative_path)?
         {
             has_reportable_entries = true;
             if !collapse_untracked_dirs {
@@ -2982,19 +3598,19 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         let tracked_paths = tracked_paths
             .as_ref()
             .expect("tracked paths for directory others");
-        let cwd_absolute = repo
-            .root
-            .join(String::from_utf8_lossy(&cwd_prefix).as_ref());
+        let cwd_path = native_path_from_git_bytes(&cwd_prefix)?;
+        let cwd_absolute = repo.root.join(&cwd_path);
         if let Ok(metadata) = fs::symlink_metadata(&cwd_absolute)
             && metadata.is_dir()
             && !ignore
                 .as_ref()
                 .expect("ignore graph for implicit cwd directory others")
                 .is_ignored(&cwd_prefix, true)
-            && ((include_empty_directories && !tracked_paths_under(&tracked_paths, &cwd_prefix))
+            && ((include_empty_directories
+                && !tracked_paths.has_tracked_descendants_native(&cwd_path)?)
                 || collect_untracked_files(
                     &cwd_absolute,
-                    &cwd_prefix,
+                    &cwd_path,
                     &tracked_paths,
                     ignore
                         .as_ref()
@@ -3165,14 +3781,12 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
     }
 
     let include_cached = include_all_cached || options.cached;
-    let sparse_expect_files_outside = if config_bool_enabled(
-        &repo,
-        "sparse.expectFilesOutsideOfPatterns",
-    )? {
-        SparsePathScope::load(&repo)?
-    } else {
-        None
-    };
+    let sparse_expect_files_outside =
+        if config_bool_enabled(&repo, "sparse.expectFilesOutsideOfPatterns")? {
+            SparsePathScope::load(&repo)?
+        } else {
+            None
+        };
     let mut records = Vec::new();
     let mut seen_records = BTreeSet::new();
     if include_all_cached || show_stage_format {
@@ -3431,7 +4045,10 @@ fn ls_files_index_with_tree(
     index: GitIndex,
     treeish: &str,
 ) -> Result<(GitIndex, HashSet<Vec<u8>>)> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let tree_index = read_treeish_index(repo, &store, treeish)?;
     let mut existing_paths = index
         .entries()
@@ -3546,7 +4163,7 @@ fn standard_repo_ignore_pruned(
     append_per_directory_excludes_pruned(
         &repo.root,
         &repo.root,
-        b"",
+        Path::new(""),
         ".gitignore",
         &mut ignore,
         tracked_paths,
@@ -3661,13 +4278,14 @@ fn append_per_directory_excludes_with_index(
 fn append_per_directory_excludes_pruned(
     root: &std::path::Path,
     dir: &std::path::Path,
-    relative_dir: &[u8],
+    relative_dir: &Path,
     name: &str,
     ignore: &mut GitIgnore,
     tracked_paths: &TrackedPathSet<'_>,
 ) -> Result<()> {
     let exclude_path = dir.join(name);
-    let base = String::from_utf8_lossy(relative_dir);
+    let base_bytes = relative_path_bytes(relative_dir);
+    let base = String::from_utf8_lossy(&base_bytes);
     append_ignore_file(ignore, &exclude_path, &base)?;
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -3678,13 +4296,21 @@ fn append_per_directory_excludes_pruned(
         if !entry.file_type()?.is_dir() {
             continue;
         }
-        let relative = relative_child_path(relative_dir, &entry.file_name());
-        let tracked_visible = tracked_paths.contains(relative.as_slice())
-            || tracked_paths_under(tracked_paths, &relative);
+        let relative_path = relative_child_path(relative_dir, &entry.file_name());
+        let relative = relative_path_bytes(&relative_path);
+        let tracked_visible = tracked_paths.contains_native(&relative_path)?
+            || tracked_paths.has_tracked_descendants_native(&relative_path)?;
         if ignore.is_ignored(&relative, true) && !tracked_visible {
             continue;
         }
-        append_per_directory_excludes_pruned(root, &path, &relative, name, ignore, tracked_paths)?;
+        append_per_directory_excludes_pruned(
+            root,
+            &path,
+            &relative_path,
+            name,
+            ignore,
+            tracked_paths,
+        )?;
     }
     Ok(())
 }
@@ -4387,7 +5013,8 @@ fn add_sparse_path_error(
             continue;
         }
         if add_path_is_sparse(entry, scope) {
-            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            let absolute = worktree_path_for_index_entry_checked(&repo.root, &entry.path)
+                .map_err(CliError::Io)?;
             if options.materialized_sparse_is_candidate && scope.is_some() && path_exists(&absolute)
             {
                 has_dense_candidate = true;
@@ -4545,7 +5172,10 @@ pub(crate) fn add_with_embedded_repo_warning(
             &paths,
         )?;
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let raw_index = {
         let _trace = phase_trace("add.read_index");
         read_repo_index_raw(&repo)?
@@ -5917,7 +6547,8 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
         return Err(CliError::Message("`rm` requires at least one path".into()));
     }
     let repo = find_repo_or_bare()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
@@ -6268,7 +6899,7 @@ pub(crate) struct ReadTreeCommandOptions {
     pub(crate) prefix: Option<String>,
     pub(crate) exclude_per_directory: Option<String>,
     pub(crate) super_prefix: Option<String>,
-    pub(crate) recurse_submodules: bool,
+    pub(crate) recurse_submodules: crate::runtime::RecurseSubmodulesValue,
     pub(crate) no_recurse_submodules: bool,
     pub(crate) no_sparse_checkout: bool,
     pub(crate) treeish: Vec<String>,
@@ -6296,6 +6927,16 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
         treeish,
     } = options;
     let _ = (quiet, no_sparse_checkout, verbose, trivial, aggressive);
+    let recurse_submodules = match recurse_submodules {
+        crate::runtime::RecurseSubmodulesValue::Disabled => false,
+        crate::runtime::RecurseSubmodulesValue::Enabled => true,
+        crate::runtime::RecurseSubmodulesValue::Invalid(value) => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("bad recurse-submodules argument: {value}"),
+            });
+        }
+    };
     if empty && !treeish.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -6341,17 +6982,25 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
         });
     }
     let repo = find_repo_or_bare()?;
-    let recurse_submodules = !no_recurse_submodules
-        && (recurse_submodules
-            || read_config_value(&repo, "submodule.recurse")?
-                .as_deref()
-                .and_then(parse_git_bool)
-                .unwrap_or(false));
+    let configured_recurse = read_config_entry(&repo, "submodule.recurse")?
+        .map(|entry| {
+            entry.bool_value().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "bad boolean config value '{}' for 'submodule.recurse'",
+                    entry.value
+                ),
+            })
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let recurse_submodules = !no_recurse_submodules && (recurse_submodules || configured_recurse);
     let output_path = index_output.unwrap_or_else(|| repo.index_path.clone());
     let original_index = read_repo_index(&repo)?;
     if empty {
         if !dry_run {
-            GitIndex::new().write_to_path(&output_path)?;
+            GitIndex::new_with_algorithm(repo_hash_algorithm_from_config(&repo)?)
+                .write_to_path(&output_path)?;
         }
         return Ok(());
     }
@@ -6361,7 +7010,10 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
             message: "read-tree requires --empty or a tree-ish".into(),
         });
     }
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
     let tree_cache = TreeObjectCache::new(&store);
     let mut result_index = if let Some(prefix) = prefix.as_deref() {
         if prefix.starts_with('/') {
@@ -6395,9 +7047,41 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
             treeish.last().expect("treeish checked"),
         )?
     };
+    let root_operation = if reset {
+        ReadTreeSubmoduleRootOperation::Reset
+    } else if merge && treeish.len() > 1 {
+        ReadTreeSubmoduleRootOperation::Merge
+    } else if merge {
+        ReadTreeSubmoduleRootOperation::OneWayMerge
+    } else {
+        ReadTreeSubmoduleRootOperation::SingleTree
+    };
     reject_null_read_tree_entries(&result_index)?;
-    read_tree_prefetch_missing_objects(&repo, &store, &result_index)?;
-    validate_read_tree_submodule_targets(&repo, &result_index, recurse_submodules)?;
+    // All submodule context consumers are guarded by the effective recursive
+    // flag.  In particular, -u --no-recurse-submodules must not parse
+    // .gitmodules or activation configuration as an incidental side effect.
+    let include_original_submodule_context =
+        recurse_submodules && (!reset || (update_worktree && !dry_run));
+    let root_submodule_contexts = if recurse_submodules {
+        Some(ReadTreeSubmoduleRootContexts::read(
+            &repo,
+            &original_index,
+            &result_index,
+            include_original_submodule_context,
+        )?)
+    } else {
+        None
+    };
+    validate_read_tree_submodule_targets(
+        &repo,
+        &original_index,
+        &result_index,
+        recurse_submodules,
+        reset,
+        root_operation,
+        root_submodule_contexts.as_ref(),
+        super_prefix.as_deref(),
+    )?;
     if !no_sparse_checkout && sparse_checkout_active(&repo)? {
         apply_sparse_checkout_bits_to_index(&repo, &mut result_index)?;
         result_index = expand_repo_sparse_index(&repo, &result_index)?;
@@ -6406,47 +7090,82 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
     result_index.refresh_cache_tree();
     read_tree_validate_confusing_paths(&repo, &result_index)?;
     if !index_only && (merge || reset) {
-        read_tree_validate_worktree(&repo, &original_index, &result_index)?;
+        read_tree_validate_worktree(&repo, &original_index, &result_index, reset)?;
     }
-    if update_worktree {
-        read_tree_validate_update_worktree(
+    let worktree_plan = if update_worktree {
+        Some(read_tree_prepare_worktree(
             &repo,
             &original_index,
             &result_index,
             merge && !reset,
             reset,
+            prefix.is_some(),
             exclude_per_directory.as_deref(),
             super_prefix.as_deref(),
-        )?;
+        )?)
+    } else {
+        None
+    };
+    validate_read_tree_submodule_worktrees(
+        &repo,
+        &original_index,
+        &result_index,
+        recurse_submodules,
+        reset,
+        root_submodule_contexts.as_ref(),
+        super_prefix.as_deref(),
+    )?;
+    if update_worktree
+        && let Some(plan) = worktree_plan.as_ref()
+        && let Some(checkout_index) = plan.checkout_index.as_ref()
+    {
+        read_tree_reject_no_lazy_missing_objects(&repo, &store, checkout_index)?;
     }
     if !dry_run {
-        let write_index = collapse_sparse_index(&repo, &store, &result_index)?;
-        write_index.write_to_path(&output_path)?;
+        if let Some(plan) = worktree_plan.as_ref() {
+            if let Some(checkout_index) = plan.checkout_index.as_ref() {
+                prefetch_checkout_index_missing_objects(&repo, &store, checkout_index)?;
+            }
+        } else {
+            read_tree_prefetch_missing_objects(&repo, &store, &result_index)?;
+        }
+    }
+    if !dry_run {
         if update_worktree {
-            remove_read_tree_submodules(&repo, &original_index, &result_index, recurse_submodules)?;
-            let refreshed_paths = read_tree_update_worktree(
-                &repo,
-                &store,
-                &original_index,
-                &result_index,
-                merge && !reset,
-                reset,
-                prefix.is_some(),
-                exclude_per_directory.as_deref(),
-                super_prefix.as_deref(),
-            )?;
-            checkout_read_tree_submodules(
+            remove_read_tree_submodules(
                 &repo,
                 &original_index,
                 &result_index,
                 recurse_submodules,
-                reset,
+                root_submodule_contexts.as_ref(),
+                super_prefix.as_deref(),
             )?;
+            let refreshed_paths = read_tree_update_worktree(
+                &repo,
+                &store,
+                worktree_plan
+                    .as_ref()
+                    .expect("worktree plan required for -u"),
+            )?;
+            if recurse_submodules {
+                checkout_read_tree_submodules(
+                    &repo,
+                    &original_index,
+                    &result_index,
+                    true,
+                    reset,
+                    root_operation,
+                    root_submodule_contexts
+                        .as_ref()
+                        .expect("read-tree recursive submodule contexts"),
+                    super_prefix.as_deref(),
+                )?;
+            }
             refresh_tracked_index_metadata_matching(&repo, &mut result_index, &refreshed_paths)?;
             result_index.refresh_cache_tree();
-            let write_index = collapse_sparse_index(&repo, &store, &result_index)?;
-            write_index.write_to_path(&output_path)?;
         }
+        let write_index = collapse_sparse_index(&repo, &store, &result_index)?;
+        write_index.write_to_path(&output_path)?;
     }
     Ok(())
 }
@@ -6519,36 +7238,208 @@ fn read_tree_prefetch_missing_objects(
     if missing.is_empty() {
         return Ok(());
     }
-    missing.sort_by_key(ObjectId::to_hex);
+    missing.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     super::admin_commands::backfill_promisor_objects(repo, &missing)?;
     Ok(())
 }
 
-fn prefetch_checkout_missing_objects(
+fn read_tree_reject_no_lazy_missing_objects(
     repo: &GitRepo,
     store: &LooseObjectStore,
-    target_id: &ObjectId,
+    index: &GitIndex,
 ) -> Result<()> {
-    if !super::transport_commands::lazy_fetch_allowed() || !partial_clone_enabled(repo)? {
+    if super::transport_commands::lazy_fetch_allowed() || !partial_clone_enabled(repo)? {
         return Ok(());
     }
-    let commit_cache = CommitObjectCache::new(store);
-    let tree_cache = TreeObjectCache::new(store);
-    let target_commit = commit_cache.read_commit(target_id)?;
-    let mut target_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
-    apply_repo_sparse_checkout_bits(repo, &mut target_index)?;
-    read_tree_prefetch_missing_objects(repo, store, &target_index)
+    let object_ids = index
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.stage == 0 && !entry.skip_worktree() && entry.mode != IndexMode::Gitlink
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+    let mut missing = store
+        .missing_objects(&object_ids)
+        .map_err(CliError::Io)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    missing.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    eprintln!("warning: lazy fetching disabled; some objects may not be available");
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!(
+            "could not fetch {} from promisor remote",
+            missing[0].to_hex()
+        ),
+    })
 }
 
-fn read_tree_validate_update_worktree(
+struct ReadTreeWorktreePlan {
+    removals: Vec<Vec<u8>>,
+    gitlink_directories: Vec<Vec<u8>>,
+    checkout_index: Option<GitIndex>,
+    refreshed_paths: Vec<Vec<u8>>,
+}
+
+#[derive(Debug)]
+struct ReadTreeBytePathIndex {
+    paths: Vec<Vec<u8>>,
+}
+
+impl ReadTreeBytePathIndex {
+    fn from_paths(mut paths: Vec<Vec<u8>>) -> Self {
+        paths.sort_unstable();
+        paths.dedup();
+        Self { paths }
+    }
+
+    fn lower_bound(&self, path: &[u8]) -> usize {
+        let mut low = 0;
+        let mut high = self.paths.len();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if self.paths[middle].as_slice() < path {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        low
+    }
+
+    fn contains(&self, path: &[u8]) -> bool {
+        let index = self.lower_bound(path);
+        self.paths
+            .get(index)
+            .is_some_and(|candidate| candidate.as_slice() == path)
+    }
+
+    fn contains_path_or_descendant(&self, path: &[u8]) -> bool {
+        let mut low = 0;
+        let mut high = self.paths.len();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            let candidate = self.paths[middle].as_slice();
+            let common = candidate.len().min(path.len());
+            let ordering = candidate[..common].cmp(&path[..common]);
+            let ordering = if ordering != std::cmp::Ordering::Equal {
+                ordering
+            } else if candidate.len() <= path.len() {
+                std::cmp::Ordering::Less
+            } else {
+                candidate[path.len()].cmp(&b'/')
+            };
+            if ordering == std::cmp::Ordering::Less {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        let index = low;
+        self.paths.get(index).is_some_and(|candidate| {
+            candidate.as_slice() == path
+                || (candidate.starts_with(path)
+                    && candidate.get(path.len()).is_some_and(|byte| *byte == b'/'))
+        })
+    }
+}
+
+struct ReadTreeWorktreeSnapshot<'a> {
+    tracked_paths: TrackedPathSet<'a>,
+    root_ignore: GitIgnore,
+    standard_ignore: Option<GitIgnore>,
+    ignored_paths: OnceLock<std::result::Result<ReadTreeBytePathIndex, String>>,
+    untracked_paths: OnceLock<std::result::Result<ReadTreeBytePathIndex, String>>,
+}
+
+impl<'a> ReadTreeWorktreeSnapshot<'a> {
+    fn read(repo: &GitRepo, original_index: &'a GitIndex, result_index: &GitIndex) -> Result<Self> {
+        let tracked_paths = tracked_path_set_for_repo(repo, original_index)?;
+        let root_ignore = GitIgnore::load_from_root(&repo.root)?;
+        let standard_ignore = result_index
+            .entries()
+            .iter()
+            .any(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
+            .then(|| standard_repo_ignore(repo))
+            .transpose()?;
+        Ok(Self {
+            tracked_paths,
+            root_ignore,
+            standard_ignore,
+            ignored_paths: OnceLock::new(),
+            untracked_paths: OnceLock::new(),
+        })
+    }
+
+    fn ignored_paths(&self, root: &Path) -> Result<&ReadTreeBytePathIndex> {
+        let cached = self.ignored_paths.get_or_init(|| {
+            ignored_untracked_files(root, &self.tracked_paths, &self.root_ignore)
+                .map(ReadTreeBytePathIndex::from_paths)
+                .map_err(|error| format!("{error:?}"))
+        });
+        cached
+            .as_ref()
+            .map_err(|error| CliError::Message(error.clone()))
+    }
+
+    fn untracked_paths(&self, root: &Path) -> Result<&ReadTreeBytePathIndex> {
+        let cached = self.untracked_paths.get_or_init(|| {
+            untracked_files(root, &self.tracked_paths, &self.root_ignore)
+                .map(ReadTreeBytePathIndex::from_paths)
+                .map_err(|error| format!("{error:?}"))
+        });
+        cached
+            .as_ref()
+            .map_err(|error| CliError::Message(error.clone()))
+    }
+
+    fn path_is_standard_ignored(&self, path: &[u8]) -> bool {
+        self.standard_ignore
+            .as_ref()
+            .is_some_and(|ignore| ignore.is_ignored(path, false) || ignore.is_ignored(path, true))
+    }
+}
+
+fn read_tree_prepare_worktree<'a>(
     repo: &GitRepo,
-    original_index: &GitIndex,
+    original_index: &'a GitIndex,
     result_index: &GitIndex,
     preserve_dirty_local: bool,
     force_checkout: bool,
+    keep_existing_paths: bool,
     exclude_per_directory: Option<&str>,
     super_prefix: Option<&str>,
-) -> Result<()> {
+) -> Result<ReadTreeWorktreePlan> {
+    let snapshot = ReadTreeWorktreeSnapshot::read(repo, original_index, result_index)?;
+    let target_entries = result_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| (entry.path.as_slice(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut removals = Vec::new();
+    if !keep_existing_paths {
+        for entry in original_index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+        {
+            match target_entries.get(entry.path.as_slice()).copied() {
+                None => removals.push(entry.path.clone()),
+                Some(target) if target.skip_worktree() && !entry.skip_worktree() => {
+                    removals.push(entry.path.clone())
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    let mut checkout_entries = Vec::new();
+    let mut gitlink_directories = Vec::new();
+    let mut refreshed_paths = Vec::new();
     for entry in result_index
         .entries()
         .iter()
@@ -6558,33 +7449,53 @@ fn read_tree_validate_update_worktree(
             continue;
         }
         let current = find_index_entry(original_index, &entry.path);
+        let gitlink_transition = current.map_or(true, |current| {
+            current.mode != IndexMode::Gitlink || current.id != entry.id
+        });
         if !read_tree_entry_needs_checkout(repo, current, entry, preserve_dirty_local)? {
             continue;
         }
-        if force_checkout {
-            continue;
-        }
-        if entry.mode == IndexMode::Gitlink {
-            let ignore = standard_repo_ignore(repo)?;
-            if ignore.is_ignored(&entry.path, false) || ignore.is_ignored(&entry.path, true) {
+        if !force_checkout {
+            if entry.mode == IndexMode::Gitlink && snapshot.path_is_standard_ignored(&entry.path) {
+                if gitlink_transition
+                    && !path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+                {
+                    gitlink_directories.push(entry.path.clone());
+                }
                 continue;
             }
+            read_tree_preflight_checkout_path(
+                repo,
+                &entry.path,
+                exclude_per_directory,
+                super_prefix,
+                &snapshot,
+            )?;
         }
-        read_tree_preflight_checkout_path(
-            repo,
-            original_index,
-            &entry.path,
-            exclude_per_directory,
-            super_prefix,
-        )?;
+        if entry.mode != IndexMode::Gitlink {
+            checkout_entries.push(entry.clone());
+            refreshed_paths.push(entry.path.clone());
+        } else if gitlink_transition
+            && !path_exists(&worktree_path_for_index_entry(&repo.root, &entry.path))
+        {
+            gitlink_directories.push(entry.path.clone());
+        }
     }
-    Ok(())
+    Ok(ReadTreeWorktreePlan {
+        removals,
+        gitlink_directories,
+        checkout_index: (!checkout_entries.is_empty())
+            .then(|| GitIndex::from_entries(checkout_entries))
+            .transpose()?,
+        refreshed_paths,
+    })
 }
 
 fn read_tree_validate_worktree(
     repo: &GitRepo,
     current_index: &GitIndex,
     result_index: &GitIndex,
+    force: bool,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
     paths.extend(
@@ -6612,6 +7523,15 @@ fn read_tree_validate_worktree(
         };
         let absolute = repo.root.join(String::from_utf8_lossy(&path).as_ref());
         if path_exists(&absolute) && worktree_entry_modified(repo, &absolute, current)? {
+            if path == b".gitmodules" {
+                if force {
+                    continue;
+                }
+                return Err(CliError::Stderr {
+                    code: 128,
+                    text: "error: Entry '.gitmodules' not uptodate. Cannot merge.\n".into(),
+                });
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!(
@@ -6631,7 +7551,92 @@ fn read_tree_resolved_index(
     treeish: &str,
 ) -> Result<GitIndex> {
     let tree_id = resolve_treeish_or_invalid_object(repo, store, treeish)?;
-    Ok(tree_cache.read_tree_to_index(&tree_id)?)
+    match tree_cache.read_tree_to_index(&tree_id) {
+        Ok(index) => Ok(index),
+        Err(error) if error.to_string() == "invalid tree mode" => {
+            let protect_hfs = config_bool_enabled(repo, "core.protectHFS")?;
+            let protect_ntfs = config_bool_enabled(repo, "core.protectNTFS")?;
+            if (protect_hfs || protect_ntfs)
+                && let Some(path) =
+                    read_tree_raw_confusing_path(store, &tree_id, protect_hfs, protect_ntfs)?
+            {
+                return Err(read_tree_invalid_path_error(&path));
+            }
+            Err(error.into())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn read_tree_raw_confusing_path(
+    store: &LooseObjectStore,
+    root_tree: &ObjectId,
+    protect_hfs: bool,
+    protect_ntfs: bool,
+) -> Result<Option<Vec<u8>>> {
+    fn visit(
+        store: &LooseObjectStore,
+        tree_id: &ObjectId,
+        prefix: &[u8],
+        protect_hfs: bool,
+        protect_ntfs: bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let object = store.read_object(tree_id)?;
+        if object.kind != GitObjectKind::Tree {
+            return Ok(None);
+        }
+        let digest_len = store.algorithm().digest_len();
+        let mut cursor = 0;
+        while cursor < object.content.len() {
+            let mode_end = object.content[cursor..]
+                .iter()
+                .position(|byte| *byte == b' ')
+                .map(|offset| cursor + offset)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "tree mode missing space")
+                })?;
+            let mode = &object.content[cursor..mode_end];
+            cursor = mode_end + 1;
+            let name_end = object.content[cursor..]
+                .iter()
+                .position(|byte| *byte == 0)
+                .map(|offset| cursor + offset)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "tree name missing NUL")
+                })?;
+            let name = &object.content[cursor..name_end];
+            cursor = name_end + 1;
+            if object.content.len().saturating_sub(cursor) < digest_len {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "tree object id is truncated",
+                )
+                .into());
+            }
+            let entry_id = ObjectId::new(
+                store.algorithm(),
+                &object.content[cursor..cursor + digest_len],
+            );
+            cursor += digest_len;
+
+            let mut path = Vec::with_capacity(prefix.len() + name.len() + 1);
+            path.extend_from_slice(prefix);
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend_from_slice(name);
+            if mode == b"40000" || mode == b"040000" {
+                if let Some(path) = visit(store, &entry_id, &path, protect_hfs, protect_ntfs)? {
+                    return Ok(Some(path));
+                }
+            } else if read_tree_path_is_confusing(&path, protect_hfs, protect_ntfs) {
+                return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
+
+    visit(store, root_tree, &[], protect_hfs, protect_ntfs)
 }
 
 fn read_tree_merge_index(
@@ -6994,71 +7999,20 @@ fn read_tree_two_way_path_result(
 fn read_tree_update_worktree(
     repo: &GitRepo,
     store: &LooseObjectStore,
-    original_index: &GitIndex,
-    result_index: &GitIndex,
-    preserve_dirty_local: bool,
-    force_checkout: bool,
-    keep_existing_paths: bool,
-    exclude_per_directory: Option<&str>,
-    super_prefix: Option<&str>,
+    plan: &ReadTreeWorktreePlan,
 ) -> Result<Vec<Vec<u8>>> {
-    let target_entries = result_index
-        .entries()
-        .iter()
-        .filter(|entry| entry.stage == 0)
-        .map(|entry| (entry.path.as_slice(), entry))
-        .collect::<HashMap<_, _>>();
-    let mut checkout_entries = Vec::new();
-    let mut refreshed_paths = Vec::new();
-    if !keep_existing_paths {
-        let mut original_paths = BTreeSet::new();
-        original_paths.extend(
-            original_index
-                .entries()
-                .iter()
-                .map(|entry| entry.path.clone()),
-        );
-        for path in original_paths {
-            match target_entries.get(path.as_slice()).copied() {
-                None => remove_worktree_path(repo, &path)?,
-                Some(entry) if entry.skip_worktree() => {
-                    let current = find_index_entry(original_index, &path);
-                    if current.is_none_or(|current| !current.skip_worktree()) {
-                        remove_worktree_path(repo, &path)?;
-                    }
-                }
-                Some(_) => {}
-            }
+    for path in &plan.removals {
+        remove_worktree_path(repo, path)?;
+    }
+    for path in &plan.gitlink_directories {
+        let absolute = worktree_path_for_index_entry(&repo.root, path);
+        if !path_exists(&absolute) {
+            fs::create_dir_all(absolute)?;
         }
     }
-    for entry in result_index
-        .entries()
-        .iter()
-        .filter(|entry| entry.stage == 0 && entry.mode != IndexMode::Gitlink)
-    {
-        if entry.skip_worktree() {
-            continue;
-        }
-        let current = find_index_entry(original_index, &entry.path);
-        if !read_tree_entry_needs_checkout(repo, current, entry, preserve_dirty_local)? {
-            continue;
-        }
-        if !force_checkout {
-            read_tree_preflight_checkout_path(
-                repo,
-                original_index,
-                &entry.path,
-                exclude_per_directory,
-                super_prefix,
-            )?;
-        }
-        checkout_entries.push(entry.clone());
-        refreshed_paths.push(entry.path.clone());
-    }
-    if checkout_entries.is_empty() {
-        return Ok(refreshed_paths);
-    }
-    let checkout_entries = GitIndex::from_entries(checkout_entries)?;
+    let Some(checkout_entries) = plan.checkout_index.as_ref() else {
+        return Ok(plan.refreshed_paths.clone());
+    };
     let materialized_paths = checkout_entries
         .entries()
         .iter()
@@ -7084,7 +8038,7 @@ fn read_tree_update_worktree(
         }
         return Err(error);
     }
-    Ok(refreshed_paths)
+    Ok(plan.refreshed_paths.clone())
 }
 
 fn read_tree_same_materialized_entry(current: Option<&IndexEntry>, result: &IndexEntry) -> bool {
@@ -7113,22 +8067,20 @@ fn read_tree_entry_needs_checkout(
 
 fn read_tree_preflight_checkout_path(
     repo: &GitRepo,
-    original_index: &GitIndex,
     path: &[u8],
     exclude_per_directory: Option<&str>,
     super_prefix: Option<&str>,
+    snapshot: &ReadTreeWorktreeSnapshot<'_>,
 ) -> Result<()> {
     let absolute = worktree_path_for_index_entry(&repo.root, path);
     let Ok(metadata) = fs::symlink_metadata(&absolute) else {
         return Ok(());
     };
-    let tracked_paths = tracked_path_set_for_repo(repo, original_index)?;
-    let ignore = GitIgnore::load_from_root(&repo.root)?;
-    let ignored = ignored_untracked_files(&repo.root, &tracked_paths, &ignore)?;
+    let ignored = snapshot.ignored_paths(&repo.root)?;
     let allow_ignored = exclude_per_directory == Some(".gitignore");
     if !metadata.is_dir() {
-        let is_tracked = tracked_paths.contains(path);
-        let is_ignored = ignored.iter().any(|candidate| candidate.as_slice() == path);
+        let is_tracked = snapshot.tracked_paths.contains(path);
+        let is_ignored = ignored.contains(path);
         if !is_tracked && (!is_ignored || !allow_ignored) {
             return Err(CliError::Fatal {
                 code: 128,
@@ -7140,11 +8092,8 @@ fn read_tree_preflight_checkout_path(
         }
         return Ok(());
     }
-    let untracked = untracked_files(&repo.root, &tracked_paths, &ignore)?;
-    let path_prefix = format!("{}/", String::from_utf8_lossy(path));
-    if untracked.iter().any(|candidate| {
-        candidate == path || String::from_utf8_lossy(candidate).starts_with(&path_prefix)
-    }) {
+    let untracked = snapshot.untracked_paths(&repo.root)?;
+    if untracked.contains_path_or_descendant(path) {
         let display = match super_prefix {
             Some(prefix) if !prefix.is_empty() => {
                 format!("{prefix}{}", String::from_utf8_lossy(path))
@@ -7162,26 +8111,31 @@ fn read_tree_preflight_checkout_path(
 fn read_tree_validate_confusing_paths(repo: &GitRepo, index: &GitIndex) -> Result<()> {
     let protect_hfs = config_bool_enabled(repo, "core.protectHFS")?;
     let protect_ntfs = config_bool_enabled(repo, "core.protectNTFS")?;
-    if !protect_hfs && !protect_ntfs {
-        return Ok(());
-    }
     for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
         if read_tree_path_is_confusing(&entry.path, protect_hfs, protect_ntfs) {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: format!("invalid path '{}'", String::from_utf8_lossy(&entry.path)),
-            });
+            return Err(read_tree_invalid_path_error(&entry.path));
         }
     }
     Ok(())
 }
 
+fn read_tree_invalid_path_error(path: &[u8]) -> CliError {
+    let mut bytes = b"error: invalid path '".to_vec();
+    bytes.extend_from_slice(path);
+    bytes.extend_from_slice(b"'\n");
+    CliError::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        zmin_cli_runtime::RawStderrBytes { code: 128, bytes },
+    ))
+}
+
 fn read_tree_path_is_confusing(path: &[u8], protect_hfs: bool, protect_ntfs: bool) -> bool {
+    let backslash_is_separator = cfg!(any(windows, target_os = "cygwin"));
     path.split(|byte| *byte == b'/').any(|component| {
         component.is_empty()
             || component == b"."
             || component == b".."
-            || (protect_ntfs && component.contains(&b'\\'))
+            || (protect_ntfs && backslash_is_separator && component.contains(&b'\\'))
             || read_tree_component_matches_dotgit(component, protect_hfs, protect_ntfs)
     })
 }
@@ -7191,35 +8145,112 @@ fn read_tree_component_matches_dotgit(
     protect_hfs: bool,
     protect_ntfs: bool,
 ) -> bool {
-    if !protect_hfs && !protect_ntfs {
-        return false;
+    if component.eq_ignore_ascii_case(b".git") {
+        return true;
     }
-    let mut candidate = if protect_ntfs {
-        match component.iter().position(|byte| *byte == b':') {
-            Some(index) => &component[..index],
-            None => component,
-        }
-    } else {
-        component
-    };
-    let mut normalized = Vec::with_capacity(candidate.len());
-    let mut cursor = 0usize;
-    while cursor < candidate.len() {
-        if protect_hfs && candidate[cursor..].starts_with(&[0xE2, 0x80, 0x8C]) {
-            cursor += 3;
-            continue;
-        }
-        normalized.push(candidate[cursor].to_ascii_lowercase());
-        cursor += 1;
-    }
-    candidate = &normalized;
-    while candidate
-        .last()
-        .is_some_and(|byte| *byte == b'.' || *byte == b' ')
+    if protect_hfs
+        && cfg!(any(windows, target_os = "cygwin"))
+        && component
+            .split(|byte| *byte == b'\\')
+            .any(read_tree_component_matches_hfs_dotgit)
     {
-        candidate = &candidate[..candidate.len() - 1];
+        return true;
     }
-    candidate == b".git" || candidate == b"git~1"
+    if protect_ntfs
+        && component
+            .split(|byte| *byte == b'\\')
+            .any(read_tree_component_matches_ntfs_dotgit)
+    {
+        return true;
+    }
+    (protect_hfs && read_tree_component_matches_hfs_dotgit(component))
+        || (protect_ntfs && read_tree_component_matches_ntfs_dotgit(component))
+}
+
+fn read_tree_component_matches_hfs_dotgit(component: &[u8]) -> bool {
+    let mut cursor = 0usize;
+    for expected in b".git" {
+        loop {
+            match read_tree_hfs_character(component, &mut cursor) {
+                ReadTreeHfsCharacter::Ignored => continue,
+                ReadTreeHfsCharacter::Ascii(actual) => {
+                    if actual.to_ascii_lowercase() != *expected {
+                        return false;
+                    }
+                }
+                ReadTreeHfsCharacter::Other
+                | ReadTreeHfsCharacter::End
+                | ReadTreeHfsCharacter::Malformed => return false,
+            }
+            break;
+        }
+    }
+    loop {
+        match read_tree_hfs_character(component, &mut cursor) {
+            ReadTreeHfsCharacter::Ignored => continue,
+            ReadTreeHfsCharacter::End | ReadTreeHfsCharacter::Malformed => return true,
+            ReadTreeHfsCharacter::Ascii(b'/') => return true,
+            ReadTreeHfsCharacter::Ascii(_) | ReadTreeHfsCharacter::Other => return false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReadTreeHfsCharacter {
+    Ascii(u8),
+    Other,
+    Ignored,
+    End,
+    Malformed,
+}
+
+fn read_tree_hfs_character(component: &[u8], cursor: &mut usize) -> ReadTreeHfsCharacter {
+    if *cursor == component.len() {
+        return ReadTreeHfsCharacter::End;
+    }
+    let suffix = &component[*cursor..];
+    let text = match std::str::from_utf8(suffix) {
+        Ok(text) => text,
+        Err(error) if error.valid_up_to() > 0 => {
+            let valid = &suffix[..error.valid_up_to()];
+            std::str::from_utf8(valid).expect("valid UTF-8 prefix")
+        }
+        Err(_) => return ReadTreeHfsCharacter::Malformed,
+    };
+    let Some(character) = text.chars().next() else {
+        return ReadTreeHfsCharacter::End;
+    };
+    *cursor += character.len_utf8();
+    match character {
+        '\u{200c}'
+        | '\u{200d}'
+        | '\u{200e}'
+        | '\u{200f}'
+        | '\u{202a}'..='\u{202e}'
+        | '\u{206a}'..='\u{206f}'
+        | '\u{feff}' => ReadTreeHfsCharacter::Ignored,
+        character if character.is_ascii() => ReadTreeHfsCharacter::Ascii(character as u8),
+        _ => ReadTreeHfsCharacter::Other,
+    }
+}
+
+fn read_tree_component_matches_ntfs_dotgit(component: &[u8]) -> bool {
+    let prefix_len = if component.len() >= 4 && component[..4].eq_ignore_ascii_case(b".git") {
+        4
+    } else if component.len() >= 5 && component[..5].eq_ignore_ascii_case(b"git~1") {
+        5
+    } else {
+        return false;
+    };
+    for byte in &component[prefix_len..] {
+        if *byte == 0 || *byte == b'\\' || *byte == b':' {
+            return true;
+        }
+        if *byte != b'.' && *byte != b' ' {
+            return false;
+        }
+    }
+    true
 }
 
 fn prefix_index(index: GitIndex, prefix: &str) -> Result<GitIndex> {
@@ -7958,7 +8989,8 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
     };
     let should_refresh = options.refresh || !options.no_refresh;
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let (args, pathspec_from_file, pathspec_file_nul) = normalize_reset_pathspec_file_options(
@@ -8005,7 +9037,7 @@ pub(crate) fn reset(options: ResetOptions) -> Result<()> {
         );
     }
     let target = pathspec_args.first().map(String::as_str).unwrap_or("HEAD");
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     if target == "HEAD"
         && refs
             .resolve("HEAD")
@@ -8617,6 +9649,7 @@ pub(crate) fn sparse_checkout(args: Vec<String>) -> Result<()> {
         "disable" => sparse_checkout_disable(),
         "init" => sparse_checkout_init(&args[1..]),
         "check-rules" => sparse_checkout_check_rules(&args[1..]),
+        "clean" => sparse_checkout_clean(&args[1..]),
         _ => Err(sparse_checkout_unknown_subcommand_error(subcommand)),
     }
 }
@@ -9821,6 +10854,172 @@ fn sparse_checkout_reapply(args: &[String]) -> Result<()> {
     apply_sparse_checkout(&repo)
 }
 
+#[derive(Debug, Default)]
+struct SparseCheckoutCleanOptions {
+    dry_run: bool,
+    force: bool,
+    verbose: bool,
+}
+
+fn sparse_checkout_clean(args: &[String]) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    ensure_sparse_checkout_worktree(&repo)?;
+    if !config_bool_enabled(&repo, "core.sparseCheckout")? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "must be in a sparse-checkout to clean directories".into(),
+        });
+    }
+    if !sparse_checkout_cone_mode(&repo)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "must be in a cone-mode sparse-checkout to clean directories".into(),
+        });
+    }
+    let options = parse_sparse_checkout_clean_options(args)?;
+    if clean_require_force(&repo)? && !options.force && !options.dry_run {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "for safety, refusing to clean without one of --force or --dry-run".into(),
+        });
+    }
+
+    let store = LooseObjectStore::new(
+        repo.objects_dir.clone(),
+        repo_hash_algorithm_from_config(&repo)?,
+    );
+    let raw_index = read_repo_index_raw(&repo)?;
+    let mut expanded_index = expand_sparse_index(&repo, &raw_index)?;
+    refresh_materialized_sparse_index_entries_in_memory(&repo, &mut expanded_index)?;
+    let sparse_index = sparse_checkout_clean_index(&repo, &store, &expanded_index)?;
+    let message = if options.dry_run {
+        b"Would remove ".as_slice()
+    } else {
+        b"Removing ".as_slice()
+    };
+    let mut stdout = io::stdout().lock();
+
+    for entry in sparse_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Tree)
+    {
+        let path = worktree_path_for_index_entry(&repo.root, &entry.path);
+        if !path.is_dir() {
+            continue;
+        }
+        if options.verbose {
+            list_sparse_checkout_files(&path, &entry.path, message, &mut stdout)?;
+        } else {
+            write_sparse_checkout_clean_line(&mut stdout, message, &entry.path)?;
+        }
+        if !options.dry_run {
+            if let Err(error) = fs::remove_dir_all(&path) {
+                write_sparse_checkout_clean_warning(&entry.path, &error);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_sparse_checkout_clean_options(args: &[String]) -> Result<SparseCheckoutCleanOptions> {
+    let mut options = SparseCheckoutCleanOptions::default();
+    let mut end_of_options = false;
+    for arg in args {
+        if end_of_options {
+            continue;
+        }
+        if arg == "--" {
+            end_of_options = true;
+            continue;
+        }
+        match arg.as_str() {
+            "-n" | "--dry-run" => options.dry_run = true,
+            "--no-dry-run" => options.dry_run = false,
+            "-f" | "--force" => options.force = true,
+            "--no-force" => options.force = false,
+            "-v" | "--verbose" => options.verbose = true,
+            "--no-verbose" => options.verbose = false,
+            "-h" | "--help" => {
+                print!("{}", sparse_checkout_usage(SparseCheckoutUsage::Clean));
+                return Err(CliError::Exit(129));
+            }
+            option if option.starts_with('-') => {
+                return Err(sparse_checkout_unknown_option_error(
+                    option,
+                    SparseCheckoutUsage::Clean,
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(options)
+}
+
+fn write_sparse_checkout_clean_line<W: Write>(
+    output: &mut W,
+    message: &[u8],
+    path: &[u8],
+) -> io::Result<()> {
+    output.write_all(message)?;
+    output.write_all(path)?;
+    output.write_all(b"\n")
+}
+
+fn write_sparse_checkout_clean_warning(path: &[u8], error: &io::Error) {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(b"warning: failed to remove '");
+    let _ = stderr.write_all(path);
+    let _ = write!(stderr, "': {error}\n");
+}
+
+fn sparse_checkout_clean_os_str_bytes(name: &std::ffi::OsStr) -> io::Result<Vec<u8>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        return Ok(name.as_bytes().to_vec());
+    }
+    #[cfg(not(unix))]
+    {
+        name.to_str()
+            .map(|name| name.as_bytes().to_vec())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "non-UTF-8 filesystem pathname is unsupported on this platform",
+                )
+            })
+    }
+}
+
+fn list_sparse_checkout_files<W: Write>(
+    directory: &Path,
+    relative: &[u8],
+    message: &[u8],
+    output: &mut W,
+) -> io::Result<()> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let name = sparse_checkout_clean_os_str_bytes(&entry.file_name())?;
+        let mut child_relative = Vec::with_capacity(relative.len() + name.len() + 1);
+        child_relative.extend_from_slice(relative);
+        child_relative.extend_from_slice(&name);
+        if file_type.is_file() {
+            write_sparse_checkout_clean_line(output, message, &child_relative)?;
+        } else if file_type.is_dir() {
+            child_relative.push(b'/');
+            list_sparse_checkout_files(&entry.path(), &child_relative, message, output)?;
+        }
+    }
+    Ok(())
+}
+
 fn sparse_checkout_list() -> Result<()> {
     let repo = find_repo_or_bare()?;
     ensure_sparse_checkout_worktree(&repo)?;
@@ -10075,7 +11274,8 @@ fn apply_sparse_checkout(repo: &GitRepo) -> Result<()> {
     let mut updated_entries = Vec::with_capacity(index.entries().len());
     for mut entry in index.entries().iter().cloned() {
         if entry.skip_worktree() {
-            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            let absolute = worktree_path_for_index_entry_checked(&repo.root, &entry.path)
+                .map_err(CliError::Io)?;
             if path_exists(&absolute)
                 && old_index.entry(&entry.path, 0).is_some_and(|old| {
                     worktree_entry_modified(repo, &absolute, old).unwrap_or(true)
@@ -10087,7 +11287,8 @@ fn apply_sparse_checkout(repo: &GitRepo) -> Result<()> {
                 remove_worktree_path(repo, &entry.path)?;
             }
         } else {
-            let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
+            let absolute = worktree_path_for_index_entry_checked(&repo.root, &entry.path)
+                .map_err(CliError::Io)?;
             if !path_exists(&absolute)
                 && old_index
                     .entry(&entry.path, 0)
@@ -10169,7 +11370,7 @@ fn cleanup_sparse_checkout_ignored_paths(
         top_level.push(candidate);
     }
 
-    let tracked_paths = tracked_path_set_for_repo(repo, old_index)?;
+    let tracked_paths = native_tracked_path_set_for_repo(repo, old_index)?;
     let ignore = GitIgnore::load_from_root(&repo.root)?;
     let mut blocked: Vec<Vec<u8>> = Vec::new();
     for directory in top_level {
@@ -10179,7 +11380,8 @@ fn cleanup_sparse_checkout_ignored_paths(
         }) {
             continue;
         }
-        let absolute = worktree_path_for_index_entry(&repo.root, &directory);
+        let absolute =
+            worktree_path_for_index_entry_checked(&repo.root, &directory).map_err(CliError::Io)?;
         if !absolute.is_dir() {
             continue;
         }
@@ -10189,7 +11391,13 @@ fn cleanup_sparse_checkout_ignored_paths(
         {
             continue;
         }
-        if sparse_directory_contains_untracked(&absolute, &directory, &tracked_paths, &ignore)? {
+        let relative_directory = native_path_from_git_bytes(&directory)?;
+        if sparse_directory_contains_untracked(
+            &absolute,
+            &relative_directory,
+            &tracked_paths,
+            &ignore,
+        )? {
             blocked.push(directory);
         } else {
             fs::remove_dir_all(absolute)?;
@@ -10200,18 +11408,19 @@ fn cleanup_sparse_checkout_ignored_paths(
 
 fn sparse_directory_contains_untracked(
     directory: &Path,
-    relative_directory: &[u8],
-    tracked_paths: &TrackedPathSet<'_>,
+    relative_directory: &Path,
+    tracked_paths: &NativeTrackedPathSet,
     ignore: &GitIgnore,
 ) -> Result<bool> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
-        let relative = relative_child_path(relative_directory, &entry.file_name());
+        let relative = relative_child_os_path(relative_directory, &entry.file_name());
         if tracked_paths.contains(&relative) {
             continue;
         }
-        if ignore.is_ignored(&relative, file_type.is_dir()) {
+        let relative_bytes = relative_path_bytes(&relative);
+        if ignore.is_ignored(&relative_bytes, file_type.is_dir()) {
             continue;
         }
         if !file_type.is_dir() || is_nested_worktree(&entry.path()) {
@@ -10353,7 +11562,32 @@ fn collapse_sparse_index(
     store: &LooseObjectStore,
     index: &GitIndex,
 ) -> Result<GitIndex> {
-    if !config_bool_enabled(repo, "index.sparse")?
+    collapse_sparse_index_inner(repo, store, index, true)
+}
+
+fn sparse_checkout_clean_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<GitIndex> {
+    if index.entries().iter().any(|entry| entry.stage != 0) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "failed to convert index to a sparse index; resolve merge conflicts and try again"
+                    .into(),
+        });
+    }
+    collapse_sparse_index_inner(repo, store, index, false)
+}
+
+fn collapse_sparse_index_inner(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    require_sparse_config: bool,
+) -> Result<GitIndex> {
+    if (require_sparse_config && !config_bool_enabled(repo, "index.sparse")?)
         || index.entries().iter().any(|entry| entry.stage != 0)
     {
         return Ok(index.clone());
@@ -10585,6 +11819,7 @@ enum SparseCheckoutUsage {
     Add,
     Init,
     Reapply,
+    Clean,
 }
 
 fn parse_sparse_checkout_options(
@@ -10663,6 +11898,14 @@ fn sparse_checkout_usage(usage: SparseCheckoutUsage) -> &'static str {
             "\n",
             "    --[no-]cone           initialize the sparse-checkout in cone mode\n",
             "    --[no-]sparse-index   toggle the use of a sparse index\n",
+        ),
+        SparseCheckoutUsage::Clean => concat!(
+            "usage: git sparse-checkout clean [-n|--dry-run]\n",
+            "\n",
+            "    -n, --[no-]dry-run    dry run\n",
+            "    -f, --[no-]force      force\n",
+            "    -v, --[no-]verbose    report each affected file, not just directories\n",
+            "\n",
         ),
     }
 }
@@ -11203,7 +12446,7 @@ fn sparse_checkout_unknown_subcommand_error(subcommand: &str) -> CliError {
         code: 129,
         text: format!(
             "error: unknown subcommand: `{subcommand}'\n\
-             usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules) [<options>]\n"
+             usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules | clean) [<options>]\n"
         ),
     }
 }
@@ -11564,9 +12807,10 @@ fn stash_push(args: &[String], usage: StashPushUsage) -> Result<()> {
         });
     }
 
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = stash_ref_store(&repo, algorithm)?;
     let head_id = match refs.resolve("HEAD") {
         Ok(id) => id,
         Err(_) if options.quiet => return Err(CliError::Exit(1)),
@@ -11671,7 +12915,10 @@ fn stash_push(args: &[String], usage: StashPushUsage) -> Result<()> {
         .message(format!("{message}\n").into_bytes())?
         .encode()?;
     let stash_id = store.write_object(GitObjectKind::Commit, &commit)?;
-    write_stash_ref_update(&repo, &refs, &stash_id, &committer, &message)?;
+    let publish_before_worktree_reset = stash_publish_before_worktree_reset(&refs, algorithm)?;
+    if publish_before_worktree_reset {
+        write_stash_ref_update(&repo, &refs, &stash_id, &committer, &message)?;
+    }
     for path in &untracked {
         remove_worktree_path(&repo, path)?;
     }
@@ -11682,6 +12929,9 @@ fn stash_push(args: &[String], usage: StashPushUsage) -> Result<()> {
         } else {
             restore_index_paths_to_worktree(&repo, &store, &original_index, &options.pathspecs)?;
         }
+    }
+    if !publish_before_worktree_reset {
+        write_stash_ref_update(&repo, &refs, &stash_id, &committer, &message)?;
     }
     if !options.quiet {
         println!("Saved working directory and index state {message}");
@@ -11959,9 +13209,10 @@ fn stash_create(args: &[String]) -> Result<()> {
         Some(args.join(" "))
     };
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = stash_ref_store(&repo, algorithm)?;
     let mut snapshot = read_repo_index(&repo)?;
     let original_index = snapshot.clone();
     if let Some(error) = stash_locked_index_error(&repo) {
@@ -11992,9 +13243,10 @@ fn stash_create(args: &[String]) -> Result<()> {
 
 fn stash_store(args: &[String]) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = stash_ref_store(&repo, algorithm)?;
     const USAGE: &str = "\"git stash store\" requires one <commit> argument\n";
     let mut message = None;
     let mut _quiet = false;
@@ -12063,7 +13315,7 @@ fn stash_store(args: &[String]) -> Result<()> {
     }
     let committer = stash_signature_from_identity(&repo, "GIT_COMMITTER")?;
     let message = message.unwrap_or_else(|| "Created via \"git stash store\".".to_owned());
-    if stash_entries(&repo, &store)?
+    if stash_entries(&repo, &store, &refs)?
         .iter()
         .any(|entry| entry.id == id)
     {
@@ -12075,8 +13327,9 @@ fn stash_store(args: &[String]) -> Result<()> {
 
 fn stash_export(args: &[String]) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = stash_ref_store(&repo, algorithm)?;
     let commit_cache = CommitObjectCache::new(&store);
     let mut print = false;
     let mut to_ref = None::<String>;
@@ -12122,7 +13375,7 @@ fn stash_export(args: &[String]) -> Result<()> {
     .encode()?;
     let mut previous = store.write_object(GitObjectKind::Commit, &base)?;
     let stash_ids = if selectors.is_empty() {
-        stash_entries(&repo, &store)?
+        stash_entries(&repo, &store, &refs)?
             .into_iter()
             .map(|entry| entry.id)
             .collect::<Vec<_>>()
@@ -12170,8 +13423,9 @@ fn stash_import(args: &[String]) -> Result<()> {
         });
     }
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = stash_ref_store(&repo, algorithm)?;
     let commit_cache = CommitObjectCache::new(&store);
     let mut current = resolve_commitish(&repo, &store, &args[0])?;
     let empty_index = GitIndex::from_entries(Vec::new())?;
@@ -12344,7 +13598,7 @@ fn create_stash_untracked_commit(
     author: zmin_git_core::Signature,
     committer: zmin_git_core::Signature,
 ) -> Result<ObjectId> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let refs = stash_ref_store(repo, store.algorithm())?;
     let branch = current_branch_ref(&refs)
         .ok()
         .flatten()
@@ -12367,7 +13621,7 @@ fn stash_selection_clean(
     index: &GitIndex,
     pathspecs: &[Vec<u8>],
 ) -> Result<bool> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     if pathspecs.is_empty() {
         return worktree_clean(repo, store);
     }
@@ -12396,7 +13650,7 @@ fn stash_pathspecs_match_known_files(
     {
         return Ok(true);
     }
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, repo_object_format(repo)?);
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     Ok(head_index
@@ -12420,7 +13674,7 @@ fn reset_stashed_worktree_paths_to_head(
     store: &LooseObjectStore,
     pathspecs: &[Vec<u8>],
 ) -> Result<()> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     if pathspecs.is_empty() {
         return reset_worktree_to_head(repo, store);
     }
@@ -12471,7 +13725,7 @@ fn reset_staged_paths_to_head(
     store: &LooseObjectStore,
     changes: &[zmin_git_core::IndexDiffEntry],
 ) -> Result<()> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     let mut current_index = read_repo_index(repo)?;
@@ -12593,7 +13847,7 @@ fn stash_push_staged(
     options: &StashPushOptions,
 ) -> Result<()> {
     let index = read_repo_index(repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     let staged_changes = diff_indexes(&head_index, &index)?
@@ -12638,8 +13892,15 @@ fn stash_push_staged(
         .message(format!("{message}\n").into_bytes())?
         .encode()?;
     let stash_id = store.write_object(GitObjectKind::Commit, &commit)?;
-    write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
+    let publish_before_worktree_reset =
+        stash_publish_before_worktree_reset(refs, store.algorithm())?;
+    if publish_before_worktree_reset {
+        write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
+    }
     reset_staged_paths_to_head(repo, store, &staged_changes)?;
+    if !publish_before_worktree_reset {
+        write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
+    }
     if !options.quiet {
         println!("Saved working directory and index state {message}");
     }
@@ -12654,7 +13915,7 @@ fn stash_push_patch(
     options: &StashPushOptions,
 ) -> Result<()> {
     let current_index = read_repo_index(repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     let worktree_index = worktree_index_snapshot(repo, &current_index)?;
@@ -12745,9 +14006,16 @@ fn stash_push_patch(
         .message(format!("{message}\n").into_bytes())?
         .encode()?;
     let stash_id = store.write_object(GitObjectKind::Commit, &commit)?;
-    write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
+    let publish_before_worktree_reset =
+        stash_publish_before_worktree_reset(refs, store.algorithm())?;
+    if publish_before_worktree_reset {
+        write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
+    }
     for update in worktree_updates {
         write_patch_worktree_update(repo, update)?;
+    }
+    if !publish_before_worktree_reset {
+        write_stash_ref_update(repo, refs, &stash_id, &committer, &message)?;
     }
     if !options.quiet {
         println!("Saved working directory and index state {message}");
@@ -12869,9 +14137,11 @@ fn stash_list(args: &[String]) -> Result<()> {
         cursor += 1;
     }
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = stash_ref_store(&repo, algorithm)?;
     let grep = compile_stash_list_grep_patterns(&grep, fixed_strings, ignore_case)?;
-    for (index, entry) in stash_entries(&repo, &store)?
+    for (index, entry) in stash_entries(&repo, &store, &refs)?
         .iter()
         .enumerate()
         .filter(|(_, entry)| stash_list_grep_matches(&entry.message, &grep, invert_grep, all_match))
@@ -13873,6 +15143,7 @@ fn stash_show(args: &[String]) -> Result<()> {
     let mut name_only = false;
     let mut name_status = false;
     let mut abbrev_len = None;
+    let mut no_abbrev = false;
     let mut full_index = false;
     let mut quiet = false;
     let mut exit_code = false;
@@ -13953,9 +15224,11 @@ fn stash_show(args: &[String]) -> Result<()> {
                 nul_terminated = true;
             }
             "--abbrev" => {
+                no_abbrev = false;
                 abbrev_len = None;
             }
             value if value.starts_with("--abbrev=") => {
+                no_abbrev = false;
                 let Some(value) = value.strip_prefix("--abbrev=") else {
                     return Err(CliError::Fatal {
                         code: 129,
@@ -13965,7 +15238,7 @@ fn stash_show(args: &[String]) -> Result<()> {
                 abbrev_len = Some(parse_stash_show_abbrev(value)?);
             }
             "--no-abbrev" => {
-                abbrev_len = Some(GitHashAlgorithm::Sha1.digest_len() * 2);
+                no_abbrev = true;
             }
             "--full-index" => {
                 full_index = true;
@@ -14311,7 +15584,11 @@ fn stash_show(args: &[String]) -> Result<()> {
     )?;
     let ignore_matching_lines = compile_ignore_matching_lines(&ignore_matching_lines)?;
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    if no_abbrev {
+        abbrev_len = Some(algorithm.digest_len() * 2);
+    }
     let commit_cache = CommitObjectCache::new(&store);
     let id = resolve_stash_id(&repo, stash)?;
     let commit = commit_cache.read_commit(&id)?;
@@ -14430,6 +15707,7 @@ fn stash_show(args: &[String]) -> Result<()> {
             &entries,
             RawPrintOptions {
                 abbrev_len,
+                abbrev_policy: None,
                 relative_prefix: None,
                 nul_terminated,
             },
@@ -14467,7 +15745,7 @@ fn stash_show(args: &[String]) -> Result<()> {
     }
     if show_patch {
         let patch_abbrev_len = if full_index {
-            Some(GitHashAlgorithm::Sha1.digest_len() * 2)
+            Some(algorithm.digest_len() * 2)
         } else {
             abbrev_len
         };
@@ -14505,7 +15783,8 @@ fn stash_apply(
     labels: &StashApplyLabels,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let restore_index = restore_index || (!no_restore_index && stash_index_config_enabled(&repo)?);
@@ -14549,7 +15828,7 @@ fn stash_apply(
         )?;
     }
     if let Some(index) = drop_index {
-        drop_stash_entry(&repo, index, quiet)?;
+        drop_stash_entry(&repo, index, quiet, stash.unwrap_or("refs/stash@{0}"))?;
     }
     Ok(())
 }
@@ -14561,7 +15840,7 @@ fn stash_apply_can_preserve_dirty_paths(
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     id: &ObjectId,
 ) -> Result<bool> {
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, commit_cache.store().algorithm());
     let stash_commit = commit_cache.read_commit(id)?;
     let Some(parent) = stash_commit.parents.first() else {
         return Err(CliError::Fatal {
@@ -14605,9 +15884,20 @@ fn stash_apply_can_preserve_dirty_paths(
 
 fn stash_drop(args: &[String]) -> Result<()> {
     let options = parse_stash_reference_options(args, "drop")?;
+    if options.stash.as_deref() == Some("") {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "error: refs/stash@{} is not a valid reference\n".into(),
+        });
+    }
     let repo = find_repo()?;
     let index = parse_stash_selector(options.stash.as_deref().unwrap_or("stash@{0}"))?;
-    drop_stash_entry(&repo, index, options.quiet)?;
+    drop_stash_entry(
+        &repo,
+        index,
+        options.quiet,
+        options.stash.as_deref().unwrap_or("refs/stash@{0}"),
+    )?;
     Ok(())
 }
 
@@ -14703,7 +15993,8 @@ fn stash_branch(args: &[String]) -> Result<()> {
     }
     let stash = args.get(1).map(String::as_str).unwrap_or("stash@{0}");
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let commit_cache = CommitObjectCache::new(&store);
     let stack_index = parse_stash_selector(stash).ok();
     let id = resolve_stash_id(&repo, Some(stash))?;
@@ -14743,7 +16034,7 @@ fn stash_branch(args: &[String]) -> Result<()> {
         &StashApplyLabels::default(),
     )?;
     if let Some(index) = stack_index {
-        drop_stash_entry(&repo, index, false)?;
+        drop_stash_entry(&repo, index, false, stash)?;
     }
     Ok(())
 }
@@ -14757,21 +16048,63 @@ fn too_many_stash_revisions_error(first: &str, second: &str) -> CliError {
 
 fn stash_clear() -> Result<()> {
     let repo = find_repo()?;
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let refs = stash_ref_store(&repo, algorithm)?;
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        return clear_reftable_stash(&refs);
+    }
     match refs.delete_ref(stash_ref_name()) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(CliError::Io(error)),
     };
-    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
-        refs.delete_reftable_log(stash_ref_name())?;
-        return Ok(());
-    }
     match fs::remove_file(stash_reflog_path(&repo)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(CliError::Io(error)),
     }
+}
+
+fn clear_reftable_stash(refs: &RefStore) -> Result<()> {
+    let records = refs
+        .reftable_logs()?
+        .into_iter()
+        .filter(|record| record.ref_name == stash_ref_name())
+        .collect::<Vec<_>>();
+    if records.is_empty() {
+        let has_ref = match refs.resolve(stash_ref_name()) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        if has_ref {
+            refs.apply_reftable_transaction(ReftableTransaction {
+                ref_updates: BTreeMap::from([(stash_ref_name().to_owned(), None)]),
+                log_updates: Vec::new(),
+            })?;
+        } else if refs.reftable_log_exists(stash_ref_name())? {
+            refs.delete_reftable_log(stash_ref_name())?;
+        }
+        return Ok(());
+    }
+    let ref_update = match refs.resolve(stash_ref_name()) {
+        Ok(_) => Some((stash_ref_name().to_owned(), None)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let ref_updates = ref_update.into_iter().collect::<BTreeMap<_, _>>();
+    let log_updates = records
+        .into_iter()
+        .map(|record| ReftableLogUpdate::Deletion {
+            ref_name: stash_ref_name().to_owned(),
+            update_index: record.update_index,
+        })
+        .collect();
+    refs.apply_reftable_transaction(ReftableTransaction {
+        ref_updates,
+        log_updates,
+    })?;
+    Ok(())
 }
 
 fn apply_stash_commit(
@@ -15040,7 +16373,7 @@ fn remove_stash_deleted_paths(
 
 pub(crate) fn reset_worktree_to_head(repo: &GitRepo, store: &LooseObjectStore) -> Result<()> {
     let old_index = read_repo_index(repo)?;
-    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let runtime = CliPrimitiveRuntime::new_from_repo(repo, store.algorithm());
     let head_index =
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
     remove_tracked_paths_missing_from_target(repo, &old_index, &head_index)?;
@@ -15119,11 +16452,36 @@ fn stash_untracked_paths(
     Ok(paths)
 }
 
+fn stash_ref_store(repo: &GitRepo, algorithm: GitHashAlgorithm) -> Result<RefStore> {
+    let refs = RefStore::new(repo.git_dir.clone(), algorithm);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        return Ok(RefStore::new(
+            read_common_git_dir(&repo.git_dir)?,
+            algorithm,
+        ));
+    }
+    Ok(refs)
+}
+
+fn stash_publish_before_worktree_reset(
+    refs: &RefStore,
+    algorithm: GitHashAlgorithm,
+) -> Result<bool> {
+    Ok(algorithm == GitHashAlgorithm::Sha1
+        && refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Files)
+}
+
+fn stash_zero_object_id(algorithm: GitHashAlgorithm) -> ObjectId {
+    ObjectId::new(algorithm, &vec![0; algorithm.digest_len()])
+}
+
 fn resolve_stash_id(repo: &GitRepo, stash: Option<&str>) -> Result<ObjectId> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = stash_ref_store(repo, algorithm)?;
     let selector = stash.unwrap_or("stash@{0}");
     if let Ok(index) = parse_stash_selector(selector) {
-        return stash_entries(repo, &store)?
+        return stash_entries(repo, &store, &refs)?
             .get(index)
             .map(|entry| entry.id.clone())
             .ok_or_else(|| CliError::Stderr {
@@ -15153,6 +16511,7 @@ fn resolve_stash_date_selector(repo: &GitRepo, selector: &str) -> Result<Option<
     let Some(timestamp) = parse_stash_selector_date(date) else {
         return Ok(None);
     };
+    let algorithm = repo_object_format(repo)?;
     let contents = match fs::read_to_string(stash_reflog_path(repo)) {
         Ok(contents) => contents,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -15161,7 +16520,9 @@ fn resolve_stash_date_selector(repo: &GitRepo, selector: &str) -> Result<Option<
     Ok(contents
         .lines()
         .rev()
-        .filter_map(parse_reflog_entry)
+        .filter_map(|line| {
+            history_commands::parse_reflog_entry_with_algorithm(line, algorithm)
+        })
         .find(|entry| entry.timestamp <= timestamp)
         .map(|entry| entry.new_id))
 }
@@ -15212,8 +16573,11 @@ fn parse_stash_selector(selector: &str) -> Result<usize> {
     })
 }
 
-fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEntry>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+fn stash_entries(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    refs: &RefStore,
+) -> Result<Vec<StashEntry>> {
     if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
         let mut records = refs
             .reftable_logs()?
@@ -15235,7 +16599,9 @@ fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEn
         Ok(content) => {
             let mut entries = content
                 .lines()
-                .filter_map(parse_reflog_entry)
+                .filter_map(|entry| {
+                    history_commands::parse_reflog_entry_with_algorithm(entry, store.algorithm())
+                })
                 .map(|entry| StashEntry {
                     id: entry.new_id,
                     message: entry.message,
@@ -15246,7 +16612,6 @@ fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEn
             Ok(entries)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
             match refs.resolve(stash_ref_name()) {
                 Ok(id) => {
                     let commit_cache = CommitObjectCache::new(store);
@@ -15273,7 +16638,16 @@ fn write_stash_ref_update(
 ) -> Result<()> {
     let old_id = refs
         .resolve(stash_ref_name())
-        .unwrap_or_else(|_| zero_object_id());
+        .unwrap_or_else(|_| stash_zero_object_id(new_id.algorithm()));
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        let record = reftable_log_record(repo, stash_ref_name(), &old_id, new_id, message)?;
+        refs.write_reftable_ref_with_logs(
+            stash_ref_name(),
+            RefTarget::Direct(new_id.clone()),
+            vec![record],
+        )?;
+        return Ok(());
+    }
     refs.write_ref(stash_ref_name(), new_id)?;
     append_stash_reflog(repo, &old_id, new_id, committer, message)
 }
@@ -15288,17 +16662,36 @@ fn append_stash_reflog(
     append_reflog_with_committer(repo, stash_ref_name(), old_id, new_id, message, committer)
 }
 
-fn drop_stash_entry(repo: &GitRepo, index: usize, quiet: bool) -> Result<()> {
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut entries = stash_entries(repo, &store)?;
+fn drop_stash_entry(repo: &GitRepo, index: usize, quiet: bool, selector: &str) -> Result<()> {
+    let algorithm = repo_object_format(repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = stash_ref_store(repo, algorithm)?;
+    let mut entries = stash_entries(repo, &store, &refs)?;
     if index >= entries.len() {
-        return Err(CliError::Stderr {
-            code: 1,
-            text: format!("error: stash@{{{index}}} is not a valid reference\n"),
+        if entries.is_empty() {
+            return Err(CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: {} is not a valid reference\n",
+                    display_stash_selector(selector, index)
+                ),
+            });
+        }
+        let ref_name = if selector.starts_with("stash@{") {
+            "stash"
+        } else {
+            "refs/stash"
+        };
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("log for '{ref_name}' only has {} entries", entries.len()),
         });
     }
+    let dropped_id = entries[index].id.clone();
     entries.remove(index);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    if refs.storage_kind()? == zmin_git_core::refs::RefStorageKind::Reftable {
+        return drop_reftable_stash_entry(&refs, index, &dropped_id, &entries, quiet, selector);
+    }
     if let Some(top) = entries.first() {
         refs.write_ref(stash_ref_name(), &top.id)?;
         rewrite_stash_reflog(repo, &entries)?;
@@ -15315,9 +16708,91 @@ fn drop_stash_entry(repo: &GitRepo, index: usize, quiet: bool) -> Result<()> {
         }
     }
     if !quiet {
-        println!("Dropped stash@{{{index}}}");
+        println!(
+            "Dropped {} ({})",
+            display_stash_selector(selector, index),
+            dropped_id.to_hex()
+        );
     }
     Ok(())
+}
+
+fn drop_reftable_stash_entry(
+    refs: &RefStore,
+    index: usize,
+    dropped_id: &ObjectId,
+    survivors: &[StashEntry],
+    quiet: bool,
+    selector: &str,
+) -> Result<()> {
+    let mut records = refs
+        .reftable_logs()?
+        .into_iter()
+        .filter(|record| record.ref_name == stash_ref_name())
+        .collect::<Vec<_>>();
+    records.sort_by_key(|record| record.update_index);
+    let selected = records
+        .iter()
+        .find(|record| record.new_id == *dropped_id)
+        .ok_or_else(|| CliError::Stderr {
+            code: 1,
+            text: format!("error: stash@{{{index}}} is not a valid reference\n"),
+        })?;
+    let selected_update_index = selected.update_index;
+    let mut log_updates = vec![ReftableLogUpdate::Deletion {
+        ref_name: stash_ref_name().to_owned(),
+        update_index: selected_update_index,
+    }];
+    let remaining = records
+        .into_iter()
+        .filter(|record| record.update_index != selected_update_index)
+        .collect::<Vec<_>>();
+    let zero = stash_zero_object_id(dropped_id.algorithm());
+    let mut old_id = zero.clone();
+    for record in &remaining {
+        let mut rewritten = record.clone();
+        rewritten.old_id = old_id.clone();
+        old_id = record.new_id.clone();
+        log_updates.push(ReftableLogUpdate::Update(rewritten));
+    }
+    let ref_target = survivors
+        .first()
+        .map(|entry| RefTarget::Direct(entry.id.clone()));
+    if ref_target.is_none() {
+        refs.apply_reftable_transaction(ReftableTransaction {
+            ref_updates: BTreeMap::new(),
+            log_updates: vec![
+                ReftableLogUpdate::ExistenceMarker {
+                    ref_name: stash_ref_name().to_owned(),
+                },
+                ReftableLogUpdate::Deletion {
+                    ref_name: stash_ref_name().to_owned(),
+                    update_index: selected_update_index,
+                },
+            ],
+        })?;
+        refs.delete_reftable_ref_with_log(stash_ref_name())?;
+    } else {
+        refs.apply_reftable_transaction(ReftableTransaction {
+            ref_updates: BTreeMap::from([(stash_ref_name().to_owned(), ref_target)]),
+            log_updates,
+        })?;
+    }
+    if !quiet {
+        println!(
+            "Dropped {} ({})",
+            display_stash_selector(selector, index),
+            dropped_id.to_hex()
+        );
+    }
+    Ok(())
+}
+
+fn display_stash_selector(selector: &str, index: usize) -> String {
+    if selector == "stash@{0}" || selector.starts_with("stash@{") {
+        return format!("stash@{{{index}}}");
+    }
+    format!("refs/stash@{{{index}}}")
 }
 
 fn rewrite_stash_reflog(repo: &GitRepo, entries: &[StashEntry]) -> Result<()> {
@@ -15327,7 +16802,7 @@ fn rewrite_stash_reflog(repo: &GitRepo, entries: &[StashEntry]) -> Result<()> {
     }
     let mut content = String::new();
     let signature = signature_from_identity(repo, "GIT_COMMITTER")?;
-    let mut old_id = zero_object_id();
+    let mut old_id = stash_zero_object_id(repo_object_format(repo)?);
     for entry in entries.iter().rev() {
         content.push_str(&format!(
             "{} {} {} <{}> {} {}\t{}\n",
@@ -15581,7 +17056,8 @@ pub(crate) fn checkout(
 
 fn checkout_patch(source: Option<&str>, paths: &[PathBuf]) -> Result<()> {
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
     let raw_index = read_repo_index_raw(&repo)?;
     let current_index = expand_repo_sparse_index(&repo, &raw_index)?;
     let source_index = if let Some(source) = source {
@@ -15589,7 +17065,7 @@ fn checkout_patch(source: Option<&str>, paths: &[PathBuf]) -> Result<()> {
         let source_commit = CommitObjectCache::new(&store).read_commit(&source_id)?;
         TreeObjectCache::new(&store).read_tree_to_index(&source_commit.tree)?
     } else {
-        let runtime = CliPrimitiveRuntime::new_default(&repo);
+        let runtime = CliPrimitiveRuntime::new_from_repo(&repo, algorithm);
         read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?
     };
     let worktree_index = worktree_index_snapshot(&repo, &current_index)?;
@@ -15726,10 +17202,10 @@ fn checkout_raw_args_have_separator() -> bool {
 fn checkout_current_head(force: bool) -> Result<()> {
     let repo = find_repo()?;
     let index_exists = repo.index_path.exists();
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let algorithm = repo_object_format(&repo)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), algorithm);
+    let refs = RefStore::new(&repo.git_dir, algorithm);
     let target_id = refs.resolve("HEAD")?;
-    prefetch_checkout_missing_objects(&repo, &store, &target_id)?;
     let checkout_metadata = WorktreeCheckoutMetadata {
         ref_name: current_branch_ref(&refs)?,
         treeish: Some(target_id.clone()),
@@ -15984,7 +17460,8 @@ fn checkout_new_branch(
         refs.write_ref(&ref_name, &id)?;
     }
     if !no_track
-        && let Some((remote, merge)) = checkout_tracking_upstream(&repo, &refs, start, explicit_track)?
+        && let Some((remote, merge)) =
+            checkout_tracking_upstream(&repo, &refs, start, explicit_track)?
     {
         set_config_value(&repo, &format!("branch.{branch}.remote"), &remote)?;
         set_config_value(&repo, &format!("branch.{branch}.merge"), &merge)?;
@@ -16164,7 +17641,6 @@ fn checkout_existing_with_message(
     } else {
         resolve_commitish(&repo, &store, target)?
     };
-    prefetch_checkout_missing_objects(&repo, &store, &target_id)?;
     let current_id = head_refs.resolve("HEAD").ok();
     let index_exists = repo.index_path.exists();
     let sparse_checkout_reapply = current_id.as_ref() == Some(&target_id)

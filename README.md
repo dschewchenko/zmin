@@ -30,6 +30,7 @@ Apple Silicon:
 mkdir -p ~/.local/bin
 curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-apple-darwin.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
+install -m 0755 zmin-git-remote-http ~/.local/bin/zmin-git-remote-http
 zmin --version
 ```
 
@@ -38,7 +39,7 @@ Intel:
 ```bash
 mkdir -p ~/.local/bin
 curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-apple-darwin.tar.gz | tar -xz
-install -m 0755 zmin ~/.local/bin/zmin
+install -m 0755 zmin zmin-git-remote-http ~/.local/bin/
 zmin --version
 ```
 
@@ -47,7 +48,8 @@ Build from source:
 ```bash
 mkdir -p ~/.local/bin
 cargo build -p zmin-cli --release --bin zmin
-install -m 0755 target/release/zmin ~/.local/bin/zmin
+cargo build -p zmin-git-remote-http --release --bin zmin-git-remote-http
+install -m 0755 target/release/zmin target/release/zmin-git-remote-http ~/.local/bin/
 zmin --version
 ```
 
@@ -58,7 +60,7 @@ x86_64:
 ```bash
 mkdir -p ~/.local/bin
 curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-unknown-linux-gnu.tar.gz | tar -xz
-install -m 0755 zmin ~/.local/bin/zmin
+install -m 0755 zmin zmin-git-remote-http ~/.local/bin/
 zmin --version
 ```
 
@@ -67,7 +69,7 @@ aarch64:
 ```bash
 mkdir -p ~/.local/bin
 curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-unknown-linux-gnu.tar.gz | tar -xz
-install -m 0755 zmin ~/.local/bin/zmin
+install -m 0755 zmin zmin-git-remote-http ~/.local/bin/
 zmin --version
 ```
 
@@ -76,7 +78,8 @@ Build from source:
 ```bash
 mkdir -p ~/.local/bin
 cargo build -p zmin-cli --release --bin zmin
-install -m 0755 target/release/zmin ~/.local/bin/zmin
+cargo build -p zmin-git-remote-http --release --bin zmin-git-remote-http
+install -m 0755 target/release/zmin target/release/zmin-git-remote-http ~/.local/bin/
 zmin --version
 ```
 
@@ -97,12 +100,17 @@ Build from source:
 
 ```powershell
 cargo build -p zmin-cli --release --bin zmin
+cargo build -p zmin-git-remote-http --release --bin zmin-git-remote-http
 .\target\release\zmin.exe --version
 ```
 
 ### Preview Archives
 
 Current binary preview archives:
+
+Archives produced by the release workflow include `zmin-git-remote-http`
+beside `zmin`; keep both files together so `zmin clone https://...` uses the
+packaged smart-HTTP transport.
 
 <!-- zmin-release-assets:start -->
 - [`zmin-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-unknown-linux-gnu.tar.gz)
@@ -148,8 +156,38 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Zmin is not 100% Git-compatible yet. It has handlers for all `151` Git `2.47.1`
-command names, but a handler only proves that the command can be routed.
+In this repository, `100% of current Git v2.55.0` means 100% of the current Git
+v2.55.0 contract excluding deprecated/removed API; it is a target definition,
+not a claim that Zmin has achieved it. The target is 1045 of 1046 top-level
+upstream shell tests, with the sole whole-file exclusion
+`t5323-pack-redundant.sh`. Current external groups git-svn, git-cvsserver,
+gitweb, cvsimport and git-p4 remain included, and deprecated assertions inside
+retained mixed files remain in scope.
+
+The current status is `compatibility_claim=unverified`: scope and denominator
+validation do not establish completed parity. No document should present the
+100% definition above as an achieved result until the required upstream,
+differential and platform evidence is complete.
+
+The authoritative current-Git contract is
+[`docs/git/upstream_compatibility_baseline.md`](docs/git/upstream_compatibility_baseline.md):
+it freezes Git `v2.55.0` at commit
+`e9019fcafe0040228b8631c30f97ae1adb61bcdc`, requires the recorded source
+archive SHA-256, and defines `all-nondeprecated` as `1045` of the `1046`
+upstream top-level test files. The sole whole-file exclusion is
+`t5323-pack-redundant.sh` (`git pack-redundant`); the external-but-current
+groups `git-svn` (`t91*`), `git-cvsserver` (`t94*`), `gitweb` (`t95*`),
+`cvsimport` (`t96*`) and `git-p4` (`t9800`-`t9836`) remain included. The local
+historical v2.47.1 census and behavior rows are supporting evidence, not the
+current denominator or a drop-in parity claim.
+
+Deprecated or removal-marked surfaces inside otherwise retained upstream tests
+remain in scope: symlink refs/`core.preferSymlinkRefs`, `show-ref --heads`,
+`ls-remote --heads`/`-h`, `name-rev --stdin`, `whatchanged`,
+`core.commentChar=auto`, and `.git/info/grafts`. They are not additional
+whole-file exclusions; legacy `.git/remotes`/`.git/branches` formats and
+dynamic deprecated-builtin alias cases likewise remain retained pending an
+explicit product decision.
 
 Real compatibility is measured at behavior-row level:
 
@@ -159,11 +197,18 @@ Examples that count as different rows: `status -z`, `status --porcelain=v2 -z
 --branch`, `fetch --depth=1 origin main`, `fetch --depth=1 origin main next`,
 `blame --date=relative -L 1,3 file`.
 
-The real denominator is still being built from Git docs, upstream Git tests and
-real tool traces. A command or option is not counted as supported just because
-Zmin parses it or because one example row works.
+The upstream test denominator is frozen, but the full behavior matrix is still
+being built from Git docs, upstream tests and real tool traces. A command or
+option is not counted as supported just because Zmin parses it or because one
+example row works.
 
-Current state:
+## Historical v2.47.1 audit snapshot (retained evidence only)
+
+See [the historical inventory](docs/cli/git_compatibility_inventory.md). The
+current authority is the machine-readable
+[`tools/git-upstream-compat-contract.tsv`](tools/git-upstream-compat-contract.tsv),
+with the generated projection documented in
+[`docs/cli/census/README.md`](docs/cli/census/README.md).
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
@@ -176,7 +221,7 @@ Current state:
 | Partial written rows | `0/5437` | written rows with incomplete parity |
 | Open written rows | `12/5437` | written rows that still do not match stock Git |
 | Invalid input rows | `690/5437` | rows where stock Git rejects the input |
-| Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
+| Frozen upstream test denominator | `1045` | Git `v2.55.0` `all-nondeprecated` scope; full parity still requires upstream, differential and platform evidence |
 
 Do not read `4732/5437` as Git compatibility. It only means `4732` of the `5437`
 rows already written down are closed supported-behavior rows. The larger
@@ -193,7 +238,7 @@ Git evidence.
 
 The compatibility audit now proceeds in this order:
 
-1. Seed all Git `2.47.1` command names and documented option spellings.
+1. Seed the supported command and option surface for the frozen Git contract.
 2. Expand each option into values, negations, repeats, ordering and positional
    forms.
 3. Add repository states, transports, platforms, upstream Git tests and real IDE
@@ -341,8 +386,9 @@ only mean no open item remains among the rows currently written. Unwritten
 values, option combinations, repository states, transports and platform cases
 are still unknown.
 
-A global percentage will be published only after every Git `2.47.1` command has
-a complete matrix built from Git docs, upstream Git tests and real tool traces.
+A global percentage will be published only after every behavior in the frozen
+current-Git contract has a complete matrix built from Git docs, upstream Git
+tests, stock-Git differential traces and required platform evidence.
 
 <details>
 <summary>Commands counted in each group</summary>
@@ -366,7 +412,7 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 
 ## Zmin-Only Extensions
 
-Zmin has additive features that are not counted as Git `2.47.1` compatibility.
+Zmin has additive features that are not counted as frozen Git compatibility.
 They are tracked separately in
 [`docs/cli/zmin_extensions_inventory.md`](docs/cli/zmin_extensions_inventory.md).
 
@@ -374,18 +420,24 @@ Current extension inventory:
 
 | Layer | Count |
 | --- | ---: |
-| Zmin-only commands | `11` |
-| Zmin-only options on Git commands | `4` |
-| Zmin-only environment controls | `1` |
-| Stable extensions | `5` |
-| Experimental extensions | `2` |
-| Planned extensions | `1` |
+| Primary stable rows | `40` |
+| Primary rows | `40` |
+| Neutral relationship rows | `7` |
+| Tracked contract rows | `47` |
 
 Implemented extensions include `zmin clone --instant`, managed `zmin hooks`
-commands, `zmin repo` metadata summaries and CMS-style porcelain such as
-`zmin save`, `zmin changes`, `zmin publish` and `zmin update`. Transport
-tuning through `ZMIN_GIT_HTTP_VERSION` is tracked as a Zmin-only environment
-control.
+commands and CMS-style porcelain such as `zmin save`, `zmin changes`,
+`zmin publish` and `zmin update`. The exact 40 stable primary rows and seven
+relationship-neutral rows are defined by
+[`tools/zmin-extensions-contract.tsv`](tools/zmin-extensions-contract.tsv).
+These are 47 tracked contract rows, not 47 Git APIs, and they never enlarge the
+1045-test current-Git denominator.
+
+The current Git names `backfill`, `diff-pairs`, `format-rev`, `history`,
+`last-modified`, `repo` and `url-parse` are not Zmin extensions; `history`
+reword/split are current Git subcommands. Stock singular `git hook run` is
+distinct from the Zmin plural `zmin hooks` surface. Transport tuning through
+`ZMIN_GIT_HTTP_VERSION` is one of the 40 primary rows.
 
 The staged-file hook runner is available as a Zmin-only extension, including
 preview, extension-filtered execution, and dry-run command surfaces. It is
@@ -394,26 +446,25 @@ tracked below the extension inventory, not in the Git compatibility matrix.
 ## Preview Limits
 
 Zmin works with regular Git repositories and existing Git remotes. This preview
-does not claim full Git LFS product parity, reftable repositories, or official
-package-manager installs. Basic Git-LFS-style pointer workflows through
-configured `filter.lfs.process` are verified for `add`, `checkout`, and
-`cat-file --filters`. Built-in local `git lfs` foundation coverage is also
-verified for `version`, `env`, `install --local --skip-repo`,
-`install --local --skip-smudge`, `track`, `untrack`, `ls-files`, and local
-`pre-push` stdin-shape validation. Network LFS transfer flows, batch API/auth,
-and broader `git lfs ...` product parity remain out of scope. Repo-configured
-`credential.helper=store` and
-`credential.helper=cache` flows are verified for `git credential
-fill|approve|reject`, but broader authenticated enterprise transport scenarios
-still need dedicated gates.
+does not claim arbitrary Git LFS ecosystem parity, reftable repositories, or
+official package-manager installs. The stable `command.lfs` extension row
+covers the implemented Git LFS v3.7.1-compatible slice: local pointer, filter,
+checkout, hook and tracking commands plus HTTP Batch download/upload, action
+authentication, credential-helper integration, proxy/TLS policy and rolling
+transport timeouts. Configured mTLS/client identity is an explicit transport
+exclusion and fails before network access; custom transfer adapters and
+untracked Git LFS commands remain outside this extension row. None of these LFS
+boundaries changes the separate current-Git denominator.
 
 Some edge-case options and environments still need more coverage. Keep a
 current backup before using preview builds on important repositories.
 
-## Speed Snapshot
+## Historical Speed Snapshot (non-authoritative)
 
-Median seconds on preview fixtures. Values in parentheses show how fast Zmin is
-against that tool by median; values below `x1.00` mean Zmin is slower.
+These dated preview measurements are historical and non-authoritative. They do
+not establish a universal faster or lower-memory claim; cross-platform evidence
+is defined by [`docs/git/performance_evidence_contract.md`](docs/git/performance_evidence_contract.md).
+Median seconds on preview fixtures follow for traceability.
 
 | Platform | Operation | Zmin | Git | Gitoxide |
 | --- | --- | ---: | ---: | ---: |

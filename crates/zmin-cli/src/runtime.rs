@@ -33,6 +33,10 @@ pub(crate) use local_time_primitives::*;
 mod trace2_primitives;
 pub(crate) use trace2_primitives::*;
 
+#[path = "runtime/abbrev.rs"]
+mod abbrev_primitives;
+pub(crate) use abbrev_primitives::*;
+
 pub(crate) use zmin_cli_runtime::{
     PhaseTrace, phase_trace, phase_trace_emit, phase_trace_enabled, remove_file_if_exists,
     remove_path_if_exists, unique_temp_sibling, write_content_addressed_file,
@@ -41,6 +45,10 @@ pub(crate) use zmin_cli_runtime::{
 #[path = "runtime/object.rs"]
 mod object_primitives;
 pub(crate) use object_primitives::*;
+
+#[path = "runtime/mktree.rs"]
+mod mktree_primitives;
+pub(crate) use mktree_primitives::*;
 
 #[path = "runtime/object_format.rs"]
 mod object_format_primitives;
@@ -113,6 +121,89 @@ pub(crate) use submodule_primitives::*;
 #[path = "runtime/transport_local.rs"]
 mod transport_local_primitives;
 pub(crate) use transport_local_primitives::*;
+
+#[path = "runtime/partial_clone_filter.rs"]
+mod partial_clone_filter_primitives;
+pub(crate) use partial_clone_filter_primitives::*;
+
+#[path = "runtime/pack_operation_lock.rs"]
+mod pack_operation_lock;
+pub(crate) use pack_operation_lock::*;
+
+#[path = "runtime/bundle_uri.rs"]
+mod bundle_uri_primitives;
+pub(crate) use bundle_uri_primitives::*;
+
+#[path = "runtime/lfs_config.rs"]
+mod lfs_config;
+pub(crate) use lfs_config::*;
+
+#[path = "runtime/lfs_url_config.rs"]
+mod lfs_url_config;
+pub(crate) use lfs_url_config::*;
+
+#[path = "runtime/lfs_http_policy.rs"]
+mod lfs_http_policy;
+pub(crate) use lfs_http_policy::*;
+
+#[path = "runtime/lfs_pointer.rs"]
+mod lfs_pointer;
+pub(crate) use lfs_pointer::*;
+
+#[path = "runtime/lfs_store.rs"]
+mod lfs_store;
+pub(crate) use lfs_store::*;
+
+#[path = "runtime/lfs_endpoint.rs"]
+mod lfs_endpoint;
+pub(crate) use lfs_endpoint::*;
+
+#[path = "runtime/lfs_auth.rs"]
+mod lfs_auth;
+pub(crate) use lfs_auth::*;
+
+#[path = "runtime/lfs_filter_process.rs"]
+mod lfs_filter_process;
+pub(crate) use lfs_filter_process::*;
+
+#[path = "runtime/lfs_batch.rs"]
+mod lfs_batch;
+pub(crate) use lfs_batch::*;
+
+#[path = "runtime/lfs_transfer.rs"]
+mod lfs_transfer;
+pub(crate) use lfs_transfer::*;
+
+#[path = "runtime/lfs_runtime_adapters.rs"]
+mod lfs_runtime_adapters;
+pub(crate) use lfs_runtime_adapters::*;
+
+#[path = "runtime/lfs_network_session.rs"]
+mod lfs_network_session;
+pub(crate) use lfs_network_session::*;
+
+#[path = "runtime/lfs_reachability.rs"]
+mod lfs_reachability;
+pub(crate) use lfs_reachability::*;
+
+pub(crate) fn resolve_repack_pack_kept_objects(
+    command_line_enabled: bool,
+    config_entry: Option<&ConfigEntry>,
+) -> Result<bool> {
+    if command_line_enabled {
+        return Ok(true);
+    }
+    let Some(config_entry) = config_entry else {
+        return Ok(false);
+    };
+    config_entry.bool_value().ok_or_else(|| CliError::Stderr {
+        code: 128,
+        text: format!(
+            "fatal: bad boolean config value '{}' for 'repack.packKeptObjects'\n",
+            config_entry.value
+        ),
+    })
+}
 
 #[path = "runtime/primitive_adapters.rs"]
 mod primitive_adapters;

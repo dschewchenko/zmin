@@ -19,9 +19,11 @@ pub mod loose;
 pub mod merge_file;
 pub mod object;
 pub mod object_store;
+mod object_validation;
 pub mod pack;
 pub mod reachable;
 pub mod refs;
+mod reftable_reader;
 mod reftable_writer;
 pub mod tag;
 pub mod tree;
@@ -35,8 +37,8 @@ pub use checkout::{
     checkout_index_fresh_with_metadata,
 };
 pub use commit::{
-    CommitBuilder, CommitLinks, CommitObject, CommitObjectCache, Signature, decode_commit,
-    decode_commit_links, encode_commit,
+    CommitBuilder, CommitLinks, CommitLinksCache, CommitObject, CommitObjectCache, Signature,
+    decode_commit, decode_commit_links, encode_commit,
 };
 pub use diff::{
     IndexDiffEntry, IndexDiffStatus, TreeDiffEntry, TreeDiffFileEntry, diff_index_to_tree,

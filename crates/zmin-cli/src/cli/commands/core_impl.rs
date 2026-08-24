@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::env;
+use std::ffi::OsString;
 use std::io::{BufRead, BufWriter, Read, Write};
 use std::sync::Arc;
 
@@ -7,7 +8,184 @@ use super::*;
 
 const UNPACK_OBJECTS_STDIN_BUF_CAPACITY: usize = 256 * 1024;
 const HASH_OBJECT_STREAM_BUF_CAPACITY: usize = 256 * 1024;
+const HASH_OBJECT_STDIN_PATH_RECORD_LIMIT: usize = HASH_OBJECT_STREAM_BUF_CAPACITY;
 const CAT_FILE_BATCH_OUTPUT_BUF_CAPACITY: usize = 256 * 1024;
+
+struct HashObjectPathRecord {
+    path: PathBuf,
+}
+
+struct HashObjectPathRecordReader<R> {
+    reader: R,
+}
+
+impl<R: BufRead> HashObjectPathRecordReader<R> {
+    fn new(reader: R) -> Self {
+        Self { reader }
+    }
+
+    fn next_record(&mut self) -> Result<Option<HashObjectPathRecord>> {
+        let max_record_bytes = HASH_OBJECT_STDIN_PATH_RECORD_LIMIT;
+        let max_buffer_bytes = max_record_bytes
+            .checked_add(2)
+            .ok_or_else(hash_object_stdin_path_limit_error)?;
+        let mut raw = Vec::new();
+
+        loop {
+            let chunk = self.reader.fill_buf()?;
+            if chunk.is_empty() {
+                if raw.is_empty() {
+                    return Ok(None);
+                }
+                break;
+            }
+            let take = chunk
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(chunk.len(), |position| position + 1);
+            if raw
+                .len()
+                .checked_add(take)
+                .is_none_or(|length| length > max_buffer_bytes)
+            {
+                return Err(hash_object_stdin_path_limit_error());
+            }
+            let terminated = chunk[take - 1] == b'\n';
+            raw.extend_from_slice(&chunk[..take]);
+            self.reader.consume(take);
+            if terminated {
+                break;
+            }
+        }
+
+        if raw.last() == Some(&b'\n') {
+            raw.pop();
+            if raw.last() == Some(&b'\r') {
+                raw.pop();
+            }
+        }
+        if raw.len() > max_record_bytes {
+            return Err(hash_object_stdin_path_limit_error());
+        }
+        Ok(Some(HashObjectPathRecord {
+            path: hash_object_path_from_bytes(hash_object_unquote_path(&raw)?)?,
+        }))
+    }
+}
+
+fn hash_object_unquote_path(raw: &[u8]) -> Result<Vec<u8>> {
+    if raw.first() != Some(&b'"') {
+        return Ok(raw.to_vec());
+    }
+
+    let mut path = Vec::with_capacity(raw.len().saturating_sub(2));
+    let mut cursor = 1;
+    loop {
+        let start = cursor;
+        while cursor < raw.len() && !matches!(raw[cursor], b'"' | b'\\' | 0) {
+            cursor += 1;
+        }
+        path.extend_from_slice(&raw[start..cursor]);
+        let Some(&byte) = raw.get(cursor) else {
+            return Err(hash_object_badly_quoted_error());
+        };
+        cursor += 1;
+        match byte {
+            b'"' => return Ok(path),
+            b'\\' => {
+                let Some(&escape) = raw.get(cursor) else {
+                    return Err(hash_object_badly_quoted_error());
+                };
+                cursor += 1;
+                let value = match escape {
+                    b'a' => 0x07,
+                    b'b' => 0x08,
+                    b'f' => 0x0c,
+                    b'n' => 0x0a,
+                    b'r' => 0x0d,
+                    b't' => 0x09,
+                    b'v' => 0x0b,
+                    b'\\' | b'"' => escape,
+                    b'0'..=b'3' => {
+                        let Some(&second) = raw.get(cursor) else {
+                            return Err(hash_object_badly_quoted_error());
+                        };
+                        let Some(&third) = raw.get(cursor + 1) else {
+                            return Err(hash_object_badly_quoted_error());
+                        };
+                        if !matches!(second, b'0'..=b'7') || !matches!(third, b'0'..=b'7') {
+                            return Err(hash_object_badly_quoted_error());
+                        }
+                        cursor += 2;
+                        ((escape - b'0') << 6) | ((second - b'0') << 3) | (third - b'0')
+                    }
+                    _ => return Err(hash_object_badly_quoted_error()),
+                };
+                path.push(value);
+            }
+            _ => return Err(hash_object_badly_quoted_error()),
+        }
+    }
+}
+
+fn hash_object_path_from_bytes(mut bytes: Vec<u8>) -> Result<PathBuf> {
+    if let Some(nul) = bytes.iter().position(|byte| *byte == 0) {
+        bytes.truncate(nul);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+
+        return Ok(PathBuf::from(OsString::from_vec(bytes)));
+    }
+    #[cfg(windows)]
+    {
+        let value = String::from_utf8(bytes).map_err(|_| {
+            CliError::Message("path cannot be represented as valid Windows UTF-8".into())
+        })?;
+        return Ok(PathBuf::from(value));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let value = String::from_utf8(bytes)
+            .map_err(|_| CliError::Message("path cannot be represented as UTF-8".into()))?;
+        Ok(PathBuf::from(value))
+    }
+}
+
+fn hash_object_stdin_path_limit_error() -> CliError {
+    CliError::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "hash-object stdin pathname exceeds configured limit",
+    ))
+}
+
+fn hash_object_badly_quoted_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "line is badly quoted".into(),
+    }
+}
+
+fn hash_object_stdin_paths<F>(mut process: F) -> Result<()>
+where
+    F: FnMut(&Path) -> Result<ObjectId>,
+{
+    let stdin = io::stdin();
+    let mut records = HashObjectPathRecordReader::new(io::BufReader::with_capacity(
+        HASH_OBJECT_STREAM_BUF_CAPACITY,
+        stdin.lock(),
+    ));
+    let stdout = io::stdout();
+    let mut output = BufWriter::with_capacity(HASH_OBJECT_STREAM_BUF_CAPACITY, stdout.lock());
+    while let Some(record) = records.next_record()? {
+        let object_id = process(&record.path)?;
+        output.write_all(object_id.to_hex().as_bytes())?;
+        output.write_all(b"\n")?;
+        output.flush()?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 enum BatchFormat {
@@ -140,25 +318,16 @@ pub(crate) fn hash_object_command(
     }
 
     if stdin_paths {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        for line in input.lines() {
-            if line.is_empty() {
-                continue;
+        hash_object_stdin_paths(|path| {
+            if path.as_os_str().is_empty() {
+                return Err(hash_object_stdin_path_io_error(
+                    path,
+                    io::Error::from(io::ErrorKind::NotFound),
+                ));
             }
-            println!(
-                "{}",
-                write_or_hash_path(
-                    store.as_ref(),
-                    hash_repo,
-                    algorithm,
-                    kind,
-                    Path::new(line),
-                    None,
-                )?
-                .to_hex()
-            );
-        }
+            write_or_hash_path(store.as_ref(), hash_repo, algorithm, kind, path, None)
+                .map_err(|error| hash_object_stdin_path_error(path, error))
+        })?;
     }
 
     for input_path in paths {
@@ -195,20 +364,20 @@ fn hash_literal_object_command(
         );
     }
     if stdin_paths {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        for line in input.lines().filter(|line| !line.is_empty()) {
-            let path = Path::new(line);
+        hash_object_stdin_paths(|path| {
+            if path.as_os_str().is_empty() {
+                return Err(hash_object_stdin_path_io_error(
+                    path,
+                    io::Error::from(io::ErrorKind::NotFound),
+                ));
+            }
             let content = if is_git_null_path(path) {
                 Vec::new()
             } else {
-                fs::read(path)?
+                fs::read(path).map_err(|error| hash_object_stdin_path_io_error(path, error))?
             };
-            println!(
-                "{}",
-                write_or_hash_literal(store, algorithm, object_type.as_bytes(), &content)?.to_hex()
-            );
-        }
+            write_or_hash_literal(store, algorithm, object_type.as_bytes(), &content)
+        })?;
     }
     for path in paths {
         let content = if is_git_null_path(&path) {
@@ -233,6 +402,31 @@ fn write_or_hash_literal(
     match store {
         Some(store) => Ok(store.write_literal_object(object_type, content)?),
         None => Ok(hash_literal_object(algorithm, object_type, content)?),
+    }
+}
+
+fn hash_object_stdin_path_error(path: &Path, error: CliError) -> CliError {
+    match error {
+        CliError::Io(error) => hash_object_stdin_path_io_error(path, error),
+        error => error,
+    }
+}
+
+fn hash_object_stdin_path_io_error(path: &Path, error: io::Error) -> CliError {
+    let error_text = if path.as_os_str().is_empty() {
+        "No such file or directory".to_owned()
+    } else {
+        error
+            .to_string()
+            .split_once(" (os error ")
+            .map_or_else(|| error.to_string(), |(message, _)| message.to_owned())
+    };
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "could not open '{}' for reading: {error_text}",
+            path.display()
+        ),
     }
 }
 

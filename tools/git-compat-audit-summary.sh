@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-baseline="${ZMIN_GIT_BASELINE:-v2.47.1}"
-cache_dir="${ZMIN_GIT_DOC_CACHE:-$repo_root/target/git-doc-cache/$baseline}"
-command_list="${ZMIN_GIT_COMMAND_LIST:-$cache_dir/command-list.txt}"
+[[ -n "${ZMIN_GIT_BASELINE:-}" ]] || { printf 'error: ZMIN_GIT_BASELINE is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_DOC_CACHE:-}" ]] || { printf 'error: ZMIN_GIT_DOC_CACHE is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_COMMAND_LIST:-}" ]] || { printf 'error: ZMIN_GIT_COMMAND_LIST is required\n' >&2; exit 1; }
+[[ -n "${ZMIN_GIT_SOURCE_ARCHIVE_SHA256:-}" ]] || { printf 'error: ZMIN_GIT_SOURCE_ARCHIVE_SHA256 is required\n' >&2; exit 1; }
+command_list="$ZMIN_GIT_COMMAND_LIST"
 groups_file="${ZMIN_GIT_REFERENCE_GROUPS:-$repo_root/docs/cli/git_reference_groups.tsv}"
 primary_groups_file="${ZMIN_GIT_AUDIT_PRIMARY_GROUPS:-$repo_root/docs/cli/git_audit_primary_groups.tsv}"
 variant_plan_file="$repo_root/docs/cli/variant_compatibility_plan.md"
 format="${1:---markdown}"
 
-if [[ ! -f "$command_list" ]]; then
-  ZMIN_GIT_BASELINE="$baseline" "$repo_root/tools/git-compat-option-inventory.sh" >/dev/null
-fi
+[[ -f "$command_list" ]] || { printf 'error: Git command list is missing: %s\n' "$command_list" >&2; exit 1; }
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -47,7 +48,7 @@ awk -F'\t' '
         group_commands[group, command] = 1
       }
     } else {
-      group_commands["Other Git 2.47 commands", command] = 1
+      group_commands["Other Git v2.55 commands", command] = 1
     }
   }
   END {
@@ -75,7 +76,7 @@ awk -F'\t' '
       n = split(group_for[command], memberships, SUBSEP)
       for (i = 1; i <= n; i++) option_rows[memberships[i]]++
     } else {
-      option_rows["Other Git 2.47 commands"]++
+      option_rows["Other Git v2.55 commands"]++
     }
   }
   END {
@@ -135,7 +136,7 @@ awk -F'\t' '
     sub(/ .*/, "", command)
     count += 0
     if (count > 0) {
-      group = command in primary ? primary[command] : "Other Git 2.47 commands"
+      group = command in primary ? primary[command] : "Other Git v2.55 commands"
       closed[group] += count
       total += count
     }
@@ -201,7 +202,7 @@ awk -F'\t' -v format="$format" '
     order[11] = "Administration"
     order[12] = "Server Admin"
     order[13] = "Plumbing Commands"
-    order[14] = "Other Git 2.47 commands"
+    order[14] = "Other Git v2.55 commands"
     for (i = 1; i <= 14; i++) {
       group = order[i]
       if (format == "--tsv") {
@@ -219,13 +220,13 @@ awk -F'\t' -v format="$format" '
       }
     }
     if (format == "--tsv") {
-      printf "Git 2.47 unique total\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+      printf "Git v2.55 unique total\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
         unique["git_command_total"] + 0, 0, unique["git_doc_option_seed_total"] + 0, 0,
         unique["matrix_rows_total"] + 0, unique["matrix_closed_total"] + 0,
         unique["matrix_partial_total"] + 0, unique["matrix_open_total"] + 0,
         unique["matrix_invalid_total"] + 0, unique["closed_block_total"] + 0
     } else {
-      printf "| **Git 2.47 unique total** | **`%d`** | **`0`** | **`%d`** | **`0`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** |\n",
+      printf "| **Git v2.55 unique total** | **`%d`** | **`0`** | **`%d`** | **`0`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** |\n",
         unique["git_command_total"] + 0, unique["git_doc_option_seed_total"] + 0,
         unique["matrix_rows_total"] + 0, unique["matrix_closed_total"] + 0,
         unique["matrix_partial_total"] + 0, unique["matrix_open_total"] + 0,

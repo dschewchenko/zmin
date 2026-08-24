@@ -48,6 +48,14 @@ fn run_cli_inner() {
             std::process::exit(1);
         }
         Err(crate::runtime::CliError::Io(error)) => {
+            if let Some(raw) = error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<zmin_cli_runtime::RawStderrBytes>())
+            {
+                use std::io::Write;
+                let _ = std::io::stderr().write_all(&raw.bytes);
+                std::process::exit(raw.code);
+            }
             if error.kind() == std::io::ErrorKind::InvalidData {
                 eprintln!("fatal: {error}");
                 std::process::exit(128);
@@ -141,16 +149,8 @@ fn run_main() -> std::result::Result<(), crate::runtime::CliError> {
     if let Some(result) = try_run_builtin_query(&raw_args) {
         return result;
     }
-    if raw_args.first().map(String::as_str) == Some("refs")
-        && raw_args.get(1).map(String::as_str) == Some("list")
-        && raw_args[2..]
-            .iter()
-            .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
-    {
-        return Err(crate::runtime::CliError::Stderr {
-            code: 129,
-            text: "usage: git refs list [<options>] [<patterns>]\n".to_owned(),
-        });
+    if let Some(error) = crate::runtime::refs_list_help_error(&raw_args) {
+        return Err(error);
     }
     let (args, command_args) = {
         let _trace = crate::runtime::phase_trace("cli.parse");
@@ -343,10 +343,13 @@ fn parse_builtin_http_fetch_options(
             _ if arg.starts_with("--packfile=") => {
                 options.packfile = Some(arg["--packfile=".len()..].to_owned());
             }
-            _ if arg.starts_with("--index-pack-args=") => {
-                options
-                    .index_pack_args
-                    .push(arg["--index-pack-args=".len()..].to_owned());
+            _ if arg.starts_with("--index-pack-args=") || arg.starts_with("--index-pack-arg=") => {
+                let prefix_len = if arg.starts_with("--index-pack-args=") {
+                    "--index-pack-args=".len()
+                } else {
+                    "--index-pack-arg=".len()
+                };
+                options.index_pack_args.push(arg[prefix_len..].to_owned());
             }
             _ if arg.starts_with('-') => return Err(http_fetch_usage_error()),
             _ => options.args.push(arg.clone()),

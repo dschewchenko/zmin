@@ -1,5 +1,19 @@
 # Git CLI Performance Benchmark
 
+The measurements in this historical document predate the W5.0 measurement
+integrity contract. They are retained as historical observations only and must
+not be reused as a current speed or RSS claim. New authoritative evidence must
+pass [`docs/git/performance_evidence_contract.md`](../git/performance_evidence_contract.md)
+through the shared benchmark contract layer.
+
+All macOS, Windows/Git-for-Windows, and Gitoxide measurements retained in
+this document are historical exploratory observations, not current
+authoritative platform or speed evidence. The current authoritative upstream
+and performance runner supports Linux only; Darwin and Windows fail closed
+before `make --version`. Do not use these rows to claim Windows selected-surface
+or `t9300-fast-import.sh` readiness; the platform limitation is defined once in
+[`docs/git/performance_evidence_contract.md`](../git/performance_evidence_contract.md).
+
 Date: 2026-06-12
 
 Host: MacBook Pro M1, 16 GB RAM, macOS 26.4, Darwin 25.4.0, arm64.
@@ -2603,7 +2617,12 @@ current test executable when needed, so transport tests do not contend with the
 parent test package target. Focused macOS validation passed:
 `cargo test -p zmin-cli --test git_transport_http_compat clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects -- --exact --test-threads=1 --nocapture`.
 
-Current cross-platform performance gate refresh:
+Historical cross-platform performance gate refresh (retained for context):
+
+The macOS and Windows/Git-for-Windows rows below are exploratory historical
+measurements from before the current descriptor-bound authoritative runner.
+They remain useful for context only and cannot override the Linux-only
+authoritative scope or establish current Windows readiness.
 
 - macOS full local 3-repeat gate:
   `/tmp/zmin-macos-performance-gate-20260618T222426Z`

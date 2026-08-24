@@ -50,16 +50,19 @@ pub(crate) fn bisect(args: Vec<String>) -> Result<()> {
 #[cfg(not(windows))]
 fn bisect_usage() -> &'static str {
     concat!(
-        "usage: git bisect start [--term-(new|bad)=<term> --term-(old|good)=<term>]    [--no-checkout] [--first-parent] [<bad> [<good>...]] [--]    [<pathspec>...]\n",
-        "   or: git bisect (good|bad) [<rev>...]\n",
-        "   or: git bisect terms [--term-good | --term-bad]\n",
+        "usage: git bisect start [--term-(bad|new)=<term-new> --term-(good|old)=<term-old>]\n",
+        "                         [--no-checkout] [--first-parent] [<bad> [<good>...]] [--] [<pathspec>...]\n",
+        "   or: git bisect (bad|new|<term-new>) [<rev>]\n",
+        "   or: git bisect (good|old|<term-old>) [<rev>...]\n",
+        "   or: git bisect terms [--term-(good|old) | --term-(bad|new)]\n",
         "   or: git bisect skip [(<rev>|<range>)...]\n",
         "   or: git bisect next\n",
         "   or: git bisect reset [<commit>]\n",
-        "   or: git bisect visualize\n",
+        "   or: git bisect (visualize|view)\n",
         "   or: git bisect replay <logfile>\n",
         "   or: git bisect log\n",
         "   or: git bisect run <cmd> [<arg>...]\n",
+        "   or: git bisect help\n",
     )
 }
 
@@ -913,6 +916,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         children: false,
         root: false,
         patch: false,
+        no_patch: false,
         patch_with_stat: false,
         combined: false,
         dense_combined: false,
@@ -2249,6 +2253,7 @@ pub(crate) fn rebase(
         },
         extra_objects: Vec::new(),
         symmetric_diff: None,
+        exclude_first_parent_only: false,
     };
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;

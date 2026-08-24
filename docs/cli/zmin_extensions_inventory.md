@@ -1,132 +1,73 @@
 # Zmin Extension Inventory
 
-This inventory is separate from Git `2.47.1` compatibility.
+This document is a human projection of the machine contract in
+`tools/zmin-extensions-contract.tsv`. The TSV is authoritative; this Markdown
+file is not a compatibility denominator.
 
-Git-compatible rows measure stock Git behavior. Zmin extensions are additive
-features exposed by `zmin` and must not increase command, option or behavior
-coverage numbers in the Git compatibility matrix.
+The Git compatibility status remains `compatibility_claim=unverified`. This
+separate inventory must not be read as a current-Git parity claim or added to
+the Git denominator.
 
-## Counts
+## Current counts
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Zmin-only commands | `12` | additive top-level commands that are not Git command names |
-| Zmin-only options on Git commands | `15` | additive options on existing Git-compatible commands |
-| Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
-| Zmin-only schema command aliases | `10` | flattened schema entries that belong to Zmin-only command groups |
-| Deferred/non-Git-2.47 schema commands | `2` | schema commands compared to newer/current stock Git or tracked non-baseline nested surfaces outside the Git `2.47.1` denominator |
-| Stable extensions | `8` | implemented and covered by focused tests |
-| Experimental extensions | `0` | implemented but still preview-only |
-| Planned extensions | `0` | designed backlog, not implemented |
+| Primary stable rows | `40` | Implemented Zmin-only command, subcommand, option and environment rows |
+| Primary deferred rows | `0` | No primary row is deferred |
+| Primary rows | `40` | Stable primary rows |
+| Neutral relationship rows | `7` | API relationships, never extensions or exclusions |
+| Tracked contract rows | `47` | 40 primary rows plus 7 relationship-neutral rows |
 
-## Zmin-Only Commands
+The 40 primary rows are grouped as follows:
 
-| Command | Status | Evidence | Notes |
-| --- | --- | --- | --- |
-| `zmin hooks` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `git_admin_tools_compat::managed_hooks_run_staged_list_uses_index_backed_selector`; `git_admin_tools_compat::managed_hooks_run_staged_ext_list_and_execution_use_selected_paths`; `git_admin_tools_compat::managed_hooks_run_staged_dry_run_and_exit_code_match_command_mode_contract`; `git_admin_tools_compat::managed_hooks_run_staged_pathspec_filters_list_dry_run_and_execution`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | supports `init`, `add [--force]`, `list`, `remove`, and index-backed `run <hook> --staged` preview/execution with extension filters, pathspec filters, dry-run output, child exit-code propagation, and managed `pre-commit` staged-runner wrappers for supported hook names; rejects unsupported managed-hook names as Zmin-only validation |
-| `zmin repo` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | exposes Zmin-only repository metadata and structure summaries; stock Git has no `git repo` command |
-| `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
-| `zmin last-modified` | stable | `git_history_query_compat::last_modified_reports_latest_commit_per_path` | reports the latest commit that affected each selected path, with recursive and NUL-delimited modes; stock Git has no `git last-modified` command, so this is tracked outside the Git `2.47.1` denominator |
-| `zmin history` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch`; `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | additive history rewrite workflow with `reword` and `split` dry-run coverage; stock Git `2.47.1` has no `git history` command, so this is tracked outside the compatibility denominator |
-| `zmin save <message>` | stable | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | CMS-style `add -A` plus `commit -m` wrapper |
-| `zmin changes` | stable | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | human-readable status wrapper |
-| `zmin publish` | stable | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe push wrapper |
-| `zmin update` | stable | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe pull wrapper |
-| `zmin undo` | stable | `git_cms_porcelain_compat::cms_undo_reverts_last_logged_save_only_when_safe`; `git_cms_porcelain_compat::cms_undo_after_first_save_restores_no_history_but_keeps_staged_content` | operation-log backed undo for the last clean `save`, including root-history rollback that restores the no-commits-yet staged state after the first save |
-| `zmin timeline` | stable | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | human-readable history wrapper |
-| `zmin recover` | stable | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases`; `git_cms_porcelain_compat::cms_recover_refuses_staged_rename_targets_and_sources` | safe file restore wrapper, including staged-rename safety on both source and destination paths |
+- 10 command rows: `hooks`, `save`, `changes`, `publish`, `update`, `undo`,
+  `timeline`, `recover`, `compatibility`, and `lfs`.
+- 5 `hooks` subcommands: `init`, `add`, `list`, `remove`, `run`.
+- 24 options: four `clone` options (`--worktree-first`, `--instant`,
+  `--background-fetch`, `--demand-hydrate`); four `cat-file` options
+  (`--type`, `--size`, `--exists`, `--pretty`); three `imap-send` options
+  (`--folder`, `--list`, `-f`); one `credential-cache` option
+  (`--daemon-internal`); three `instaweb` options (`--daemon-internal`,
+  `--git-dir`, `--work-tree`); and nine hook/report options
+  (`--ignore-missing`, `--to-stdin`, `--force`, `--staged-runner`, `--ext`,
+  `--staged`, `--list`, `--dry-run`). The repeated `--ext` surface is a
+  separate contract row for its distinct hook parent.
+- One environment row: `ZMIN_GIT_HTTP_VERSION`.
 
-## Zmin-Only Schema Command Aliases
+The seven neutral relationship rows are `hooks -> init`, `hooks -> add`,
+`hooks -> list`, `hooks -> remove`, `hooks -> run`, `repo -> info`, and
+`repo -> structure`. They describe API relationships and do not make `repo`
+or any related surface a Zmin-only exclusion.
 
-These rows map flattened `zmin compat` schema names back to additive command
-groups. They are machine-readable classification rows only; they do not add
-Git `2.47.1` compatibility coverage.
+## Current Git names that are not extensions
 
-| Command | Status | Evidence | Notes |
-| --- | --- | --- | --- |
-| `zmin hooks init` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-init`; initializes managed-hook metadata without replacing manual hooks |
-| `zmin hooks add` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-add`; adds managed hook commands, supports managed staged-runner wrappers for supported hook names, and validates supported Zmin hook names |
-| `zmin hooks list` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-list`; lists configured managed-hook commands |
-| `zmin hooks remove` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-remove`; removes managed hook commands or staged-runner config without deleting manual hooks |
-| `zmin hooks run` | stable | `git_admin_tools_compat::managed_hooks_run_staged_list_uses_index_backed_selector`; `git_admin_tools_compat::managed_hooks_run_staged_ext_list_and_execution_use_selected_paths`; `git_admin_tools_compat::managed_hooks_run_staged_dry_run_and_exit_code_match_command_mode_contract`; `git_admin_tools_compat::managed_hooks_run_staged_pathspec_filters_list_dry_run_and_execution`; `git_admin_tools_compat::managed_hooks_staged_runner_wrapper_integrates_with_pre_commit_workflow` | flattened schema alias `hooks-run`; current implemented surface includes preview, extension filters, pathspec filters, dry-run output, direct command execution over selected staged paths, and wrapper-driven pre-commit execution |
-| `zmin repo info` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-info`; reports Zmin-only repository metadata |
-| `zmin repo structure` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-structure`; reports Zmin-only repository layout summaries |
-| `zmin history reword` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch` | flattened schema alias `history-reword`; dry-run prints planned ref updates without moving the branch |
-| `zmin history split` | experimental | `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | flattened schema alias `history-split`; dry-run split planning supports selected file hunks and pathspec filtering |
+The frozen Git v2.55.0 contract explicitly keeps these current command names
+out of the Zmin primary extension set:
 
-## Deferred Non-Git-2.47 Schema Commands
+`backfill`, `diff-pairs`, `format-rev`, `history`, `last-modified`, `repo`,
+`url-parse`.
 
-These rows keep schema entries out of the Git `2.47.1` denominator when their
-evidence compares against newer/current stock Git rather than Git `2.47.1`.
+In particular, `history` with `reword` and `split` is current Git behavior, and
+`repo` is current-Git relationship evidence. Stock Git's singular `git hook
+run` is also distinct from Zmin's plural `zmin hooks` product surface.
 
-| Command | Status | Evidence | Notes |
-| --- | --- | --- | --- |
-| `zmin backfill` | deferred | `git_admin_tools_compat::backfill_matches_stock_git_for_complete_repository_noop`; `git_admin_tools_compat::backfill_promisor_remote_recovers_missing_local_objects` | local/current stock Git has `git backfill`, but Git `2.47.1` command-list does not; keep outside the Git `2.47.1` compatibility denominator until a target profile that includes `backfill` is active |
-| `git lfs` | deferred local foundation | `git_lfs_local_compat::lfs_version_and_env_report_builtin_local_foundation_state`; `git_lfs_local_compat::lfs_pull_fetches_from_local_remote_like_stock_git`; `git_lfs_local_compat::lfs_local_foundation_commands_do_not_depend_on_stock_git_runtime`; `git_replacement_dogfood_compat::replacement_shim_routes_lfs_discovery_and_local_hook_takeover_commands_without_stock_git` | Git LFS is not part of the upstream Git `2.47.1` command-list baseline, so the built-in `git lfs` surface stays outside that denominator even though Zmin now ships a covered local foundation for discovery, local hook takeover, pointer checkout, and local/file-based pull lanes. Non-local/authenticated/custom-transfer Git LFS transport parity is still deferred, and the current builtin rejects unsupported pull remotes with `unsupported built-in zmin lfs pull remote: ...` until that broader LFS work is implemented. |
+## Evidence boundary
 
-## Zmin-Only Options
+The current Git target is defined independently by
+`tools/git-upstream-compat-contract.tsv` and
+`docs/git/upstream_compatibility_baseline.md`: the frozen nondeprecated surface
+has 1045 of 1046 top-level Git v2.55.0 shell tests, with only the whole-file
+`t5323-pack-redundant.sh` exclusion. The five retained legacy/current groups
+and deprecated assertions inside retained mixed tests are not extra exclusions.
+Extension rows never inflate that denominator and do not establish Git parity.
 
-| Command | Option | Status | Evidence | Notes |
-| --- | --- | --- | --- | --- |
-| `zmin clone` | `--worktree-first` | stable | `git_clone_compat::clone_instant_local_repo_marks_worktree_first_without_changing_git_state`; `git_clone_compat::clone_worktree_first_rejects_non_worktree_or_remote_modes` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
-| `zmin clone` | `--instant` | stable | `git_clone_compat::clone_instant_local_repo_fetch_and_pull_remain_canonical_git_operations`; `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over local repositories, git-daemon, SSH and smart HTTP transport; local instant clones keep later `fetch origin` and `pull --ff-only` as canonical Git operations while preserving `zmin.worktreeFirst=true` |
-| `zmin clone` | `--background-fetch` | stable | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_worktree_first_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after a remote worktree-first clone, validated for both the explicit `--worktree-first` spelling and the `--instant` alias across git-daemon, SSH, and smart HTTP |
-| `zmin clone` | `--demand-hydrate` | stable | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_worktree_first_smart_http_demand_hydrate_recovers_missing_head_objects` | marks remote worktree-first clones as promisor-backed for missing-object hydration, validated for both the explicit `--worktree-first` spelling and the `--instant` alias across git-daemon, SSH, and smart HTTP |
-| `zmin cat-file` | `--type` | stable | `manual stock oracle 2026-06-23: git cat-file --type exits 129; zmin cat-file --type maps to -t` | Zmin-only long alias for `cat-file -t`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin cat-file` | `--size` | stable | `manual stock oracle 2026-06-23: git cat-file --size exits 129; zmin cat-file --size maps to -s` | Zmin-only long alias for `cat-file -s`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin cat-file` | `--exists` | stable | `manual stock oracle 2026-06-23: git cat-file --exists exits 129; zmin cat-file --exists maps to -e` | Zmin-only long alias for `cat-file -e`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin cat-file` | `--pretty` | stable | `manual stock oracle 2026-06-23: git cat-file --pretty exits 129; zmin cat-file --pretty maps to -p` | Zmin-only long alias for `cat-file -p`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin imap-send` | `--folder` | stable | `manual stock oracle 2026-06-23: git imap-send --folder exits 129; zmin imap-send --folder selects the target mailbox` | Zmin-only mailbox override; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin imap-send` | `--list` | stable | `manual stock oracle 2026-06-23: git imap-send --list exits 129; zmin imap-send --list lists mailboxes` | Zmin-only mailbox listing mode; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin imap-send` | `-f` | stable | `manual stock oracle 2026-06-23: git imap-send -f exits 129; zmin imap-send -f aliases --folder` | Zmin-only short mailbox override; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin credential-cache` | `--daemon-internal` | internal | `manual stock oracle 2026-06-23: git credential-cache --daemon-internal exits 129; zmin credential-cache --daemon-internal --socket <path> starts the private cache daemon helper` | Zmin-only internal daemon helper used by the credential-cache implementation; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
-| `zmin instaweb` | `--daemon-internal` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | Zmin-only internal daemon helper used to run the builtin `instaweb` server; upstream Git `2.47.1` rejects this option as unknown, so it stays outside the compatibility denominator |
-| `zmin instaweb` | `--git-dir` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | paired internal path option for the Zmin builtin `instaweb` daemon; upstream Git `2.47.1` only reaches an unknown-option failure on the preceding internal flag, so this stays outside the compatibility denominator |
-| `zmin instaweb` | `--work-tree` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | paired internal path option for the Zmin builtin `instaweb` daemon; stock Git `2.47.1` does not expose this internal surface, so it stays outside the compatibility denominator |
-
-## Zmin-Only Environment Controls
-
-| Variable | Status | Evidence | Notes |
-| --- | --- | --- | --- |
-| `ZMIN_GIT_HTTP_VERSION` | stable | `transport_impl::tests::remote_http_helper_version_arg_rejects_unsupported_values` | selects the Zmin HTTP remote-helper protocol preference; accepted values are `auto`, `http1`, `http2` and `http3`; invalid values are Zmin-only validation and do not count toward Git `2.47.1` compatibility |
-
-## Staged Hook Runner
-
-The staged hook runner is a Zmin-only extension and must not change standard
-Git hook semantics.
-
-Detailed command contract and acceptance rows live in
-`docs/cli/zmin_hooks_staged_runner.md` and
-`docs/cli/zmin_hooks_staged_runner_acceptance.tsv`.
-
-Current implemented user-facing API:
-
-```bash
-zmin hooks run pre-commit --staged --list
-zmin hooks run pre-commit --staged --ext rs,ts,js --list
-zmin hooks run pre-commit --staged --list -- src
-zmin hooks run pre-commit --staged --dry-run -- command ...
-zmin hooks run pre-commit --staged -- command ...
-zmin hooks run pre-commit --staged -- src -- command ...
-```
-
-Current selector contract:
-
-- read staged paths from the index, not from the working tree
-- list deleted paths distinctly while keeping the preview index-backed
-- preserve renamed paths using the staged destination path
-- return an empty successful preview when the index has no staged entries
-- support extension filters before list, dry-run, or execution output is rendered
-- support pathspec filters before list, dry-run, or execution output is rendered
-- pass only selected staged executable files to command mode
-- return the child exit code from command mode
-
-Verified wrapper requirements:
-
-- skip deleted paths by default during command execution, while still listing
-  them in preview output
-- work from a standard Git hook wrapper without breaking `.git/hooks/<hook>`
-- keep managed hooks optional; manual hooks must still work
-
-This staged runner remains separate from Git compatibility reporting because
-stock Git has no equivalent `git hooks run --staged` command.
+All 40 primary rows are stable. Together with the seven relationship-neutral
+rows, the contract therefore has 47 tracked contract rows. That number is
+neither 47 Git APIs nor a claim of arbitrary Git LFS ecosystem parity.
+`command.lfs` covers the implemented Git LFS v3.7.1-compatible command and
+transport slice, with local and HTTP Batch download/upload evidence in the
+machine contract.
+Configured mTLS/client identity remains an explicit transport exclusion and is
+rejected before network access; it is not an exclusion from the Git
+denominator. Custom transfer adapters and untracked Git LFS commands likewise
+remain outside the extension row.

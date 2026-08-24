@@ -1,6 +1,559 @@
 # Upstream Git Compatibility Baseline
 
-## Current v2.47.1 frontier (2026-07-16)
+## Authoritative current-Git contract
+
+The machine-readable scope contract is
+`tools/git-upstream-compat-contract.tsv`. This section is the canonical
+compatibility scope; other compatibility documents and older evidence notes
+must refer back to it instead of defining another denominator. Run
+`tools/git-upstream-compat-audit.sh contract-check` before changing the pinned
+source or scope files.
+The CI entrypoint is
+`tools/git-upstream-compat-contract-gate.sh prepare-and-check`; it verifies the
+remote tag's peeled commit, downloads and hashes the exact archive when the
+cache is absent, and then runs the local contract audit. It emits
+`compatibility_claim=unverified`: passing the scope gate is not compatibility
+evidence by itself. Suite outputs carry `run-metadata.tsv`; validate it with
+`tools/git-upstream-compat-contract-gate.sh validate-run` so bounded, custom,
+failed or exploratory runs cannot be treated as authoritative full evidence.
+The gate also compares an archive-derived source-tree digest with every
+archive-listed file in the cache, and its immutable CI sentinels reject drift
+of the v2.55.0 identity, `1045/1046` counts or exact exclusion groups.
+
+The frozen upstream identity is Git `v2.55.0`, commit
+`e9019fcafe0040228b8631c30f97ae1adb61bcdc`, from
+`https://github.com/git/git/archive/refs/tags/v2.55.0.tar.gz` with SHA-256
+`72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49`. The
+cache path is `~/.cache/zmin/git-upstream/git-v2.55.0`. A source archive is
+accepted for this contract only when its SHA-256 matches; a Git checkout must
+also resolve to the recorded commit. Other tags are exploratory evidence, not
+current-contract evidence.
+
+### Explicit HTTP comparator profiles
+
+`tools/git-upstream-http-provenance.sh` has two explicit profiles. The
+`canonical` profile is the base `bundle.tsv` schema containing `git`,
+`git-remote-http` and `git-http-backend`; it remains the default used by the
+current-Git suite. The `with-http-fetch-pinned` profile is a separate
+versioned schema (`manifest_version=3`) whose bundle name ends in
+`-with-http-fetch-pinned` and whose manifest records the archive-bound source
+manifest, declared tag/commit binding, exact build flags and toolchain hashes,
+source-member hashes, member modes/sizes/hashes and link dependencies. It
+builds `git-http-fetch` from the frozen v2.55.0 archive-derived source with
+the Darwin reproducibility profile (`SOURCE_DATE_EPOCH=0`, path remapping,
+`ZERO_AR_DATE=1` and `-Wl,-no_uuid,-headerpad_max_install_names`), then adds
+one fixed UUID and an ad hoc signature so Darwin dispatch remains readable.
+The trusted helper is mode `0555`, SHA-256
+`fc2e8b9e47cafb39140ca90f56fbc6cb09912c6d715feb020157733868f08b0e`, and its
+Mach-O dependencies are limited to the five recorded system paths.
+
+Profile selection is explicit: pass `canonical` or
+`with-http-fetch-pinned` as the validator's second argument (or set
+`ZMIN_HTTP_BUNDLE_PROFILE`). The pinned profile records the fixed trusted
+helper digest for reporting, but authorizes the published helper only by a
+fresh deterministic source/toolchain byte comparison and requires both the
+manifest helper field and fixed-tool hash to match that digest. It fails closed on
+`ZMIN_HTTP_PERL` and Perl module-injection variables, verifies that `git
+http-fetch -h` dispatches to the bundle-local helper, and rejects changed
+Mach-O UUID/load commands, injected or non-system dylibs, and tampered helpers
+even when the manifest and sidecar are rewritten. Run
+`tools/test-git-upstream-http-fetch-profile.sh` for two clean-build byte
+identity, dispatch, and tampered-helper regression checks; the base profile
+remains covered by `tools/test-git-upstream-http-provenance.sh`.
+
+The v3 `source_root` field is an absolute cache-local path and is intentionally
+not a cross-machine portability claim; a relocated cache must rewrite that
+field and its sidecar only after restoring the exact archive-derived source.
+Pinned validation authorizes the helper by byte-for-byte comparison with a
+fresh rebuild from that validated source and fixed `/usr/bin` toolchain, so a
+manifest or hash-command rewrite cannot authorize a different helper.
+
+The authoritative upstream manifest is `all-nondeprecated`: all `1046`
+top-level `tNNNN-*.sh` files in the frozen tree except the one whole-file
+deprecated group below. Its upstream-test denominator is therefore `1045`.
+In this repository, `100% of current Git v2.55.0` means 100% of the current Git
+v2.55.0 contract excluding deprecated/removed API, with every
+supported/nondeprecated behavior backed by the pinned upstream shell suite,
+stock-Git differential evidence, and applicable macOS, Linux and Windows
+platform evidence. Command dispatch, parser acceptance, a local census,
+written-row ratios or a green narrowed suite do not prove drop-in parity.
+
+Zmin-only APIs have a separate contract and evidence denominator in
+`docs/cli/zmin_extensions_inventory.md`; they are not silently added to the
+Git denominator. The machine source for that separate contract is
+`tools/zmin-extensions-contract.tsv`; the Markdown inventory is only its human
+projection. It contains 40 stable primary rows and 7 relationship-neutral
+rows. Together that is 47 tracked contract rows, not 47 Git APIs and not an
+arbitrary Git LFS ecosystem-parity claim. The `command.lfs` row's configured
+mTLS/client-identity exclusion fails before network access and belongs only to
+the extension transport scope; it does not alter the Git denominator.
+
+Any performance or RSS measurements later in this retained evidence document
+are historical and non-authoritative. They do not establish a universal speed
+or memory claim; use `docs/git/performance_evidence_contract.md` for the
+cross-platform evidence contract.
+
+## Release archive contract
+
+Every supported release-matrix archive contains the `zmin` executable, its
+sibling `zmin-git-remote-http` helper, and `ZMIN-MANIFEST.tsv` with the SHA-256
+of both binaries. `tools/release-package.py check` validates this manifest;
+the release workflow runs it for every archive and runs an extracted-package
+smart-HTTP HTTPS clone with an explicit local test CA, empty `PATH`, and no
+helper-path override. This is a packaging/install gate, not current-Git
+compatibility or cross-platform evidence.
+
+The exact exclusions and classifications are:
+
+| Group | Files | Classification | Current contract | Upstream evidence |
+| --- | ---: | --- | --- | --- |
+| `t5323-pack-redundant` | `1` | upstream deprecated/removed | excluded | `Documentation/git-pack-redundant.adoc:14-26`, `t/t5323-pack-redundant.sh:39-53` |
+| `git-svn` (`t91*`) | `69` | external-but-current | included | `Documentation/git-svn.adoc`, `command-list.txt:195`, `t/t91*` |
+| `git-cvsserver` (`t94*`) | `3` | external-but-current | included | `Documentation/git-cvsserver.adoc`, `command-list.txt:91-92`, `t/t94*` |
+| `gitweb` (`t95*`) | `3` | external-but-current | included | `Documentation/gitweb.adoc`, `command-list.txt:247`, `t/t95*` |
+| `cvsimport` (`t96*`) | `5` | external-but-current | included | `Documentation/git-cvsimport.adoc`, `command-list.txt:91-92`, `t/t96*` |
+| `git-p4` (`t9800`-`t9836`) | `37` | external-but-current | included | `Documentation/git-p4.adoc`, `command-list.txt:150`, `t/t9800`-`t9836` |
+
+The `full-core` manifest excludes the five current external groups only for a
+narrowed core developer-flow suite. It is not the current-Git denominator and
+must not be described as `100% current Git`. `t9850-shell.sh` is not a
+git-p4 test and remains in `full-core` and `all-nondeprecated`.
+
+## Historical macOS preflight checkpoint (2026-08-10; non-authoritative)
+
+This dated macOS checkpoint is retained as historical exploratory evidence.
+The current authoritative upstream and performance runner supports Linux only;
+Darwin and Windows fail closed before `make --version`. It cannot establish
+current compatibility or platform readiness. The canonical current contract
+and status are defined by the machine-readable scope plus
+[`docs/cli/compatibility_acceptance.md`](../cli/compatibility_acceptance.md)
+and [`performance_evidence_contract.md`](performance_evidence_contract.md).
+
+The W2a preflight used a clean `git archive HEAD` snapshot at commit
+`b7f48c2716273fff98a255ef36c4cbf62b390b01`, the exact v2.55.0 contract gate,
+and the `compat` Cargo profile. The host manifest is recorded at
+`/Users/dschewchenko/.cache/zmin/w2a-macos-v2.55.0-20260810.8n242w/preflight.txt`
+(SHA-256 `472c6ddf4864359fe4e8f3048f8a54097e98ca018548e21a55d593aee7610ba2`):
+macOS `26.5.2` arm64, Apple Git `2.50.1`, stable Rust `1.95.0`, Xcode
+`26.6`, and 37.8 GB free disk at preflight. The gate passed the pinned
+archive/source identity and `1045/1046` contract. The generated manifest has
+`1045` rows with test-name digest
+`b49ad3a4b94a93d77109da4060671ee5ba0fa92fd1b45885023bd5b358ed34a6` and
+file SHA-256
+`ba7f8c03b683eb984970c103f791e65a77c5664101ba8ca61d3c5d80ab4bafcb`.
+
+No authoritative suite result was produced: the clean `compat` binary build
+failed before the runner started (`cargo exit 101`, eight compile errors in
+`crates/zmin-cli/src/runtime/object.rs`, `E0425=2` and `E0277=6`). The compact
+failure record is
+`/Users/dschewchenko/.cache/zmin/w2a-macos-v2.55.0-20260810.8n242w/build-failure-summary.tsv`
+(SHA-256 `23e39575388490d13c0738767f139fb54df1e1eb0fcf6615841a92e7d5cd4d7b`);
+the raw build log remains local at the same artifact directory. This is a
+W3 product compile blocker, not a compatibility result. The status remains
+`compatibility_claim=unverified`; no macOS, Linux, or Windows coverage is
+implied, and no stock-Git control was run because no clean Zmin binary existed.
+
+## Historical macOS full-manifest checkpoint (2026-08-10; non-authoritative)
+
+The rerun used a clean `git archive HEAD` snapshot at commit
+`5a5685aadf15a9671da282a4a5b6f45600252a32`, Rust/Cargo `1.95.0`, the `compat`
+profile, macOS `26.5.2` arm64, Apple Git `2.50.1`, and Xcode `26.6`. The
+preflight record is
+`/Users/dschewchenko/.cache/zmin/w2a-macos-authoritative-20260810.XnYznV/preflight.txt`
+(SHA-256 `c9a96ce27754d98f1dfcd7b6f09574db08d76df4e85c08557fe3e58b15559d35`).
+The contract archive SHA is
+`72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49`, the
+manifest has `1045/1046` rows with full-file SHA-256
+`ba7f8c03b683eb984970c103f791e65a77c5664101ba8ca61d3c5d80ab4bafcb` and
+test-name digest
+`b49ad3a4b94a93d77109da4060671ee5ba0fa92fd1b45885023bd5b358ed34a6`.
+The exact built binary hashes are zmin
+`aa8aca4017c2c5f220eaf7c588eae1071e165aaa1b42ad8fc2d8e1062bc72b4b` and
+`zmin-git-remote-http`
+`2b950e8d900a6788d4bbf4daf5d068e902e9f74c1eee3391d251f0b49a11f93a`.
+
+The runner emitted all `1045` manifest rows, with `358 pass` and `687 fail`
+(`suite exit 1`). Its metadata is
+`/Users/dschewchenko/.cache/zmin/w2a-macos-authoritative-20260810.XnYznV/suite-out/run-metadata.tsv`
+(SHA-256 `6fe32fd29e7cc5e5f6b788da11a11f79da5d75d3a7db13f7cc446e65434d90c2`),
+and the summary is
+`/Users/dschewchenko/.cache/zmin/w2a-macos-authoritative-20260810.XnYznV/suite-out/summary.tsv`
+(SHA-256 `da9481178b749cb4a57f025a2aae01665555e892eab7abf4bc8550f3e9bf9fb0`).
+The contract check passed, but `validate-run` classified the result as
+`exploratory-or-incomplete`; `validate-run ... --require-authoritative`
+failed closed. Metadata therefore records
+`evidence_scope=authoritative-suite-incomplete` and
+`compatibility_claim=unverified`.
+
+The bounded local interruption record lists `t5532-fetch-proxy.sh`,
+`t5570-git-daemon.sh`, `t5700-protocol-v1.sh`,
+`t5702-protocol-v2.sh`, `t5731-protocol-v2-bundle-uri-git.sh`,
+`t5811-proto-disable-git.sh`, `t9300-fast-import.sh`, and
+`t9700-perl-git.sh`. Compact first-20-line classification found `677`
+ordinary product-failure rows, `8` interrupted product hangs, and `2`
+environment/upstream-marker rows (`t4109-apply-multifrag.sh` and
+`t7800-difftool.sh`), with `0` harness-failure rows. The largest failure
+families were `t40*`
+(`67`), `t55*` (`63`), `t41*` (`40`), `t34*` (`38`), `t64*` (`35`), and
+`t53*` (`33`). Stock-Git differential control and other platforms were not
+run; this checkpoint is not a 100% compatibility claim.
+
+## W3.1 local daemon readiness checkpoint (2026-08-10)
+
+W3.1 applied the smallest shared lifecycle fix: `zmin daemon --verbose` now
+emits the upstream-compatible `[numeric-pid] Ready to rumble` line after the
+listener and optional pidfile are ready. This unblocks the upstream daemon
+helper; it does not implement protocol negotiation, bundle-uri, protocol
+policy, or daemon-option semantics.
+
+The exact exploratory rerun used the frozen v2.55.0 source identity and a
+temporary five-row manifest. The requested
+`t5731-protocol-v2-hidden-refs-http.sh` name is absent from v2.55.0; the
+matching frozen-source test is `t5731-protocol-v2-bundle-uri-git.sh`. The
+manifest is `/Users/dschewchenko/.cache/zmin/w31-five.u9Wp2S/manifest.tsv`
+(raw-file SHA-256
+`b2ecb4168893cbc482d09d5ca4c3c62246b59580c9f63e6a7f43e04467d2808f`; the
+metadata test-name digest is
+`5c8eaaf52ef1738087c3a296a7ba895100888dde5527e9b3adcbe31d64e14454`), and
+the summary is
+`/Users/dschewchenko/.cache/zmin/w31-five.u9Wp2S/out/summary.tsv` (SHA-256
+`849e93022f9855fa9dd0b179f3acd4203da24505418efb6f5f905a3aa182825f`). The
+run metadata is
+`/Users/dschewchenko/.cache/zmin/w31-five.u9Wp2S/out/run-metadata.tsv` (SHA-256
+`8632fcd365270fdfee8e08374d7fa03a1227f20eeb6684c71698f845afa35174`). All
+five rows completed as product failures (`0 pass`, `5 fail`), with no target
+processes left behind. The run metadata remains exploratory and records
+`compatibility_claim=unverified`; the authoritative-required gate fails
+closed. Before this fix, all five target runs were interrupted on the
+readiness path; `t5570` also had independent option-validation failures. After
+it, all five reach their independent product failures.
+
+Remaining W3 slices are separate: remaining `t5570` daemon transport/access
+behavior, `t5700`/`t5702` daemon protocol-version dispatch,
+`t5731-protocol-v2-bundle-uri-git.sh` bundle-uri support, and `t5811`
+`GIT_ALLOW_PROTOCOL` policy.
+
+## W3.2 daemon option-validation checkpoint (2026-08-10)
+
+W3.2 preserved daemon numeric option values as raw strings and validates them
+once before daemon side effects. Against the pinned Git v2.55.0 `git-daemon`
+(SHA-256 `a0b82a7bdb62aa38b36ebccaa0d9e47341a37ea397d0d3c0843d1bef0f206cec`),
+`--timeout` and `--init-timeout` accept decimal `0..4294967295`; invalid or
+negative values exit `128` with Git's exact non-negative-integer fatal text.
+`--max-connections` accepts signed `-2147483648..2147483647`, including `-1`;
+invalid values exit `128` with Git's exact integer fatal text. Invalid runs
+create no pidfile and leave no daemon process.
+
+The compat zmin binary SHA-256 is
+`4c168b0288838da8f45da37e2b02625c5b9931a439ea28362786e1576a998699`, and the
+remote HTTP helper SHA-256 is
+`4bca16fd2da209e4ba21259bcb9339f5bb85e050835e401d3cefba56ab21f9fe`.
+Focused Rust validation and the W1 contract/audit guards passed. The
+exploratory one-test `t5570-git-daemon.sh` artifact is
+`/tmp/zmin-w32-t5570.R4Ydgn`; its manifest has one row, raw-file SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e`, and
+metadata test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+Metadata SHA-256 is
+`e66f6611a9a8e8b2c51502574a184afbc0f6a306f832d402b6fa50e89b52cec7` and
+summary SHA-256 is
+`39b6f2dd34e7d574afca1eb16473d66946c2311127217d7005464caad14ece59`.
+The official test reported `14/25` subtests passed and `11/25` failed:
+`6,7,8,10,14,19,20,21,22,23,25`. The run is exploratory, not authoritative;
+the authoritative-required gate failed closed, and no full current-Git or
+cross-platform claim is implied.
+
+## W3.3 t5570 informative daemon errors checkpoint (2026-08-10)
+
+W3.3 selected one shared root cause from the residual t5570 failures: the
+informative daemon remote-error protocol. Residual classification was:
+
+| IDs | Surface | Classification / next owner |
+| --- | --- | --- |
+| `6,7` | clone/fetch upload-pack data path | client transport; later slice |
+| `8` | verbose no-op fetch output | client transport; later slice |
+| `10` | HEAD/ref advertisement | daemon advertisement; later slice |
+| `14` | newline URL validation | daemon URL parser; later slice |
+| `19-22` | missing, disabled and unexported access errors | W3.3 selected root |
+| `23,25` | interpolated host/path access | daemon interpolation; later slice |
+
+The fix matches Git v2.55.0 `daemon_error`: informative mode emits exact
+`ERR no such repository`, `ERR service not enabled` and `ERR repository not
+exported` payloads, flushes before the stock inetd rc `255`, and maps daemon
+upload-pack/receive-pack errors to the stock client text `fatal: remote error:`.
+Unknown services retain the stock empty-packet behavior. Generic local, SSH and
+HTTP error parsers are unchanged.
+
+The final compat binary SHA-256 is
+`8a066cf5bde90641a4f9acf1bd4c80b05dbe7a8858dc529e7afc4a04ba76aa98`; the
+remote HTTP helper SHA-256 is
+`a079b1e6b9bfe5e757bd4be623dcd968c8a537cbd025fdf12a729ce64d8c9fda`.
+The full exploratory t5570 artifact is
+`/tmp/zmin-w33-t5570-reviewed.jYScdB`. Its one-row manifest raw SHA-256 is
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e`, its
+metadata test-name digest is
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`, the
+summary SHA-256 is
+`5ed36dc4a82ed18e267f84be290da769a915c71b5f3ce6da5b70edfc74128d1a`, and
+the run-metadata SHA-256 is
+`cffd3fa6c67d3441738bd116c4447b21440f012c125543fe285508ef4496f43f`.
+The exploratory run completed `17/25` subtests; target IDs `20,21,22` moved
+from fail to pass. Residual full-run failures are `6,7,8,10,14,19,23,25`.
+The remaining t19 failure is a separate clone-destination side effect: the
+earlier default error case leaves `nowhere/`, so the later clone stops before
+daemon access. A clean-prerequisite target replay at
+`/tmp/zmin-w33-t5570-targets.Mr3u4x` passed `4,5,19,20,21,22` (`6/6`);
+its summary SHA-256 is
+`2d0fc40db843b777b8bc1637763ca1e699d438e306bd920318b72558e5dbc079`, and
+its run-metadata SHA-256 is
+`7df011d70ae9a9357e65cd3db528b4738d87617d42e1ca2bd449c36bad1a7dc0`.
+Both runs are exploratory and `compatibility_claim=unverified`; no
+authoritative current-Git or cross-platform claim is made.
+
+W3.4 on 2026-08-10 fixed the t5570 clone-destination cascade. The git-daemon
+clone path now distinguishes a protocol flush from an early transport EOF and
+uses a scoped rollback guard through pre-checkout clone stages. An interrupted
+or failed new clone destination is removed; an existing non-empty destination
+and its user files remain untouched; a valid empty repository still retains
+its initialized destination. No daemon error mapping or cross-transport clone
+behavior changed.
+
+The focused stock/Zmin evidence passed the new-destination rollback,
+pre-existing-file preservation, pre-existing bare-destination preservation,
+separate-git-dir rollback, and valid-empty-repository cases, with no child
+daemon left running after teardown. The final full exploratory artifact is
+`/tmp/zmin-w34-final3.PCett9`; its one-row manifest uses the existing raw SHA
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e`, metadata
+test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`, summary
+SHA-256 `af0750bd2a00bbeb070ad9db2d31935f2bea0220c3fc4fe6e2b096fcad98a875`,
+run-metadata SHA-256
+`8ab22b4f819e5fefb1a65d280d24eb21e4ad0c80eee7fb7d4a1425ec70b6f4e7`, and log
+SHA-256 `fb5927f1bf8c5a4d9d0b2e34b7e5485b6f19ee6a33dbd9a6f7ddad2647927b64`.
+The run remains exploratory (`total=1`, `passed=0`, `failed=1` at the
+top-level file; `18/25` subtests pass) with residual IDs `6,7,8,10,14,23,25`.
+The compat zmin SHA-256 is
+`3168bf7f195018e56d73830fce6bb1d606b86139fcd086cfdc96b5623a891119` and the
+remote helper remains
+`a079b1e6b9bfe5e757bd4be623dcd968c8a537cbd025fdf12a729ce64d8c9fda`.
+`compatibility_claim=unverified`; this does not establish a current-Git or
+cross-platform claim.
+
+## W3.5 git-daemon client verbosity checkpoint (2026-08-10)
+
+W3.5 fixed one shared v0 git-daemon client gap for t5570 IDs 6, 7, and 8.
+The client now carries `-v` through clone, pull, and fetch discovery and emits
+the stock connection diagnostics: `Looking up ... done.` and `Connecting to
+... done.`. Stock and Zmin prerequisite-complete probes had matching clone
+objects, HEAD, refs, file state, and `ls-remote --symref` output; the prior
+difference was the missing stderr diagnostics. No daemon option, readiness,
+error, cleanup, protocol-v1/v2, bundle, proxy, or API behavior was changed.
+
+Pinned stock Git v2.55.0 control passed all 25 t5570 subtests. The exploratory
+stock artifact is `/tmp/zmin-w35-stock-final.mnBgc8`; its summary SHA-256 is
+`8f25da5ea18088969b0697dc52d9c39416db83938c0aa841508a08c1ebe1f703`,
+run-metadata SHA-256 is
+`3e9d5cbb1216cfbffbc6d49da5c5a0dec778638cdb6bc70341c2fd3fee96ba34`, and
+log SHA-256 is
+`f933c7a00696fd581e6ae0bbf9fc4b2e7d5a81636d4b98b137fec7c8da466f91`.
+
+The final Zmin exploratory artifact is `/tmp/zmin-w35-zmin-final3.nodLvd`.
+Its one-row manifest is the reviewed t5570 manifest with raw SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e`, and
+metadata test-name digest `feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+The summary SHA-256 is
+`0d24e60b8454b95d4a4f6d05f945606a48c807ee068e989fde53874f3660a85b`,
+run-metadata SHA-256 is
+`eb12a8b32a3257166e5462e265a6371079e5c6859d5bc135179b12a8649581be`, and
+log SHA-256 is
+`8cc775c40a507a34ef11447c99a471753ce54555ecf3bbe15a01680220f3a0a6`.
+The run is exploratory and unverified (`total=1`, `passed=0`, `failed=1` at
+the top-level file); 21/25 t5570 subtests pass. IDs 6, 7, and 8 moved from
+fail to pass. Residual IDs are 10, 14, 23, and 25. ID 10 remains the separate
+network `remote set-head -a` ownership gap; IDs 14, 23, and 25 are unchanged.
+
+The final compat zmin SHA-256 is `25b07f9eddcf140f16fc6d17e42bf9a7b74734bf3c70fbddde365ebd5fc782e3`;
+the remote helper SHA-256 is
+`a079b1e6b9bfe5e757bd4be623dcd968c8a537cbd025fdf12a729ce64d8c9fda`.
+The W3.5 verbose-propagation correction is committed in `61f0d9c5` and was
+built as compat zmin SHA-256
+`ad90e13b16dab1d72fe9658187dc780fae1d01ca4cd3b7e05884701850f59bad`; it
+passed focused multi-refspec `fetch -v` and `pull --all -v` stock/Zmin
+differentials. The exploratory artifact above remains bound to the earlier
+binary and is not expanded into a new full-suite claim here.
+The pinned stock client and daemon used for differential control have SHA-256
+`0c58c409a1689b9668c39f6d5f6db7a566f9772c8dbfa8c4e4ec297f7541fc0e` and
+`36c57ddf35d3602a4901355b6075876d1a21b0f1769594000437822a5b973328`.
+This checkpoint does not establish a current-Git, 100% compatibility, or
+cross-platform claim.
+
+## W3.6 git-daemon remote set-head checkpoint (2026-08-10)
+
+W3.6 fixed t5570 ID 10 for the canonical upstream option order
+`remote set-head -d origin` followed by `remote set-head -a origin`. The
+schema now parses the typed options before the remote name, and the command
+uses the existing git-daemon advertisement parser to read `symref=HEAD`.
+After deleting the local remote HEAD, stock and Zmin both returned rc 0 with
+empty stderr, printed `'origin/HEAD' is now created and points to 'main'`,
+and wrote `refs/remotes/origin/HEAD -> refs/remotes/origin/main`.
+
+The final bounded exploratory t5570 run used the reviewed one-row manifest
+with raw SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e` and
+test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+Its local artifact is `/tmp/zmin-w36-final.kCB6Hp`; summary SHA-256 is
+`37441c8340db7853efbb9c552ec64e3c22d2e1d07356a333af967afc5c54aa66`,
+run-metadata SHA-256 is
+`19bbce7df4b89d1603411df1a1d67e470ad4b1534a0836926d4ba2e37bde42f7`, and
+log SHA-256 is
+`dbdd5ffe1a21958775f55dfb5bcffa82311cca46afe0fb633d9d5218b4009246`.
+The compat zmin binary was SHA-256
+`16f673e6a3042a2839bb9101664f6862be7dd8c3547b22147f2548f910ad2c85` on
+Darwin 25.5.0 arm64 with Rust 1.95.0. The top-level metadata is
+`total=1`, `passed=0`, `failed=1` because the run is bound to one manifest
+row; the t5570 subtest log is 22/25, with only IDs 14, 23, and 25 failing.
+The gate classifies the evidence as exploratory and `compatibility_claim` as
+`unverified`; the authoritative-required gate fails closed. This checkpoint
+does not establish a current-Git, 100% compatibility, performance, or
+cross-platform claim. IDs 14, 23, and 25 remain the next bounded slices.
+
+## W3.7 git-daemon newline URL validation checkpoint (2026-08-10)
+
+W3.7 fixed t5570 ID 14. The pinned Git v2.55.0 source rejects a newline in the
+parsed git:// host or repository path before opening the client connection, with
+rc 128, empty stdout, and `fatal: newline is forbidden in git:// hosts and repo
+paths`. The smallest stock-vs-Zmin probe used
+`git://127.0.0.1:<port>/repo\n.git`: stock and Zmin now match rc 128, empty
+stdout, the exact fatal line, no destination directory, and no TCP connection.
+The typed `ParsedDaemonUrl` boundary performs this validation before request
+serialization or transport side effects. The focused parser and integration
+tests also cover newline-in-host and newline-in-path inputs.
+
+The final bounded exploratory t5570 run used the reviewed one-row manifest with
+raw SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e` and
+test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+Its local artifact is `/tmp/zmin-w37-final.wDopcP`; summary SHA-256 is
+`89d97a7200b7297e8ccb0fb8bed298b3488a22d1196e37dc4ed0862d4880b658`,
+run-metadata SHA-256 is
+`743f671f45c9a17ae85fadb3d4f549ba85651f581acb0a8b13c35a0aa2c997da` and
+log SHA-256 is
+`9ac2a0573f8c95f78ad381dadddab43676f044aeab42d33447801083cd8828f8`.
+The compat zmin binary was SHA-256
+`fc1505554e4bd852b7e44405c4c76e586a6d21dd4e116e8e50873eec0fe43db9` on
+Darwin 25.5.0 arm64 with Rust 1.95.0. The top-level metadata is `total=1`,
+`passed=0`, `failed=1` because the run is bound to one manifest row; the t5570
+subtest log passed 23/25, with only IDs 23 and 25 failing. The pinned contract
+identity is Git v2.55.0 commit
+`e9019fcafe0040228b8631c30f97ae1adb61bcdc` and archive SHA-256
+`72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49`.
+The gate classifies this evidence as exploratory and `compatibility_claim` as
+`unverified`; the authoritative-required gate fails closed. This checkpoint
+does not establish a current-Git, 100% compatibility, performance, or
+cross-platform claim. IDs 23 and 25 remain explicit residuals.
+
+## W3.8 git-daemon interpolated-path checkpoint (2026-08-10)
+
+W3.8 diagnosed t5570 IDs 23 and 25 as two layers of the same upstream feature,
+but not one identical code defect. Both hit `--interpolated-path=<root>/%H%D`.
+The Zmin daemon previously rejected every request when this option was present.
+The raw ID 25 probe therefore returned `ERR access denied or repository not
+exported: /interp.git`, while pinned stock Git expanded `host=localhost` and
+`/interp.git` to `<root>/localhost/interp.git` and advertised `refs/heads/main`.
+The ID 23 client probe additionally showed that Zmin does not yet honor the
+client-side `GIT_OVERRIDE_VIRTUAL_HOST` environment variable: Zmin sends the
+connection host instead of the overridden virtual host. That client-only gap
+is left explicit for the next bounded slice.
+
+The W3.8 fix is server-side only. Daemon request parsing now applies Git's
+host split, separator sanitization, and lower-case canonicalization for `%H`,
+including bracketed IPv6 and ports. It expands the upstream `%H` and `%D`
+placeholders, requires a safe absolute expanded path, checks the resolved
+expanded path against export directories, and rejects dot, empty, and
+parent-directory components. Missing interpolated targets return the stock
+access-denied packet without an extra LF and the stock protocol-failure status.
+Focused stock/Zmin inetd tests cover canonicalized hosts, path traversal,
+allowlist ordering, missing-target packet bytes, and prior daemon behavior.
+Existing daemon error, newline, remote-head, verbose, and cleanup tests remain
+green.
+
+The follow-up security correction makes strict export-directory matching exact,
+while non-strict matching permits descendants as in Git. Resolver rejection and
+missing-repository failures now use one typed error path: informative errors say
+`no such repository`, unexported repositories say `repository not exported`,
+and non-informative errors use the generic access-denied text. All of these
+paths flush the packet without an LF and return the daemon protocol-failure
+status. Raw requests without extended arguments are covered with active
+interpolated-path rejection and base-path strict-allowlist success
+differentials; allowlist checks now always use the resolved base/interpolated
+target rather than the raw request string.
+
+The final bounded exploratory t5570 run used the reviewed one-row manifest with
+raw SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e` and
+test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+Its latest local artifact is `/tmp/zmin-w38-final7.anVj8G`; summary SHA-256 is
+`d131f6aa6a494ebfc7a8a85cadeaafbfda27ea0e3f5b2e1d8f6bef52cb58612a`,
+run-metadata SHA-256 is
+`f0cad444ce07ec9b2c0a526be2453e5f5e867b1e734fcff10323093cf2558cfe`, and
+log SHA-256 is
+`6526207120ab9f036fd17047d98594226f3ef399d3558f4f1e7d88028e05ad5a`.
+The compat zmin binary was SHA-256
+`bdb1576636581da3defc78b03019a447ca5b051fce556d801f9f6ae0c4712d3f` on
+Darwin 25.5.0 arm64 with Rust 1.95.0. The top-level metadata is `total=1`,
+`passed=0`, `failed=1` because the run is bound to one manifest row; the t5570
+subtest log passed 24/25, with only ID 23 failing. The run metadata binds the
+evidence to Git v2.55.0 commit
+`e9019fcafe0040228b8631c30f97ae1adb61bcdc`, archive SHA-256
+`72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49`, and the
+same one-row manifest digest above.
+The gate classifies this evidence as exploratory and `compatibility_claim` as
+`unverified`; the authoritative-required gate fails closed. This checkpoint
+does not establish a current-Git, 100% compatibility, performance, or
+cross-platform claim. ID 23 remains the explicit client-override residual.
+
+## W3.9 git-daemon virtual-host override checkpoint (2026-08-11)
+
+W3.9 fixed t5570 ID 23's client-side `GIT_OVERRIDE_VIRTUAL_HOST` propagation.
+Pinned Git v2.55.0 reads this variable for git:// upload-pack connections and
+uses its exact value as the extended `host=` field. The override replaces the
+URL host and URL port in that field, while the URL host and port remain the TCP
+connection target. The shared daemon request writer covers clone, fetch,
+ls-remote, and receive-pack paths; unset variables retain the existing URL
+host/port behavior, and newline validation applies to the override as well.
+
+Focused stock/Zmin coverage passed for exact request bytes, URL-port
+precedence, the interpolated-host `ls-remote` differential, Unix raw
+non-UTF-8 override bytes, raw-LF rejection, and existing clone/fetch/daemon
+preservation tests. On Unix, the override is read with `var_os` and carried as
+raw bytes; empty and unset values retain their distinct Git semantics. The
+final bounded exploratory run used the reviewed one-row manifest with raw
+SHA-256
+`1bada99f2762eee2e535f8e13a75b68f29a353d412a525e8ebaf8a5a270e751e` and
+test-name digest
+`feb1233e5ae8118e3a6cb09bfeeec85751d7e1531ebc9efd9c2576a95638a507`.
+Its local artifact is `/tmp/zmin-w39-final9.xQdp1W`; summary SHA-256 is
+`21dae5f3ff3f297d6ec0f3356a048f7c46c48c6437f26caddaf209d0981e92d5`,
+run-metadata SHA-256 is
+`c2667bef82421e7a4baaa3d8d2f743e4bad1b24b261773fcfa5dad1929124037`, and
+log SHA-256 is
+`f933c7a00696fd581e6ae0bbf9fc4b2e7d5a81636d4b98b137fec7c8da466f91`.
+The compat zmin binary was SHA-256
+`e22da54592db9cee3d3b059b75fbbe36bfb6092b536fc487347d48823f886feb` on
+Darwin 25.5.0 arm64 with Rust 1.95.0. The one-row top-level run passed 1/1,
+and the t5570 log passed 25/25. This is full-file t5570 evidence only: the W1
+gate still classifies it as exploratory because the manifest contains one row,
+so it does not establish global 1045-test parity, performance, or
+cross-platform compatibility.
+
+## Historical v2.47.1 and targeted evidence
+
+The evidence below records earlier v2.47.1 frontier work and targeted
+v2.55.0 probes. It is not the current-Git scope contract above. When a date,
+tag or count differs, the contract and generated audit are authoritative.
 
 A fresh integrated `all-nondeprecated` run with offset `0` and limit `50`
 passed `50/50` files against pinned Git `v2.47.1`. The previously failing
@@ -61,8 +614,8 @@ cache-tree safety, alternate shared-index lookup, and `GIT_TEST_SPLIT_INDEX`.
 
 Date: 2026-06-18
 
-This document tracks compatibility against selected upstream Git test-suite files.
-It is intentionally stricter than the local command inventory and smoke tests:
+This document tracks compatibility against upstream Git test-suite files. It
+is intentionally stricter than the local command inventory and smoke tests:
 command presence is not counted as behavior parity.
 
 ## Upstream strategy
@@ -71,7 +624,8 @@ Do not vendor-copy the upstream `t/` suite into this repository.
 
 Use the pinned upstream source in the local cache as the single source of truth:
 
-- pinned source: `~/.cache/zmin/git-upstream/git-v2.54.0`
+- pinned source: `~/.cache/zmin/git-upstream/git-v2.55.0`
+- machine-readable contract: `tools/git-upstream-compat-contract.tsv`
 - default core allowlist:
   `tools/git-upstream-compat-tests-core.txt`
 - generated full-core manifest:
@@ -88,6 +642,8 @@ Use the pinned upstream source in the local cache as the single source of truth:
   `tools/git-upstream-sync.sh refresh-all`
 - upstream scope audit:
   `tools/git-upstream-compat-audit.sh legacy-audit`
+- frozen contract check:
+  `tools/git-upstream-compat-audit.sh contract-check`
 - deprecated-surface audit:
   `tools/git-upstream-deprecated-audit.sh audit`
 - explicit legacy/external family excludes:
@@ -95,27 +651,21 @@ Use the pinned upstream source in the local cache as the single source of truth:
 - optional per-file excludes:
   `tools/git-upstream-compat-tests-file-excludes.tsv`
 
-The current cached upstream `t/` tree contains `1042` top-level `tNNNN-*.sh`
-shell test files. The core replace-git track intentionally excludes `119`
-legacy, deprecated or external bridge files and keeps `923` upstream shell
-files in scope for the generated full-core suite. The current explicit
-excludes are:
+The frozen cached upstream `t/` tree contains `1046` top-level `tNNNN-*.sh`
+shell test files. `all-nondeprecated` keeps `1045` of them in the current-Git
+denominator. `full-core` keeps `928` files after excluding `118` files from
+the narrowed core-only list: the one upstream deprecated group and the five
+external-but-current groups. Those external groups remain in
+`all-nondeprecated`; they are not deprecated and are not removed from the
+current-Git claim.
 
-- `t5323` `pack-redundant`: `1`
-- `t91xx` `git-svn`: `69`
-- `t94xx` `git-cvsserver`: `3`
-- `t95xx` `gitweb`: `3`
-- `t96xx` `cvsimport`: `5`
-- `t98xx` `git-p4`: `38`
-
-These are excluded from the core developer-flow parity track because they are
-external integration families rather than the classic local/transport/history/
-index workflows required for replacing stock Git in common developer use.
-
-The deprecated-surface audit currently shows `19` top-level upstream shell
-files with explicit deprecated/removal markers. Only `1` of them is currently
-fully excluded from full-core (`t5323-pack-redundant.sh` via the explicit
-legacy-exclude manifest). The other `18` remain in scope because they are
+The deprecated-surface audit currently shows `14` top-level upstream shell
+files with explicit deprecated/removal markers and `13` files with the
+distinct `WITH_BREAKING_CHANGES` marker; their union is `20`. The latter is a
+breaking-change prerequisite, not deprecated/removed evidence. Only `1` of the
+deprecated-marker files is currently fully excluded from full-core
+(`t5323-pack-redundant.sh` via the explicit legacy-exclude manifest). The
+other `13` deprecated-marker files remain in scope because they are
 still-supported upstream shell suites with mixed deprecated assertions inside
 live commands and repository flows, for example:
 
@@ -129,9 +679,10 @@ live commands and repository flows, for example:
 
 This distinction is non-negotiable: do not treat every upstream
 "deprecated"/"scheduled for removal" mention as justification for removing the
-whole shell test from full-core. For the Git `2.47.1` baseline, mixed
-deprecated assertions inside still-present commands remain part of practical
-replace-git compatibility.
+whole shell test from the current denominator, and do not treat
+`WITH_BREAKING_CHANGES` as deprecated evidence. Mixed deprecated assertions or
+breaking-change prerequisite markers inside still-present commands remain in
+`all-nondeprecated`.
 
 If a local copied subset is needed for triage or suite consolidation, export
 only the selected subtree from the cache instead of vendoring upstream `t/`
@@ -145,10 +696,10 @@ tools/git-upstream-compat-materialize.sh fully-excluded-deprecated /tmp/zmin-ups
 tools/git-upstream-sync.sh refresh-all
 ```
 
-The default local sync copies the current `1041` nondeprecated top-level
-upstream shell tests into `.upstream-snapshots/git-v2.54.0/nondeprecated`,
+The default local sync copies the current `1045` nondeprecated top-level
+upstream shell tests into `.upstream-snapshots/git-v2.55.0/nondeprecated`,
 while the explicit whole-file deprecated surface remains isolated under
-`.upstream-snapshots/git-v2.54.0/deprecated-only`.
+`.upstream-snapshots/git-v2.55.0/deprecated-only`.
 
 Use `tools/git-compat-test-topology.sh audit` to keep the local Rust compat
 layer honest relative to this upstream scope. The policy is:
@@ -178,17 +729,22 @@ full-core suite from silently dropping still-relevant Git surfaces such as
 completion, or `git web--browse` just because they live near the external
 bridge families in the upstream numbering scheme.
 
-## Current core-suite status
+## Historical macOS core-suite checkpoint (2026-07-02; non-authoritative)
 
-As of 2026-07-02 on macOS, the new default core allowlist has current direct
+The dated macOS direct/debug/oracle results below are historical exploratory
+evidence. They cannot establish current compatibility or platform readiness;
+the current authoritative runner is Linux-only and Darwin/Windows fail closed
+before `make --version`. Refer to the canonical current contract and status
+above and to [`performance_evidence_contract.md`](performance_evidence_contract.md).
+
+As of 2026-07-02 on macOS, the new default core allowlist had direct exploratory
 evidence for:
 
 - `quick`: green at `3/3`
 - `standard`: green at `9/9`
 
-The first broad `all-nondeprecated` macOS batch now also has fresh current
-evidence through the file-level manifest batching path on the current `debug`
-binary:
+The first broad `all-nondeprecated` macOS batch also had dated evidence through
+the file-level manifest batching path on that `debug` binary:
 
 - batch command:
   `ZMIN_BIN=/Users/dschewchenko/.cache/skron-git/cargo-target/debug/zmin ZMIN_UPSTREAM_ALLOW_FAILURES=1 ZMIN_UPSTREAM_MANIFEST_OFFSET=0 ZMIN_UPSTREAM_MANIFEST_LIMIT=50 tools/git-upstream-compat-suite.sh all-nondeprecated`
@@ -198,15 +754,15 @@ binary:
   `50/50` pass, `0/50` fail
 
 Do not treat the older `23/50` and `38/50` manifests for this first
-`all-nondeprecated` slice as the current frontier anymore. They remain useful
-only as historical progression evidence. The entire earliest `0..49`
-top-level file slice is now closed on the current local macOS oracle,
+`all-nondeprecated` slice as the active frontier. They remain useful only as
+historical progression evidence. The entire earliest `0..49` top-level file
+slice was reported closed by that historical local macOS oracle,
 including the previously noisy help/alias/path/config and CRLF/conversion
 families in that batch.
 
 This latest `50/50` rerun still includes one important
 compatibility-accounting rule in the upstream suite wrapper itself.
-`t0050-filesystem.sh` does not count as a product failure when the log shows
+`t0050-filesystem.sh` did not count as a product failure when the log showed
 that every real assertion passed and the shell exits non-zero only because
 upstream `TODO known breakage` markers vanished. The focused evidence for that
 accounting rule is:
@@ -230,7 +786,7 @@ Focused replay evidence now also closes the previous-checkout syntax suite:
 - `t0101-at-syntax.sh`: green at `1/1` in
   `/tmp/zmin-upstream-t0101-focused.015rWC/summary.tsv`
 
-That replay covers stock-compatible `@{-n}` handling across branch deletion,
+That dated replay covered stock-compatible `@{-n}` handling across branch deletion,
 merge target resolution, ancestor shorthand such as `@{-1}~1`, and reflog
 rendering (`log -g @{-1}`) on the current `compat` binary.
 
@@ -239,7 +795,7 @@ revision arguments, including `@{now}`, absolute historical dates such as
 `@{2001-09-17}`, and stock-compatible noisy-token forms like
 `@{3.hot.dogs.on.2001-09-17}`.
 
-The latest focused `t0000-basic.sh` rerun on the current debug binary is now
+The dated focused `t0000-basic.sh` rerun on that debug binary was
 green at `1/1`:
 
 - summary:
@@ -273,7 +829,7 @@ known-breakage lane:
   `text` attribute precedence so `core.autocrlf=true` overrides `core.eol=lf`
   like stock Git.
 
-The remaining gettext lane is now also closed on the current `compat` binary:
+The remaining gettext lane was also reported closed on that dated `compat` binary:
 
 - `t0203-gettext-setlocale-sanity.sh`: green at `1/1` in
   `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0203-check2.IooOPZ/summary.tsv`
@@ -283,9 +839,14 @@ non-UTF-8 `GIT_AUTHOR_NAME` / `GIT_COMMITTER_NAME` values sourced by the
 upstream ISO-8859-1 fixture are no longer dropped by UTF-8-only env decoding
 before commit creation.
 
-## Current second-batch frontier
+## Historical macOS second-batch checkpoint (2026-07-02; non-authoritative)
 
-After the gettext and shell-helper fixes, a fresh partial rerun of the next
+This dated macOS frontier is historical exploratory evidence only and cannot
+establish current compatibility or platform readiness. The current
+authoritative runner is Linux-only; Darwin and Windows fail closed before
+`make --version`.
+
+After the gettext and shell-helper fixes, a dated partial rerun of the next
 `all-nondeprecated` batch (`offset=50 limit=50`) produced the following
 incremental summary before the run was interrupted during the second half of
 the manifest:
@@ -293,14 +854,14 @@ the manifest:
 - partial summary:
   `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-all-batch2-refresh.K54oS6/summary.tsv`
 
-The currently observed pass/fail split in that older partial summary was:
+The observed pass/fail split in that historical partial summary was:
 
 - pass: `t0092`, `t0095`, `t0100`, `t0101`, `t0200`, `t0201`, `t0202`,
   `t0203`, `t0204`, `t0300`, `t0303`, `t0500`
 - fail: `t0091`, `t0210`, `t0211`, `t0212`, `t0213`, `t0301`, `t0302`,
   `t0410`, `t0411`, `t0450`, `t0600`, `t0601`, `t0602`
 
-This establishes the next real broad upstream frontier after the gettext
+This established the next historical broad upstream frontier after the gettext
 cluster:
 
 - `t0091-bugreport.sh`: report template, system info section, duplicate-file
@@ -326,7 +887,7 @@ Focused replay evidence now also closes the bugreport shell suite:
 - `t0091-bugreport.sh`: green at `1/1` in
   `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-t0091-check5.qLx6XE/summary.tsv`
 
-The current pinned-v2.55.0 `t0450-txt-doc-vs-help.sh` replay (2026-07-17)
+Dated pinned-v2.55.0 `t0450-txt-doc-vs-help.sh` replay (2026-07-17)
 reports `20` failures among `815` non-expected assertions. Those failures are
 not one shared help renderer defect: the v2.55 documentation adds or changes
 usage forms for commands that Zmin deliberately exposes at the supported
@@ -342,14 +903,20 @@ branches at the same commit, the selected-index-bit behavior of
 `checkout-index --ignore-skip-worktree-bits`, and local promisor backfill for
 the partial-clone lazy-fetch case.
 
-## Trace2 oracle status
+## Historical Trace2 oracle status (non-authoritative)
+
+The macOS oracle/debug results in this section are dated exploratory evidence.
+They cannot establish current compatibility or platform readiness. The current
+authoritative runner is Linux-only; Darwin and Windows fail closed before
+`make --version`. Refer to the canonical current contract and status above and
+to [`performance_evidence_contract.md`](performance_evidence_contract.md).
 
 Focused trace2 reruns showed that the earlier red signal for this family was
 contaminated by harness state rather than only by product behavior. Two
 separate harness issues existed:
 
 - the upstream `t/helper/test-tool` helper was built from the pinned
-  `v2.54.0` tree, while `ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1` previously used the
+  older `v2.54.0` tree, while `ZMIN_UPSTREAM_STOCK_GIT_CONTROL=1` previously used the
   ambient `git` from `PATH`, which was a different version on this machine
 - the non-Windows `t/helper/test-tool` trace2 wrapper could remain pinned to a
   stale `zmin` artifact path from an older run, so later upstream replays
@@ -361,7 +928,7 @@ to the same source tree. It also rewrites the non-Windows trace2
 `t/helper/test-tool` shim on every prepare step so focused and broad reruns
 always target the current `ZMIN_BIN`.
 
-Direct evidence after those fixes:
+Historical direct evidence after those fixes:
 
 - `t0210-trace2-normal.sh`: stock-control green at `1/1` in
   `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-trace2-stock-fixed.h7qELI/out/summary.tsv`
@@ -377,15 +944,15 @@ This means:
 - the later broad `offset=50 limit=50` failures for `t0210` to `t0213` were
   also not valid product evidence once the stale helper wrapper path was
   identified;
-- the current `trace2` frontier must be split into:
+- the historical `trace2` frontier must be split into:
   a valid oracle/harness lane and a product-implementation lane;
 - `zmin` still does not have enough built-in trace2 behavior to claim parity,
   but the oracle for the base normal stream is now trustworthy again.
 
-Focused product-side progress after the oracle fix:
+Dated focused product-side progress after the oracle fix:
 
 - `cargo test -q -p zmin-cli --test git_trace2_compat -- --nocapture`
-  is now green at `5/5` for the currently implemented built-in surface:
+  was green at `5/5` for the then-implemented built-in surface:
   normal/perf lifecycle emission for `zmin version`, config-driven target
   resolution, config/env `def_param` emission, and default credential redaction
   with `GIT_TRACE2_REDACT=0` opt-out, plus unredacted `clone` start/`def_param`
@@ -397,7 +964,7 @@ Focused product-side progress after the oracle fix:
   and global-config helper lanes) rather than only by ordinary Git command
   execution through the `zmin` CLI.
 
-Latest focused replay after routing upstream `test-tool trace2` helper lanes
+Dated focused replay after routing upstream `test-tool trace2` helper lanes
 through Zmin's built-in `git test-tool trace2` implementation:
 
 - `t0210-trace2-normal.sh`: green at `1/1` in
@@ -705,9 +1272,9 @@ runner also now has first-class large-batch modes for the broader upstream
 surface:
 
 - `all-nondeprecated`: every top-level upstream shell test except the explicit
-  whole-file deprecated excludes; current count `1041`
+  whole-file deprecated excludes; current count `1045`
 - `all-top-level`: the complete pinned top-level upstream shell suite; current
-  count `1042`
+  count `1046`
 
 That means future upstream work can run the supported core surface, the
 all-minus-whole-file-deprecated surface, or the literal full top-level shell
@@ -1004,19 +1571,25 @@ bounded cleanup again returned `tasks=0`, `procs=0`, `roots=0`, and
 `temp_roots=0`. The earlier contended `quick` smoke selected zero tests because
 that test list is marked for `exhaustive` mode only.
 
-## Current measured baseline
+## Historical measured baseline (dated snapshots; non-authoritative)
 
-Last full selected macOS `standard` run:
+The macOS and Windows/Git-for-Windows selected and exhaustive runs below are
+dated historical snapshots, not current authoritative readiness evidence. The
+current authoritative runner is Linux-only; Darwin and Windows fail closed
+before `make --version`. These records cannot establish current platform
+readiness; see [`performance_evidence_contract.md`](performance_evidence_contract.md).
+
+Dated full selected macOS `standard` run:
 `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.wIhuNm/summary.tsv`
 
-Last full selected Windows/Git-for-Windows `standard` run:
+Dated full selected Windows/Git-for-Windows `standard` run:
 `C:\Users\zmin\zmin-upstream-20260615T043109Z-18392-out\summary.tsv`
 
-Latest expanded macOS `exhaustive` supported-surface run with unsupported
+Dated expanded macOS `exhaustive` supported-surface run with unsupported
 reftable assertions skipped:
 `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T//zmin-upstream-compat.SUcvtW/summary.tsv`
 
-Latest expanded Windows/Git-for-Windows `exhaustive` supported-surface run with
+Dated expanded Windows/Git-for-Windows `exhaustive` supported-surface run with
 unsupported reftable assertions skipped:
 `C:\Users\skron\zmin-upstream-20260618T210215Z-22587-out\summary.tsv`
 
@@ -1769,15 +2342,24 @@ The previous selected `standard` blockers in `t3200-branch.sh` and
 Windows-sensitive racy index/staging path where same-size rapid rewrites could
 be skipped after reset/stash when the file metadata matched.
 
-## What is covered now
+## Historical macOS/Windows evidence retained for context
 
-- macOS and Windows/Git-for-Windows can run the same upstream compatibility
-  harness locally.
-- The quick suite is green on both platforms.
-- The selected standard suite is green on both platforms.
-- The expanded supported-surface suite is green on both platforms:
-  `15/15` selected files on macOS and `15/15` selected files on
-  Windows/Git-for-Windows with reftable assertions skipped as unsupported.
+The macOS and Windows/Git-for-Windows results in this section are historical
+exploratory evidence produced before the current descriptor-bound authoritative
+runner was sealed. They do not establish current-Git readiness or current
+authoritative platform coverage. The current authoritative upstream and
+performance runner supports Linux only; Darwin and Windows fail closed before
+`make --version`, as specified by the
+[`performance_evidence_contract.md`](performance_evidence_contract.md).
+
+- Historical macOS and Windows/Git-for-Windows runs could execute the earlier
+  upstream compatibility harness locally.
+- Historical quick and selected standard suites were green on both platforms.
+- Historical expanded supported-surface evidence reported `15/15` selected
+  files on macOS and `15/15` selected files on Windows/Git-for-Windows, with
+  reftable assertions skipped as unsupported. This is retained as exploratory
+  evidence only; it is not a current Windows readiness claim.
+
 - Native Windows extended smoke covers build, status/diff/log/rev-list/ls-tree,
   local clone/fetch/push/pull, provider remote smoke, and a real repository
   mutation workflow.
@@ -1849,9 +2431,10 @@ Current broader burn-down status as of 2026-06-18:
   `raw_missing_upstream_commands_including_help=0`; and
   `cargo test -p zmin-cli --test compatibility_command -- --nocapture` passed
   `4/4`.
-- Behavior parity is green only for the selected supported upstream surface:
-  current expanded `exhaustive` runs are `16/16` selected files on macOS and
-  Windows/Git-for-Windows with unsupported reftable assertions skipped.
+- Historical exploratory behavior evidence was green only for the selected
+  supported upstream surface: expanded runs reported `16/16` selected files on
+  macOS and Windows/Git-for-Windows with unsupported reftable assertions
+  skipped. This does not override the current Linux-only authoritative runner.
 - Additive Zmin CLI surface is not counted as upstream parity, but its
   canonical `.git` behavior is currently covered by focused macOS and Windows
   tests for managed hooks, CMS porcelain, local/remote `clone --instant`,
@@ -1865,10 +2448,11 @@ Current broader burn-down status as of 2026-06-18:
   in git-in-PATH replacement, IDE/client command shapes, and test-only
   confinement of audited stock-Git runtime patterns, but they do not upgrade
   the project to full Git parity on their own.
-- Performance gates are collected and correctness-clean on macOS and Windows
-  with real Gitoxide where comparable. They do not close all optimization work;
-  the remaining measured gaps are tracked in
-  `docs/cli/performance_benchmark_2026-05-18.md`.
+- Historical exploratory performance measurements were collected on macOS and
+  Windows with Gitoxide where comparable. They are not current authoritative
+  performance evidence: authoritative mode disables Gitoxide and the current
+  descriptor-bound Make runner is Linux-only. See
+  [`performance_evidence_contract.md`](performance_evidence_contract.md).
 
 The following surfaces are not approved as complete Git parity:
 
@@ -1890,11 +2474,20 @@ The following surfaces are not approved as complete Git parity:
   Windows/Git-for-Windows; stash behavior outside this selected file remains
   subject to later exhaustive coverage.
 - Reftable ref storage (`--ref-format=reftable`,
-  `extensions.refStorage=reftable`) is explicitly unsupported until a real
-  reftable backend exists. Supported-surface upstream runs may set
-  `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`; full upstream runs without that
-  flag must still report reftable-dependent assertions as outside current
-  parity.
+  `extensions.refStorage=reftable`) has partial reader, writer, and stack
+  support in the current source, but its current-Git acceptance remains open
+  pending complete clone/ref-resolution/fsck and platform evidence. Supported-
+  surface upstream runs may set `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`;
+  full upstream runs without that flag must still report unverified reftable
+  assertions rather than treating partial implementation as parity.
+- Fast-import pack and edge-pack publication is currently unsupported on
+  Windows: the product path fails closed before Windows handle-relative
+  publication ([`import_impl.rs`](../../crates/zmin-cli/src/cli/commands/import_impl.rs#L1781)).
+  This is an implementation blocker, not a denominator exclusion;
+  `t9300-fast-import.sh` remains in `all-nondeprecated`, and historical
+  Windows selected-surface evidence must not be reported as Windows t9300
+  readiness. The platform evidence policy is centralized in
+  [`performance_evidence_contract.md`](performance_evidence_contract.md).
 - Authenticated HTTPS/SSH transport, credential-helper flows, corporate proxy
   handling, custom enterprise TLS/proxy environments, and long-running
   non-loopback network scenarios are outside the current supported parity claim
@@ -1916,7 +2509,7 @@ The following surfaces are not approved as complete Git parity:
   `git lfs version`, `git lfs env`, and empty-repo `git lfs ls-files` probes as
   client/plugin readiness evidence for the built-in local LFS foundation.
   `transport_impl::tests::parsed_http_url_reads_credential_store_helper_basic_auth_with_quoted_file_path`).
-- Full Git LFS product parity, partial clone filter negotiation beyond the
+- Arbitrary Git LFS ecosystem parity, partial clone filter negotiation beyond the
   explicit demand-hydration surface, sparse-checkout expansion, signed
   commit/tag verification workflows, and platform-specific file watcher /
   daemon behavior remain outside the current parity claim unless a later test
@@ -1934,12 +2527,41 @@ The following surfaces are not approved as complete Git parity:
   `git lfs post-commit`, `git lfs post-checkout`, and `git lfs post-merge`
   through the shim path, so repositories with standard installed Git LFS hook
   wrappers no longer immediately fall off the local replace-git path.
-  Network LFS upload/download, batch API/auth, and full client/plugin
-  compatibility are still open.
+  The stable extension slice also covers HTTP Batch download/upload,
+  action-specific and credential-helper authentication, scoped proxy/TLS/header
+  policy, and rolling dial/TLS/activity timeouts
+  (`git_lfs_network_commands` plus the focused `lfs_batch`, `lfs_auth`,
+  `lfs_network_session`, `lfs_transfer`, and `lfs_http_policy` suites).
+  Configured mTLS/client identity remains an explicit fail-before-network
+  transport exclusion. Custom transfer adapters, untracked Git LFS commands,
+  and arbitrary client/plugin ecosystem compatibility are not claimed; none of
+  these extension boundaries changes the 1045-test Git denominator.
 - Larger real-repository scale scenarios are not complete. Existing real-repo
   smokes are useful preservation evidence, but they are not a substitute for a
   documented scale matrix with repository size, object count, ref count,
   transport, auth/proxy mode, and macOS/Windows results.
+
+## Current Git Linux replay evidence
+
+The manual current-Git replay is the authoritative 1,045-file upstream
+denominator: Git v2.55.0 has 1,046 top-level shell tests and only
+`t5323-pack-redundant.sh` is excluded. The retained git-svn, git-cvsserver,
+gitweb, cvsimport, and git-p4 families remain in scope; optional external
+client assertions are reported from raw logs rather than assumed to run.
+
+The replay binds the v2.55.0 archive SHA-256
+`72923418db7b26dfddc21e2268660c5118e560bdfaa09b4489b67b38e9b69c49`, annotated
+tag object `5ce91c059e41090e7d2cffad39c04af8acf98dc1`, and peeled commit
+`e9019fcafe0040228b8631c30f97ae1adb61bcdc` through
+`tools/git-current-compat-contract.json`. Full authority requires
+`per_test_timeout=0`; a nonzero timeout is diagnostic.
+
+The cached current state is 358/1045 pass, 687 fail, with two timeout
+markers, and remains unverified. It must not be described as a current Linux
+compatibility result. That claim is withheld until a complete
+`per_test_timeout=0` replay succeeds in both stock and Zmin lanes with zero
+fully skipped retained top-level tests; assertion-level platform skips are
+reported separately.
 
 ## Completion rule
 

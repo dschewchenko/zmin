@@ -11,7 +11,7 @@ use flate2::write::ZlibEncoder;
 
 use crate::object::{
     GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_literal_object, hash_object,
-    object_hex_common_prefix_len_bytes, update_unique_abbrev_len_for_candidate,
+    object_hex_common_prefix_len_bytes, update_unique_abbrev_lens_for_candidate,
 };
 use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint, PrefixOrFullObject};
 use crate::pack::{PackedObjectOrdinalLookup, PackedObjectStore};
@@ -1002,12 +1002,23 @@ impl LooseObjectStore {
         ids: &[ObjectId],
         minimum: usize,
     ) -> io::Result<usize> {
+        Ok(self
+            .minimum_unique_abbrev_lens_for_ids(ids, minimum)?
+            .into_iter()
+            .max()
+            .unwrap_or(minimum.min(self.algorithm.digest_len() * 2)))
+    }
+
+    pub fn minimum_unique_abbrev_lens_for_ids(
+        &self,
+        ids: &[ObjectId],
+        minimum: usize,
+    ) -> io::Result<Vec<usize>> {
         let full_len = self.algorithm.digest_len() * 2;
         if minimum >= full_len {
-            return Ok(full_len);
+            return Ok(vec![full_len; ids.len()]);
         }
-        let mut targets = ids.to_vec();
-        for id in &targets {
+        for id in ids {
             if id.algorithm() != self.algorithm {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -1015,27 +1026,41 @@ impl LooseObjectStore {
                 ));
             }
         }
+        let mut targets = ids.to_vec();
         targets.sort_unstable_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         targets.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
         if targets.is_empty() {
-            return Ok(minimum);
+            return Ok(Vec::new());
         }
-        let mut required = minimum;
-        for pair in targets.windows(2) {
+        let mut required = vec![minimum; targets.len()];
+        for (index, pair) in targets.windows(2).enumerate() {
             let [left, right] = pair else {
                 continue;
             };
-            required = required
-                .max(object_hex_common_prefix_len_bytes(left.as_bytes(), right.as_bytes()) + 1);
+            let length = object_hex_common_prefix_len_bytes(left.as_bytes(), right.as_bytes()) + 1;
+            required[index] = required[index].max(length);
+            required[index + 1] = required[index + 1].max(length);
         }
-        self.update_unique_abbrev_len_for_ids_inner(&targets, &mut required, &mut HashSet::new())?;
-        Ok(required.min(full_len))
+        self.update_unique_abbrev_lens_for_ids_inner(&targets, &mut required, &mut HashSet::new())?;
+        ids.iter()
+            .map(|id| {
+                targets
+                    .binary_search_by(|target| target.as_bytes().cmp(id.as_bytes()))
+                    .map(|index| required[index].min(full_len))
+                    .map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "object id target disappeared during abbreviation scan",
+                        )
+                    })
+            })
+            .collect()
     }
 
-    fn update_unique_abbrev_len_for_ids_inner(
+    fn update_unique_abbrev_lens_for_ids_inner(
         &self,
         sorted_targets: &[ObjectId],
-        required: &mut usize,
+        required: &mut [usize],
         visited: &mut ObjectDirectoryVisitSet,
     ) -> io::Result<()> {
         let key = self.canonical_objects_dir();
@@ -1043,7 +1068,7 @@ impl LooseObjectStore {
             return Ok(());
         }
         self.packed_store
-            .update_unique_abbrev_len_for_ids(sorted_targets, required)?;
+            .update_unique_abbrev_lens_for_ids(sorted_targets, required)?;
         let mut start = 0_usize;
         while start < sorted_targets.len() {
             let fanout = sorted_targets[start].as_bytes()[0];
@@ -1051,7 +1076,7 @@ impl LooseObjectStore {
             while end < sorted_targets.len() && sorted_targets[end].as_bytes()[0] == fanout {
                 end += 1;
             }
-            self.update_unique_abbrev_len_from_loose_fanout(
+            self.update_unique_abbrev_lens_from_loose_fanout(
                 fanout,
                 &sorted_targets[start..end],
                 required,
@@ -1061,16 +1086,16 @@ impl LooseObjectStore {
         for alternate in self.alternate_object_dirs()?.iter().cloned() {
             Self::new(alternate, self.algorithm)
                 .with_max_object_bytes(self.max_object_bytes)
-                .update_unique_abbrev_len_for_ids_inner(sorted_targets, required, visited)?;
+                .update_unique_abbrev_lens_for_ids_inner(sorted_targets, required, visited)?;
         }
         Ok(())
     }
 
-    fn update_unique_abbrev_len_from_loose_fanout(
+    fn update_unique_abbrev_lens_from_loose_fanout(
         &self,
         fanout: u8,
         sorted_targets: &[ObjectId],
-        required: &mut usize,
+        required: &mut [usize],
     ) -> io::Result<()> {
         let dir_name = format!("{fanout:02x}");
         let entries = match fs::read_dir(self.objects_dir.join(&dir_name)) {
@@ -1090,14 +1115,11 @@ impl LooseObjectStore {
             {
                 continue;
             }
-            if !sorted_targets.iter().any(|target| {
-                loose_object_suffix_matches_prefix(file_name.as_bytes(), target, *required)
-            }) || !entry.file_type()?.is_file()
-            {
+            if !entry.file_type()?.is_file() {
                 continue;
             }
             let candidate = loose_object_id_from_parts(self.algorithm, &dir_name, file_name)?;
-            update_unique_abbrev_len_for_candidate(sorted_targets, candidate.as_bytes(), required);
+            update_unique_abbrev_lens_for_candidate(sorted_targets, required, candidate.as_bytes());
         }
         Ok(())
     }

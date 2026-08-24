@@ -386,6 +386,45 @@ pub struct CommitObjectCache<'a, S: GitObjectStore + ?Sized> {
     commit_links: RefCell<HashMap<ObjectId, Arc<CommitLinks>>>,
 }
 
+const COMMIT_LINKS_CACHE_LIMIT: usize = 8192;
+
+pub struct CommitLinksCache<'a, S: GitObjectStore + ?Sized> {
+    store: &'a S,
+    links: HashMap<ObjectId, Arc<CommitLinks>>,
+}
+
+impl<'a, S: GitObjectStore + ?Sized> CommitLinksCache<'a, S> {
+    pub fn new(store: &'a S) -> Self {
+        Self {
+            store,
+            links: HashMap::new(),
+        }
+    }
+
+    pub fn read_links(&mut self, id: &ObjectId) -> io::Result<Arc<CommitLinks>> {
+        if let Some(links) = self.links.get(id) {
+            return Ok(Arc::clone(links));
+        }
+        let object = self.store.read_object(id)?;
+        if object.kind != GitObjectKind::Commit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "object is not a commit",
+            ));
+        }
+        let links = Arc::new(decode_commit_links(object.id.algorithm(), &object.content)?);
+        if self.links.len() >= COMMIT_LINKS_CACHE_LIMIT {
+            self.links.clear();
+        }
+        self.links.insert(object.id, Arc::clone(&links));
+        Ok(links)
+    }
+
+    pub fn len(&self) -> usize {
+        self.links.len()
+    }
+}
+
 impl<'a, S: GitObjectStore + ?Sized> CommitObjectCache<'a, S> {
     pub fn new(store: &'a S) -> Self {
         Self {
@@ -393,6 +432,10 @@ impl<'a, S: GitObjectStore + ?Sized> CommitObjectCache<'a, S> {
             commits: RefCell::new(HashMap::new()),
             commit_links: RefCell::new(HashMap::new()),
         }
+    }
+
+    pub fn store(&self) -> &S {
+        self.store
     }
 
     pub fn read_commit(&self, id: &ObjectId) -> io::Result<Arc<CommitObject>> {
@@ -722,6 +765,57 @@ mod tests {
         );
 
         assert_eq!(store.reads.get(), 1);
+    }
+
+    #[test]
+    fn commit_links_cache_reuses_links_and_evicts_at_bound() {
+        struct CountingStore {
+            inner: InMemoryObjectStore,
+            reads: Cell<usize>,
+        }
+
+        impl GitObjectStore for CountingStore {
+            fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject> {
+                self.reads.set(self.reads.get() + 1);
+                self.inner.read_object(id)
+            }
+        }
+
+        let store = CountingStore {
+            inner: InMemoryObjectStore::new(GitHashAlgorithm::Sha1),
+            reads: Cell::new(0),
+        };
+        let tree = store
+            .inner
+            .write_object(GitObjectKind::Tree, &encode_tree(&[]).expect("encode tree"))
+            .expect("write tree");
+        let signature = Signature::new("Zmin Test", "zmin@example.com", 1_700_000_000, "+0000")
+            .expect("signature");
+        let mut ids = Vec::with_capacity(COMMIT_LINKS_CACHE_LIMIT + 1);
+        for index in 0..=COMMIT_LINKS_CACHE_LIMIT {
+            let commit_bytes =
+                CommitBuilder::new(tree.clone(), signature.clone(), signature.clone())
+                    .message(format!("links {index}\n").into_bytes())
+                    .expect("message")
+                    .encode()
+                    .expect("encode commit");
+            ids.push(
+                store
+                    .inner
+                    .write_object(GitObjectKind::Commit, &commit_bytes)
+                    .expect("write commit"),
+            );
+        }
+        let mut cache = CommitLinksCache::new(&store);
+        for id in &ids {
+            cache.read_links(id).expect("read links");
+        }
+        assert!(cache.len() <= COMMIT_LINKS_CACHE_LIMIT);
+        let reads = store.reads.get();
+        cache
+            .read_links(ids.last().expect("last id"))
+            .expect("cached links");
+        assert_eq!(store.reads.get(), reads);
     }
 
     #[test]

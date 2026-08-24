@@ -23,6 +23,18 @@ env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  contract:
+    name: Verify compatibility contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Verify pinned source, denominator and exclusions
+        run: tools/git-upstream-compat-contract-gate.sh prepare-and-check
+
   metadata:
     name: Check release metadata
     runs-on: ubuntu-latest
@@ -55,7 +67,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: metadata
+    needs: [metadata, contract]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -86,6 +98,11 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
       - name: Show Rust toolchain
         run: rustup show
 
@@ -94,6 +111,9 @@ jobs:
 
       - name: Build zmin
         run: cargo build -p zmin-cli --release --bin zmin --target ${{ matrix.target }}
+
+      - name: Build HTTPS remote helper
+        run: cargo build -p zmin-git-remote-http --release --bin zmin-git-remote-http --target ${{ matrix.target }}
 
       - name: Verify zmin on Unix
         if: runner.os != 'Windows'
@@ -104,21 +124,35 @@ jobs:
         shell: pwsh
         run: .\target\${{ matrix.target }}\release\zmin.exe --version
 
+      - name: Verify HTTPS remote helper on Unix
+        if: runner.os != 'Windows'
+        run: ./target/${{ matrix.target }}/release/zmin-git-remote-http --help
+
+      - name: Verify HTTPS remote helper on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\target\${{ matrix.target }}\release\zmin-git-remote-http.exe --help
+
       - name: Package Unix artifact
         if: runner.os != 'Windows'
         run: |
-          mkdir -p dist/package
-          cp "target/${{ matrix.target }}/release/zmin" dist/package/zmin
-          chmod 0755 dist/package/zmin
-          tar -C dist/package -czf "dist/${{ matrix.artifact }}" zmin
+          mkdir -p dist
+          python tools/release-package.py create \
+            --zmin "target/${{ matrix.target }}/release/zmin" \
+            --helper "target/${{ matrix.target }}/release/zmin-git-remote-http" \
+            --artifact "dist/${{ matrix.artifact }}"
+          python tools/release-package.py check --artifact "dist/${{ matrix.artifact }}"
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\zmin.exe" dist\package\zmin.exe
-          Compress-Archive -Path dist\package\zmin.exe -DestinationPath "dist\${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          python tools/release-package.py create `
+            --zmin "target\${{ matrix.target }}\release\zmin.exe" `
+            --helper "target\${{ matrix.target }}\release\zmin-git-remote-http.exe" `
+            --artifact "dist\${{ matrix.artifact }}"
+          python tools/release-package.py check --artifact "dist\${{ matrix.artifact }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -127,10 +161,39 @@ jobs:
           path: dist/${{ matrix.artifact }}
           if-no-files-found: error
 
+  package-e2e:
+    name: Verify extracted HTTPS package
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Download Linux package
+        uses: actions/download-artifact@v7
+        with:
+          name: zmin-x86_64-unknown-linux-gnu.tar.gz
+          path: dist
+
+      - name: Check and exercise extracted package
+        run: |
+          python tools/test_release_package.py
+          python tools/release-package.py check \
+            --artifact dist/zmin-x86_64-unknown-linux-gnu.tar.gz
+          python tools/release-package.py e2e \
+            --artifact dist/zmin-x86_64-unknown-linux-gnu.tar.gz
+
   publish:
     name: Publish GitHub release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, package-e2e]
     steps:
       - name: Checkout release tag
         uses: actions/checkout@v6
