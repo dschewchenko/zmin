@@ -21,6 +21,10 @@ artifact_budget_bytes=$((2 * 1024 * 1024 * 1024))
 required_rust_toolchain=1.98.0-x86_64-unknown-linux-gnu
 rust_toolchain="${REPLAY_RUST_TOOLCHAIN:-}"
 rustup_bin="${ZMIN_REPLAY_RUSTUP:-}"
+rustup_toolchain_env="${RUSTUP_TOOLCHAIN:-}"
+rustc_bin="${RUSTC:-}"
+rustdoc_bin="${RUSTDOC:-}"
+cargo_bin="${REPLAY_CARGO:-}"
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -253,6 +257,36 @@ if [[ "${1:-}" == --selftest-rustup-binding ]]; then
   canonical_rustup="$(resolve_canonical_executable "$bound_rustup" || true)"
   [[ "$canonical_rustup" == "$bound_rustup" ]] || die 'ZMIN_REPLAY_RUSTUP is not canonical'
   printf '%s\n' "$canonical_rustup"
+  exit 0
+fi
+
+if [[ "${1:-}" == --selftest-rust-toolchain-binding ]]; then
+  [[ "$#" == 1 ]] || die 'usage: --selftest-rust-toolchain-binding'
+  [[ "$rust_toolchain" == "$required_rust_toolchain" ]] || die 'REPLAY_RUST_TOOLCHAIN is not pinned'
+  [[ "$rustup_toolchain_env" == "$required_rust_toolchain" ]] || die 'RUSTUP_TOOLCHAIN is not pinned'
+  [[ -n "$rustc_bin" && -n "$rustdoc_bin" && -n "$cargo_bin" ]] || die 'pinned Rust executable bindings are unset'
+  canonical_rustc="$(resolve_canonical_executable "$rustc_bin" || true)"
+  canonical_rustdoc="$(resolve_canonical_executable "$rustdoc_bin" || true)"
+  canonical_cargo="$(resolve_canonical_executable "$cargo_bin" || true)"
+  [[ "$canonical_rustc" == "$rustc_bin" ]] || die 'RUSTC is not canonical'
+  [[ "$canonical_rustdoc" == "$rustdoc_bin" ]] || die 'RUSTDOC is not canonical'
+  [[ "$canonical_cargo" == "$cargo_bin" ]] || die 'REPLAY_CARGO is not canonical'
+  rust_bin_dir="${rustc_bin%/*}"
+  rustdoc_bin_dir="${rustdoc_bin%/*}"
+  cargo_bin_dir="${cargo_bin%/*}"
+  [[ "$rustdoc_bin_dir" == "$rust_bin_dir" && "$cargo_bin_dir" == "$rust_bin_dir" ]] || die 'pinned Rust executables do not share one bin directory'
+  case "${PATH:-}" in
+    "$rust_bin_dir":*) ;;
+    *) die 'pinned Rust bin directory is not first in PATH' ;;
+  esac
+  grep -Eq '^channel[[:space:]]*=[[:space:]]*"stable"[[:space:]]*$' "$repo_root/rust-toolchain.toml" ||
+    die 'selftest requires the repository stable toolchain policy'
+  unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER
+  RUSTUP_TOOLCHAIN="$required_rust_toolchain" RUSTC="$rustc_bin" RUSTDOC="$rustdoc_bin" \
+    PATH="$rust_bin_dir:${PATH:-}" "$cargo_bin" --version >/dev/null ||
+    die 'pinned cargo binding could not execute'
+  printf 'rust-toolchain-binding\t%s\t%s\t%s\n' \
+    "$required_rust_toolchain" "$rustc_bin" "$cargo_bin"
   exit 0
 fi
 
@@ -532,7 +566,33 @@ require_canonical_executable() {
     >>"$runtime_executables"
 }
 
+[[ "$rustup_toolchain_env" == "$rust_toolchain" ]] ||
+  fail_with_artifact "RUSTUP_TOOLCHAIN must be exactly $rust_toolchain"
 require_canonical_executable ZMIN_REPLAY_RUSTUP rustup "$rustup_bin"
+require_canonical_executable RUSTC rustc "$rustc_bin"
+require_canonical_executable RUSTDOC rustdoc "$rustdoc_bin"
+require_canonical_executable REPLAY_CARGO cargo "$cargo_bin"
+rust_bin_dir="${rustc_bin%/*}"
+rustdoc_bin_dir="${rustdoc_bin%/*}"
+cargo_bin_dir="${cargo_bin%/*}"
+path_text_is_safe "$rust_bin_dir" || fail_with_artifact 'Rust toolchain bin directory is not safe'
+[[ -d "$rust_bin_dir" && ! -L "$rust_bin_dir" &&
+  "$rustdoc_bin_dir" == "$rust_bin_dir" && "$cargo_bin_dir" == "$rust_bin_dir" ]] ||
+  fail_with_artifact 'Rust toolchain executable bindings do not share one canonical bin directory'
+toolchain_dir="${rust_bin_dir%/bin}"
+case "$toolchain_dir" in
+  */toolchains/"$rust_toolchain") ;;
+  *) fail_with_artifact "Rust toolchain executables are outside expected toolchain directory: $rust_bin_dir" ;;
+esac
+case "${PATH:-}" in
+  "$rust_bin_dir":*) ;;
+  *) fail_with_artifact 'Rust toolchain bin directory is not first in PATH' ;;
+esac
+unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER
+run_pinned_cargo() {
+  RUSTUP_TOOLCHAIN="$rust_toolchain" RUSTC="$rustc_bin" RUSTDOC="$rustdoc_bin" \
+    PATH="$rust_bin_dir:${PATH:-}" "$cargo_bin" "$@"
+}
 zmin_test_perl="${ZMIN_TEST_PERL:-}"
 contract_git_bin="${ZMIN_UPSTREAM_CONTRACT_GIT:-}"
 contract_python_bin="${ZMIN_UPSTREAM_CONTRACT_PYTHON:-}"
@@ -656,7 +716,7 @@ export CARGO_NET_RETRY="${CARGO_NET_RETRY:-0}"
 rust_toolchain_entry="$("$rustup_bin" toolchain list | awk -v toolchain="$rust_toolchain" '$1 == toolchain { print $1; exit }')"
 test "$rust_toolchain_entry" = "$rust_toolchain" ||
   fail_with_artifact "required Rust toolchain is not installed: $rust_toolchain"
-if ! rustc_verbose="$("$rustup_bin" run "$rust_toolchain" rustc --version --verbose 2>&1)"; then
+if ! rustc_verbose="$("$rustc_bin" --version --verbose 2>&1)"; then
   fail_with_artifact "could not execute rustc from required Rust toolchain: $rust_toolchain"
 fi
 rustc_release="$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')"
@@ -665,7 +725,7 @@ test "$rustc_release" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)' ||
 rustc_host="$(printf '%s\n' "$rustc_verbose" | awk '$1 == "host:" { print $2; exit }')"
 test "$rustc_host" = x86_64-unknown-linux-gnu ||
   fail_with_artifact "unexpected rustc host for $rust_toolchain: $rustc_host"
-if ! cargo_version="$("$rustup_bin" run "$rust_toolchain" cargo --version 2>&1)"; then
+if ! cargo_version="$(run_pinned_cargo --version 2>&1)"; then
   fail_with_artifact "could not execute cargo from required Rust toolchain: $rust_toolchain"
 fi
 case "$cargo_version" in
@@ -676,7 +736,7 @@ build_target="$work_root/cargo-target"
 mkdir -p "$build_target"
 build_log="$artifact_root/build.log"
 set +e
-CARGO_TARGET_DIR="$build_target" "$rustup_bin" run "$rust_toolchain" cargo build \
+CARGO_TARGET_DIR="$build_target" run_pinned_cargo build \
   --locked --release --manifest-path "$repo_root/Cargo.toml" \
   -p zmin-cli -p zmin-git-remote-http >"$build_log" 2>&1
 build_rc=$?
@@ -691,9 +751,19 @@ test -x "$zmin_bin" || fail_with_artifact "missing release zmin binary"
 test -x "$zmin_remote_http" || fail_with_artifact "missing release zmin-git-remote-http binary"
 {
   printf 'rust_toolchain\t%s\n' "$rust_toolchain"
+  printf 'rustup_toolchain_env\t%s\n' "$rustup_toolchain_env"
+  printf 'toolchain_dir\t%s\n' "$toolchain_dir"
+  printf 'rust_bin_dir\t%s\n' "$rust_bin_dir"
+  printf 'rustc_path\t%s\n' "$rustc_bin"
+  printf 'rustdoc_path\t%s\n' "$rustdoc_bin"
+  printf 'cargo_path\t%s\n' "$cargo_bin"
   printf 'rustc_host\t%s\n' "$rustc_host"
   printf '%s\n' "$rustc_verbose" | sed 's/^/rustc\t/'
   printf 'cargo\t%s\n' "$cargo_version"
+  printf 'rustdoc\t%s\n' "$("$rustdoc_bin" --version)"
+  printf 'RUSTC_WRAPPER\t<unset>\n'
+  printf 'CARGO_BUILD_RUSTC_WRAPPER\t<unset>\n'
+  printf 'build_command\t%s build --locked --release --manifest-path %s -p zmin-cli -p zmin-git-remote-http\n' "$cargo_bin" "$repo_root/Cargo.toml"
   sha256sum "$repo_root/Cargo.lock" | awk '{ print "Cargo.lock_sha256\t" $1 }'
   sha256sum "$zmin_bin" | awk '{ print "zmin_sha256\t" $1 }'
   sha256sum "$zmin_remote_http" | awk '{ print "zmin_git_remote_http_sha256\t" $1 }'

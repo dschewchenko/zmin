@@ -34,7 +34,7 @@ jobs:
            github.event.forced == false &&
            (github.event.created == true ||
             (github.event.created == false &&
-             github.event.before == '0e1f17ac245e306fb90462be38d4091c72a089bd' &&
+             github.event.before == '6ae3fa78e2f4499bc1ca2a5b511fcde27b9605c2' &&
              github.event.head_commit != null &&
              contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
@@ -91,6 +91,8 @@ jobs:
             exit "$rc"
           }
           trap record_setup_failure ERR
+          unset RUSTC_WRAPPER CARGO_BUILD_RUSTC_WRAPPER
+          printf 'RUSTC_WRAPPER=\nCARGO_BUILD_RUSTC_WRAPPER=\n' >>"$GITHUB_ENV"
           sudo -n true
           replay_stage=apt.update
           sudo -n apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
@@ -213,6 +215,39 @@ jobs:
           printf 'ZMIN_REPLAY_RUSTUP=%s\n' "$ZMIN_REPLAY_RUSTUP" >>"$GITHUB_ENV"
           replay_stage=rustup-install
           "$ZMIN_REPLAY_RUSTUP" toolchain install "$REPLAY_RUST_TOOLCHAIN" --profile minimal --no-self-update
+          resolve_pinned_rust_tool() {
+            local tool_name="$1" tool_path canonical
+            tool_path="$("$ZMIN_REPLAY_RUSTUP" which --toolchain "$REPLAY_RUST_TOOLCHAIN" "$tool_name")" || return 1
+            path_is_safe "$tool_path" || return 1
+            canonical="$(realpath -e -- "$tool_path")" || return 1
+            path_is_safe "$canonical" || return 1
+            [[ "$canonical" == "$tool_path" && -f "$canonical" && -x "$canonical" && ! -L "$canonical" ]] || return 1
+            printf '%s\n' "$canonical"
+          }
+          replay_stage=rust-toolchain-binding
+          rustc_path="$(resolve_pinned_rust_tool rustc)"
+          cargo_path="$(resolve_pinned_rust_tool cargo)"
+          rustdoc_path="$(resolve_pinned_rust_tool rustdoc)"
+          rust_bin_dir="${rustc_path%/*}"
+          cargo_bin_dir="${cargo_path%/*}"
+          rustdoc_bin_dir="${rustdoc_path%/*}"
+          path_is_safe "$rust_bin_dir"
+          [[ -d "$rust_bin_dir" && ! -L "$rust_bin_dir" &&
+            "$cargo_bin_dir" == "$rust_bin_dir" && "$rustdoc_bin_dir" == "$rust_bin_dir" ]]
+          toolchain_dir="${rust_bin_dir%/bin}"
+          case "$toolchain_dir" in
+            */toolchains/"$REPLAY_RUST_TOOLCHAIN") ;;
+            *) printf 'pinned Rust tools resolved outside expected toolchain directory: %s\n' "$rust_bin_dir" >&2; false ;;
+          esac
+          export RUSTUP_TOOLCHAIN="$REPLAY_RUST_TOOLCHAIN"
+          export RUSTC="$rustc_path"
+          export RUSTDOC="$rustdoc_path"
+          export REPLAY_CARGO="$cargo_path"
+          export PATH="$rust_bin_dir:$PATH"
+          printf 'RUSTUP_TOOLCHAIN=%s\n' "$RUSTUP_TOOLCHAIN" >>"$GITHUB_ENV"
+          printf 'RUSTC=%s\n' "$RUSTC" >>"$GITHUB_ENV"
+          printf 'RUSTDOC=%s\n' "$RUSTDOC" >>"$GITHUB_ENV"
+          printf 'REPLAY_CARGO=%s\n' "$REPLAY_CARGO" >>"$GITHUB_ENV"
           for package in "${apt_packages[@]}"; do
             dpkg-query -W -f='apt_package\t${Package}\t${Version}\t${Status}\n' "$package" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
@@ -335,21 +370,28 @@ jobs:
           } >>"$GITHUB_ENV"
           replay_stage=rustup-verification
           test "$("$ZMIN_REPLAY_RUSTUP" toolchain list | awk -v toolchain="$REPLAY_RUST_TOOLCHAIN" '$1 == toolchain { print $1; exit }')" = "$REPLAY_RUST_TOOLCHAIN"
-          rustc_verbose="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" rustc --version --verbose)"
+          rustc_verbose="$("$rustc_path" --version --verbose)"
           test "$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)'
           test "$(printf '%s\n' "$rustc_verbose" | awk '$1 == "host:" { print $2; exit }')" = x86_64-unknown-linux-gnu
-          cargo_version="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" cargo --version)"
+          cargo_version="$("$cargo_path" --version)"
           case "$cargo_version" in
             'cargo 1.98.0 ('*) ;;
             *) printf 'unexpected cargo version: %s\n' "$cargo_version" >&2; false ;;
           esac
+          rustdoc_version="$("$rustdoc_path" --version)"
+          test "$(printf '%s\n' "$rustdoc_version" | awk 'NR == 1 { print; exit }')" = 'rustdoc 1.98.0 (88d9e12ae 2026-08-18)'
           {
             printf 'rustup_path\t%s\n' "$ZMIN_REPLAY_RUSTUP"
             printf 'rustup_toolchain\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" toolchain list | tr '\n' ';')"
             printf 'rust_toolchain\t%s\n' "$REPLAY_RUST_TOOLCHAIN"
-            printf 'cargo_path\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" which --toolchain "$REPLAY_RUST_TOOLCHAIN" cargo)"
+            printf 'rustup_toolchain_env\t%s\n' "$RUSTUP_TOOLCHAIN"
+            printf 'rust_bin_dir\t%s\n' "$rust_bin_dir"
+            printf 'toolchain_dir\t%s\n' "$toolchain_dir"
+            printf 'rustc_path\t%s\n' "$rustc_path"
+            printf 'cargo_path\t%s\n' "$cargo_path"
+            printf 'rustdoc_path\t%s\n' "$rustdoc_path"
             printf 'cargo_version\t%s\n' "$cargo_version"
-            printf 'rustc_path\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" which --toolchain "$REPLAY_RUST_TOOLCHAIN" rustc)"
+            printf 'rustdoc_version\t%s\n' "$rustdoc_version"
             printf 'rustc_version\t%s\n' "$(printf '%s\n' "$rustc_verbose" | tr '\n' ';')"
             printf 'git_path\t%s\n' "$(command -v git)"
             printf 'git_version\t%s\n' "$(git --version)"

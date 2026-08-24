@@ -5,7 +5,7 @@ and normal manual (`workflow_dispatch`) runs. The first authoritative run is
 created by pushing a new branch named exactly
 `compat/current-git-v2.55-replay`. The controlled retry is a single
 non-forced push from snapshot tip
-`0e1f17ac245e306fb90462be38d4091c72a089bd`; its tip commit must be signed and
+`6ae3fa78e2f4499bc1ca2a5b511fcde27b9605c2`; its tip commit must be signed and
 contain the exact `Replay-Current-Git: true` marker. Push-run reruns are
 skipped because `github.run_attempt` must be `1`. Preserve the branch after
 creation: deleting and recreating it could create another accepted run.
@@ -74,6 +74,13 @@ plus `CARGO_NET_RETRY=0` makes installation or dependency fetch failure
 explicit rather than silently retrying. Cargo builds both `zmin` and
 `zmin-git-remote-http` with `--locked --release`.
 
+The replay setup resolves absolute `rustc`, `rustdoc`, and `cargo` paths from
+the pinned toolchain with `rustup which --toolchain`, validates their shared
+expected toolchain directory, binds `RUSTUP_TOOLCHAIN`, `RUSTC`, `RUSTDOC`, and
+the replay cargo path, and prepends that directory to `PATH`. It unsets
+`RUSTC_WRAPPER` and `CARGO_BUILD_RUSTC_WRAPPER`; isolated `CARGO_HOME` cannot
+make Cargo fall back to a rustup proxy or the repository's `stable` override.
+
 The v2 contract has one frozen Linux base profile and seven explicit
 platform/dedicated-host assignments: Windows `t0029`, `t0051`, and `t5580`;
 macOS `t3910`; case-insensitive Linux `t6419`; privileged Linux `t1509`; and
@@ -134,6 +141,15 @@ executables and downloaded tools require the spelling itself to be canonical.
 The next controlled retry must use a signed, non-forced commit whose parent is
 that snapshot tip and whose message contains the exact
 `Replay-Current-Git: true` marker.
+
+Run `32773393010` for snapshot
+`6ae3fa78e2f4499bc1ca2a5b511fcde27b9605c2` is classified `HARNESS INVALID`:
+the isolated Cargo home left the nested rustup proxy without the pinned
+toolchain bin directory, causing `rustc -vV` to fail with `ENOENT` before
+either lane ran (zero tests). Its artifact is not current-Git evidence and
+must not be counted as either a pass or a test failure. The next controlled
+retry must use a signed, non-forced commit whose parent is that snapshot tip
+and whose message contains the exact `Replay-Current-Git: true` marker.
 
 Run `32769621191` for snapshot
 `0e1f17ac245e306fb90462be38d4091c72a089bd` is classified `HARNESS INVALID`:

@@ -62,9 +62,13 @@ required_loop = first_index(lambda line: "for command in awk bash cat comm curl"
 jgit_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit" in line)
 dpkg_query_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_DPKG_QUERY dpkg-query" in line)
 cvsps_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_CVSPS cvsps" in line)
+rust_binding = first_index(lambda line: line.strip() == "replay_stage=rust-toolchain-binding")
+rustc_which = first_index(lambda line: 'rustc_path="$(resolve_pinned_rust_tool rustc)"' in line)
+cargo_which = first_index(lambda line: 'cargo_path="$(resolve_pinned_rust_tool cargo)"' in line)
+rustdoc_which = first_index(lambda line: 'rustdoc_path="$(resolve_pinned_rust_tool rustdoc)"' in line)
 owned_verify = first_index(lambda line: "verify_provisioned_tool p4" in line)
 owned_version = first_index(lambda line: 'jgit_version="$(jgit --version' in line)
-github_env_write = first_index(lambda line: '>>"$GITHUB_ENV"' in line)
+github_env_write = first_index(lambda line: "printf 'RUSTUP_TOOLCHAIN=%s" in line)
 completion = first_index(lambda line: "dependency_preflight_complete" in line)
 replay_success = first_index(lambda line: line.strip() == "if: success()")
 setup_start = first_index(lambda line: line.strip() == "- name: Install pinned Git test dependencies")
@@ -75,7 +79,7 @@ ambient_loop = first_index(lambda line: "for command in apt-cache apt-get awk cu
 
 assert p4_download < p4d_download < jgit_download < path_export < owned_verify < owned_version
 assert owned_version < github_env_write
-assert owned_version < required_loop < jgit_canonical < dpkg_query_canonical < cvsps_canonical < completion
+assert owned_version < rust_binding < rustc_which < cargo_which < rustdoc_which < required_loop < jgit_canonical < dpkg_query_canonical < cvsps_canonical < completion
 assert "set -Eeuo pipefail" in setup_text
 assert "exit 1" not in setup_text
 assert "return 1" in setup_text
@@ -87,8 +91,18 @@ assert "IFS= read -r -d '' command_path" not in setup_text
 assert "IFS= read -r -d '' canonical" not in setup_text
 assert "cvsps --version" not in setup_text
 assert "validate_cvsps_version" in setup_text
+assert 'export RUSTUP_TOOLCHAIN="$REPLAY_RUST_TOOLCHAIN"' in setup_text
+assert 'export RUSTC="$rustc_path"' in setup_text
+assert 'export RUSTDOC="$rustdoc_path"' in setup_text
+assert 'export REPLAY_CARGO="$cargo_path"' in setup_text
+assert '"$rustc_path" --version --verbose' in setup_text
+assert '"$cargo_path" --version' in setup_text
+assert '"$rustdoc_path" --version' in setup_text
+assert '"$ZMIN_REPLAY_RUSTUP" run ' not in setup_text
+assert 'RUSTC_WRAPPER=\\nCARGO_BUILD_RUSTC_WRAPPER=\\n' in setup_text
 workflow_text = "\n".join(lines)
-assert "github.event.before == '0e1f17ac245e306fb90462be38d4091c72a089bd'" in workflow_text
+assert "github.event.before == '6ae3fa78e2f4499bc1ca2a5b511fcde27b9605c2'" in workflow_text
+assert "github.event.before == '0e1f17ac245e306fb90462be38d4091c72a089bd'" not in workflow_text
 assert "github.event.before == '45108021d7883ec8011b4d03bdd0aec0606851b7'" not in workflow_text
 assert "github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531'" not in workflow_text
 assert "github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145'" not in workflow_text
@@ -390,6 +404,27 @@ if bash "$cvsps_version_script" 'not-installed' '2.1-8' >/dev/null 2>&1; then
   exit 1
 fi
 printf '%s\n' 'cvsps package version fixture: pass (2.1/2.2 accepted; 3.x/unknown/uninstalled rejected)'
+rust_binding_root="$tmp_root/rust-binding"
+rust_binding_bin="$rust_binding_root/rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin"
+rust_binding_probe="$tmp_root/rust-binding-probe.tsv"
+mkdir -p "$rust_binding_bin"
+rust_binding_bin="$(realpath "$rust_binding_bin")"
+printf '#!/bin/sh\nprintf "%%s\\n" "${RUSTUP_TOOLCHAIN}|${RUSTC}|${RUSTDOC}|${RUSTC_WRAPPER-unset}|${CARGO_BUILD_RUSTC_WRAPPER-unset}" >"%s"\nprintf "cargo 1.98.0 (selftest)\\n"\n' "$rust_binding_probe" >"$rust_binding_bin/cargo"
+printf '#!/bin/sh\nprintf "rustc 1.98.0 (selftest)\\n"\n' >"$rust_binding_bin/rustc"
+printf '#!/bin/sh\nprintf "rustdoc 1.98.0 (selftest)\\n"\n' >"$rust_binding_bin/rustdoc"
+chmod 755 "$rust_binding_bin/cargo" "$rust_binding_bin/rustc" "$rust_binding_bin/rustdoc"
+RUSTUP_TOOLCHAIN=1.98.0-x86_64-unknown-linux-gnu \
+REPLAY_RUST_TOOLCHAIN=1.98.0-x86_64-unknown-linux-gnu \
+RUSTC="$rust_binding_bin/rustc" \
+RUSTDOC="$rust_binding_bin/rustdoc" \
+REPLAY_CARGO="$rust_binding_bin/cargo" \
+RUSTC_WRAPPER=stable-wrapper \
+CARGO_BUILD_RUSTC_WRAPPER=stable-wrapper \
+PATH="$rust_binding_bin:$PATH" \
+  bash "$helper" --selftest-rust-toolchain-binding >/dev/null
+test "$(cat "$rust_binding_probe")" = \
+  "1.98.0-x86_64-unknown-linux-gnu|$rust_binding_bin/rustc|$rust_binding_bin/rustdoc|unset|unset"
+printf '%s\n' 'Rust toolchain binding fixture: pass (stable repo override cannot replace pinned cargo/rustc/rustdoc; wrappers unset)'
 if env -u ZMIN_REPLAY_RUSTUP bash "$helper" --selftest-rustup-binding >/dev/null 2>&1; then
   echo 'unset ZMIN_REPLAY_RUSTUP was accepted' >&2
   exit 1
