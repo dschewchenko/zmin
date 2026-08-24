@@ -68,6 +68,8 @@ replay_success = first_index(lambda line: line.strip() == "if: success()")
 setup_start = first_index(lambda line: line.strip() == "- name: Install pinned Git test dependencies")
 setup_end = first_index(lambda line: line.strip() == "- name: Run stock control and Zmin replay")
 setup_text = "\n".join(lines[setup_start:setup_end])
+ambient_record = first_index(lambda line: "ambient_command\\t%s\\t%s\\t%s" in line)
+ambient_loop = first_index(lambda line: "for command in apt-cache apt-get awk curl" in line)
 
 assert p4_download < p4d_download < jgit_download < path_export < owned_verify < owned_version
 assert owned_version < github_env_write
@@ -75,8 +77,12 @@ assert owned_version < required_loop < jgit_canonical < completion
 assert "set -Eeuo pipefail" in setup_text
 assert "exit 1" not in setup_text
 assert "return 1" in setup_text
+assert ambient_record < ambient_loop
+assert "test \"$canonical\" = \"$path\"" not in setup_text
+assert 'replay_stage="ambient-command-canonicalization:$command"' in setup_text
 workflow_text = "\n".join(lines)
-assert "github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531'" in workflow_text
+assert "github.event.before == '45108021d7883ec8011b4d03bdd0aec0606851b7'" in workflow_text
+assert "github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531'" not in workflow_text
 assert "github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145'" not in workflow_text
 assert replay_success > completion
 assert "if: always()" not in "\n".join(lines[replay_success - 3: replay_success + 2])
@@ -250,8 +256,10 @@ chmod 755 "$canonical_real"
 ln -s "$(basename "$canonical_real")" "$canonical_link"
 ln -s missing-target "$canonical_dangling"
 printf 'not executable\n' >"$canonical_nonexec"
+canonical_resolved="$canonical_real"
 if command -v realpath >/dev/null 2>&1 && realpath -e "$canonical_real" >/dev/null 2>&1; then
-  test "$(bash "$helper" --selftest-canonical-executable "$canonical_link")" = "$canonical_real"
+  canonical_resolved="$(realpath -e -- "$canonical_real")"
+  test "$(bash "$helper" --selftest-canonical-executable "$canonical_link")" = "$canonical_resolved"
   if bash "$helper" --selftest-canonical-executable "$canonical_dangling" >/dev/null 2>&1; then
     echo 'dangling executable symlink was accepted' >&2
     exit 1
@@ -262,6 +270,7 @@ if command -v realpath >/dev/null 2>&1 && realpath -e "$canonical_real" >/dev/nu
   fi
   printf 'canonical executable fixture: pass (symlink resolved; dangling/non-executable rejected)\n'
 else
+  canonical_resolved="$(realpath "$canonical_real")"
   python3 - "$canonical_link" "$canonical_real" "$canonical_dangling" "$canonical_nonexec" <<'PY'
 import os
 import stat
@@ -291,8 +300,67 @@ if ZMIN_REPLAY_RUSTUP="$canonical_link" bash "$helper" --selftest-rustup-binding
   echo 'symlink ZMIN_REPLAY_RUSTUP was accepted' >&2
   exit 1
 fi
-test "$(ZMIN_REPLAY_RUSTUP="$canonical_real" bash "$helper" --selftest-rustup-binding)" = "$canonical_real"
+test "$(ZMIN_REPLAY_RUSTUP="$canonical_resolved" bash "$helper" --selftest-rustup-binding)" = "$canonical_resolved"
 printf 'rustup binding fixture: pass (unset/relative/non-executable/symlink rejected; canonical path accepted)\n'
+
+if realpath -e "$canonical_real" >/dev/null 2>&1; then
+ambient_fixture="$tmp_root/ambient-alternatives"
+ambient_bin="$ambient_fixture/bin"
+ambient_real="$ambient_fixture/ambient-real"
+ambient_link="$ambient_bin/ambient-tool"
+ambient_dangling="$ambient_bin/ambient-dangling"
+ambient_nonexec="$ambient_bin/ambient-nonexec"
+ambient_preflight="$tmp_root/.replay/dependency-preflight.tsv"
+ambient_script="$tmp_root/ambient-canonicalization.sh"
+mkdir -p "$ambient_bin" "$tmp_root/.replay"
+printf '#!/bin/sh\nexit 0\n' >"$ambient_real"
+chmod 755 "$ambient_real"
+ln -s "$ambient_real" "$ambient_link"
+ln -s missing-target "$ambient_dangling"
+printf 'not executable\n' >"$ambient_nonexec"
+python3 - "$proposal_root/.github/workflows/git-current-compat.yml" "$ambient_script" <<'PY'
+import sys
+import textwrap
+
+workflow_path, script_path = sys.argv[1:]
+lines = open(workflow_path, encoding="utf-8").read().splitlines()
+path_start = next(i for i, line in enumerate(lines) if line.strip() == "path_is_safe() {")
+loop_start = next(i for i, line in enumerate(lines[path_start:], path_start) if line.strip().startswith("for command in apt-cache apt-get awk curl"))
+function_block = textwrap.dedent("\n".join(lines[path_start:loop_start]))
+script = textwrap.dedent(
+    """\
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    """
+) + function_block + textwrap.dedent(
+    """
+    assert_ambient_canonical "$1"
+    """
+)
+open(script_path, "w", encoding="utf-8").write(script)
+PY
+chmod 755 "$ambient_script"
+PATH="$ambient_bin:$PATH" GITHUB_WORKSPACE="$tmp_root" bash "$ambient_script" ambient-tool
+ambient_record_line="$(awk -F '\t' '$1 == "ambient_command" { print; exit }' "$ambient_preflight")"
+ambient_canonical="$(realpath -e -- "$ambient_real")"
+expected_ambient_record=$'ambient_command\tambient-tool\t'"$ambient_link"$'\t'"$ambient_canonical"
+test "$ambient_record_line" = "$expected_ambient_record"
+if PATH="$ambient_bin:$PATH" GITHUB_WORKSPACE="$tmp_root" bash "$ambient_script" ambient-dangling >/dev/null 2>&1; then
+  echo 'dangling ambient alternative was accepted' >&2
+  exit 1
+fi
+if PATH="$ambient_bin:$PATH" GITHUB_WORKSPACE="$tmp_root" bash "$ambient_script" ambient-nonexec >/dev/null 2>&1; then
+  echo 'non-executable ambient alternative was accepted' >&2
+  exit 1
+fi
+if ZMIN_REPLAY_RUSTUP="$canonical_link" bash "$helper" --selftest-rustup-binding >/dev/null 2>&1; then
+  echo 'final-bound symlink was accepted' >&2
+  exit 1
+fi
+printf '%s\n' 'ambient alternatives fixture: pass (symlink spelling recorded with canonical target; dangling/nonexec rejected; final bound symlink rejected)'
+else
+printf '%s\n' 'ambient alternatives fixture: skipped (realpath -e unavailable on this host; production Ubuntu path remains statically checked)'
+fi
 
 authority_archive="${ZMIN_CURRENT_GIT_AUTHORITY_ARCHIVE:-}"
 compat_repo_root="${ZMIN_COMPAT_REPO_ROOT:-$proposal_root}"

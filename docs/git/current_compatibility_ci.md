@@ -5,7 +5,7 @@ and normal manual (`workflow_dispatch`) runs. The first authoritative run is
 created by pushing a new branch named exactly
 `compat/current-git-v2.55-replay`. The controlled retry is a single
 non-forced push from snapshot tip
-`9ac8723b671d845cb6181b6b0b88e6bb93a97531`; its tip commit must be signed and
+`45108021d7883ec8011b4d03bdd0aec0606851b7`; its tip commit must be signed and
 contain the exact `Replay-Current-Git: true` marker. Push-run reruns are
 skipped because `github.run_attempt` must be `1`. Preserve the branch after
 creation: deleting and recreating it could create another accepted run.
@@ -124,6 +124,16 @@ step was correctly skipped; zero tests ran. Its artifact records the setup
 stage, line, and shell command without credentials. The next controlled retry
 must use a signed, non-forced commit whose parent is that snapshot tip and
 whose message contains the exact `Replay-Current-Git: true` marker.
+
+Run `32767635984` for snapshot
+`45108021d7883ec8011b4d03bdd0aec0606851b7` is classified `HARNESS INVALID`:
+ambient executable preflight rejected the runner's symlinked `awk` alternative
+before either lane ran (zero tests). Ambient command spellings are now recorded
+alongside their canonical regular executable targets; only final bound
+executables and downloaded tools require the spelling itself to be canonical.
+The next controlled retry must use a signed, non-forced commit whose parent is
+that snapshot tip and whose message contains the exact
+`Replay-Current-Git: true` marker.
 
 Stock and Zmin runs use separate, newly-created lane caches, homes, temp
 directories, and output directories. The stock lane builds Git from the exact
