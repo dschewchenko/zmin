@@ -3672,7 +3672,7 @@ run_manifest_fixture() (
   local limits_pristine limits_prepared
   local published_marker_payload published_manifest_payload sentinel sentinel_expected
   local type_saved optional_expected optional_saved symlink_outside symlink_saved relative
-  local fixture_make generated_graph_saved
+  local fixture_make fixture_make_real generated_graph_saved makefile_saved
   fixture_root="$(mktemp -d "$out_dir/.zmin-manifest-fixture.XXXXXX")"
   trap 'release_prepare_lock || true; chmod -R u+w "$fixture_root" 2>/dev/null || true; rm -rf "$fixture_root"' EXIT
   pristine="$fixture_root/pristine"
@@ -3692,7 +3692,7 @@ run_manifest_fixture() (
   validate_fixture_make_identity() {
     require_absolute_executable ZMIN_UPSTREAM_CONTRACT_MAKE "$make_bin"
     if [[ "$(uname -s 2>/dev/null || printf '%s' unknown)" == "Linux" ]]; then
-      if [[ "$make_bin" == "$fixture_make" ]]; then
+      if [[ "$make_bin" == "$fixture_make" && "$fixture_make_real" != 1 ]]; then
         make_sha256="$(shasum -a 256 "$make_bin" | awk '{ print $1 }')"
         make_version='GNU Make 4.4 (manifest fixture)'
         make_anchor_path="$make_bin"
@@ -3710,7 +3710,13 @@ run_manifest_fixture() (
     fi
   }
   fixture_make="$fixture_root/make"
-  cat >"$fixture_make" <<'EOF'
+  fixture_platform="$(uname -s 2>/dev/null || printf '%s' unknown)"
+  if [[ "$fixture_platform" == Linux ]]; then
+    cp "${ZMIN_UPSTREAM_CONTRACT_MAKE:?set ZMIN_UPSTREAM_CONTRACT_MAKE for the Linux memfd probe}" "$fixture_make"
+    chmod 0555 "$fixture_make"
+    fixture_make_real=1
+  else
+    cat >"$fixture_make" <<'EOF'
 #!/bin/sh
 if test "${1-}" = "--version"
 then
@@ -3730,7 +3736,9 @@ dep_dirs := .depend builtin/.depend compat/.depend \
   contrib/credential/osxkeychain/.depend conditional\ dir/.depend
 MAKE_DATABASE
 EOF
-  chmod +x "$fixture_make"
+    chmod +x "$fixture_make"
+    fixture_make_real=0
+  fi
   make_bin="$fixture_make"
   validate_fixture_make_identity
   cat >"$pristine/Makefile" <<'EOF'
@@ -3743,7 +3751,6 @@ all:
 EOF
   make_bin="${ZMIN_UPSTREAM_FIXTURE_MAKE:-$fixture_make}"
   validate_fixture_make_identity
-  fixture_platform="$(uname -s 2>/dev/null || printf '%s' unknown)"
   if [[ "$fixture_platform" == "Linux" ]]; then
     make_bin="${ZMIN_UPSTREAM_CONTRACT_MAKE:?set ZMIN_UPSTREAM_CONTRACT_MAKE for the Linux memfd probe}"
     make_anchor_path=""
@@ -3783,6 +3790,11 @@ EOF
       echo "pinned Make runner did not clear injected Make variables" >&2
       exit 1
     fi
+    make_bin="$fixture_make"
+    make_anchor_path=""
+    make_anchor_sha256=""
+    make_anchor_version=""
+    validate_fixture_make_identity
     make_saved="$fixture_root/make-saved"
     cp "$fixture_make" "$make_saved"
     printf '%s\n' '#!/bin/sh' 'printf "%s\n" "GNU Make forged"' >"$fixture_make"
@@ -3796,21 +3808,21 @@ EOF
     make_anchor_sha256=""
     make_anchor_version=""
     validate_fixture_make_identity
+    makefile_saved="$fixture_root/Makefile.saved"
+    cp "$pristine/Makefile" "$makefile_saved"
     for parser_case in duplicate injection traversal; do
-      parser_make="$fixture_root/make-$parser_case"
       case "$parser_case" in
         duplicate)
-          printf '%s\n' '#!/bin/sh' 'if test "${1-}" = "--version"; then printf "%s\\n" "GNU Make 4.4 (manifest fixture)"; exit 0; fi' '# Files' 'dep_dirs := .depend .depend' >"$parser_make"
+          printf '%s\n' 'dep_dirs := .depend .depend' >"$pristine/Makefile"
           ;;
         injection)
-          printf '%s\n' '#!/bin/sh' 'if test "${1-}" = "--version"; then printf "%s\\n" "GNU Make 4.4 (manifest fixture)"; exit 0; fi' '# Files' 'dep_dirs := .depend;touch external' >"$parser_make"
+          printf '%s\n' 'dep_dirs := .depend;touch external' >"$pristine/Makefile"
           ;;
         traversal)
-          printf '%s\n' '#!/bin/sh' 'if test "${1-}" = "--version"; then printf "%s\\n" "GNU Make 4.4 (manifest fixture)"; exit 0; fi' '# Files' 'dep_dirs := ../.depend' >"$parser_make"
+          printf '%s\n' 'dep_dirs := ../.depend' >"$pristine/Makefile"
           ;;
       esac
-      chmod +x "$parser_make"
-      make_bin="$parser_make"
+      make_bin="${ZMIN_UPSTREAM_CONTRACT_MAKE:?set ZMIN_UPSTREAM_CONTRACT_MAKE for the parser fixture}"
       make_anchor_path=""
       make_anchor_sha256=""
       make_anchor_version=""
@@ -3820,6 +3832,7 @@ EOF
         exit 1
       fi
     done
+    cp "$makefile_saved" "$pristine/Makefile"
   fi
   make_bin="$fixture_make"
   make_anchor_path=""
