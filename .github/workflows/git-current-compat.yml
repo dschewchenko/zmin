@@ -34,7 +34,7 @@ jobs:
            github.event.forced == false &&
            (github.event.created == true ||
             (github.event.created == false &&
-             github.event.before == 'd8f756d1f5eb0abd377f9939524cd33ab2f939ad' &&
+             github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145' &&
              github.event.head_commit != null &&
              contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
@@ -47,8 +47,10 @@ jobs:
       REPLAY_JOBS: ${{ inputs.jobs || '4' }}
       REPLAY_PER_TEST_TIMEOUT: ${{ inputs.per_test_timeout || '0' }}
       REPLAY_RUST_TOOLCHAIN: "1.98.0-x86_64-unknown-linux-gnu"
+      REPLAY_PROFILE: linux-ubuntu-24.04-x86_64
       RUSTUP_MAX_RETRIES: "0"
       CARGO_NET_RETRY: "0"
+      CARGO_HTTP_TIMEOUT: "30"
       CARGO_TERM_COLOR: never
 
     steps:
@@ -75,13 +77,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get -o Acquire::Retries=0 update
+          sudo -n true
+          sudo -n apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           apt_packages=(
             bash build-essential ca-certificates curl file findutils gawk gettext
             git make perl python3 rsync tar zlib1g-dev libssl-dev
             libcurl4-openssl-dev libexpat1-dev libpcre2-dev libzstd-dev liblz4-dev
-            tcl tk cvs cvsps subversion
+            tcl tk cvs cvsps subversion apache2 apache2-utils libapache2-mod-svn
+            locales openssl openssh-client gnupg sudo openjdk-17-jre-headless
+            libhttp-date-perl libtimedate-perl highlight
             libsvn-perl libcgi-pm-perl libdbi-perl libdbd-sqlite3-perl
+            libjson-perl libwww-perl liberror-perl libauthen-sasl-perl
+            libintl-perl
             ripgrep
           )
           missing_packages=()
@@ -94,37 +101,177 @@ jobs:
             printf 'Required Git compatibility dependencies are unavailable: %s\n' "${missing_packages[*]}" >&2
             exit 1
           fi
-          sudo apt-get -o Acquire::Retries=0 install -y --no-install-recommends "${apt_packages[@]}"
-          rustup toolchain install "$REPLAY_RUST_TOOLCHAIN" --profile minimal --no-self-update
+          sudo -n apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${apt_packages[@]}"
           printf 'apt_required_missing\tnone\n' >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          path_is_safe() {
+            local value="$1"
+            [[ -n "$value" && "$value" == /* && "$value" != *$'\n'* && "$value" != *$'\r'* ]] || return 1
+            python3 -c 'import sys; value=sys.argv[1]; value.encode("utf-8").decode("utf-8"); assert all((ord(ch) >= 32 and ord(ch) != 127) or ch == "\t" for ch in value)' "$value"
+          }
+          assert_ambient_canonical() {
+            local command_name="$1" path canonical
+            path="$(command -v "$command_name")"
+            path_is_safe "$path"
+            canonical="$(realpath -e -- "$path")"
+            test "$canonical" = "$path"
+          }
+          for command in apt-cache apt-get awk curl dpkg-query grep realpath sha256sum stat mktemp mv chmod python3 sudo; do
+            assert_ambient_canonical "$command"
+          done
+          rustup_path="$(command -v rustup)"
+          path_is_safe "$rustup_path" || exit 1
+          rustup_path="$(realpath -e -- "$rustup_path")"
+          path_is_safe "$rustup_path" || exit 1
+          [[ -f "$rustup_path" && -x "$rustup_path" && ! -L "$rustup_path" ]] || exit 1
+          rustup_path_again="$(realpath -e -- "$rustup_path")"
+          [[ "$rustup_path_again" == "$rustup_path" ]] || exit 1
+          printf 'ZMIN_REPLAY_RUSTUP=%s\n' "$rustup_path" >>"$GITHUB_ENV"
+          export ZMIN_REPLAY_RUSTUP="$rustup_path"
+          toolbin="$GITHUB_WORKSPACE/.replay/toolbin"
+          mkdir -p "$toolbin"
+          download_verified() {
+            local name="$1" url="$2" expected_sha="$3" expected_size="$4"
+            local destination final="$toolbin/$name"
+            destination="$(mktemp "$toolbin/.${name}.tmp.XXXXXX")"
+            [[ ! -e "$final" && ! -L "$final" ]] || exit 1
+            curl -fsSL --connect-timeout 30 --max-time 600 "$url" -o "$destination"
+            [[ -f "$destination" && ! -L "$destination" ]] || exit 1
+            test "$(stat -c '%s' "$destination")" = "$expected_size"
+            test "$(sha256sum "$destination" | awk '{ print $1 }')" = "$expected_sha"
+            mv -- "$destination" "$final"
+            chmod 0555 "$final"
+            [[ -f "$final" && ! -L "$final" && "$(stat -c '%s' "$final")" = "$expected_size" ]] || exit 1
+            test "$(stat -c '%a' "$final")" = 555
+          }
+          download_verified p4 \
+            https://ftp.perforce.com/perforce/r23.2/bin.linux26x86_64/p4 \
+            7b73445a34e1d067c3092838a302a284ae15bc7068dbc1e7e5d3ae4c3833f248 10587624
+          download_verified p4d \
+            https://ftp.perforce.com/perforce/r23.2/bin.linux26x86_64/p4d \
+            cab870ae52cea689e9a839d95be8f62b012ffd40ac7e99d381f2663a13679f2d 18181064
+          download_verified jgit \
+            https://repo1.maven.org/maven2/org/eclipse/jgit/org.eclipse.jgit.pgm/6.8.0.202311291450-r/org.eclipse.jgit.pgm-6.8.0.202311291450-r.sh \
+            764f272c3857da1acaa26689f187a5b38d6597f766c91db649300fd0b8225fa9 27037916
+          printf 'provisioned_tool\tp4\tr23.2\t%s\n' \
+            "$(sha256sum "$toolbin/p4" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'provisioned_tool\tp4d\tr23.2\t%s\n' \
+            "$(sha256sum "$toolbin/p4d" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'provisioned_tool\tjgit\t6.8.0.202311291450-r\t%s\n' \
+            "$(sha256sum "$toolbin/jgit" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          export PATH="$toolbin:/usr/bin:/bin:/usr/sbin:/sbin"
+          "$ZMIN_REPLAY_RUSTUP" toolchain install "$REPLAY_RUST_TOOLCHAIN" --profile minimal --no-self-update
           for package in "${apt_packages[@]}"; do
             dpkg-query -W -f='apt_package\t${Package}\t${Version}\t${Status}\n' "$package" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
-          for command in bash rustup make gcc perl curl tar sha256sum rg cvs cvsps svn; do
+          for command in awk bash cat comm curl cvs cvsps df diff du envsubst find gcc git grep gpg highlight iconv java jgit make msgfmt openssl p4 p4d perl python3 realpath rg sed sha256sum shasum sh ssh sort svn svnadmin svnmucc svnserve tar timeout tr uniq uname wc cc ar ranlib apache2 apache2ctl locale locale-gen sudo; do
             command_path="$(command -v "$command")"
-            case "$command_path" in /*) ;; *) exit 1 ;; esac
+            path_is_safe "$command_path"
+            command_path="$(realpath -e -- "$command_path")"
+            [[ -f "$command_path" && -x "$command_path" && ! -L "$command_path" ]] || exit 1
             printf 'command_path\t%s\t%s\n' "$command" "$command_path" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
             printf 'command_version\t%s\t%s\n' "$command" \
-              "$("$command" --version 2>&1 | head -n 1 | tr '\n' ';')" \
+              "$($command --version 2>&1 | head -n 1 | tr '\n' ';' || true)" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
-          test "$(rustup toolchain list | awk -v toolchain="$REPLAY_RUST_TOOLCHAIN" '$1 == toolchain { print $1; exit }')" = "$REPLAY_RUST_TOOLCHAIN"
-          rustc_verbose="$(rustup run "$REPLAY_RUST_TOOLCHAIN" rustc --version --verbose)"
+          canonical_required_executable() {
+            local variable="$1"
+            local command_name="$2"
+            local command_path canonical canonical_again
+            IFS= read -r -d '' command_path < <(command -v "$command_name"; printf '\0') || {
+              printf 'required executable lookup failed: %s (%s)\n' "$variable" "$command_name" >&2
+              exit 1
+            }
+            path_is_safe "$command_path" || {
+              printf 'required executable lookup is invalid: %s (%s)\n' "$variable" "$command_name" >&2
+              exit 1
+            }
+            IFS= read -r -d '' canonical < <(realpath -e -- "$command_path" 2>/dev/null; printf '\0') || {
+              printf 'required executable canonicalization failed: %s (%s)\n' "$variable" "$command_name" >&2
+              exit 1
+            }
+            path_is_safe "$canonical" &&
+              [[ -n "$canonical" && "$canonical" == /* &&
+              -f "$canonical" && -x "$canonical" && ! -L "$canonical" ]] || {
+              printf 'required executable is not a canonical regular executable: %s (%s)\n' \
+                "$variable" "$command_name" >&2
+              exit 1
+            }
+            IFS= read -r -d '' canonical_again < <(realpath -e -- "$canonical" 2>/dev/null; printf '\0') || {
+              printf 'required executable canonicalization recheck failed: %s (%s)\n' \
+                "$variable" "$command_name" >&2
+              exit 1
+            }
+            [[ "$canonical_again" == "$canonical" ]] || {
+              printf 'required executable canonicalization is unstable: %s (%s)\n' \
+                "$variable" "$command_name" >&2
+              exit 1
+            }
+            printf '%s=%s\n' "$variable" "$canonical" >>"$GITHUB_ENV"
+            printf 'runtime_executable\t%s\t%s\t%s\n' \
+              "$variable" "$command_name" "$canonical" \
+              >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          }
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_GIT git
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_PYTHON python3
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_MAKE make
+          canonical_required_executable ZMIN_TEST_PERL perl
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_SHELL sh
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_CC cc
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_AR ar
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_RANLIB ranlib
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_CURL curl
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_OPENSSL openssl
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4 p4
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4D p4d
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit
+          test "$(jgit --version 2>&1)" = 'jgit version 6.8.0.202311291450-r'
+          perl -MDigest::SHA -MGit -MSVN::Core -MSVN::Repos -MSVN::Ra -MSVN::Delta \
+            -MSVN::Client -MDBI -MDBD::SQLite -MCGI::Util -MCGI::Carp \
+            -MTime::HiRes -MEncode -MCompress::Zlib -MLocale::Messages -e '1'
+          cvsps --version 2>&1 | grep -Eq '2\.(1|2)($|[^0-9])'
+          java -version 2>&1 | awk 'NR == 1 && $0 ~ /version "(1[1-9]|[2-9][0-9])\./ { found=1 } END { exit !found }'
+          apache2 -v | awk 'NR == 1 && $0 ~ /Apache\/2\.([4-9]|[1-9][0-9])/ { found=1 } END { exit !found }'
+          for module in cgi dav dav_fs dav_svn ssl auth_basic; do sudo -n a2enmod "$module" >/dev/null; done
+          apache2ctl -M 2>/dev/null | grep -q 'dav_svn_module'
+          apache2ctl -M 2>/dev/null | grep -q 'ssl_module'
+          test "$(id -u)" != 0
+          test "$(id -un)" = "$(stat -c '%U' "$GITHUB_WORKSPACE")"
+          python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); s.close()'
+          sudo -n localedef -i en_US -f UTF-8 en_US.UTF-8
+          sudo -n localedef -i is_IS -f UTF-8 is_IS.UTF-8
+          utf8_locale="$(locale -a | awk 'tolower($0) == "en_us.utf8" || tolower($0) == "en_us.utf-8" { print; exit }')"
+          test -n "$utf8_locale"
+          locale -a | awk 'tolower($0) == "is_is.utf8" || tolower($0) == "is_is.utf-8" { found=1 } END { exit !found }'
+          printf 'GIT_TEST_UTF8_LOCALE=%s\n' "$utf8_locale" >>"$GITHUB_ENV"
+          printf 'runtime_profile\t%s\n' "$REPLAY_PROFILE" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          {
+            printf 'PATH=%s\n' "$PATH"
+            printf 'GIT_TEST_HTTPD=true\n'
+            printf 'GIT_TEST_SVNSERVE=true\n'
+            printf 'GIT_TEST_SVN_HTTPD=true\n'
+            printf 'GIT_TEST_ALLOW_SUDO=YES\n'
+            printf 'GIT_TEST_CLONE_2GB=false\n'
+            printf 'IKNOWWHATIAMDOING=NO\n'
+            printf 'LANG=C\nLC_ALL=C\nTZ=UTC\n'
+          } >>"$GITHUB_ENV"
+          test "$("$ZMIN_REPLAY_RUSTUP" toolchain list | awk -v toolchain="$REPLAY_RUST_TOOLCHAIN" '$1 == toolchain { print $1; exit }')" = "$REPLAY_RUST_TOOLCHAIN"
+          rustc_verbose="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" rustc --version --verbose)"
           test "$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)'
           test "$(printf '%s\n' "$rustc_verbose" | awk '$1 == "host:" { print $2; exit }')" = x86_64-unknown-linux-gnu
-          cargo_version="$(rustup run "$REPLAY_RUST_TOOLCHAIN" cargo --version)"
+          cargo_version="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" cargo --version)"
           case "$cargo_version" in
             'cargo 1.98.0 ('*) ;;
             *) exit 1 ;;
           esac
           {
-            printf 'rustup_toolchain\t%s\n' "$(rustup toolchain list | tr '\n' ';')"
+            printf 'rustup_path\t%s\n' "$ZMIN_REPLAY_RUSTUP"
+            printf 'rustup_toolchain\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" toolchain list | tr '\n' ';')"
             printf 'rust_toolchain\t%s\n' "$REPLAY_RUST_TOOLCHAIN"
-            printf 'cargo_path\t%s\n' "$(rustup which --toolchain "$REPLAY_RUST_TOOLCHAIN" cargo)"
+            printf 'cargo_path\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" which --toolchain "$REPLAY_RUST_TOOLCHAIN" cargo)"
             printf 'cargo_version\t%s\n' "$cargo_version"
-            printf 'rustc_path\t%s\n' "$(rustup which --toolchain "$REPLAY_RUST_TOOLCHAIN" rustc)"
+            printf 'rustc_path\t%s\n' "$("$ZMIN_REPLAY_RUSTUP" which --toolchain "$REPLAY_RUST_TOOLCHAIN" rustc)"
             printf 'rustc_version\t%s\n' "$(printf '%s\n' "$rustc_verbose" | tr '\n' ';')"
             printf 'git_path\t%s\n' "$(command -v git)"
             printf 'git_version\t%s\n' "$(git --version)"

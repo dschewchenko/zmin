@@ -5,7 +5,7 @@ and normal manual (`workflow_dispatch`) runs. The first authoritative run is
 created by pushing a new branch named exactly
 `compat/current-git-v2.55-replay`. The controlled retry is a single
 non-forced push from snapshot tip
-`d8f756d1f5eb0abd377f9939524cd33ab2f939ad`; its tip commit must be signed and
+`18a0f0d455337385e1b6a25312fb15879cdf5145`; its tip commit must be signed and
 contain the exact `Replay-Current-Git: true` marker. Push-run reruns are
 skipped because `github.run_attempt` must be `1`. Preserve the branch after
 creation: deleting and recreating it could create another accepted run.
@@ -45,15 +45,24 @@ exclusion.
 The runner installs the complete Git test dependency set with
 `Acquire::Retries=0`; the cvs/cvsps, subversion/libsvn-perl, CGI, DBI, SQLite,
 and other listed packages are required and a missing package fails preflight.
-Package and executable versions/absolute paths are recorded. The Git-p4 family
-remains in the denominator, but the proprietary `p4`/`p4d` prerequisite is not
-bundled and is reported as an explicit caveat, not silently replaced. Each
+Package and executable versions/absolute paths are recorded. Perforce r23.2
+`p4`/`p4d` and the pinned JGit 6.8.0 launcher are downloaded into a task-owned
+tool directory, verified against frozen HTTPS SHA-256 and exact-size values
+(`p4` 10,587,624 bytes; `p4d` 18,181,064 bytes), and never
+uploaded as replay artifacts. The JGit launcher is the official Maven Central
+6.8.0.202311291450-r `.sh` artifact (size 27,037,916 bytes; SHA-256
+`764f272c3857da1acaa26689f187a5b38d6597f766c91db649300fd0b8225fa9`); its
+HTTPS origin and frozen digest are the provenance/identity check. Apache/SVN, locales, gettext, OpenSSL, Java,
+Perl modules, cvsps, and passwordless non-root sudo are preflighted before
+the lanes start; failures are infrastructure failures, not test skips. The
+Git-p4 family remains in the denominator. Each
 lane's logs are checked for missing files and an exact top-level TAP
 `1..0 # SKIP`; fully skipped retained tests (including t91xx, t94xx, t95xx,
 t96xx, and t98xx) make the outcome incomplete. Assertion-level `# SKIP`
 counts are recorded separately and do not turn platform skips into failures or
 passes. The artifact files `optional-skips.tsv` and `assertion-skips.tsv` carry
-the per-lane test names, reasons, log hashes, and separate assertion counts.
+the per-lane test names, classification, required profile, exact reason, log
+hashes, and separate assertion counts.
 The replay lane does not use a runner's preinstalled Rust toolchain and has no
 fallback. `rust-toolchain.toml` continues to express the repository's
 `stable` policy, while the replay lane freezes the observed native toolchain
@@ -64,6 +73,22 @@ at `1.98.0-x86_64-unknown-linux-gnu`, installed with the minimal profile and
 plus `CARGO_NET_RETRY=0` makes installation or dependency fetch failure
 explicit rather than silently retrying. Cargo builds both `zmin` and
 `zmin-git-remote-http` with `--locked --release`.
+
+The v2 contract has one frozen Linux base profile and seven explicit
+platform/dedicated-host assignments: Windows `t0029`, `t0051`, and `t5580`;
+macOS `t3910`; case-insensitive Linux `t6419`; privileged Linux `t1509`; and
+high-disk Linux `t5608`. Their exact source TAP reasons are required in
+`optional-skips.tsv`; unknown tests, reason changes, profile mismatches, and
+missing logs fail closed. The Linux artifact therefore reports
+`cross_platform_status=pending` with seven coverage gaps, even when both
+1,045-row lanes pass. `tools/git-current-compat-aggregate.py` accepts a
+cross-platform pass only after the assigned profiles close those gaps and
+both control and Zmin cover every selected test; it never treats Linux alone
+as a 100% claim. Aggregation verifies the artifact checksum manifest, metadata
+and lane status, every real TAP log and its skip reason, exact manifest/contract
+identity, and rejects symlinked/traversal paths, duplicate keys, unknown
+profiles, and synthetic TSV-only evidence. Its output is atomically replaced
+only after validation.
 
 Run `32741972934` for snapshot `369ac8b56f6c8cdee6e7057df7b77712b6007380`
 is classified `HARNESS INVALID`: the runner had no preinstalled `stable`
@@ -80,6 +105,18 @@ controlled retry must use a signed, non-forced commit whose parent is that
 snapshot tip and whose message contains the exact `Replay-Current-Git: true`
 marker.
 
+Run `32748958014` for snapshot
+`18a0f0d455337385e1b6a25312fb15879cdf5145` is also classified
+`HARNESS INVALID`: the pinned Rust installation and release build passed, but
+the runtime executable preflight rejected the runner's symlinked Perl path
+before either lane ran (zero tests). Its artifact is not current-Git evidence
+and must not be counted as either a pass or a test failure. The next controlled
+retry must use a signed, non-forced commit whose parent is that snapshot tip
+and whose message contains the exact `Replay-Current-Git: true` marker. The
+workflow now resolves and exports canonical, regular executable paths for
+Perl, Git, Python, and Make, while the replay helper revalidates those exact
+paths and records their command identities and canonical paths.
+
 Stock and Zmin runs use separate, newly-created lane caches, homes, temp
 directories, and output directories. The stock lane builds Git from the exact
 archive, then resolves exactly one executable matching
@@ -87,6 +124,14 @@ archive, then resolves exactly one executable matching
 `git version 2.55.0`, and records its path/hash/version. No fingerprint or host
 path is hardcoded. The Zmin lane uses the release binary and remote HTTP helper
 built from the triggering commit.
+
+Normal Make is authoritative for the prepared stock tree: its
+`GIT-BUILD-OPTIONS` must be present, must show CURL, EXPAT, gettext, Perl,
+Python, Gitweb, and PCRE2 enabled, and no synthetic NO_* fallback is allowed.
+The prepared tree includes generated `git-svn`, `git-cvsserver`,
+`git-cvsimport`, `git-p4`, and Gitweb helpers. Both lane shims receive the same
+source/options/helper set; only the Git executable and remote-HTTP target
+differ.
 
 `per_test_timeout=0` is authoritative. Any nonzero timeout is diagnostic and
 is labelled in metadata; it cannot be reported as authoritative. The `jobs`

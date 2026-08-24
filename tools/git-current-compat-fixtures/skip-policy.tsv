@@ -1,0 +1,8 @@
+test	classification	required_run_profile	reason
+t0029-core-unsetenvvars.sh	platform	windows-x86_64	skipping Windows-specific tests
+t0051-windows-named-pipe.sh	platform	windows-x86_64	skipping Windows-specific tests
+t1509-root-work-tree.sh	dedicated-host	linux-privileged-root	Test requiring writable / skipped. Read this test if you want to run it
+t3910-mac-os-precompose.sh	platform	macos-native	filesystem does not corrupt utf-8
+t5580-unc-paths.sh	platform	windows-x86_64	skipping Windows-only path tests
+t5608-clone-2gb.sh	dedicated-host	linux-high-disk	expensive 2GB clone test; enable with GIT_TEST_CLONE_2GB=true
+t6419-merge-ignorecase.sh	platform	linux-case-insensitive-fs	skipping case insensitive tests - case sensitive file system

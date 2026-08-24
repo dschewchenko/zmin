@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "upstream": {
     "tag": "v2.55.0",
     "archive_url": "https://github.com/git/git/archive/refs/tags/v2.55.0.tar.gz",
@@ -16,5 +16,53 @@
     "selected_names_sha256": "b49ad3a4b94a93d77109da4060671ee5ba0fa92fd1b45885023bd5b358ed34a6",
     "generated_tsv_sha256": "ba7f8c03b683eb984970c103f791e65a77c5664101ba8ca61d3c5d80ab4bafcb",
     "names_encoding": "LC_ALL=C sorted basenames, one LF-terminated name per line"
+  },
+  "skip_policy": {
+    "version": 1,
+    "base_profile": "linux-ubuntu-24.04-x86_64",
+    "entries": [
+      {
+        "test": "t0029-core-unsetenvvars.sh",
+        "classification": "platform",
+        "required_run_profile": "windows-x86_64",
+        "reason": "skipping Windows-specific tests"
+      },
+      {
+        "test": "t0051-windows-named-pipe.sh",
+        "classification": "platform",
+        "required_run_profile": "windows-x86_64",
+        "reason": "skipping Windows-specific tests"
+      },
+      {
+        "test": "t1509-root-work-tree.sh",
+        "classification": "dedicated-host",
+        "required_run_profile": "linux-privileged-root",
+        "reason": "Test requiring writable / skipped. Read this test if you want to run it"
+      },
+      {
+        "test": "t3910-mac-os-precompose.sh",
+        "classification": "platform",
+        "required_run_profile": "macos-native",
+        "reason": "filesystem does not corrupt utf-8"
+      },
+      {
+        "test": "t5580-unc-paths.sh",
+        "classification": "platform",
+        "required_run_profile": "windows-x86_64",
+        "reason": "skipping Windows-only path tests"
+      },
+      {
+        "test": "t5608-clone-2gb.sh",
+        "classification": "dedicated-host",
+        "required_run_profile": "linux-high-disk",
+        "reason": "expensive 2GB clone test; enable with GIT_TEST_CLONE_2GB=true"
+      },
+      {
+        "test": "t6419-merge-ignorecase.sh",
+        "classification": "platform",
+        "required_run_profile": "linux-case-insensitive-fs",
+        "reason": "skipping case insensitive tests - case sensitive file system"
+      }
+    ]
   }
 }

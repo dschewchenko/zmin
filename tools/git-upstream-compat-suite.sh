@@ -742,6 +742,11 @@ def copy_verified_source():
 
 def launch_pinned():
     global exec_fd
+    shell_path = os.environ.get("ZMIN_UPSTREAM_CONTRACT_SHELL", "/bin/sh")
+    cc_path = os.environ.get("ZMIN_UPSTREAM_CONTRACT_CC", "cc")
+    ar_path = os.environ.get("ZMIN_UPSTREAM_CONTRACT_AR", "ar")
+    ranlib_path = os.environ.get("ZMIN_UPSTREAM_CONTRACT_RANLIB", "ranlib")
+    python_path = os.environ.get("ZMIN_UPSTREAM_CONTRACT_PYTHON", "/usr/bin/python3")
     environment = {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         "HOME": "/tmp",
@@ -749,8 +754,14 @@ def launch_pinned():
         "LANG": "C",
         "LC_ALL": "C",
         "TZ": "UTC",
-        "SHELL": "/bin/sh",
+        "SHELL": shell_path,
         "PERL_PATH": perl_path,
+        "PYTHON_PATH": python_path,
+        "SHELL_PATH": shell_path,
+        "TEST_SHELL_PATH": shell_path,
+        "CC": cc_path,
+        "AR": ar_path,
+        "RANLIB": ranlib_path,
     }
     if sys.platform != "linux":
         fail("descriptor-bound Make execution is supported only on Linux")
@@ -1542,6 +1553,8 @@ try:
         "git-sh-i18n--envsubst", "git-sh-i18n--envsubst.exe", "git",
         "git.exe", "git-http-backend", "git-http-backend.exe", "git-sh-i18n",
         "git-sh-i18n.exe", "git-sh-setup", "git-sh-setup.exe",
+        "git-svn", "git-cvsserver", "git-cvsimport", "git-p4",
+        "gitweb/gitweb.cgi",
         "templates/boilerplates.made", "templates/blt/description",
         "templates/blt/hooks/applypatch-msg.sample",
         "templates/blt/hooks/commit-msg.sample",
@@ -1560,7 +1573,7 @@ try:
         "t/helper/test-tool", "t/helper/test-tool-real", "t/helper/test-tool.exe",
         "t/helper/test-tool-real.exe")}
     allowed_dirs = {"./" + item for item in (
-        "perl/build", "perl/build/lib", "templates/blt", "templates/blt/hooks",
+        "perl/build", "perl/build/lib", "gitweb", "templates/blt", "templates/blt/hooks",
         "templates/blt/info")}
     lines = []
     reftable_count = 0
@@ -2335,7 +2348,8 @@ evaluate_prepared_dep_dirs() {
   make_database="$(mktemp "$cache_root/.zmin-make-database.XXXXXX")" || return 1
   if ! (
     cd -P "$pristine" || exit 1
-    run_pinned_make -pn NO_GETTEXT=1 COMPUTE_HEADER_DEPENDENCIES=yes >"$make_database"
+    run_pinned_make -pn NO_CURL= NO_EXPAT= NO_GETTEXT= NO_GITWEB= NO_PERL= NO_PYTHON= \
+      USE_LIBPCRE2=YesPlease COMPUTE_HEADER_DEPENDENCIES=yes >"$make_database"
   ); then
     rm -f -- "$make_database"
     return 1
@@ -2668,7 +2682,19 @@ prepare_upstream_harness() {
       local need_prerequisites=0
       local perl_source perl_target
       local platform_helper="$(platform_helper_path)"
-      local make_targets=(NO_GETTEXT=1 GIT-BUILD-OPTIONS t/helper/test-tool git-sh-i18n--envsubst)
+      local shell_path="${ZMIN_UPSTREAM_CONTRACT_SHELL:-/bin/sh}"
+      local cc_path="${ZMIN_UPSTREAM_CONTRACT_CC:-cc}"
+      local ar_path="${ZMIN_UPSTREAM_CONTRACT_AR:-ar}"
+      local ranlib_path="${ZMIN_UPSTREAM_CONTRACT_RANLIB:-ranlib}"
+      local make_targets=(
+        NO_CURL= NO_EXPAT= NO_GETTEXT= NO_GITWEB= NO_PERL= NO_PYTHON=
+        USE_LIBPCRE2=YesPlease PERL_PATH="$perl_bin"
+        PYTHON_PATH="$contract_python_bin" SHELL_PATH="$shell_path"
+        TEST_SHELL_PATH="$shell_path" CC="$cc_path" AR="$ar_path" RANLIB="$ranlib_path"
+        GIT-BUILD-OPTIONS t/helper/test-tool git-sh-i18n--envsubst all
+        build-perl-script build-python-script gitweb git-svn git-cvsserver
+        git-cvsimport git-p4
+      )
       if [[ "$stock_git_control" == "1" && ! -x git && ! -x git.exe ]]; then
         build_stock_git=1
       fi
@@ -2719,38 +2745,21 @@ prepare_upstream_harness() {
       mkdir -p perl/build/lib
     fi
     if [[ ! -f GIT-BUILD-OPTIONS ]]; then
-      local shell_path perl_path x_suffix
-      shell_path="$(command -v sh)"
-      perl_path="$perl_bin"
-      x_suffix=""
-      if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
-        x_suffix=".exe"
-      fi
-      cat >GIT-BUILD-OPTIONS <<EOF
-BROKEN_PATH_FIX='/^# @BROKEN_PATH_FIX@$/d'
-DIFF='diff'
-GIT_SOURCE_DIR='$source_dir'
-GIT_TEST_CMP='diff -u'
-GIT_TEST_CMP_USE_COPIED_CONTEXT=''
-GIT_TEST_GITPERLLIB='$source_dir/perl/build/lib'
-GIT_TEST_INDEX_VERSION=''
-GIT_TEST_OPTS=''
-GIT_TEST_PERL_FATAL_WARNINGS=''
-GIT_TEST_TEMPLATE_DIR='$source_dir/templates/blt'
-GIT_TEST_TEXTDOMAINDIR='$source_dir/po/build/locale'
-GIT_TEST_UTF8_LOCALE=''
-NO_CURL='1'
-NO_EXPAT='1'
-NO_GETTEXT='1'
-NO_PERL=''
-NO_PYTHON='1'
-PERL_PATH='$perl_path'
-SHELL_PATH='$shell_path'
-TEST_OUTPUT_DIRECTORY=''
-TEST_SHELL_PATH='$shell_path'
-X='$x_suffix'
-EOF
+      echo "normal Make did not produce GIT-BUILD-OPTIONS; refusing synthetic fallback" >&2
+      exit 1
     fi
+    for required_option in NO_CURL NO_EXPAT NO_GETTEXT NO_GITWEB NO_PERL NO_PYTHON; do
+      option_value="$(awk -F= -v key="$required_option" '$1 == key { print substr($0, index($0, "=") + 1); exit }' GIT-BUILD-OPTIONS)"
+      [[ "$option_value" == "''" || "$option_value" == "\"\"" ]] || {
+        echo "normal Make option $required_option is not enabled in GIT-BUILD-OPTIONS" >&2
+        exit 1
+      }
+    done
+    use_pcre2_option="$(awk -F= '$1 == "USE_LIBPCRE2" { print substr($0, index($0, "=") + 1); exit }' GIT-BUILD-OPTIONS)"
+    [[ -n "$use_pcre2_option" && "$use_pcre2_option" != "''" && "$use_pcre2_option" != "\"\"" ]] || {
+      echo "normal Make did not enable PCRE2" >&2
+      exit 1
+    }
     if [[ -f GIT-BUILD-OPTIONS ]]; then
       "$perl_bin" -0pi -e "s/GIT_TEST_CMP='[^']*'/GIT_TEST_CMP='diff -u'/" GIT-BUILD-OPTIONS
     fi
@@ -3560,6 +3569,14 @@ EOF
       "$source_dir/git-sh-setup.sh" >"$shim_dir/git-sh-setup"
     chmod +x "$shim_dir/git-sh-setup"
   fi
+  for external_helper in git-svn git-cvsserver git-cvsimport git-p4; do
+    [[ -f "$source_dir/$external_helper" && ! -L "$source_dir/$external_helper" && -x "$source_dir/$external_helper" ]] || {
+      echo "prepared external helper is missing: $external_helper" >&2
+      return 1
+    }
+    cp "$source_dir/$external_helper" "$shim_dir/$external_helper"
+  done
+  chmod +x "$shim_dir"/git-svn "$shim_dir"/git-cvsserver "$shim_dir"/git-cvsimport "$shim_dir"/git-p4
 }
 
 make_stock_git_http_shim() {
@@ -3608,10 +3625,18 @@ make_stock_git_http_shim() {
     return 1
   }
   cp "$source_dir/git-sh-i18n" "$shim_dir/git-sh-i18n"
+  for external_helper in git-svn git-cvsserver git-cvsimport git-p4; do
+    [[ -f "$source_dir/$external_helper" && ! -L "$source_dir/$external_helper" && -x "$source_dir/$external_helper" ]] || {
+      echo "prepared external helper is missing: $external_helper" >&2
+      return 1
+    }
+    cp "$source_dir/$external_helper" "$shim_dir/$external_helper"
+  done
   chmod +x "$shim_dir"/*
   for path in "$shim_dir/$http_git_relative" "$shim_dir/$http_remote_http_relative" \
     "$shim_dir/$http_backend_relative" "$shim_dir/test-tool" "$shim_dir/git-sh-setup" \
-    "$shim_dir/git-sh-i18n" "$shim_dir/git-sh-i18n--envsubst"; do
+    "$shim_dir/git-sh-i18n" "$shim_dir/git-sh-i18n--envsubst" \
+    "$shim_dir/git-svn" "$shim_dir/git-cvsserver" "$shim_dir/git-cvsimport" "$shim_dir/git-p4"; do
     [[ -f "$path" && ! -L "$path" && -x "$path" ]] || {
       echo "stock HTTP shim member is not a regular executable: $path" >&2
       return 1
@@ -4399,14 +4424,14 @@ while IFS=$'\t' read -r test_name test_mode reason; do
   set -e
   if [[ "$rc" == "0" ]]; then
     passed=$((passed + 1))
-    printf '%s\t%s\tpass\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "$log" >>"$summary"
+    printf '%s\t%s\tpass\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "${test_name%.sh}.log" >>"$summary"
   elif todo_breakage_vanished_only "$log"; then
     passed=$((passed + 1))
     printf '%s\t%s\tpass\t%s (upstream TODO breakage vanished only)\t%s\n' \
-      "$test_mode" "$test_name" "$reason" "$log" >>"$summary"
+      "$test_mode" "$test_name" "$reason" "${test_name%.sh}.log" >>"$summary"
   else
     failed=$((failed + 1))
-    printf '%s\t%s\tfail\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "$log" >>"$summary"
+    printf '%s\t%s\tfail\t%s\t%s\n' "$test_mode" "$test_name" "$reason" "${test_name%.sh}.log" >>"$summary"
     tail -n 40 "$log" >&2 || true
   fi
 done < <(selected_tests)
