@@ -5,7 +5,7 @@ and normal manual (`workflow_dispatch`) runs. The first authoritative run is
 created by pushing a new branch named exactly
 `compat/current-git-v2.55-replay`. The controlled retry is a single
 non-forced push from snapshot tip
-`369ac8b56f6c8cdee6e7057df7b77712b6007380`; its tip commit must be signed and
+`d8f756d1f5eb0abd377f9939524cd33ab2f939ad`; its tip commit must be signed and
 contain the exact `Replay-Current-Git: true` marker. Push-run reruns are
 skipped because `github.run_attempt` must be `1`. Preserve the branch after
 creation: deleting and recreating it could create another accepted run.
@@ -71,6 +71,14 @@ toolchain, dependency setup stopped before the replay, and zero tests ran.
 Its artifact is not current-Git evidence and must not be counted as either a
 pass or a test failure. The controlled retry must use the frozen toolchain
 above; no manual rerun of the failed push is authoritative.
+
+Run `32746703223` for snapshot `d8f756d1f5eb0abd377f9939524cd33ab2f939ad`
+is also classified `HARNESS INVALID`: the authoritative build was blocked by
+Rust E0308 before tests ran (zero tests). Its artifact is not current-Git
+evidence and must not be counted as either a pass or a test failure. The next
+controlled retry must use a signed, non-forced commit whose parent is that
+snapshot tip and whose message contains the exact `Replay-Current-Git: true`
+marker.
 
 Stock and Zmin runs use separate, newly-created lane caches, homes, temp
 directories, and output directories. The stock lane builds Git from the exact

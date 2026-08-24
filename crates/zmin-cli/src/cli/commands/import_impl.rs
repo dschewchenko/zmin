@@ -2360,7 +2360,7 @@ impl FastImportDirectory {
                         "fast-import source descriptor path contains NUL",
                     )
                 })?;
-            let destination = CString::new(destination.as_bytes()).map_err(|_| {
+            let destination_cstring = CString::new(destination.as_bytes()).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "fast-import filename contains NUL",
@@ -2372,7 +2372,7 @@ impl FastImportDirectory {
                     libc::AT_FDCWD,
                     source_fd_path.as_ptr(),
                     self.file.as_raw_fd(),
-                    destination.as_ptr(),
+                    destination_cstring.as_ptr(),
                     libc::AT_SYMLINK_FOLLOW,
                 )
             };

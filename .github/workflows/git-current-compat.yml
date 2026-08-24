@@ -34,7 +34,7 @@ jobs:
            github.event.forced == false &&
            (github.event.created == true ||
             (github.event.created == false &&
-             github.event.before == '369ac8b56f6c8cdee6e7057df7b77712b6007380' &&
+             github.event.before == 'd8f756d1f5eb0abd377f9939524cd33ab2f939ad' &&
              github.event.head_commit != null &&
              contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
