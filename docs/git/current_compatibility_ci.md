@@ -5,7 +5,7 @@ and normal manual (`workflow_dispatch`) runs. The first authoritative run is
 created by pushing a new branch named exactly
 `compat/current-git-v2.55-replay`. The controlled retry is a single
 non-forced push from snapshot tip
-`18a0f0d455337385e1b6a25312fb15879cdf5145`; its tip commit must be signed and
+`9ac8723b671d845cb6181b6b0b88e6bb93a97531`; its tip commit must be signed and
 contain the exact `Replay-Current-Git: true` marker. Push-run reruns are
 skipped because `github.run_attempt` must be `1`. Preserve the branch after
 creation: deleting and recreating it could create another accepted run.
@@ -116,6 +116,14 @@ and whose message contains the exact `Replay-Current-Git: true` marker. The
 workflow now resolves and exports canonical, regular executable paths for
 Perl, Git, Python, and Make, while the replay helper revalidates those exact
 paths and records their command identities and canonical paths.
+
+Run `32764105728` for snapshot
+`9ac8723b671d845cb6181b6b0b88e6bb93a97531` is classified `HARNESS INVALID`:
+dependency provisioning failed before its completion marker, and the replay
+step was correctly skipped; zero tests ran. Its artifact records the setup
+stage, line, and shell command without credentials. The next controlled retry
+must use a signed, non-forced commit whose parent is that snapshot tip and
+whose message contains the exact `Replay-Current-Git: true` marker.
 
 Stock and Zmin runs use separate, newly-created lane caches, homes, temp
 directories, and output directories. The stock lane builds Git from the exact

@@ -415,6 +415,20 @@ fi
 if [[ -f "$run_root/dependency-preflight.tsv" ]]; then
   cp "$run_root/dependency-preflight.tsv" "$artifact_root/dependency-preflight.tsv"
 fi
+dependency_preflight_failure() {
+  local message="$1"
+  printf '%s\n' "$message" >"$artifact_root/failure.txt"
+  {
+    printf 'result\tfail\n'
+    printf 'exit_code\t2\n'
+    printf 'reason\t%s\n' "$message"
+  } >"$artifact_root/outcome.tsv"
+  exit 2
+}
+[[ -f "$run_root/dependency-preflight.tsv" ]] ||
+  dependency_preflight_failure 'dependency preflight is missing; refusing to run without provisioned tools'
+grep -Fqx $'dependency_preflight_complete\ttrue' "$run_root/dependency-preflight.tsv" ||
+  dependency_preflight_failure 'dependency preflight is incomplete; refusing to run without provisioned tools'
 if [[ -e "$repo_tmp" ]]; then
   die "checkout repository .tmp must be absent before replay"
 fi

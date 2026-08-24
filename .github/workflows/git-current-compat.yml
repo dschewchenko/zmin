@@ -34,7 +34,7 @@ jobs:
            github.event.forced == false &&
            (github.event.created == true ||
             (github.event.created == false &&
-             github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145' &&
+             github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531' &&
              github.event.head_commit != null &&
              contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
@@ -76,8 +76,23 @@ jobs:
       - name: Install pinned Git test dependencies
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          dependency_preflight_failure="$GITHUB_WORKSPACE/.replay/dependency-preflight-failure.tsv"
+          replay_stage=bootstrap
+          record_setup_failure() {
+            local rc=$?
+            {
+              printf 'result\tfail\n'
+              printf 'stage\t%s\n' "$replay_stage"
+              printf 'line\t%s\n' "${BASH_LINENO[0]:-$LINENO}"
+              printf 'command\t%q\n' "$BASH_COMMAND"
+              printf 'exit_code\t%s\n' "$rc"
+            } >"$dependency_preflight_failure"
+            exit "$rc"
+          }
+          trap record_setup_failure ERR
           sudo -n true
+          replay_stage=apt.update
           sudo -n apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           apt_packages=(
             bash build-essential ca-certificates curl file findutils gawk gettext
@@ -99,8 +114,9 @@ jobs:
           if ((${#missing_packages[@]})); then
             printf 'apt_required_missing\t%s\n' "${missing_packages[*]}" >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
             printf 'Required Git compatibility dependencies are unavailable: %s\n' "${missing_packages[*]}" >&2
-            exit 1
+            test "${#missing_packages[@]}" -eq 0
           fi
+          replay_stage=apt.install
           sudo -n apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${apt_packages[@]}"
           printf 'apt_required_missing\tnone\n' >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           path_is_safe() {
@@ -115,17 +131,18 @@ jobs:
             canonical="$(realpath -e -- "$path")"
             test "$canonical" = "$path"
           }
+          replay_stage=ambient-command-canonicalization
           for command in apt-cache apt-get awk curl dpkg-query grep realpath sha256sum stat mktemp mv chmod python3 sudo; do
             assert_ambient_canonical "$command"
           done
+          replay_stage=rustup-binding
           rustup_path="$(command -v rustup)"
-          path_is_safe "$rustup_path" || exit 1
+          path_is_safe "$rustup_path"
           rustup_path="$(realpath -e -- "$rustup_path")"
-          path_is_safe "$rustup_path" || exit 1
-          [[ -f "$rustup_path" && -x "$rustup_path" && ! -L "$rustup_path" ]] || exit 1
+          path_is_safe "$rustup_path"
+          [[ -f "$rustup_path" && -x "$rustup_path" && ! -L "$rustup_path" ]]
           rustup_path_again="$(realpath -e -- "$rustup_path")"
-          [[ "$rustup_path_again" == "$rustup_path" ]] || exit 1
-          printf 'ZMIN_REPLAY_RUSTUP=%s\n' "$rustup_path" >>"$GITHUB_ENV"
+          [[ "$rustup_path_again" == "$rustup_path" ]]
           export ZMIN_REPLAY_RUSTUP="$rustup_path"
           toolbin="$GITHUB_WORKSPACE/.replay/toolbin"
           mkdir -p "$toolbin"
@@ -133,80 +150,113 @@ jobs:
             local name="$1" url="$2" expected_sha="$3" expected_size="$4"
             local destination final="$toolbin/$name"
             destination="$(mktemp "$toolbin/.${name}.tmp.XXXXXX")"
-            [[ ! -e "$final" && ! -L "$final" ]] || exit 1
+            [[ ! -e "$final" && ! -L "$final" ]] || return 1
             curl -fsSL --connect-timeout 30 --max-time 600 "$url" -o "$destination"
-            [[ -f "$destination" && ! -L "$destination" ]] || exit 1
+            [[ -f "$destination" && ! -L "$destination" ]] || return 1
             test "$(stat -c '%s' "$destination")" = "$expected_size"
             test "$(sha256sum "$destination" | awk '{ print $1 }')" = "$expected_sha"
             mv -- "$destination" "$final"
             chmod 0555 "$final"
-            [[ -f "$final" && ! -L "$final" && "$(stat -c '%s' "$final")" = "$expected_size" ]] || exit 1
+            [[ -f "$final" && ! -L "$final" && "$(stat -c '%s' "$final")" = "$expected_size" ]] || return 1
             test "$(stat -c '%a' "$final")" = 555
           }
+          replay_stage=provision-p4
           download_verified p4 \
             https://ftp.perforce.com/perforce/r23.2/bin.linux26x86_64/p4 \
             7b73445a34e1d067c3092838a302a284ae15bc7068dbc1e7e5d3ae4c3833f248 10587624
+          replay_stage=provision-p4d
           download_verified p4d \
             https://ftp.perforce.com/perforce/r23.2/bin.linux26x86_64/p4d \
             cab870ae52cea689e9a839d95be8f62b012ffd40ac7e99d381f2663a13679f2d 18181064
+          replay_stage=provision-jgit
           download_verified jgit \
             https://repo1.maven.org/maven2/org/eclipse/jgit/org.eclipse.jgit.pgm/6.8.0.202311291450-r/org.eclipse.jgit.pgm-6.8.0.202311291450-r.sh \
             764f272c3857da1acaa26689f187a5b38d6597f766c91db649300fd0b8225fa9 27037916
+          replay_stage=provisioned-tool-verification
+          export PATH="$toolbin:/usr/bin:/bin:/usr/sbin:/sbin"
+          verify_provisioned_tool() {
+            local name="$1"
+            local tool_path="$toolbin/$name"
+            local resolved command_path
+            path_is_safe "$tool_path"
+            [[ -f "$tool_path" && -x "$tool_path" && ! -L "$tool_path" ]] || return 1
+            resolved="$(realpath -e -- "$tool_path")"
+            path_is_safe "$resolved"
+            [[ "$resolved" == "$tool_path" && -f "$resolved" && -x "$resolved" && ! -L "$resolved" ]] || return 1
+            command_path="$(command -v "$name")"
+            path_is_safe "$command_path"
+            [[ "$command_path" == "$tool_path" ]] || return 1
+          }
+          verify_provisioned_tool p4
+          verify_provisioned_tool p4d
+          verify_provisioned_tool jgit
+          p4_version="$(p4 -V 2>&1 | tr '\n' ';')"
+          p4d_version="$(p4d -V 2>&1 | tr '\n' ';')"
+          jgit_version="$(jgit --version 2>&1)"
+          test -n "$p4_version"
+          test -n "$p4d_version"
+          test "$jgit_version" = 'jgit version 6.8.0.202311291450-r'
           printf 'provisioned_tool\tp4\tr23.2\t%s\n' \
             "$(sha256sum "$toolbin/p4" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           printf 'provisioned_tool\tp4d\tr23.2\t%s\n' \
             "$(sha256sum "$toolbin/p4d" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           printf 'provisioned_tool\tjgit\t6.8.0.202311291450-r\t%s\n' \
             "$(sha256sum "$toolbin/jgit" | awk '{ print $1 }')" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
-          export PATH="$toolbin:/usr/bin:/bin:/usr/sbin:/sbin"
+          printf 'provisioned_tool_version\tp4\t%s\n' "$p4_version" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'provisioned_tool_version\tp4d\t%s\n' "$p4d_version" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'provisioned_tool_version\tjgit\t%s\n' "$jgit_version" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'ZMIN_REPLAY_RUSTUP=%s\n' "$ZMIN_REPLAY_RUSTUP" >>"$GITHUB_ENV"
+          replay_stage=rustup-install
           "$ZMIN_REPLAY_RUSTUP" toolchain install "$REPLAY_RUST_TOOLCHAIN" --profile minimal --no-self-update
           for package in "${apt_packages[@]}"; do
             dpkg-query -W -f='apt_package\t${Package}\t${Version}\t${Status}\n' "$package" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
+          replay_stage=required-command-preflight
           for command in awk bash cat comm curl cvs cvsps df diff du envsubst find gcc git grep gpg highlight iconv java jgit make msgfmt openssl p4 p4d perl python3 realpath rg sed sha256sum shasum sh ssh sort svn svnadmin svnmucc svnserve tar timeout tr uniq uname wc cc ar ranlib apache2 apache2ctl locale locale-gen sudo; do
             command_path="$(command -v "$command")"
             path_is_safe "$command_path"
             command_path="$(realpath -e -- "$command_path")"
-            [[ -f "$command_path" && -x "$command_path" && ! -L "$command_path" ]] || exit 1
+            [[ -f "$command_path" && -x "$command_path" && ! -L "$command_path" ]]
             printf 'command_path\t%s\t%s\n' "$command" "$command_path" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
             printf 'command_version\t%s\t%s\n' "$command" \
               "$($command --version 2>&1 | head -n 1 | tr '\n' ';' || true)" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
+          replay_stage=canonical-runtime-environment
           canonical_required_executable() {
             local variable="$1"
             local command_name="$2"
             local command_path canonical canonical_again
             IFS= read -r -d '' command_path < <(command -v "$command_name"; printf '\0') || {
               printf 'required executable lookup failed: %s (%s)\n' "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             path_is_safe "$command_path" || {
               printf 'required executable lookup is invalid: %s (%s)\n' "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             IFS= read -r -d '' canonical < <(realpath -e -- "$command_path" 2>/dev/null; printf '\0') || {
               printf 'required executable canonicalization failed: %s (%s)\n' "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             path_is_safe "$canonical" &&
               [[ -n "$canonical" && "$canonical" == /* &&
               -f "$canonical" && -x "$canonical" && ! -L "$canonical" ]] || {
               printf 'required executable is not a canonical regular executable: %s (%s)\n' \
                 "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             IFS= read -r -d '' canonical_again < <(realpath -e -- "$canonical" 2>/dev/null; printf '\0') || {
               printf 'required executable canonicalization recheck failed: %s (%s)\n' \
                 "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             [[ "$canonical_again" == "$canonical" ]] || {
               printf 'required executable canonicalization is unstable: %s (%s)\n' \
                 "$variable" "$command_name" >&2
-              exit 1
+              return 1
             }
             printf '%s=%s\n' "$variable" "$canonical" >>"$GITHUB_ENV"
             printf 'runtime_executable\t%s\t%s\t%s\n' \
@@ -226,7 +276,7 @@ jobs:
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4 p4
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4D p4d
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit
-          test "$(jgit --version 2>&1)" = 'jgit version 6.8.0.202311291450-r'
+          test "$jgit_version" = 'jgit version 6.8.0.202311291450-r'
           perl -MDigest::SHA -MGit -MSVN::Core -MSVN::Repos -MSVN::Ra -MSVN::Delta \
             -MSVN::Client -MDBI -MDBD::SQLite -MCGI::Util -MCGI::Carp \
             -MTime::HiRes -MEncode -MCompress::Zlib -MLocale::Messages -e '1'
@@ -245,6 +295,7 @@ jobs:
           test -n "$utf8_locale"
           locale -a | awk 'tolower($0) == "is_is.utf8" || tolower($0) == "is_is.utf-8" { found=1 } END { exit !found }'
           printf 'GIT_TEST_UTF8_LOCALE=%s\n' "$utf8_locale" >>"$GITHUB_ENV"
+          replay_stage=runtime-environment
           printf 'runtime_profile\t%s\n' "$REPLAY_PROFILE" >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           {
             printf 'PATH=%s\n' "$PATH"
@@ -256,6 +307,7 @@ jobs:
             printf 'IKNOWWHATIAMDOING=NO\n'
             printf 'LANG=C\nLC_ALL=C\nTZ=UTC\n'
           } >>"$GITHUB_ENV"
+          replay_stage=rustup-verification
           test "$("$ZMIN_REPLAY_RUSTUP" toolchain list | awk -v toolchain="$REPLAY_RUST_TOOLCHAIN" '$1 == toolchain { print $1; exit }')" = "$REPLAY_RUST_TOOLCHAIN"
           rustc_verbose="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" rustc --version --verbose)"
           test "$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)'
@@ -263,7 +315,7 @@ jobs:
           cargo_version="$("$ZMIN_REPLAY_RUSTUP" run "$REPLAY_RUST_TOOLCHAIN" cargo --version)"
           case "$cargo_version" in
             'cargo 1.98.0 ('*) ;;
-            *) exit 1 ;;
+            *) printf 'unexpected cargo version: %s\n' "$cargo_version" >&2; false ;;
           esac
           {
             printf 'rustup_path\t%s\n' "$ZMIN_REPLAY_RUSTUP"
@@ -276,10 +328,13 @@ jobs:
             printf 'git_path\t%s\n' "$(command -v git)"
             printf 'git_version\t%s\n' "$(git --version)"
           } >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          replay_stage=complete
+          printf 'dependency_preflight_complete\ttrue\n' >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          trap - ERR
 
       - name: Run stock control and Zmin replay
         id: replay
-        if: always()
+        if: success()
         shell: bash
         continue-on-error: true
         env:
@@ -305,6 +360,9 @@ jobs:
           mkdir -p "$artifact_root"
           if [[ -f "$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv" && ! -f "$artifact_root/dependency-preflight.tsv" ]]; then
             cp "$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv" "$artifact_root/dependency-preflight.tsv"
+          fi
+          if [[ -f "$GITHUB_WORKSPACE/.replay/dependency-preflight-failure.tsv" ]]; then
+            cp "$GITHUB_WORKSPACE/.replay/dependency-preflight-failure.tsv" "$artifact_root/dependency-preflight-failure.tsv"
           fi
           if [[ ! -f "$artifact_root/outcome.tsv" ]]; then
             {

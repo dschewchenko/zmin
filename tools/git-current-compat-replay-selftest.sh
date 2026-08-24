@@ -40,12 +40,132 @@ assert [entry["test"] for entry in contract["skip_policy"]["entries"]] == sorted
 assert len(contract["skip_policy"]["entries"]) == 7
 PY
 
+python3 - "$proposal_root/.github/workflows/git-current-compat.yml" <<'PY'
+import sys
+
+workflow_path = sys.argv[1]
+lines = open(workflow_path, encoding="utf-8").read().splitlines()
+
+
+def first_index(predicate):
+    for index, line in enumerate(lines):
+        if predicate(line):
+            return index
+    raise AssertionError("workflow assertion did not match")
+
+
+p4_download = first_index(lambda line: "download_verified p4" in line)
+p4d_download = first_index(lambda line: "download_verified p4d" in line)
+jgit_download = first_index(lambda line: "download_verified jgit" in line)
+path_export = first_index(lambda line: 'export PATH="$toolbin:' in line)
+required_loop = first_index(lambda line: "for command in awk bash cat comm curl" in line)
+jgit_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit" in line)
+owned_verify = first_index(lambda line: "verify_provisioned_tool p4" in line)
+owned_version = first_index(lambda line: 'jgit_version="$(jgit --version' in line)
+github_env_write = first_index(lambda line: '>>"$GITHUB_ENV"' in line)
+completion = first_index(lambda line: "dependency_preflight_complete" in line)
+replay_success = first_index(lambda line: line.strip() == "if: success()")
+setup_start = first_index(lambda line: line.strip() == "- name: Install pinned Git test dependencies")
+setup_end = first_index(lambda line: line.strip() == "- name: Run stock control and Zmin replay")
+setup_text = "\n".join(lines[setup_start:setup_end])
+
+assert p4_download < p4d_download < jgit_download < path_export < owned_verify < owned_version
+assert owned_version < github_env_write
+assert owned_version < required_loop < jgit_canonical < completion
+assert "set -Eeuo pipefail" in setup_text
+assert "exit 1" not in setup_text
+assert "return 1" in setup_text
+workflow_text = "\n".join(lines)
+assert "github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531'" in workflow_text
+assert "github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145'" not in workflow_text
+assert replay_success > completion
+assert "if: always()" not in "\n".join(lines[replay_success - 3: replay_success + 2])
+print("workflow provisioning order: pass (owned downloads, PATH, verification, versions precede generic lookup/canonicalization; replay is success-gated)")
+PY
+
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/git-current-compat-selftest.XXXXXX")"
 cleanup() {
   chmod -R u+w "$tmp_root" 2>/dev/null || true
   rm -rf -- "$tmp_root"
 }
 trap cleanup EXIT
+
+marker_probe="$tmp_root/missing-preflight"
+mkdir -p "$marker_probe/artifacts"
+if REPLAY_PROFILE=linux-ubuntu-24.04-x86_64 \
+  REPLAY_RUST_TOOLCHAIN=1.98.0-x86_64-unknown-linux-gnu \
+  ZMIN_REPLAY_RUSTUP=/bin/true \
+  bash "$helper" 1 0 "$marker_probe/artifacts" >/dev/null 2>&1; then
+  echo 'replay helper accepted missing dependency preflight marker' >&2
+  exit 1
+fi
+test "$(awk -F '\t' '$1 == "reason" { print $2; exit }' "$marker_probe/artifacts/outcome.tsv")" = \
+  'dependency preflight is missing; refusing to run without provisioned tools'
+printf '%s\n' 'dependency preflight marker guard: pass (missing marker rejected before replay)'
+
+dynamic_failure_script="$tmp_root/dynamic-setup-failure.sh"
+dynamic_success_script="$tmp_root/dynamic-setup-success.sh"
+dynamic_failure_file="$tmp_root/dynamic-setup-failure.tsv"
+python3 - "$proposal_root/.github/workflows/git-current-compat.yml" \
+  "$dynamic_failure_script" "$dynamic_success_script" <<'PY'
+import sys
+import textwrap
+
+workflow_path, failure_path, success_path = sys.argv[1:]
+lines = open(workflow_path, encoding="utf-8").read().splitlines()
+start = next(i for i, line in enumerate(lines) if line.strip() == "record_setup_failure() {")
+end = next(i for i, line in enumerate(lines[start:], start) if line.strip() == "trap record_setup_failure ERR")
+function_block = textwrap.dedent("\n".join(lines[start:end]))
+prefix = textwrap.dedent(
+    """\
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    dependency_preflight_failure="$1"
+    replay_stage=dynamic-controlled-failure
+    """
+)
+failure_script = prefix + function_block + textwrap.dedent(
+    """
+    trap record_setup_failure ERR
+    controlled_failure() {
+      false
+    }
+    controlled_failure
+    """
+)
+success_script = prefix.replace("dynamic-controlled-failure", "dynamic-controlled-success") + function_block + textwrap.dedent(
+    """
+    trap record_setup_failure ERR
+    controlled_success() {
+      :
+    }
+    controlled_success
+    test ! -e "$dependency_preflight_failure"
+    """
+)
+open(failure_path, "w", encoding="utf-8").write(failure_script)
+open(success_path, "w", encoding="utf-8").write(success_script)
+PY
+chmod 755 "$dynamic_failure_script" "$dynamic_success_script"
+if env DYNAMIC_SECRET=dynamic-secret-value bash "$dynamic_failure_script" "$dynamic_failure_file"; then
+  echo 'ERR trap dynamic failure unexpectedly succeeded' >&2
+  exit 1
+fi
+test "$(awk -F '\t' '$1 == "result" { print $2; exit }' "$dynamic_failure_file")" = fail
+test "$(grep -Fc $'result\tfail' "$dynamic_failure_file")" -eq 1
+test "$(awk -F '\t' '$1 == "stage" { print $2; exit }' "$dynamic_failure_file")" = dynamic-controlled-failure
+dynamic_line="$(awk -F '\t' '$1 == "line" { print $2; exit }' "$dynamic_failure_file")"
+test "$dynamic_line" -gt 0
+dynamic_command="$(awk -F '\t' '$1 == "command" { print $2; exit }' "$dynamic_failure_file")"
+test -n "$dynamic_command"
+test "$dynamic_command" = false
+test "$(awk -F '\t' '$1 == "exit_code" { print $2; exit }' "$dynamic_failure_file")" -eq 1
+if grep -Fq 'dynamic-secret-value' "$dynamic_failure_file"; then
+  echo 'ERR trap artifact leaked environment secret' >&2
+  exit 1
+fi
+bash "$dynamic_success_script" "$tmp_root/dynamic-setup-success.tsv"
+printf '%s\n' 'ERR trap dynamic guard: pass (phase/line/quoted command/exit captured once; success stays clean)'
 
 make_manifest() {
   local path="$1"
