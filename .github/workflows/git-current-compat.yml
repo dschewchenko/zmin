@@ -30,7 +30,13 @@ jobs:
       ${{ github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'push' &&
            github.ref == 'refs/heads/compat/current-git-v2.55-replay' &&
-           github.event.created == true &&
+           github.event.deleted == false &&
+           github.event.forced == false &&
+           (github.event.created == true ||
+            (github.event.created == false &&
+             github.event.before == '369ac8b56f6c8cdee6e7057df7b77712b6007380' &&
+             github.event.head_commit != null &&
+             contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
     name: Current Git replay (Linux x86_64)
     # 1,045 upstream files can take most of a runner allocation.  Keep the
@@ -40,7 +46,7 @@ jobs:
     env:
       REPLAY_JOBS: ${{ inputs.jobs || '4' }}
       REPLAY_PER_TEST_TIMEOUT: ${{ inputs.per_test_timeout || '0' }}
-      REPLAY_RUST_TOOLCHAIN: stable
+      REPLAY_RUST_TOOLCHAIN: "1.98.0-x86_64-unknown-linux-gnu"
       RUSTUP_MAX_RETRIES: "0"
       CARGO_NET_RETRY: "0"
       CARGO_TERM_COLOR: never
@@ -89,12 +95,13 @@ jobs:
             exit 1
           fi
           sudo apt-get -o Acquire::Retries=0 install -y --no-install-recommends "${apt_packages[@]}"
+          rustup toolchain install "$REPLAY_RUST_TOOLCHAIN" --profile minimal --no-self-update
           printf 'apt_required_missing\tnone\n' >"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           for package in "${apt_packages[@]}"; do
             dpkg-query -W -f='apt_package\t${Package}\t${Version}\t${Status}\n' "$package" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
-          for command in bash cargo rustc rustup make gcc perl curl tar sha256sum rg cvs cvsps svn; do
+          for command in bash rustup make gcc perl curl tar sha256sum rg cvs cvsps svn; do
             command_path="$(command -v "$command")"
             case "$command_path" in /*) ;; *) exit 1 ;; esac
             printf 'command_path\t%s\t%s\n' "$command" "$command_path" \
@@ -103,13 +110,22 @@ jobs:
               "$("$command" --version 2>&1 | head -n 1 | tr '\n' ';')" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
-          test "$(rustup toolchain list | awk '$1 == "stable" { print $1; exit }')" = stable
+          test "$(rustup toolchain list | awk -v toolchain="$REPLAY_RUST_TOOLCHAIN" '$1 == toolchain { print $1; exit }')" = "$REPLAY_RUST_TOOLCHAIN"
+          rustc_verbose="$(rustup run "$REPLAY_RUST_TOOLCHAIN" rustc --version --verbose)"
+          test "$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)'
+          test "$(printf '%s\n' "$rustc_verbose" | awk '$1 == "host:" { print $2; exit }')" = x86_64-unknown-linux-gnu
+          cargo_version="$(rustup run "$REPLAY_RUST_TOOLCHAIN" cargo --version)"
+          case "$cargo_version" in
+            'cargo 1.98.0 ('*) ;;
+            *) exit 1 ;;
+          esac
           {
             printf 'rustup_toolchain\t%s\n' "$(rustup toolchain list | tr '\n' ';')"
-            printf 'cargo_path\t%s\n' "$(command -v cargo)"
-            printf 'cargo_version\t%s\n' "$(cargo --version)"
-            printf 'rustc_path\t%s\n' "$(command -v rustc)"
-            printf 'rustc_version\t%s\n' "$(rustc --version --verbose | tr '\n' ';')"
+            printf 'rust_toolchain\t%s\n' "$REPLAY_RUST_TOOLCHAIN"
+            printf 'cargo_path\t%s\n' "$(rustup which --toolchain "$REPLAY_RUST_TOOLCHAIN" cargo)"
+            printf 'cargo_version\t%s\n' "$cargo_version"
+            printf 'rustc_path\t%s\n' "$(rustup which --toolchain "$REPLAY_RUST_TOOLCHAIN" rustc)"
+            printf 'rustc_version\t%s\n' "$(printf '%s\n' "$rustc_verbose" | tr '\n' ';')"
             printf 'git_path\t%s\n' "$(command -v git)"
             printf 'git_version\t%s\n' "$(git --version)"
           } >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"

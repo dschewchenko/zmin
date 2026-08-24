@@ -17,7 +17,8 @@ upstream_archive_url="https://github.com/git/git/archive/refs/tags/${upstream_ta
 upstream_repo_url=https://github.com/git/git.git
 expected_full_tests=1045
 artifact_budget_bytes=$((2 * 1024 * 1024 * 1024))
-rust_toolchain="${REPLAY_RUST_TOOLCHAIN:-stable}"
+required_rust_toolchain=1.98.0-x86_64-unknown-linux-gnu
+rust_toolchain="${REPLAY_RUST_TOOLCHAIN:-}"
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -416,6 +417,9 @@ fail_with_artifact() {
   exit "$rc"
 }
 
+[[ "$rust_toolchain" == "$required_rust_toolchain" ]] ||
+  fail_with_artifact "REPLAY_RUST_TOOLCHAIN must be exactly $required_rust_toolchain"
+
 for command in awk cat comm curl df du find git grep python3 realpath rg rustup sed sha256sum sort tail tar timeout tr uniq uname wc; do
   command -v "$command" >/dev/null || fail_with_artifact "missing command: $command"
 done
@@ -489,8 +493,25 @@ export CARGO_HOME="$work_root/cargo-home"
 export CARGO_TERM_COLOR=never
 export RUSTUP_MAX_RETRIES="${RUSTUP_MAX_RETRIES:-0}"
 export CARGO_NET_RETRY="${CARGO_NET_RETRY:-0}"
-test "$(rustup toolchain list | awk -v toolchain="$rust_toolchain" '$1 == toolchain { print $1; exit }')" = "$rust_toolchain" ||
-  fail_with_artifact "required preinstalled Rust toolchain is unavailable: $rust_toolchain"
+rust_toolchain_entry="$(rustup toolchain list | awk -v toolchain="$rust_toolchain" '$1 == toolchain { print $1; exit }')"
+test "$rust_toolchain_entry" = "$rust_toolchain" ||
+  fail_with_artifact "required Rust toolchain is not installed: $rust_toolchain"
+if ! rustc_verbose="$(rustup run "$rust_toolchain" rustc --version --verbose 2>&1)"; then
+  fail_with_artifact "could not execute rustc from required Rust toolchain: $rust_toolchain"
+fi
+rustc_release="$(printf '%s\n' "$rustc_verbose" | awk 'NR == 1 { print; exit }')"
+test "$rustc_release" = 'rustc 1.98.0 (88d9e12ae 2026-08-18)' ||
+  fail_with_artifact "unexpected rustc release for $rust_toolchain: $rustc_release"
+rustc_host="$(printf '%s\n' "$rustc_verbose" | awk '$1 == "host:" { print $2; exit }')"
+test "$rustc_host" = x86_64-unknown-linux-gnu ||
+  fail_with_artifact "unexpected rustc host for $rust_toolchain: $rustc_host"
+if ! cargo_version="$(rustup run "$rust_toolchain" cargo --version 2>&1)"; then
+  fail_with_artifact "could not execute cargo from required Rust toolchain: $rust_toolchain"
+fi
+case "$cargo_version" in
+  'cargo 1.98.0 ('*) ;;
+  *) fail_with_artifact "unexpected cargo release for $rust_toolchain: $cargo_version" ;;
+esac
 build_target="$work_root/cargo-target"
 mkdir -p "$build_target"
 build_log="$artifact_root/build.log"
@@ -510,8 +531,9 @@ test -x "$zmin_bin" || fail_with_artifact "missing release zmin binary"
 test -x "$zmin_remote_http" || fail_with_artifact "missing release zmin-git-remote-http binary"
 {
   printf 'rust_toolchain\t%s\n' "$rust_toolchain"
-  rustup run "$rust_toolchain" rustc --version --verbose | sed 's/^/rustc\t/'
-  rustup run "$rust_toolchain" cargo --version | sed 's/^/cargo\t/'
+  printf 'rustc_host\t%s\n' "$rustc_host"
+  printf '%s\n' "$rustc_verbose" | sed 's/^/rustc\t/'
+  printf 'cargo\t%s\n' "$cargo_version"
   sha256sum "$repo_root/Cargo.lock" | awk '{ print "Cargo.lock_sha256\t" $1 }'
   sha256sum "$zmin_bin" | awk '{ print "zmin_sha256\t" $1 }'
   sha256sum "$zmin_remote_http" | awk '{ print "zmin_git_remote_http_sha256\t" $1 }'
