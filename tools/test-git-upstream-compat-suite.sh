@@ -467,6 +467,13 @@ printf '%s\n' "$manifest_fixture_output" | grep -Fqx 'manifest-fixture=pass' || 
   exit 1
 }
 runner_source="$repo_root/tools/git-upstream-compat-suite.sh"
+grep -Fq 'ZMIN_UPSTREAM_MAKE_DESCRIPTOR_SELFTEST=1 run_pinned_make --version' "$runner_source"
+grep -Fq 'offset-safe descriptor hashing requires a regular file' "$runner_source"
+grep -Fq 'pread(fd, 1024 * 1024, offset)' "$runner_source"
+if grep -Fq 'duplicate = os.dup(fd)' "$runner_source" || grep -Fq 'os.read(duplicate' "$runner_source"; then
+  echo "descriptor hashing still mutates a shared duplicated fd offset" >&2
+  exit 1
+fi
 grep -Fq 'memfd_create("zmin-pinned-make", allow_sealing | cloexec)' "$runner_source"
 grep -Fq 'fcntl.fcntl(pin_fd, add_seals, seal_flags)' "$runner_source"
 grep -Fq 'fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)' "$runner_source"

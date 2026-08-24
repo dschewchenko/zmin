@@ -652,17 +652,19 @@ def fail(message):
 
 
 def digest_fd(fd):
-    duplicate = os.dup(fd)
-    try:
-        os.lseek(duplicate, 0, os.SEEK_SET)
-        digest = hashlib.sha256()
-        while True:
-            chunk = os.read(duplicate, 1024 * 1024)
-            if not chunk:
-                return digest.hexdigest()
-            digest.update(chunk)
-    finally:
-        os.close(duplicate)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        fail("offset-safe descriptor hashing requires a regular file")
+    pread = getattr(os, "pread", None)
+    if pread is None:
+        fail("offset-safe descriptor hashing requires os.pread")
+    digest = hashlib.sha256()
+    offset = 0
+    while True:
+        chunk = pread(fd, 1024 * 1024, offset)
+        if not chunk:
+            return digest.hexdigest()
+        digest.update(chunk)
+        offset += len(chunk)
 
 
 def open_readonly(path):
@@ -677,6 +679,22 @@ def open_readonly(path):
 
 def copy_verified_source():
     global source_fd, pin_fd, source_identity
+    if os.environ.get("ZMIN_UPSTREAM_MAKE_DESCRIPTOR_SELFTEST") == "1":
+        pipe_read, pipe_write = os.pipe()
+        try:
+            os.write(pipe_write, b"pipe")
+            try:
+                digest_fd(pipe_read)
+            except RuntimeError as error:
+                if str(error) != "offset-safe descriptor hashing requires a regular file":
+                    fail("pipe descriptor self-test failed with an unexpected error")
+            else:
+                fail("pipe descriptor self-test unexpectedly succeeded")
+            if os.read(pipe_read, 4) != b"pipe":
+                fail("pipe descriptor self-test consumed input before rejection")
+        finally:
+            os.close(pipe_read)
+            os.close(pipe_write)
     path_stat = os.stat(source_path, follow_symlinks=False)
     if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISREG(path_stat.st_mode):
         fail("authenticated Make source path is not a regular non-symlink file")
@@ -687,6 +705,8 @@ def copy_verified_source():
     source_identity = (source_stat.st_dev, source_stat.st_ino)
     if not stat.S_ISREG(source_stat.st_mode) or not (source_stat.st_mode & 0o111):
         fail("authenticated Make source is not an executable regular file")
+    if os.environ.get("ZMIN_UPSTREAM_MAKE_DESCRIPTOR_SELFTEST") == "1":
+        os.lseek(source_fd, source_stat.st_size, os.SEEK_SET)
     if digest_fd(source_fd) != expected_sha:
         fail("authenticated Make source changed before pinning")
     if sys.platform != "linux":
@@ -715,10 +735,12 @@ def copy_verified_source():
             view = view[written:]
     os.fsync(pin_fd)
     os.lseek(pin_fd, 0, os.SEEK_SET)
+    if os.environ.get("ZMIN_UPSTREAM_MAKE_DESCRIPTOR_SELFTEST") == "1":
+        os.lseek(pin_fd, os.fstat(pin_fd).st_size, os.SEEK_SET)
     if digest_fd(pin_fd) != expected_sha:
         fail("sealed Make copy hash mismatch")
-    header = os.read(pin_fd, 4)
     os.lseek(pin_fd, 0, os.SEEK_SET)
+    header = os.read(pin_fd, 4)
     if header != b"\x7fELF":
         fail("Linux descriptor-bound Make requires a native ELF executable")
     import fcntl
@@ -3728,6 +3750,7 @@ EOF
     make_anchor_sha256=""
     make_anchor_version=""
     validate_fixture_make_identity
+    ZMIN_UPSTREAM_MAKE_DESCRIPTOR_SELFTEST=1 run_pinned_make --version >/dev/null
     parser_output="$(evaluate_prepared_dep_dirs "$pristine")"
     [[ -n "$parser_output" ]]
   elif [[ "$fixture_platform" == "Darwin" || "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
