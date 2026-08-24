@@ -60,6 +60,8 @@ jgit_download = first_index(lambda line: "download_verified jgit" in line)
 path_export = first_index(lambda line: 'export PATH="$toolbin:' in line)
 required_loop = first_index(lambda line: "for command in awk bash cat comm curl" in line)
 jgit_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit" in line)
+dpkg_query_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_DPKG_QUERY dpkg-query" in line)
+cvsps_canonical = first_index(lambda line: "canonical_required_executable ZMIN_UPSTREAM_CONTRACT_CVSPS cvsps" in line)
 owned_verify = first_index(lambda line: "verify_provisioned_tool p4" in line)
 owned_version = first_index(lambda line: 'jgit_version="$(jgit --version' in line)
 github_env_write = first_index(lambda line: '>>"$GITHUB_ENV"' in line)
@@ -73,15 +75,21 @@ ambient_loop = first_index(lambda line: "for command in apt-cache apt-get awk cu
 
 assert p4_download < p4d_download < jgit_download < path_export < owned_verify < owned_version
 assert owned_version < github_env_write
-assert owned_version < required_loop < jgit_canonical < completion
+assert owned_version < required_loop < jgit_canonical < dpkg_query_canonical < cvsps_canonical < completion
 assert "set -Eeuo pipefail" in setup_text
 assert "exit 1" not in setup_text
 assert "return 1" in setup_text
 assert ambient_record < ambient_loop
 assert "test \"$canonical\" = \"$path\"" not in setup_text
 assert 'replay_stage="ambient-command-canonicalization:$command"' in setup_text
+assert 'command_path="$(command -v -- "$command_name")"' in setup_text
+assert "IFS= read -r -d '' command_path" not in setup_text
+assert "IFS= read -r -d '' canonical" not in setup_text
+assert "cvsps --version" not in setup_text
+assert "validate_cvsps_version" in setup_text
 workflow_text = "\n".join(lines)
-assert "github.event.before == '45108021d7883ec8011b4d03bdd0aec0606851b7'" in workflow_text
+assert "github.event.before == '0e1f17ac245e306fb90462be38d4091c72a089bd'" in workflow_text
+assert "github.event.before == '45108021d7883ec8011b4d03bdd0aec0606851b7'" not in workflow_text
 assert "github.event.before == '9ac8723b671d845cb6181b6b0b88e6bb93a97531'" not in workflow_text
 assert "github.event.before == '18a0f0d455337385e1b6a25312fb15879cdf5145'" not in workflow_text
 assert replay_success > completion
@@ -284,6 +292,104 @@ assert not os.access(nonexec, os.X_OK)
 PY
   printf 'canonical executable fixture: pass (portable equivalent; realpath unavailable)\n'
 fi
+runtime_script="$tmp_root/canonical-runtime.sh"
+runtime_env="$tmp_root/canonical-runtime.env"
+runtime_workspace="$tmp_root/canonical-runtime-workspace"
+mkdir -p "$runtime_workspace/.replay"
+python3 - "$proposal_root/.github/workflows/git-current-compat.yml" "$runtime_script" <<'PY'
+import sys
+import textwrap
+
+workflow_path, script_path = sys.argv[1:]
+lines = open(workflow_path, encoding="utf-8").read().splitlines()
+path_start = next(i for i, line in enumerate(lines) if line.strip() == "path_is_safe() {")
+ambient_start = next(i for i, line in enumerate(lines[path_start:], path_start) if line.strip() == "assert_ambient_canonical() {")
+runtime_start = next(i for i, line in enumerate(lines) if line.strip() == "canonical_required_executable() {")
+runtime_call = next(i for i, line in enumerate(lines[runtime_start:], runtime_start) if line.strip().startswith("canonical_required_executable ZMIN_UPSTREAM_CONTRACT_GIT"))
+script = textwrap.dedent(
+    """\
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    """
+) + textwrap.dedent("\n".join(lines[path_start:ambient_start])) + "\n" + textwrap.dedent("\n".join(lines[runtime_start:runtime_call])) + textwrap.dedent(
+    """
+    canonical_required_executable "$1" "$2"
+    """
+)
+open(script_path, "w", encoding="utf-8").write(script)
+PY
+chmod 755 "$runtime_script"
+runtime_path="$PATH"
+if realpath -e "$canonical_real" >/dev/null 2>&1; then
+  :
+else
+  runtime_toolbin="$tmp_root/canonical-runtime-bin"
+  mkdir -p "$runtime_toolbin"
+  printf '#!/bin/sh\nif [ "$1" = "-e" ]; then shift; fi\nexec /bin/realpath "$@"\n' >"$runtime_toolbin/realpath"
+  chmod 755 "$runtime_toolbin/realpath"
+  runtime_path="$runtime_toolbin:$PATH"
+fi
+runtime_git_spelling="$(PATH="$runtime_path" command -v -- git)"
+runtime_git_canonical="$(PATH="$runtime_path" realpath -e -- "$runtime_git_spelling")"
+PATH="$runtime_path" GITHUB_ENV="$runtime_env" GITHUB_WORKSPACE="$runtime_workspace" \
+  bash "$runtime_script" TEST_GIT git
+test "$(cat "$runtime_env")" = "TEST_GIT=$runtime_git_canonical"
+test "$(cat "$runtime_workspace/.replay/dependency-preflight.tsv")" = \
+  $'runtime_executable\tTEST_GIT\tgit\t'"$runtime_git_canonical"
+case "$runtime_git_spelling" in
+  *$'\n'*|*$'\r'*)
+    echo 'git command lookup retained a line terminator' >&2
+    exit 1
+    ;;
+esac
+malicious_dir="$tmp_root/canonical-runtime-malicious"$'\n'"path/bin"
+malicious_workspace="$tmp_root/canonical-runtime-malicious-workspace"
+mkdir -p "$malicious_dir" "$malicious_workspace/.replay"
+printf '#!/bin/sh\nexit 0\n' >"$malicious_dir/git"
+chmod 755 "$malicious_dir/git"
+if PATH="$malicious_dir:$runtime_path" GITHUB_ENV="$tmp_root/malicious.env" \
+  GITHUB_WORKSPACE="$malicious_workspace" bash "$runtime_script" TEST_GIT git >/dev/null 2>&1; then
+  echo 'malicious newline command path was accepted' >&2
+  exit 1
+fi
+printf '%s\n' 'canonical runtime lookup fixture: pass (git path has no newline; malicious newline rejected)'
+cvsps_version_script="$tmp_root/cvsps-version.sh"
+python3 - "$proposal_root/.github/workflows/git-current-compat.yml" "$cvsps_version_script" <<'PY'
+import sys
+import textwrap
+
+workflow_path, script_path = sys.argv[1:]
+lines = open(workflow_path, encoding="utf-8").read().splitlines()
+start = next(i for i, line in enumerate(lines) if line.strip() == "validate_cvsps_version() {")
+end = next(i for i, line in enumerate(lines[start:], start) if line.strip().startswith("canonical_required_executable ZMIN_UPSTREAM_CONTRACT_GIT"))
+script = textwrap.dedent(
+    """\
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    """
+) + textwrap.dedent("\n".join(lines[start:end])) + textwrap.dedent(
+    """
+    validate_cvsps_version "$1" "$2"
+    """
+)
+open(script_path, "w", encoding="utf-8").write(script)
+PY
+chmod 755 "$cvsps_version_script"
+bash "$cvsps_version_script" 'install ok installed' '2.1-8'
+bash "$cvsps_version_script" 'install ok installed' '2.2-1ubuntu1'
+if bash "$cvsps_version_script" 'install ok installed' '3.0-1' >/dev/null 2>&1; then
+  echo 'cvsps 3.x package version was accepted' >&2
+  exit 1
+fi
+if bash "$cvsps_version_script" 'install ok installed' 'unknown' >/dev/null 2>&1; then
+  echo 'unknown cvsps package version was accepted' >&2
+  exit 1
+fi
+if bash "$cvsps_version_script" 'not-installed' '2.1-8' >/dev/null 2>&1; then
+  echo 'uninstalled cvsps package was accepted' >&2
+  exit 1
+fi
+printf '%s\n' 'cvsps package version fixture: pass (2.1/2.2 accepted; 3.x/unknown/uninstalled rejected)'
 if env -u ZMIN_REPLAY_RUSTUP bash "$helper" --selftest-rustup-binding >/dev/null 2>&1; then
   echo 'unset ZMIN_REPLAY_RUSTUP was accepted' >&2
   exit 1

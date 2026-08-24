@@ -34,7 +34,7 @@ jobs:
            github.event.forced == false &&
            (github.event.created == true ||
             (github.event.created == false &&
-             github.event.before == '45108021d7883ec8011b4d03bdd0aec0606851b7' &&
+             github.event.before == '0e1f17ac245e306fb90462be38d4091c72a089bd' &&
              github.event.head_commit != null &&
              contains(github.event.head_commit.message, 'Replay-Current-Git: true'))) &&
            github.run_attempt == 1) }}
@@ -218,7 +218,7 @@ jobs:
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           done
           replay_stage=required-command-preflight
-          for command in awk bash cat comm curl cvs cvsps df diff du envsubst find gcc git grep gpg highlight iconv java jgit make msgfmt openssl p4 p4d perl python3 realpath rg sed sha256sum shasum sh ssh sort svn svnadmin svnmucc svnserve tar timeout tr uniq uname wc cc ar ranlib apache2 apache2ctl locale locale-gen sudo; do
+          for command in awk bash cat comm curl cvs df diff du envsubst find gcc git grep gpg highlight iconv java jgit make msgfmt openssl p4 p4d perl python3 realpath rg sed sha256sum shasum sh ssh sort svn svnadmin svnmucc svnserve tar timeout tr uniq uname wc cc ar ranlib apache2 apache2ctl locale locale-gen sudo; do
             command_path="$(command -v "$command")"
             path_is_safe "$command_path"
             command_path="$(realpath -e -- "$command_path")"
@@ -234,7 +234,7 @@ jobs:
             local variable="$1"
             local command_name="$2"
             local command_path canonical canonical_again
-            IFS= read -r -d '' command_path < <(command -v "$command_name"; printf '\0') || {
+            command_path="$(command -v -- "$command_name")" || {
               printf 'required executable lookup failed: %s (%s)\n' "$variable" "$command_name" >&2
               return 1
             }
@@ -242,7 +242,7 @@ jobs:
               printf 'required executable lookup is invalid: %s (%s)\n' "$variable" "$command_name" >&2
               return 1
             }
-            IFS= read -r -d '' canonical < <(realpath -e -- "$command_path" 2>/dev/null; printf '\0') || {
+            canonical="$(realpath -e -- "$command_path" 2>/dev/null)" || {
               printf 'required executable canonicalization failed: %s (%s)\n' "$variable" "$command_name" >&2
               return 1
             }
@@ -253,7 +253,7 @@ jobs:
                 "$variable" "$command_name" >&2
               return 1
             }
-            IFS= read -r -d '' canonical_again < <(realpath -e -- "$canonical" 2>/dev/null; printf '\0') || {
+            canonical_again="$(realpath -e -- "$canonical" 2>/dev/null)" || {
               printf 'required executable canonicalization recheck failed: %s (%s)\n' \
                 "$variable" "$command_name" >&2
               return 1
@@ -263,10 +263,17 @@ jobs:
                 "$variable" "$command_name" >&2
               return 1
             }
+            printf -v "$variable" '%s' "$canonical"
             printf '%s=%s\n' "$variable" "$canonical" >>"$GITHUB_ENV"
             printf 'runtime_executable\t%s\t%s\t%s\n' \
               "$variable" "$command_name" "$canonical" \
               >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          }
+          validate_cvsps_version() {
+            local package_status="$1"
+            local package_version="$2"
+            [[ "$package_status" == 'install ok installed' ]] || return 1
+            [[ "$package_version" =~ ^2\.(1|2)-[0-9][0-9A-Za-z.+~:-]*$ ]] || return 1
           }
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_GIT git
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_PYTHON python3
@@ -281,11 +288,25 @@ jobs:
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4 p4
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_P4D p4d
           canonical_required_executable ZMIN_UPSTREAM_CONTRACT_JGIT jgit
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_DPKG_QUERY dpkg-query
+          canonical_required_executable ZMIN_UPSTREAM_CONTRACT_CVSPS cvsps
+          cvsps_package_record="$($ZMIN_UPSTREAM_CONTRACT_DPKG_QUERY -W -f='${Status}\t${Version}' cvsps)"
+          cvsps_package_status="${cvsps_package_record%%$'\t'*}"
+          cvsps_package_version="${cvsps_package_record#*$'\t'}"
+          validate_cvsps_version "$cvsps_package_status" "$cvsps_package_version"
+          cvsps_owner_record="$($ZMIN_UPSTREAM_CONTRACT_DPKG_QUERY -S "$ZMIN_UPSTREAM_CONTRACT_CVSPS")"
+          case "$cvsps_owner_record" in
+            'cvsps: '*) ;;
+            *) printf 'cvsps executable is not owned by package cvsps: %s\n' "$cvsps_owner_record" >&2; false ;;
+          esac
+          printf 'cvsps_package\t%s\t%s\n' "$cvsps_package_status" "$cvsps_package_version" \
+            >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
+          printf 'cvsps_owner\t%s\n' "$cvsps_owner_record" \
+            >>"$GITHUB_WORKSPACE/.replay/dependency-preflight.tsv"
           test "$jgit_version" = 'jgit version 6.8.0.202311291450-r'
           perl -MDigest::SHA -MGit -MSVN::Core -MSVN::Repos -MSVN::Ra -MSVN::Delta \
             -MSVN::Client -MDBI -MDBD::SQLite -MCGI::Util -MCGI::Carp \
             -MTime::HiRes -MEncode -MCompress::Zlib -MLocale::Messages -e '1'
-          cvsps --version 2>&1 | grep -Eq '2\.(1|2)($|[^0-9])'
           java -version 2>&1 | awk 'NR == 1 && $0 ~ /version "(1[1-9]|[2-9][0-9])\./ { found=1 } END { exit !found }'
           apache2 -v | awk 'NR == 1 && $0 ~ /Apache\/2\.([4-9]|[1-9][0-9])/ { found=1 } END { exit !found }'
           for module in cgi dav dav_fs dav_svn ssl auth_basic; do sudo -n a2enmod "$module" >/dev/null; done
